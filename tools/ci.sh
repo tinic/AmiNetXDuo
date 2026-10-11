@@ -145,6 +145,9 @@ CROSS_CONFIGS=(
     # carry two of them and is now the same arm, so it is gone.  This preset is
     # the micro drawer shipped in the archive and offered by the Installer.
     "micro:$("$ROOT/tools/preset-options.sh" micro)"
+    # The fourth drawer: the full stack at -O2 -m68020, drivers and commands
+    # included.  Same options as build/release-fat.
+    "fat:$("$ROOT/tools/preset-options.sh" fat)"
     # THE FOUR ARMS BELOW EXIST BECAUSE EIGHTEEN OPTIONS WERE COMPILED BY
     # NOTHING AT ONCE, and one of them, AMINETXDUO_RXPROBE=ON, had not compiled
     # for as long as it took someone to type it by hand.  Grouped rather than

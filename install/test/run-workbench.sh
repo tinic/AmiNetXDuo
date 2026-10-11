@@ -8,7 +8,7 @@
 #                                 [-N BOARD] [-t SECONDS] [-T SECONDS] [-k]
 #                                 [-H] [-S] [-D] [-g] [-R] [-U] [-E] [-J] [-B]
 #                                 [-q ANSWERS] [-x PROFILE-TRANSITION]
-#                                 [-e genet|wifi|both]
+#                                 [-e genet|wifi|both] [-P fail|broken]
 #                                 [-c drivers]
 #                                 [-m core|driver|probe|minimal]
 #                                 [-C] [-M] [-V] [-I] [-z] [-W]
@@ -34,6 +34,12 @@
 # server; `-s invalid' types a refused name first.  Without -s the question
 # takes its default, no, and S:Network-Startup must carry no sntp line.
 # -a takes an archive as given; without it a release-only defect cannot show.
+# -P replaces the throw-away archive's InstallNetProbe with one that exits
+# RETURN_FAIL for every query (fail) or with a file that is not a program
+# (broken): the Installer must fall back to the full stack and the driver
+# files, never to fat.
+# -p fat on a 68000/68010 model (AMINETXDUO_MODEL=A600) picks fat, requires
+# the refusal and the re-asked page, then picks the full stack there.
 # Exit: 0 pass, 1 a failure under test, 2 an ingredient is missing (Workbench
 # 3.1 ADFs, Kickstart, Commodore's Installer, the card's driver, xdftool, lha
 # -- none of them ours to ship), 3 nothing could reach the Amiga from outside.
@@ -74,8 +80,9 @@ INST=
 PICK=""
 BOARD="${AMINETXDUO_AMIBERRY_BOARD:-a2065}"
 SNTP_MODE=""
+PROBE_FAULT=""
 
-while getopts "b:a:l:p:N:t:T:kHSDgRUEJBIMq:x:f:e:c:m:CVzWs:" opt; do
+while getopts "b:a:l:p:N:t:T:kHSDgRUEJBIMq:x:f:e:c:m:CVzWs:P:" opt; do
     case "$opt" in
         b) BUILD="$OPTARG" ;;
         a) ARCHIVE="$OPTARG" ;;
@@ -98,6 +105,7 @@ while getopts "b:a:l:p:N:t:T:kHSDgRUEJBIMq:x:f:e:c:m:CVzWs:" opt; do
         x) TRANSITION="$OPTARG" ;;
         f) FOREIGN_MODE="$OPTARG" ;;
         e) EMU68_FIXTURE="$OPTARG"; CONFIG_ONLY=1 ;;
+        P) PROBE_FAULT="$OPTARG"; CONFIG_ONLY=1 ;;
         c) CANCEL_MODE="$OPTARG"; CONFIG_ONLY=1 ;;
         m) MISSING_MODE="$OPTARG"; CONFIG_ONLY=1 ;;
         C) NO_CARD=1; CONFIG_ONLY=1 ;;
@@ -111,8 +119,8 @@ while getopts "b:a:l:p:N:t:T:kHSDgRUEJBIMq:x:f:e:c:m:CVzWs:" opt; do
                 "[-l NOVICE|AVERAGE|EXPERT] [-p choice] [-N board]" \
                 "[-t seconds] [-T seconds] [-k] [-H] [-S] [-D] [-g] [-R] [-U] [-E]" \
                 "[-J] [-B]" \
-                "[-q answers] [-x full-minimal|minimal-full|full-micro|micro-full]" \
-                "[-f existing-stack-mode] [-e genet|wifi|both]" \
+                "[-q answers] [-x full-minimal|minimal-full|full-micro|micro-full|fat-full|full-fat]" \
+                "[-f existing-stack-mode] [-e genet|wifi|both] [-P fail|broken]" \
                 "[-c drivers] [-m core|driver|probe|minimal] [-C] [-M] [-V] [-I] [-z]" \
                 "[-s yes|invalid]" >&2
            exit 2 ;;
@@ -226,9 +234,12 @@ case "$PICK" in
 # waited for a page that never appeared and all reduced-profile tests quietly
 # installed the full stack.  The byte-for-byte profile assertion below caught
 # that vacuous pass as soon as these scenarios became a release gate.
-full)      PICK_SPEC="3:2:1" ;;
-minimal)   PICK_SPEC="3:3:1" ;;
-micro)     PICK_SPEC="3:4:1" ;;
+# FOUR OPTIONS SINCE fat JOINED (gadget 5).  No other page has four, so the
+# stack page is match 0 again.
+full)      PICK_SPEC="4:2:0" ;;
+minimal)   PICK_SPEC="4:3:0" ;;
+micro)     PICK_SPEC="4:4:0" ;;
+fat)       PICK_SPEC="4:5:0" ;;
 # The SECOND two-option askchoice is the drawer layout at
 # Install-AmiNetXDuo:770, "Into the system" / "Into its own drawer", so it is
 # skip 1 and gadget 3.  Reaching it needs FORCE_DRAWER to be 0, which means NOT
@@ -238,7 +249,7 @@ micro)     PICK_SPEC="3:4:1" ;;
 # options now, so the layout page is the only two-option one left.  UNVERIFIED
 # on the rig -- the stack picks were measured, this index was derived.
 drawer)    PICK_SPEC="2:3:0" ;;
-*)         echo "-p takes full, minimal, micro or drawer, not \"$PICK\"" >&2; exit 2 ;;
+*)         echo "-p takes full, minimal, micro, fat or drawer, not \"$PICK\"" >&2; exit 2 ;;
 esac
 
 # It needs a level for the same reason -H does: at NOVICE the page is never
@@ -261,7 +272,7 @@ if [ -n "$TRANSITION" ]; then
         exit 2
     }
     case "$TRANSITION" in
-        full-minimal|minimal-full|full-micro|micro-full) ;;
+        full-minimal|minimal-full|full-micro|micro-full|fat-full|full-fat) ;;
         *) echo "unknown profile transition: $TRANSITION" >&2; exit 2 ;;
     esac
 fi
@@ -328,6 +339,16 @@ if [ -n "$EMU68_FIXTURE" ]; then
     [ -z "$TRANSITION" ] && [ -z "$FOREIGN_MODE" ] || {
         echo "-e cannot be combined with a drawer, driver-decline, custom-name, transition or foreign-stack scenario" >&2
         exit 2
+    }
+fi
+
+if [ -n "$PROBE_FAULT" ]; then
+    case "$PROBE_FAULT" in
+        fail|broken) ;;
+        *) echo "unknown probe fault: $PROBE_FAULT" >&2; exit 2 ;;
+    esac
+    [ -z "$EMU68_FIXTURE" ] && [ -z "$MISSING_MODE" ] || {
+        echo "-P cannot be combined with -e or -m" >&2; exit 2
     }
 fi
 
@@ -943,11 +964,30 @@ for ((answer_run = 1; answer_run <= DRIVE_RUNS; answer_run++)); do
     fi
 done
 case "$TRANSITION" in
-    full-minimal) ANSWER_LINES+=("2|CHOICE|3|3|1") ;;
-    minimal-full) ANSWER_LINES+=("1|CHOICE|3|3|1") ;;
-    full-micro)   ANSWER_LINES+=("2|CHOICE|3|4|1") ;;
-    micro-full)   ANSWER_LINES+=("1|CHOICE|3|4|1") ;;
+    full-minimal) ANSWER_LINES+=("2|CHOICE|4|3|0") ;;
+    minimal-full) ANSWER_LINES+=("1|CHOICE|4|3|0") ;;
+    full-micro)   ANSWER_LINES+=("2|CHOICE|4|4|0") ;;
+    micro-full)   ANSWER_LINES+=("1|CHOICE|4|4|0") ;;
+    fat-full)     ANSWER_LINES+=("1|CHOICE|4|5|0") ;;
+    full-fat)     ANSWER_LINES+=("2|CHOICE|4|5|0") ;;
 esac
+# Fat on a 68000/68010: pick it, the Installer refuses and draws the stack page
+# again (ordinal 1), and the full stack is picked there.  Every scripted action
+# must be used, so the run fails if the page is not asked a second time.
+FAT_REFUSED=0
+if [ "$PICK" = fat ]; then
+    case "$MODEL" in
+        A500*|A600*|A1000*|A2000*)
+            # The installer's decision is what is under test.  The boot that
+            # follows would test https on a 68000, which needs a server that
+            # waits two minutes for a handshake (the A1200 note above MODEL).
+            FAT_REFUSED=1
+            CONFIG_ONLY=1
+            PICK_SPEC=""
+            ANSWER_LINES+=("1|CHOICE|4|5|0" "1|CHOICE|4|2|1")
+            ;;
+    esac
+fi
 
 echo "==> building installdrive ($LEVEL, $DRIVE_RUNS run(s)${YES_LABEL:+, \"$YES_LABEL\"}${PICK:+, picking \"$PICK\"})"
 DRIVER="$ROOT/build/installdrive-$TAG-$LEVEL"
@@ -1357,6 +1397,25 @@ if [ -n "$EMU68_FIXTURE" ]; then
     chmod 755 "$UNPACK/AmiNetXDuo/InstallNetProbe"
     echo "==> Emu68 fixture: $EMU68_FIXTURE"
 fi
+
+# A probe that fails, or cannot be loaded at all.  The file still exists, so
+# the Installer's archive-completeness check passes and every (run) of it
+# returns non-zero: Emu68 reads as absent and the default stays the full stack.
+case "$PROBE_FAULT" in
+    fail)
+        _fixture_bin="$ROOT/build/install-netprobe-fail-$TAG"
+        "$GCC" -O2 -m68000 -Wall -Wextra -I"$NDK" -DFIXTURE_FAIL=1 \
+            -o "$_fixture_bin" "$ROOT/install/test/netprobe-fixture.c" || exit 2
+        cp "$_fixture_bin" "$UNPACK/AmiNetXDuo/InstallNetProbe"
+        chmod 755 "$UNPACK/AmiNetXDuo/InstallNetProbe"
+        echo "==> probe fault: every InstallNetProbe call exits RETURN_FAIL"
+        ;;
+    broken)
+        printf 'not an AmigaDOS load file\n' > "$UNPACK/AmiNetXDuo/InstallNetProbe"
+        chmod 755 "$UNPACK/AmiNetXDuo/InstallNetProbe"
+        echo "==> probe fault: InstallNetProbe is not a program"
+        ;;
+esac
 
 # Named existing-stack fixtures.  They contain the pieces the Installer can
 # actually observe: a live socket library, an interface definition, editable
@@ -2042,6 +2101,7 @@ if [ -n "$_stack_real" ] && [ -f "$_stack_real" ]; then
     _full_bytes=$(_bytes_of "$UNPACK/AmiNetXDuo/Libs/bsdsocket.library")
     _min_bytes=$(_bytes_of "$UNPACK/AmiNetXDuo/Libs/minimal/bsdsocket.library")
     _micro_bytes=$(_bytes_of "$UNPACK/AmiNetXDuo/Libs/micro/bsdsocket.library")
+    _fat_bytes=$(_bytes_of "$UNPACK/AmiNetXDuo/Libs/fat/bsdsocket.library")
 
     # AMBIGUITY IS REPORTED, NOT RESOLVED.  Three assignments in a row let the
     # LAST match win, so an archive whose drawers hold the same library named
@@ -2053,6 +2113,7 @@ if [ -n "$_stack_real" ] && [ -f "$_stack_real" ]; then
     [ -n "$_full_bytes" ]  && [ "$_stack_bytes" = "$_full_bytes" ]  && _matches="$_matches full"
     [ -n "$_min_bytes" ]   && [ "$_stack_bytes" = "$_min_bytes" ]   && _matches="$_matches minimal"
     [ -n "$_micro_bytes" ] && [ "$_stack_bytes" = "$_micro_bytes" ] && _matches="$_matches micro"
+    [ -n "$_fat_bytes" ]   && [ "$_stack_bytes" = "$_fat_bytes" ]   && _matches="$_matches fat"
     set -- $_matches
     case $# in
         0) STACK_INSTALLED=unknown ;;
@@ -2064,6 +2125,7 @@ if [ -n "$_stack_real" ] && [ -f "$_stack_real" ]; then
     echo "stack_archive_full=${_full_bytes:-absent}"
     echo "stack_archive_minimal=${_min_bytes:-absent}"
     echo "stack_archive_micro=${_micro_bytes:-absent}"
+    echo "stack_archive_fat=${_fat_bytes:-absent}"
 else
     echo "stack_installed=none"
 fi
@@ -2072,6 +2134,7 @@ case "$PICK" in
 ""|full)      WANT_STACK=full ;;
 minimal)      WANT_STACK=minimal ;;
 micro)        WANT_STACK=micro ;;
+fat)          WANT_STACK=fat ;;
 # -p drawer answers the LAYOUT page, not the stack page, so the stack page
 # takes its own default and that default is the full stack.
 drawer)       WANT_STACK=full ;;
@@ -2079,11 +2142,69 @@ esac
 case "$TRANSITION" in
     full-minimal) WANT_STACK=minimal ;;
     full-micro)   WANT_STACK=micro ;;
-    minimal-full|micro-full) WANT_STACK=full ;;
+    minimal-full|micro-full|fat-full) WANT_STACK=full ;;
+    full-fat)     WANT_STACK=fat ;;
 esac
+[ "$FAT_REFUSED" = 0 ] || WANT_STACK=full
+# On Emu68 the Installer preselects fat when the archive has it and the CPU is
+# a 68020 or newer (Install-AmiNetXDuo, AUTO_EMU68).
+if [ -z "$PICK" ] && [ -z "$TRANSITION" ] && [ -n "$EMU68_FIXTURE" ] &&
+   [ -f "$UNPACK/AmiNetXDuo/Libs/fat/bsdsocket.library" ]; then
+    case "$MODEL" in
+        A500*|A600*|A1000*|A2000*) ;;
+        *) WANT_STACK=fat ;;
+    esac
+fi
 if [ "$STACK_INSTALLED" != "$WANT_STACK" ]; then
     echo "!! asked for the $WANT_STACK stack and $STACK_INSTALLED was installed"
     fail=1
+fi
+
+# EVERY INSTALLED BINARY IS THE SELECTED DRAWER'S, byte for byte, whenever fat
+# is involved: the libraries, every command in C: (NetPrefs and NetMeter
+# included) and their SYS:Prefs / SYS:Utilities copies.  The drivers are
+# compared against Devs/Networks[/fat] below.  A fat-to-full reinstall that
+# left one fat command behind passes the byte-count stack check above.
+if [ "$WANT_STACK" = fat ] || [ "$FAT_REFUSED" = 1 ] ||
+   [ "$TRANSITION" = fat-full ] || [ "$TRANSITION" = full-fat ]; then
+    _src_libs="$UNPACK/AmiNetXDuo/Libs"
+    _src_c="$UNPACK/AmiNetXDuo/C"
+    if [ "$WANT_STACK" = fat ]; then
+        _src_libs="$_src_libs/fat"
+        _src_c="$_src_c/fat"
+    fi
+    _bin_bad=0
+    _bin_n=0
+    _bin_cmp() { # installed-relative-path source-file
+        local real
+        real=$(amiga_path "$1" 2>/dev/null || true)
+        _bin_n=$((_bin_n + 1))
+        if [ -z "$real" ] || [ ! -f "$real" ]; then
+            echo "!! $WANT_STACK: $1 is missing"
+            _bin_bad=1
+        elif [ "$(shasum -a 256 < "$real" | cut -d' ' -f1)" != \
+               "$(shasum -a 256 < "$2" | cut -d' ' -f1)" ]; then
+            echo "!! $WANT_STACK: $1 is not ${2#"$UNPACK"/}"
+            _bin_bad=1
+        fi
+    }
+    for _f in bsdsocket.library usergroup.library tls.library; do
+        [ -f "$_src_libs/$_f" ] && _bin_cmp "${INST}Libs/$_f" "$_src_libs/$_f"
+    done
+    for _f in "$_src_c"/*; do
+        [ -f "$_f" ] || continue
+        case "$_f" in *.info) continue ;; esac
+        _bin_cmp "${INST}C/$(basename "$_f")" "$_f"
+    done
+    if [ "$DRAWER" = 0 ]; then
+        _bin_cmp "Prefs/NetPrefs" "$_src_c/NetPrefs"
+        _bin_cmp "Utilities/NetMeter" "$_src_c/NetMeter"
+    fi
+    if [ "$_bin_bad" = 0 ]; then
+        echo "  ok      $_bin_n installed binaries are the $WANT_STACK drawer's (sha256)"
+    else
+        fail=1
+    fi
 fi
 for cmd in AddNetInterface Online Offline ShowNetStatus \
            ping netstat host fetch; do
@@ -2301,7 +2422,10 @@ esac
 # that name is there": the bytes, against the copy in the archive that was just
 # installed from, because a stale driver of the right name in the right drawer
 # is the exact failure being gated against and it passes every weaker check.
-ANXNET_ARCHIVE="$UNPACK/AmiNetXDuo/Devs/Networks/anxnet.device"
+# The fat stack installs its own drivers, from Devs/Networks/fat.
+DEVS_ARCHIVE="$UNPACK/AmiNetXDuo/Devs/Networks"
+[ "$WANT_STACK" != fat ] || DEVS_ARCHIVE="$DEVS_ARCHIVE/fat"
+ANXNET_ARCHIVE="$DEVS_ARCHIVE/anxnet.device"
 ANXNET_INSTALLED=$(amiga_path "${INST}Devs/Networks/anxnet.device" 2>/dev/null || true)
 ANXNET_OLD=$(amiga_path "${INST}Devs/Networks/anxnet.device.old" 2>/dev/null || true)
 
@@ -2381,7 +2505,7 @@ fi
 # The second driver image, anxgenet.device, goes through the same procedure
 # in the installer and is asserted the same way: the archive's bytes, in
 # DEVS:Networks, whatever was there before.
-ANXGENET_ARCHIVE="$UNPACK/AmiNetXDuo/Devs/Networks/anxgenet.device"
+ANXGENET_ARCHIVE="$DEVS_ARCHIVE/anxgenet.device"
 ANXGENET_INSTALLED=$(amiga_path "${INST}Devs/Networks/anxgenet.device" 2>/dev/null || true)
 
 if [ ! -f "$ANXGENET_ARCHIVE" ]; then
@@ -2413,7 +2537,7 @@ fi
 # The third driver image, anxzz9000.device, likewise -- when the archive
 # carries it.  It ships only from a build configured -DAMINETXDUO_ZZ9000=ON
 # (CMakeLists.txt); an archive without it must leave no such file behind.
-ANXZZ9000_ARCHIVE="$UNPACK/AmiNetXDuo/Devs/Networks/anxzz9000.device"
+ANXZZ9000_ARCHIVE="$DEVS_ARCHIVE/anxzz9000.device"
 ANXZZ9000_INSTALLED=$(amiga_path "${INST}Devs/Networks/anxzz9000.device" 2>/dev/null || true)
 
 if [ ! -f "$ANXZZ9000_ARCHIVE" ]; then
@@ -2445,7 +2569,7 @@ else
 fi
 
 # The fourth driver image, anxwifipi.device, likewise.
-ANXWIFIPI_ARCHIVE="$UNPACK/AmiNetXDuo/Devs/Networks/anxwifipi.device"
+ANXWIFIPI_ARCHIVE="$DEVS_ARCHIVE/anxwifipi.device"
 ANXWIFIPI_INSTALLED=$(amiga_path "${INST}Devs/Networks/anxwifipi.device" 2>/dev/null || true)
 
 if [ ! -f "$ANXWIFIPI_ARCHIVE" ]; then

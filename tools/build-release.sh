@@ -17,6 +17,10 @@ cmake --build build/release-minimal --parallel --target release_libraries
 cmake --preset micro -B build/release-micro
 cmake --build build/release-micro --parallel --target release_libraries
 
+# fat carries its own drivers and commands, so the whole payload.
+cmake --preset fat -B build/release-fat
+cmake --build build/release-fat --parallel --target release_payload
+
 AMINETXDUO_CLIENT_ANY=1 AMIGA_CLIENT_ARCH=-m68000 \
     clients/dropbear/build.sh -b build/ssh
 
@@ -30,7 +34,10 @@ for path in \
     C/ssh C/scp C/scp-runner Installer \
     Docs/AmiNetXDuo.guide Docs/AmiNetXDuo.guide.info \
     Libs/bsdsocket.library Libs/tls.library \
-    Libs/minimal/bsdsocket.library; do
+    Libs/minimal/bsdsocket.library Libs/micro/bsdsocket.library \
+    Libs/fat/bsdsocket.library Libs/fat/tls.library \
+    Devs/Networks/fat/anxnet.device C/fat/AddNetInterface \
+    Flavours/full Flavours/fat Flavours/minimal Flavours/micro; do
     [ -f "build/dist/AmiNetXDuo/$path" ] || {
         echo "release_candidate=FAIL missing=$path" >&2
         exit 1
@@ -73,6 +80,9 @@ manifest=build/dist/release-candidate.txt
     echo "toolchain_sha=$(tools/fetch-toolchain.sh --print-sha)"
     echo "archive=$(basename "$archive")"
     echo "archive_sha256=$(hash_file "$archive")"
+    for f in full fat minimal micro; do
+        echo "flavour_$f=$(hash_file "build/dist/AmiNetXDuo/Flavours/$f")"
+    done
 } > "$manifest"
 
 echo "release_candidate=PASS archive=$(basename "$archive") sha256=$(hash_file "$archive")"

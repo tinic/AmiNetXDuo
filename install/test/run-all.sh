@@ -25,6 +25,7 @@
 #                   replacement plus the S:Network-Startup.old recovery path
 #   SYSTEM_MINIMAL  installs and boots the minimal profile
 #   SYSTEM_MICRO    installs and boots the micro profile
+#   SYSTEM_FAT      installs and boots the fat profile
 #   XSURF100_MINIMAL_* / XSURF100_MICRO_* boot both reduced profiles with
 #                   iComp's vendor x-surf-100.device, DHCP and static. The
 #                   vendor driver changes its copy path if it sees AMITCP
@@ -41,7 +42,13 @@
 #                   decline with a zero-diff oracle or replace while keeping
 #                   editable configuration and the AmiTCP: assignment
 #   EMU68_* inject deterministic device-tree results and prove the Installer
-#                   creates genet/wifipi definitions and starts only Ethernet
+#                   creates genet/wifipi definitions and starts only Ethernet;
+#                   on a 68020+ they also prove fat is the default under Emu68
+#   PROBE_FAIL / PROBE_BROKEN make InstallNetProbe fail or not load and require
+#                   the full stack as the default
+#   FAT_68000       picks fat on an A600 and requires the refusal and re-ask
+#   FAT_FULL / FULL_FAT reinstall across fat and full; every library, driver
+#                   and command must be the selected drawer's, by sha256
 #   CANCEL_DRIVERS clicks the real Abort button before writes and requires an
 #                   exact zero-diff destination
 #   MISSING_* corrupt the throw-away archive at four distinct preflights and
@@ -75,7 +82,8 @@ ARGS=("$@")
 SCENARIOS=(
     NOVICE AVERAGE EXPERT STATIC INVALID_STATIC INVALID_NAMES
     NO_DRIVERS NO_BOOT
-    SYSTEM_RERUN SYSTEM_RECONFIGURE SYSTEM_MINIMAL SYSTEM_MICRO
+    SYSTEM_RERUN SYSTEM_RECONFIGURE SYSTEM_MINIMAL SYSTEM_MICRO SYSTEM_FAT
+    FAT_68000 FAT_FULL FULL_FAT PROBE_FAIL PROBE_BROKEN
     XSURF100_MINIMAL_DHCP XSURF100_MINIMAL_STATIC
     XSURF100_MICRO_DHCP XSURF100_MICRO_STATIC
     FULL_MINIMAL MINIMAL_FULL FULL_MICRO MICRO_FULL
@@ -144,6 +152,7 @@ for scenario in "${SCENARIOS[@]}"; do
     # path it owns.  Drawer rows install twice because the second pass is the
     # reinstall of our own self-contained stack; they also begin with a
     # foreign stack and prove that declining replacement writes nothing.
+    scenario_model=""
     case "$scenario" in
         NOVICE|AVERAGE)        opts=(-l "$scenario") ;;
         EXPERT)                opts=(-l EXPERT -E) ;;
@@ -156,6 +165,12 @@ for scenario in "${SCENARIOS[@]}"; do
         SYSTEM_RECONFIGURE)    opts=(-l AVERAGE -U) ;;
         SYSTEM_MINIMAL)        opts=(-l AVERAGE -p minimal) ;;
         SYSTEM_MICRO)          opts=(-l AVERAGE -p micro) ;;
+        SYSTEM_FAT)            opts=(-l AVERAGE -p fat) ;;
+        FAT_68000)             opts=(-l AVERAGE -p fat); scenario_model=A600 ;;
+        FAT_FULL)              opts=(-l AVERAGE -x fat-full) ;;
+        FULL_FAT)              opts=(-l AVERAGE -x full-fat) ;;
+        PROBE_FAIL)            opts=(-l AVERAGE -P fail) ;;
+        PROBE_BROKEN)          opts=(-l AVERAGE -P broken) ;;
         XSURF100_MINIMAL_DHCP) opts=(-l AVERAGE -p minimal -N xsurf100z3) ;;
         XSURF100_MINIMAL_STATIC) opts=(-l AVERAGE -p minimal -N xsurf100z3 -S) ;;
         XSURF100_MICRO_DHCP)   opts=(-l AVERAGE -p micro -N xsurf100z3) ;;
@@ -196,6 +211,7 @@ SPACES_DRAWER)         opts=(-l AVERAGE -D -W) ;;
     esac
 
     AMINETXDUO_RUN_TAG="matrix-$scenario" \
+    AMINETXDUO_MODEL="${scenario_model:-${AMINETXDUO_MODEL:-}}" \
         "$ROOT/install/test/run-workbench.sh" "${opts[@]}" "${ARGS[@]}"
     rc=$?
     case "$rc" in

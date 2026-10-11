@@ -18,6 +18,10 @@
 #ifndef FIXTURE_WIFI
 #define FIXTURE_WIFI 0
 #endif
+/* Every call fails, the way a probe that cannot work does (run-workbench -P). */
+#ifndef FIXTURE_FAIL
+#define FIXTURE_FAIL 0
+#endif
 
 enum
 {
@@ -36,7 +40,7 @@ int main(int argc, char **argv)
     LONG           result = RETURN_WARN;
 
     (void)argv;
-    if (argc == 0)
+    if (argc == 0 || FIXTURE_FAIL)
         return RETURN_FAIL;
 
     /* Match the shipping helper's AmigaDOS parser.  Using libc argv here

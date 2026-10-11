@@ -64,9 +64,7 @@ endif()
 # `any` takes it for the reason both of those do, and it is the only assembly
 # here a CPU-independent binary can carry: MULU.W is in the original 68000 set
 # and the 68060 kept it, so one build of this file runs on the whole family.
-if(CMAKE_CROSSCOMPILING AND (AMINETXDUO_CPU STREQUAL "68060" OR
-                            AMINETXDUO_CPU STREQUAL "68000" OR
-                            AMINETXDUO_CPU STREQUAL "any"))
+if(CMAKE_CROSSCOMPILING AND AMINETXDUO_CPU MATCHES "^(68060|68000|any|68020-60)$")
     set(_crypto68k_asm_mulw_default ON)
 else()
     set(_crypto68k_asm_mulw_default OFF)
@@ -243,7 +241,9 @@ endif()
 # c68k_p256.S is NOT here yet: one instruction in a per-limb macro (extb.l) has
 # to be substituted before a 68000 can run it, which is its own commit.
 set(CRYPTO68K_MV OFF)
-if(CMAKE_CROSSCOMPILING AND AMINETXDUO_CPU STREQUAL "any")
+# 68020-60 (fat) takes the same: the MULU.L/DIVU.L 64-bit forms are only
+# reached on a 68020-68040 (c68k_cpu.c, AFF_68060), never on a 68060.
+if(CMAKE_CROSSCOMPILING AND AMINETXDUO_CPU MATCHES "^(any|68020-60)$")
     set(CRYPTO68K_MV ON)
     list(APPEND CRYPTO68K_SOURCES
          c68k_prim.S c68k_chacha20.S c68k_poly1305.S c68k_prim_mulw.S
