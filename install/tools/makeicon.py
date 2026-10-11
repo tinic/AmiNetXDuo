@@ -135,7 +135,7 @@ class Canvas:
 # ------------------------------------------------------------ file writer --
 
 def diskobject(canvas, obj_type, default_tool=None, tooltypes=(),
-               stack=4096, drawer=False):
+               stack=4096, drawer=False, window=(60, 40, 450, 180)):
     w, h = canvas.w, canvas.h
 
     gadget = struct.pack(
@@ -173,7 +173,7 @@ def diskobject(canvas, obj_type, default_tool=None, tooltypes=(),
         # struct DrawerData: a NewWindow (48) plus dd_CurrentX/dd_CurrentY.
         nw = struct.pack(
             ">hhhhBBIIIIIIIhhHHH",
-            50, 40, 300, 150,               # LeftEdge TopEdge Width Height
+            *window,                        # LeftEdge TopEdge Width Height
             255, 255,                       # DetailPen, BlockPen
             0,                              # IDCMPFlags
             0x0004022F,                     # Flags: the usual drawer window
@@ -408,7 +408,7 @@ def main(argv):
             ],
             stack=10000),
         "AmiNetXDuo.info": diskobject(
-            drawer_icon(), WBDRAWER, drawer=True),
+            drawer_icon(), WBDRAWER, drawer=True, window=(10, 12, 620, 236)),
         "Drawer.info": diskobject(
             plain_drawer_icon(), WBDRAWER, drawer=True),
         "Document.info": diskobject(

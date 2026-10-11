@@ -38,10 +38,18 @@ is not shipped.
 ## Icons
 
 The default `.info` files combine the original classic four-color images and
-metadata with 48x48, 128-color GlowIcons. Color-capable `icon.library` versions
+launch settings with 48x48, 128-color GlowIcons. Color-capable `icon.library` versions
 display the new artwork; stock older libraries load the classic fallback.
 Normal and selected color states have transparent backgrounds. This adds
 23,276 bytes across the seven icon templates and no library code.
+
+The main drawer defaults to 620x236 pixels and fits a 640x256 Workbench.
+Packaging places the main icons on a four-column grid. Private installations
+put NetMeter and NetPrefs in the parent AmiNetXDuo drawer; command copies
+remain in `C/` for CLI compatibility, without duplicate Workbench icons.
+The commands drawer has a 340x116 window. Generic document/drawer
+templates and the parent AmiNetXDuo icon stay unsnapped so reusing them in
+other drawers does not give unrelated icons overlapping fixed positions.
 
 Packaging needs only Python's standard library. To build a classic-only
 archive, set `AMINETXDUO_ICON_STYLE=classic` when invoking `dist/make-dist.sh`.

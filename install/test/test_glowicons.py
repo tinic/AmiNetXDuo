@@ -8,6 +8,7 @@ import contextlib
 import importlib.util
 import io
 from pathlib import Path
+import shutil
 import struct
 import subprocess
 import sys
@@ -21,6 +22,56 @@ spec.loader.exec_module(reader)
 
 
 class GlowIcons(unittest.TestCase):
+    def test_archive_layout(self):
+        with tempfile.TemporaryDirectory(prefix="icon-layout-", dir=ROOT / "build") as tmp:
+            out = Path(tmp)
+            tree = out / "AmiNetXDuo"
+            (tree / "C/fat").mkdir(parents=True)
+            for target, source in {
+                    "Install-AmiNetXDuo.info": "Install-AmiNetXDuo",
+                    "ReadMe.info": "Document", "Docs.info": "Drawer",
+                    "Examples.info": "Drawer", "Terminal.info": "Drawer",
+                    "Developer.info": "Drawer", "AmiNetXDuo.info": "AmiNetXDuo",
+                    "C/NetMeter.info": "NetMeter", "C/NetPrefs.info": "NetPrefs",
+                    "C/fat/NetMeter.info": "NetMeter", "C/fat/NetPrefs.info": "NetPrefs"}.items():
+                shutil.copyfile(ROOT / "install" / (source + ".info"), tree / target)
+            original = {p: p.read_bytes() for p in tree.rglob("*.info")}
+            subprocess.run([sys.executable, str(ROOT / "install/tools/layout-icons.py"),
+                            str(out)], check=True)
+            occupied = set()
+            for path, before in original.items():
+                after = path.read_bytes()
+                # Layout changes must preserve launch settings and artwork.
+                self.assertEqual(after[:58], before[:58])
+                self.assertEqual(after[66:], before[66:])
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertTrue(reader.show(path))
+                if path.parent == tree and path.name != "AmiNetXDuo.info":
+                    x, y = struct.unpack_from(">ii", after, 58)
+                    self.assertNotIn((x, y), occupied)
+                    occupied.add((x, y))
+                    self.assertGreaterEqual(x - 48, 0)  # room for long labels
+                    self.assertLess(x + 92, 620 - 18)
+                    self.assertLess(y + 48 + 12, 236 - 20)
+            # The parent icon is reused at the installation destination:
+            # leave its position to Workbench instead of overlapping other apps.
+            self.assertEqual((tree / "AmiNetXDuo.info").read_bytes(),
+                             original[tree / "AmiNetXDuo.info"])
+            tools = (tree / "C.info").read_bytes()
+            left, top, width, height = struct.unpack_from(">hhhh", tools, 78)
+            self.assertLessEqual(left + width, 640)
+            self.assertLessEqual(top + height, 256)
+            for path in (tree / "C").glob("*.info"):
+                x, y = struct.unpack_from(">ii", path.read_bytes(), 58)
+                self.assertGreaterEqual(x, 0)
+                self.assertLess(x + 48 + 12, width - 18)
+                self.assertLess(y + 48 + 12, height - 20)
+            # Re-running packaging must not drift positions or data.
+            once = {p: p.read_bytes() for p in tree.rglob("*.info")}
+            subprocess.run([sys.executable, str(ROOT / "install/tools/layout-icons.py"),
+                            str(out)], check=True)
+            self.assertEqual(once, {p: p.read_bytes() for p in tree.rglob("*.info")})
+
     def test_shipping_and_classic(self):
         # Keep test scratch under the repository, including when TMPDIR points
         # elsewhere. Test the actual CLI paths used by packaging.

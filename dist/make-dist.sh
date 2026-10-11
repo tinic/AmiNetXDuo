@@ -723,6 +723,9 @@ fi
 
 echo "==> including $(basename "$DOCSRC")/: $(cd "$TREE/Docs" && echo *)"
 
+# Give the complete archive a layout after its individual icons are copied.
+python3 "$INSTALL/tools/layout-icons.py" "$OUTDIR"
+
 # ------------------------------------------------- per-flavour manifests --
 #
 # Flavours/<name>: key=value, one per drawer the Installer offers.  What it

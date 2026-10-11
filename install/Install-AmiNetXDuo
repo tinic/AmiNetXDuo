@@ -102,6 +102,8 @@
                     (tackon SRCDIR "Examples.info") "Examples.info"))
 (set S_TERMICON (if (> (strlen SRCDIR) 0)
                     (tackon SRCDIR "Terminal.info") "Terminal.info"))
+(set S_CICON (if (> (strlen SRCDIR) 0)
+                 (tackon SRCDIR "C.info") "C.info"))
 
 ; --------------------------------------------------------------------------
 ; Help texts.  Every ask.../copy... statement is required by the Installer to
@@ -2239,6 +2241,49 @@
       (infos)
       (optional "force")))
 (set S_CSEL (if (= MINPICK 3) S_CFAT S_C))
+
+; Put the graphical applications beside the documentation in a private
+; installation. Keep command copies in C: for existing CLI callers, with
+; no duplicate Workbench icons once the parent copies are present.
+(if DRAWER_LAYOUT
+  (
+    (copyfiles
+      (prompt "Installing NetPrefs into the AmiNetXDuo drawer")
+      (help "Open NetPrefs directly from the AmiNetXDuo drawer.")
+      (source (tackon S_CSEL "NetPrefs"))
+      (dest D_ROOT)
+      (infos)
+      (optional "force"))
+    (copyfiles
+      (prompt "Installing NetMeter into the AmiNetXDuo drawer")
+      (help "Open NetMeter directly from the AmiNetXDuo drawer.")
+      (source (tackon S_CSEL "NetMeter"))
+      (dest D_ROOT)
+      (infos)
+      (optional "force"))
+    (if (AND (exists (tackon D_ROOT "NetPrefs") (noreq))
+             (exists (tackon D_ROOT "NetPrefs.info") (noreq)))
+      (delete (tackon D_C "NetPrefs.info")
+        (prompt "Removing the duplicate NetPrefs command icon")
+        (help "The application icon is in the parent AmiNetXDuo drawer.")
+        (optional "force" "nofail")))
+    (if (AND (exists (tackon D_ROOT "NetMeter") (noreq))
+             (exists (tackon D_ROOT "NetMeter.info") (noreq)))
+      (delete (tackon D_C "NetMeter.info")
+        (prompt "Removing the duplicate NetMeter command icon")
+        (help "The application icon is in the parent AmiNetXDuo drawer.")
+        (optional "force" "nofail")))
+  ))
+
+; Give the private commands drawer its icon and window layout.
+(if (AND DRAWER_LAYOUT (exists S_CICON (noreq)))
+    (copyfiles
+      (prompt "Giving the commands drawer its icon")
+      (help @copyfiles-help)
+      (source S_CICON)
+      (dest D_ROOT)
+      (newname "C.info")
+      (optional "force")))
 
 ; A system installation also exposes the GUI where an Amiga user expects a
 ; preferences editor.  The C: copy remains the canonical executable (and the
