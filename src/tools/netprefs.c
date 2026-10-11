@@ -742,10 +742,12 @@ static LONG run_command(const char *command, const char *name, BOOL quiet)
     LONG result;
 
     /* In a self-contained install C: deliberately searches the system first.
-       Use the sibling commands, not a stale command belonging to another
-       stack.  The SYS:Prefs copy has no siblings and therefore uses C:. */
+       Use the private commands beside this tool or in its C drawer,
+       rather than a stale command belonging to another stack.  The SYS:Prefs copy has no siblings and therefore uses C:. */
     if (tool_exists("PROGDIR:AddNetInterface"))
         prefix = "PROGDIR:";
+    else if (tool_exists("PROGDIR:C/AddNetInterface"))
+        prefix = "PROGDIR:C/";
     else if (tool_exists("C:AddNetInterface"))
         prefix = "C:";
     else
