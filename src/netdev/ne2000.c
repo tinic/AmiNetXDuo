@@ -126,6 +126,8 @@
 #define  MII_ANAR_100HD         0x0080
 #define  MII_ANAR_100FD         0x0100
 #define  MII_ANAR_PAUSE         0x0400
+#define  MII_ANAR_MODES         0x03e0
+#define  MII_ANAR_10_MODES      0x0060
 #define MII_ANLPAR              5
 
 /* 32 frames of the 1536 bytes the ring stores a full one in: what the
@@ -871,14 +873,65 @@ static VOID ax88796_advertise(NetdevNic *nic)
 {
     LONG anar = ax_mii_read(nic, MII_ANAR);
     LONG bmcr = ax_mii_read(nic, MII_BMCR);
+    UWORD want;
 
-    if (anar < 0 || bmcr < 0 || (anar & MII_ANAR_PAUSE) != 0)
+    if (anar < 0 || bmcr < 0)
         return;
     if ((bmcr & MII_BMCR_ANENABLE) == 0)
         return;                 /* forced speed: nothing is negotiated */
 
-    ax_mii_write(nic, MII_ANAR, (UWORD)(anar | MII_ANAR_PAUSE));
+    want = (UWORD)(anar | MII_ANAR_PAUSE);
+    if (nic->link_speed_limit == 10)
+        want = (UWORD)((want & ~MII_ANAR_MODES) | MII_ANAR_10_MODES);
+    if (want == (UWORD)anar)
+        return;
+    ax_mii_write(nic, MII_ANAR, want);
     ax_mii_write(nic, MII_BMCR, (UWORD)(bmcr | MII_BMCR_ANRESTART));
+}
+
+/* Limit the advertised modes, never force duplex. Read back ANAR before
+   accepting a request, and preserve the attach-time modes for last Close. */
+static BOOL ax88796_set_link_speed(NetdevNic *nic, ULONG mbps)
+{
+    LONG anar;
+    LONG bmcr;
+    UWORD want;
+
+    if (!nic->ax_phy || (mbps != 0 && mbps != 10))
+        return FALSE;
+    anar = ax_mii_read(nic, MII_ANAR);
+    bmcr = ax_mii_read(nic, MII_BMCR);
+    if (anar < 0 || bmcr < 0)
+        return FALSE;
+    want = (UWORD)((anar & ~MII_ANAR_MODES) | MII_ANAR_PAUSE |
+                  (mbps == 10 ? MII_ANAR_10_MODES : nic->ax_default_anar));
+    if (want != (UWORD)anar)
+    {
+        ax_mii_write(nic, MII_ANAR, want);
+        if (ax_mii_read(nic, MII_ANAR) != want)
+        {
+            ax_mii_write(nic, MII_ANAR, (UWORD)anar);
+            return FALSE;
+        }
+    }
+    if (nic->link_speed_limit != mbps || want != (UWORD)anar ||
+        (bmcr & MII_BMCR_ANENABLE) == 0)
+    {
+        LONG control;
+        ax_mii_write(nic, MII_BMCR,
+                     (UWORD)(bmcr | MII_BMCR_ANENABLE | MII_BMCR_ANRESTART));
+        control = ax_mii_read(nic, MII_BMCR);
+        if (control < 0 || (control & MII_BMCR_ANENABLE) == 0)
+        {
+            ax_mii_write(nic, MII_ANAR, (UWORD)anar);
+            ax_mii_write(nic, MII_BMCR, (UWORD)bmcr);
+            return FALSE;
+        }
+    }
+    nic->link_speed_limit = mbps;
+    nic->rx_pause_capacity = 0;
+    nic->link_bps = mbps == 10 ? 10000000UL : 0;
+    return TRUE;
 }
 
 /*
@@ -892,6 +945,8 @@ static VOID ne2000_ax88796_phy(NetdevNic *nic)
     nic->ax_phy_tick       = 0;
     nic->ax_phy_tries      = 0;
     nic->rx_pause_capacity = 0;
+    nic->set_link_speed    = NULL;
+    nic->link_speed_limit  = 0;
 
     if (!nic->card->ax88796)
         return;
@@ -900,6 +955,16 @@ static VOID ne2000_ax88796_phy(NetdevNic *nic)
         return;
 
     nic->ax_phy = 1;
+    {
+        LONG anar = ax_mii_read(nic, MII_ANAR);
+        if (anar < 0)
+        {
+            nic->ax_phy = 0;
+            return;
+        }
+        nic->ax_default_anar = (UWORD)(anar & MII_ANAR_MODES);
+    }
+    nic->set_link_speed = ax88796_set_link_speed;
     ax88796_advertise(nic);
 }
 
@@ -1114,8 +1179,9 @@ static BOOL ne2000_tick(NetdevNic *nic)
     anlpar = ax_mii_read(nic, MII_ANLPAR);
 
     nic->rx_pause_capacity = ax88796_pause_capacity(bmsr, anar, anlpar);
-
-    if (anar >= 0 && (anar & MII_ANAR_PAUSE) != 0)
+    if (anar >= 0 && (anar & MII_ANAR_PAUSE) != 0 &&
+        (nic->link_speed_limit != 10 ||
+         (anar & MII_ANAR_MODES) == MII_ANAR_10_MODES))
         nic->ax_phy_tries = 0;
     else if (anar >= 0 && nic->ax_phy_tries < AX88796_PHY_TRIES)
     {

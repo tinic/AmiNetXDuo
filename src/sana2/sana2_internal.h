@@ -18,6 +18,7 @@
 #include "aminetxduo/config.h"
 #include "aminetxduo/compat.h"
 #include "aminetxduo/anxs2ext.h"
+#include "aminetxduo/anxnet.h"
 #include "aminetxduo/asm_abi.h"
 
 #include "sana2_device.h"
@@ -835,6 +836,7 @@ struct AmiSana2If
        list is an input to OpenDevice and outlives the open. */
     char                card[AMI_CFG_NAME_LEN];
     struct TagItem      buffer_tags[12];
+    AnxdLinkSpeed       link_speed_request;
     AnxdS2Extension     extension;       /* one size/version negotiated record */
     BOOL                link_hdr_ok;    /* negotiated ANXD_S2F_RX_LINK_HDR   */
     UBYTE               rx_flags_ok;    /* negotiated RX_FILLED verdict bits */

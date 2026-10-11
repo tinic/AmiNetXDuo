@@ -13,6 +13,7 @@
 #include <proto/exec.h>
 
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -55,6 +56,8 @@ typedef struct HostDevice
 
     int     closes;         /* CloseDevice() calls */
     int     opens;          /* OpenDevice() calls */
+    BOOL    supports_link_speed;
+    ULONG   link_speed_seen;
 
     /* How S2_OFFLINE is answered when it arrives by SendIO(). */
     int     offline_mode;       /* H_OFF_* */
@@ -434,6 +437,26 @@ static UBYTE h_units[2];        /* unit 0 is NULL, as plipbox reports it */
 LONG ami_sana2_open_device_flags(const char *name, ULONG unit,
                                  struct IORequest *req, ULONG flags)
 {
+    {
+        /* templ is the interface's first field. ti_Data is deliberately
+           32-bit in this host shim, so compare it without dereferencing a
+           truncated host pointer. */
+        AmiSana2If *iface = (AmiSana2If *)req;
+        struct TagItem *tag = (struct TagItem *)
+            ((struct IOSana2Req *)req)->ios2_BufferManagement;
+        while (tag->ti_Tag != TAG_DONE)
+        {
+            if (tag->ti_Tag == ANXD_S2_LINK_SPEED)
+            {
+                h_check(tag->ti_Data == (ULONG)(uintptr_t)&iface->link_speed_request,
+                        "speed tag addresses the interface-owned record");
+                h_dev.link_speed_seen = iface->link_speed_request.Mbps;
+                if (h_dev.supports_link_speed)
+                    iface->link_speed_request.Accepted = 1;
+            }
+            tag++;
+        }
+    }
     h_open_flags   = flags;
     req->io_Device = (strcmp(name, "other.device") == 0)
                          ? (struct Device *)&h_other_device
@@ -2116,10 +2139,41 @@ static void case_bursty_wifi_reads(void)
     }
 }
 
+static void case_link_speed(void)
+{
+    AmiSana2If *iface;
+    LONG err = 0;
+    h_device_reset();
+    h_config();
+    h_cfg.link_speed = 10;
+    iface = ami_sana2_open(&h_cfg, &err);
+    h_check(iface == NULL && err == AMI_NET_ERR_DEVBAD,
+            "older driver ignoring speed tag is refused");
+    h_check(h_dev.closes == 1 && h_dev.query_cmds == 0,
+            "unaccepted speed closes before configuring the unit");
+    h_device_reset();
+    h_config();
+    h_dev.supports_link_speed = TRUE;
+    h_cfg.link_speed = 10;
+    iface = ami_sana2_open(&h_cfg, &err);
+    h_check(iface != NULL && h_dev.link_speed_seen == 10,
+            "10 Mbit request reaches supporting driver");
+    if (iface != NULL)
+        h_check(ami_sana2_close(iface), "accepted speed interface closes cleanly");
+    h_device_reset();
+    h_config();
+    iface = ami_sana2_open(&h_cfg, &err);
+    h_check(iface != NULL && h_dev.link_speed_seen == 0,
+            "Auto does not require a speed extension");
+    if (iface != NULL)
+        h_check(ami_sana2_close(iface), "ordinary interface closes cleanly");
+}
+
 int main(void)
 {
     printf("sana2 device: open, online, offline, close\n");
 
+    case_link_speed();
     case_healthy();
     case_out_of_service_still_offlines();
     case_offline_is_idempotent();

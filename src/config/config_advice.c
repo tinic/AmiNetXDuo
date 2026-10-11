@@ -79,6 +79,7 @@ static const char *const ami_cfg_advice_text[] =
     "TCPWANWINDOW is bytes, 1 to 1048576; default from RXBUFFER",
     "GROFRAMES is 1 to 16, default 16",
     "ACKPACE is kbit/s, 1 to 1000000; default unpaced",
+    "LINKSPEED is AUTO or 10 (Mbit/s); requires a supporting driver",
 };
 
 const char *ami_cfg_advice(UWORD code)

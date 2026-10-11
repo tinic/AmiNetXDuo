@@ -67,14 +67,45 @@ VOID netdev_rebuild_filter(NetdevUnit *unit)
     Enable();
 }
 
-/*
- * The unit outlives every opener, so anything an opener changed about it must
- * be undone when the last one goes: the accept-all-multicast latch, the 32-slot
- * multicast table, and the configured flag.
- */
+/* Open's lifecycle lock and Disable() cover validation and programming. */
+BOOL netdev_set_link_speed(NetdevUnit *unit, AnxdLinkSpeed *request)
+{
+    if (request == NULL)
+    {
+        /* Last Close may have found an unresponsive PHY. Do not let the
+           next ordinary opener inherit that stale 10 Mbit policy. */
+        if (unit->nu_Openers == 0 && unit->nu_Nic.link_speed_limit != 0)
+            return unit->nu_Nic.set_link_speed != NULL &&
+                   unit->nu_Nic.set_link_speed(&unit->nu_Nic, 0);
+        return TRUE;
+    }
+    request->Accepted = 0;
+    if ((request->Mbps != 0 && request->Mbps != 10) ||
+        unit->nu_Nic.set_link_speed == NULL)
+        return FALSE;
+    if (unit->nu_Openers != 0)
+    {
+        if (unit->nu_Nic.link_speed_limit != request->Mbps)
+            return FALSE;
+    }
+    else if (!unit->nu_Nic.set_link_speed(&unit->nu_Nic, request->Mbps))
+        return FALSE;
+    request->Accepted = 1;
+    return TRUE;
+}
+
+/* Restore per-unit policy when the last opener closes. */
 VOID netdev_release_unit(NetdevUnit *unit)
 {
     UWORD i;
+
+    if (unit->nu_Nic.link_speed_limit != 0 &&
+        unit->nu_Nic.set_link_speed != NULL)
+    {
+        Disable();
+        (VOID)unit->nu_Nic.set_link_speed(&unit->nu_Nic, 0);
+        Enable();
+    }
 
     for (i = 0; i < NETDEV_MCAST_MAX; i++)
     {

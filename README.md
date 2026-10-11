@@ -82,6 +82,13 @@ the stack allows a larger TCP receive window while it is agreed. Without
 it, networking still works, with a smaller automatic window. Leave
 `RXBUFFER` unset; increasing it manually does not add memory to the card.
 
+Add `LINKSPEED=10` to the interface file to limit
+the X-Surf 100 to 10 Mbit/s while still negotiating duplex and PAUSE.
+Omit it or use `LINKSPEED=AUTO` for the normal modes. Reboot or remove and
+re-add the interface after editing it. The option requires an updated
+`anxnet.device`; the stack refuses the interface if the driver or card
+does not support the request.
+
 See the [manual](docs/user/AmiNetXDuo.guide), "X-Surf 100 and flow control",
 for setup checks, overrun counters and guidance for switches without this
 setting. The measured figures below are examples, not the card's link speed.
