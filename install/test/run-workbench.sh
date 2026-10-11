@@ -38,8 +38,8 @@
 # -e replaces the throw-away archive's InstallNetProbe with a fixture naming
 # the Emu68 devices.  genet-old is a GENET Emu68 1.0.x leaves unmapped, with
 # Emu68's own genet.device in DEVS:Networks: the interface must name it.
-# genet-old-bare is the same tree with no genet.device: the Installer must
-# stop before writing anything.
+# genet-old-bare is the same tree with no genet.device and no other driver:
+# the Installer must stop before writing anything.
 # -P replaces the throw-away archive's InstallNetProbe with one that exits
 # RETURN_FAIL for every query (fail) or with a file that is not a program
 # (broken): the Installer must fall back to the full stack and the driver
@@ -1040,7 +1040,8 @@ if [ "$MANUAL_CARD" = 0 ]; then
         echo "!! $SANA2_DRIVER was not staged onto the test drive" >&2
         exit 2
     }
-    if [ "$NO_CARD" = 1 ]; then
+    # genet-old-bare: the Pi Ethernet is all there is, no driver file either.
+    if [ "$NO_CARD" = 1 ] || [ "$EMU68_FIXTURE" = genet-old-bare ]; then
         rm -f "$STAGED_AT"
         [ ! -e "$STAGED_AT" ] || {
             echo "!! no-card fixture could not remove $STAGED_AT" >&2
@@ -1061,7 +1062,8 @@ elif [ "$MANUAL_CARD" = 1 ]; then
     echo "==> hardware-only fixture: no vendor SANA-II driver in DEVS:"
 fi
 cp "$DRIVER" "$HD/C/installdrive"
-if [ "$NO_CARD" = 0 ] && [ "$MANUAL_CARD" = 0 ]; then
+if [ "$NO_CARD" = 0 ] && [ "$MANUAL_CARD" = 0 ] &&
+   [ "$EMU68_FIXTURE" != genet-old-bare ]; then
     chmod 755 "$STAGED_AT"
 fi
 chmod 755 "$HD/C/installdrive"
@@ -2008,12 +2010,16 @@ if [ "$REFUSAL" = 1 ]; then
         zero_ok=0
     fi
     # The stop page comes straight after the GENETOK query, before the first
-    # question: welcome and stop are the only pages drawn.
+    # question: welcome (plus the Installer's own pretend/log page above
+    # Novice) and stop are the only pages drawn.  Only Novice writes a log.
+    _stop_pages=3
+    [ "$LEVEL" != NOVICE ] || _stop_pages=2
     if [ "$EMU68_FIXTURE" = genet-old-bare ] &&
-       { ! grep -q 'InstallNetProbe" GENETOK' "$HD/install-log.txt" 2>/dev/null ||
-         ! grep -q '^Aborting script' "$HD/install-log.txt" 2>/dev/null ||
-         ! grep -q '^installdrive: 2 pages driven in total' \
-             "$HD/installdrive.txt" 2>/dev/null; }; then
+       { ! grep -q "^installdrive: $_stop_pages pages driven in total" \
+             "$HD/installdrive.txt" 2>/dev/null ||
+         { [ -f "$HD/install-log.txt" ] &&
+           { ! grep -q 'InstallNetProbe" GENETOK' "$HD/install-log.txt" ||
+             ! grep -q '^Aborting script' "$HD/install-log.txt"; }; }; }; then
         echo "!! genet-old-bare did not stop at the Emu68 page"
         zero_ok=0
     fi
@@ -2028,7 +2034,7 @@ if [ "$REFUSAL" = 1 ]; then
         _reason=${_reason:-missing-$MISSING_MODE}
         [ "$NO_CARD" = 0 ] || _reason=no-card-novice-refusal
         [ "$STALE_PI_DRIVERS" = 0 ] || _reason=stale-pi-driver-refusal
-        [ "$EMU68_FIXTURE" != genet-old-bare ] || _reason=old-emu68-refusal
+        [ "$EMU68_FIXTURE" != genet-old-bare ] || _reason="old-emu68-refusal"
         echo "  ok      $_reason left the destination byte-exact"
         echo "workbench_e2e=PASS board=$BOARD model=$MODEL driver=$SANA2_DRIVER" \
              "card_config=not-written stack=unchanged boot_status=not-run"

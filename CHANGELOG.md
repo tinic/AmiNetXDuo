@@ -6,7 +6,7 @@ Add new entries under `Unreleased`; published release sections are history.
 ## Unreleased
 
 - Installer: on Emu68 older than 1.1 alpha.1 it uses Emu68's genet.device
-  for the Pi Ethernet, or stops with one page when that driver is absent.
+  for the Pi Ethernet, or stops with one page when no network device works.
 
 - Nightly builds: the newest tested build of main is published every
   night as the "nightly" pre-release on GitHub, for testing between

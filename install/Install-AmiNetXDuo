@@ -887,7 +887,7 @@
 (if AUTO_GENET
   (
     (set PROBE_CMD ("\"%s\" GENETOK" S_NETPROBE))
-    (if (<> 0 (run PROBE_CMD
+    (if (= 5 (run PROBE_CMD
                    (prompt "Checking the Emu68 version")
                    (help "This reads Emu68's device tree.  It does not open or "
                          "reset the Ethernet device.")
@@ -947,12 +947,15 @@
   (set CARD_DEFAULT (bitor CARD_DEFAULT 1)))
 (if AUTO_WIFIPI (set CARD_DEFAULT (bitor CARD_DEFAULT 2048)))
 
-; Only the unreachable GENET was found: nothing this installer writes can
-; bring the network up.  Before any question, so nothing has been written.
-(if (AND GENET_OLD (NOT GENET_LEGACY) (= CARD_DEFAULT 0))
+; Only the unreachable GENET was found, and no driver file either: nothing
+; this installer writes can bring the network up.  Before any question, so
+; nothing has been written.  Expert continues to the card page.
+(if (AND GENET_OLD (NOT GENET_LEGACY) (< @user-level 2)
+         (= (bitor CARD_DEFAULT DRIVER_DEFAULT) 0))
     (abort "anxgenet.device needs Emu68 1.1 alpha.1 or newer.  This Emu68 "
            "does not map the Raspberry Pi Ethernet for the 68k.\n\n"
-           "Update Emu68, then run this installer again.\n\n"
+           "Update Emu68, or install Emu68's genet.device, then run this "
+           "installer again.\n\n"
            "Nothing was changed."))
 
 ; If hardware was enumerated, do not also preselect stale Zorro driver files.
