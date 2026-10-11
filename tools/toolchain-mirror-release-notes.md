@@ -9,7 +9,7 @@ Which asset is pinned, and its expected hash, is recorded in
 
 | | |
 |---|---|
-| GCC | 16.2.0b (C/C++/ObjC), tinic/gcc `fb3ead73` (AmigaPorts `amiga16.2` v16.2-rc15 `0edaa619` + visibility fix) |
+| GCC | 16.2.0b (C/C++/ObjC), tinic/gcc `1d4ca5d4` (AmigaPorts `amiga16.2` `1d4ca5d4`, no local patches) |
 | binutils | 2.46, bebbo `amiga-2.46` + `tools/patches/binutils-2.46/` |
 | NDK | 3.9 (`INCLUDE_VERSION` 45) + Roadshow bsdsocket/SANA-II headers |
 | Also | libnix, libgcc, libpthread, vasm, sfdc, fd2sfd, fd2pragma, gprof |
@@ -17,15 +17,15 @@ Which asset is pinned, and its expected hash, is recorded in
 
 | Asset | Host | Size | SHA-256 |
 |---|---|---|---|
-| `m68k-amigaos-gcc-16.2.6-ndk3.9-linux-x86_64.tar.xz` | Linux x86-64 (glibc) | 37,878,896 | `479316a7737cd883fe95426d507df1b3a6e484592b85413f96909d423b4c5de3` |
-| `m68k-amigaos-gcc-16.2.6-ndk3.9-darwin-arm64.tar.xz` | macOS arm64 | 32,744,696 | `e07be49191bb73120fd9db2377fd4d0f4d466387070ad771cdb666d8e1a951ba` |
+| `m68k-amigaos-gcc-16.2.7-ndk3.9-linux-x86_64.tar.xz` | Linux x86-64 (glibc) | 37,872,184 | `8d04c18e4b04d861848854922b6761651958932af85b4a6a26918e6da4d60e97` |
+| `m68k-amigaos-gcc-16.2.7-ndk3.9-darwin-arm64.tar.xz` | macOS arm64 | 32,754,352 | `59c695e980c9866580e32409dcfa9854e97cc0d4d9dffc5383c0c064da602cb3` |
 
 **Not covered:** macOS x86-64 and Linux aarch64. There is no asset for either;
 `tools/build-toolchain.sh` builds on both.
 
 ```sh
-sha256sum m68k-amigaos-gcc-16.2.6-ndk3.9-linux-x86_64.tar.xz
-tar xJf   m68k-amigaos-gcc-16.2.6-ndk3.9-linux-x86_64.tar.xz
+sha256sum m68k-amigaos-gcc-16.2.7-ndk3.9-linux-x86_64.tar.xz
+tar xJf   m68k-amigaos-gcc-16.2.7-ndk3.9-linux-x86_64.tar.xz
 # -> opt/m68k-amigaos/bin/m68k-amigaos-gcc
 ```
 
@@ -54,7 +54,7 @@ commit rather than a branch, because bebbo's branches move.
 ```
 build driver   https://codeberg.org/bebbo/amiga-gcc            86f8ba62f7a5035e309600c86962681e1cbacccb
 binutils/GDB   https://franke.ms/git/bebbo/binutils-gdb        a50544a917284847c99e97d41c69ece9d5cb2fef   (amiga-2.46)
-GCC            https://github.com/tinic/gcc                    fb3ead730d3a3682ab299eb8168f37153497ea19   (amiga16.2-rc15-anx)
+GCC            https://github.com/tinic/gcc                    1d4ca5d4b1592b663af2f00589b245934d872eb3   (amiga16.2-16.2.7)
 newlib         https://franke.ms/git/bebbo/newlib-cygwin       0909ae9abc18b38595425143e7a63d9e2fc31174
 libnix         https://franke.ms/git/bebbo/libnix              b7268e35510b8b7b4ccdad67fbcbb25e73189aef
 sfdc           https://franke.ms/git/bebbo/sfdc                5d4efca359e949547553463f5873778bd85e5506
@@ -70,8 +70,7 @@ bebbo's GitHub repositories are gone. Codeberg and his own franke.ms Gitea are
 what survive, and they are not interchangeable. Each line above is the remote
 verified to serve its pin.
 
-GCC is AmigaPorts `amiga16.2` at v16.2-rc15 (`0edaa619`) with AmigaPorts/gcc
-PR #82 on top (`42ba31a2`, `fb3ead73`): the LTO visibility-warning fix. binutils carries the three diffs in
+GCC is AmigaPorts `amiga16.2` at `1d4ca5d4` with no local patches. binutils carries the three diffs in
 `tools/patches/binutils-2.46/`; newlib and aros-stuff carry the diffs under
 `tools/patches/newlib/` and `tools/patches/aros-stuff/`. amiga-gcc's own
 Makefile gets `--with-system-zlib`, `--disable-gdb --disable-sim` and

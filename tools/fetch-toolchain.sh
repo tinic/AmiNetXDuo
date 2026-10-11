@@ -33,9 +33,10 @@ TC_GCC_VERSION="16.2.0b"
 # plus the sibcall fix. 16.2.5 added the LTO visibility-warning fix. 16.2.6
 # rebases GCC onto AmigaPorts v16.2-rc15 (0edaa619), which carries the
 # sibcall fix, plus AmigaPorts/gcc PR #82 for the visibility warning
-# (tinic/gcc amiga16.2-rc15-anx). The reported version remains 16.2.0b.
+# (tinic/gcc amiga16.2-rc15-anx). 16.2.7 is AmigaPorts amiga16.2 1d4ca5d4
+# with no local patches. The reported version remains 16.2.0b.
 # Older asset hashes remain at their original tags.
-TC_ASSET_VERSION="16.2.6"
+TC_ASSET_VERSION="16.2.7"
 TC_PREFIX_IN_TAR="opt/m68k-amigaos"
 
 # Compiler assets live with the fork rather than topping the product releases.
@@ -52,11 +53,11 @@ ARCH=$(uname -m)
 case "$OS/$ARCH" in
     Linux/x86_64|Linux/amd64)
         TC_PLATFORM="linux-x86_64"
-        TC_SHA256="479316a7737cd883fe95426d507df1b3a6e484592b85413f96909d423b4c5de3"
+        TC_SHA256="8d04c18e4b04d861848854922b6761651958932af85b4a6a26918e6da4d60e97"
         ;;
     Darwin/arm64|Darwin/aarch64)
         TC_PLATFORM="darwin-arm64"
-        TC_SHA256="e07be49191bb73120fd9db2377fd4d0f4d466387070ad771cdb666d8e1a951ba"
+        TC_SHA256="59c695e980c9866580e32409dcfa9854e97cc0d4d9dffc5383c0c064da602cb3"
         ;;
     *)
         TC_PLATFORM=""
