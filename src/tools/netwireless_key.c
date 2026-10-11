@@ -17,6 +17,7 @@
 #include "nx_crypto_sha1.h"
 
 #include "netwireless_key.h"
+#include "aminetxduo/nxstatus.h"
 
 typedef struct NwSha1State
 {
@@ -40,7 +41,7 @@ static void nw_sha1_final(const NwSha1State *from, const UCHAR *msg, UINT len,
     nw_block[62] = (UCHAR)(bits >> 8);
     nw_block[63] = (UCHAR)bits;
     for (i = 0; i < 5; i++) nw_ctx.nx_sha1_states[i] = from->h[i];
-    _nx_crypto_sha1_process_buffer(&nw_ctx, nw_block);
+    AMI_NX_ONLY_SUCCESS(_nx_crypto_sha1_process_buffer(&nw_ctx, nw_block));
     for (i = 0; i < 5; i++)
     {
         ULONG v = nw_ctx.nx_sha1_states[i];
@@ -62,7 +63,7 @@ static int nw_sha1_pad(const char *key, size_t len, UCHAR pad, NwSha1State *s)
         return 0;
     for (i = 0; i < 64; i++)
         nw_block[i] = (UCHAR)((i < len ? (UCHAR)key[i] : 0) ^ pad);
-    _nx_crypto_sha1_process_buffer(&nw_ctx, nw_block);
+    AMI_NX_ONLY_SUCCESS(_nx_crypto_sha1_process_buffer(&nw_ctx, nw_block));
     for (i = 0; i < 5; i++) s->h[i] = nw_ctx.nx_sha1_states[i];
     return 1;
 }
