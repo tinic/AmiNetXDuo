@@ -365,14 +365,16 @@ static LONG nw_shell_list(VOID)
 
 /* ------------------------------------------------- Wireless.prefs -- */
 
-/* A file buffer cleared before it is freed: it can hold a psk. */
-static VOID nw_free_file(char *buf)
+/* A file buffer, its first len bytes cleared before it is freed: it can
+   hold a psk. */
+static VOID nw_free_file(char *buf, ULONG len)
 {
     volatile char *v = buf;
     ULONG          i;
 
     if (buf == NULL) return;
-    for (i = 0; i < NW_FILE_MAX; i++) v[i] = 0;
+    if (len > NW_FILE_MAX) len = NW_FILE_MAX;
+    for (i = 0; i < len; i++) v[i] = 0;
     FreeVec(buf);
 }
 
@@ -396,7 +398,7 @@ static char *nw_read(const char *path, ULONG *len, BOOL *missing)
     Close(fh);
     if (got < 0 || got >= (LONG)NW_FILE_MAX)
     {
-        nw_free_file(buf);
+        nw_free_file(buf, got < 0 ? NW_FILE_MAX : (ULONG)got);
         return NULL;
     }
     *len = (ULONG)got;
@@ -455,7 +457,7 @@ static const char *nw_save_network(const UBYTE *ssid, LONG ssid_len,
     NwBlockEdit      e;
     char            *old, *out;
     ULONG            old_len;
-    size_t           new_len;
+    size_t           new_len = NW_FILE_MAX;
     LONG             count, i, k, top = 0;
     const char      *why = NULL;
     BOOL             missing;
@@ -466,7 +468,7 @@ static const char *nw_save_network(const UBYTE *ssid, LONG ssid_len,
     count = nw_prefs_parse(old != NULL ? old : "", old_len, nets, NW_NETS_MAX);
     if (count < 0 || count > NW_NETS_MAX)
     {
-        nw_free_file(old);
+        nw_free_file(old, old_len);
         return count < 0 ? "Wireless.prefs has a network={ with no closing }."
                          : "Wireless.prefs has more networks than this edits.";
     }
@@ -505,7 +507,10 @@ static const char *nw_save_network(const UBYTE *ssid, LONG ssid_len,
         why = "Not enough memory.";
     else if (!nw_prefs_write(old != NULL ? old : "", old_len, nets, (int)count,
                              &e, 1, out, NW_FILE_MAX - 1, &new_len))
+    {
+        new_len = NW_FILE_MAX;
         why = "Wireless.prefs would be too large.";
+    }
     else
     {
         nw_make_dir("ENVARC:Sys");
@@ -514,8 +519,8 @@ static const char *nw_save_network(const UBYTE *ssid, LONG ssid_len,
             !nw_write(nw_prefs_env, out, (ULONG)new_len))
             why = "Wireless.prefs could not be written.";
     }
-    nw_free_file(out);
-    nw_free_file(old);
+    nw_free_file(out, (ULONG)new_len);
+    nw_free_file(old, old_len);
     return why;
 }
 
@@ -1394,7 +1399,7 @@ static VOID nw_close_known(VOID)
     nw.known.win = NULL;
     nw.known.glist = NULL;
     for (i = NW_K_LIST; i <= NW_K_CANCEL; i++) nw.g[i] = NULL;
-    nw_free_file(kn.text);
+    nw_free_file(kn.text, kn.len);
     kn.text = NULL;
 }
 
@@ -1487,7 +1492,7 @@ static VOID nw_known_store(BOOL save)
     static NwField     f[NW_NETS_MAX];
     static char        prio[NW_NETS_MAX][12];
     char              *out;
-    size_t             len;
+    size_t             len = NW_FILE_MAX;
     int                n;
     const char        *why = NULL;
     BOOL               moved = kn.shown != kn.count;
@@ -1513,7 +1518,7 @@ static VOID nw_known_store(BOOL save)
 
         for (i = 0; same && now != NULL && i < now_len; i++)
             if (now[i] != kn.text[i]) same = FALSE;
-        nw_free_file(now);
+        nw_free_file(now, now_len);
         if (!same)
         {
             nw_requester("Wireless.prefs changed since this window opened, "
@@ -1529,7 +1534,10 @@ static VOID nw_known_store(BOOL save)
         why = "Not enough memory.";
     else if (!nw_prefs_write(kn.text != NULL ? kn.text : "", kn.len, kn.nets,
                              (int)kn.count, e, n, out, NW_FILE_MAX - 1, &len))
+    {
+        len = NW_FILE_MAX;
         why = "Wireless.prefs would be too large.";
+    }
     else
     {
         /* ENVARC: first, as a join writes them. */
@@ -1543,7 +1551,7 @@ static VOID nw_known_store(BOOL save)
         if (why == NULL && !nw_write(nw_prefs_env, out, (ULONG)len))
             why = "Wireless.prefs could not be written.";
     }
-    nw_free_file(out);
+    nw_free_file(out, (ULONG)len);
     if (why != NULL)
     {
         nw_requester(why);
