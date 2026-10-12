@@ -491,6 +491,11 @@
   (cat "It starts by itself at the next reboot.  To start it now:\n\n"
        "    %sAddNetInterface DEVS:NetInterfaces/%s\n"))
 
+; The drawer layout: its assigns, and so its library, exist only from the
+; next boot.
+(set F_START_REBOOT
+  "It starts by itself at the next reboot.\n")
+
 (set F_START_NO
   (cat "It does not start by itself.  To start it:\n\n"
        "    %sAddNetInterface DEVS:NetInterfaces/%s\n"))
@@ -3844,10 +3849,12 @@
     ; stack (AmiTCP or Miami from their own drawers, with or without its
     ; port), or an earlier AmiNetXDuo, whose library names it (VERSION).
     ; Either way the last page says to reboot.
+    ; An update over a running earlier AmiNetXDuo that GetNetStatus can
+    ; ask answers 0 or 5: OLD_BSD sends that one to VERSION as well.
     (set NET_RC (run ("%s QUIET" NET_GNS) (quiet) (safe)))
-    (if (= NET_RC 10)
+    (if (OR (= NET_RC 10) OLD_BSD)
       (
-        (set NET_OTHER 1)
+        (if (= NET_RC 10) (set NET_OTHER 1))
         (if (= 0 (run ("%s VERSION >T:AmiNetXDuo-Stack" NET_GNS) (quiet) (safe)))
             (if (= 0 (run "Search >NIL: FROM T:AmiNetXDuo-Stack SEARCH AmiNetXDuo QUIET"
                           (quiet) (safe)))
@@ -3884,7 +3891,9 @@
                     (set FINAL_START F_START_EARLIER)
                     (if NET_OTHER
                         (set FINAL_START F_START_OTHER)
-                        (set FINAL_START (F_START_YES C_PREFIX START_IF)))))))
+                        (if DRAWER_LAYOUT
+                            (set FINAL_START F_START_REBOOT)
+                            (set FINAL_START (F_START_YES C_PREFIX START_IF))))))))
     (set FINAL_START (F_START_NO  C_PREFIX START_IF)))
 
 ; Said again on the last page, and deliberately.  The question that turned it

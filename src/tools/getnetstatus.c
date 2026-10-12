@@ -213,7 +213,9 @@ int main(int argc, char **argv)
     {
         tool_fault(IoErr());
         tool_usage("[CHECK <condition>[,<condition>...]] [QUIET]",
-                   "Returns 0 when the network is ready, 5 when it is not.");
+                   "Returns 0 when the network is ready, 5 when it is not, "
+                   "10 when it cannot ask (another stack, or an earlier "
+                   "AmiNetXDuo).");
         return RETURN_ERROR;
     }
 
