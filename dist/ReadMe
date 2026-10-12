@@ -180,8 +180,9 @@ than deleted, after a page that asks first, at every level; an earlier
 AmiNetXDuo's is replaced without one.  When a network device was found,
 another stack's network configuration is set up again by default.  The
 other stack's libraries, interface files, routes, name_resolution and
-S:Network-Startup are copied first into the Backup drawer of the
-AmiNetXDuo drawer, once, and stay there.  Every library is copied in
+S:Network-Startup are copied first, with Copy CLONE, into a drawer of that
+installation's own under the AmiNetXDuo drawer's Backup: Backup/1, then
+Backup/2.  Nothing there is replaced later.  Every library is copied in
 under a .new name first and swapped after, so a copy that fails leaves the
 installed file in place.
 
@@ -370,8 +371,8 @@ S:User-Startup, deletes the configuration files the installer wrote (each
 names the installer on its first lines), and runs S:AmiNetXDuo-Files, the
 record the installer leaves.  That record deletes the libraries, commands,
 drivers and the NetPrefs and NetMeter copies the installer put in place,
-puts back from the drawer's Backup the files of another stack that the
-installer replaced, and deletes the drawer.  S:AmiNetXDuo-WiFi, where the
+puts back the files of another stack that the installer replaced, from
+the numbered drawers of Backup, oldest first, and deletes the drawer.  S:AmiNetXDuo-WiFi, where the
 Pi Wi-Fi was selected, deletes the WirelessManager and Wireless.prefs the
 installer created and no others.  Files ending in .old stay,
 the drivers' included.  A drawer whose window is open stays, empty, until
@@ -379,8 +380,9 @@ it is deleted.
 
 Backup holds another stack's libraries, its commands with the same names as
 AmiNetXDuo's, its NetPrefs and NetMeter, its certificate store, and its
-interface, routes, name_resolution and S:Network-Startup files, each as it
-was the first time AmiNetXDuo replaced it.
+interface, routes, name_resolution and S:Network-Startup files: Backup/1
+as the first installation that replaced any found them, Backup/2 for the
+next.
 
 A drawer installation is the AmiNetXDuo drawer, the startup block,
 S:Network-Startup and S:AmiNetXDuo-Files.
