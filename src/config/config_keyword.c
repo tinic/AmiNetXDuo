@@ -852,3 +852,49 @@ BOOL ami_cfg_resolver_hostname_file(const char *path, char *out, ULONG outlen)
     ami_free(buf);
     return found;
 }
+
+ULONG ami_cfg_hostname_line(const char *name, char *out, ULONG cap)
+{
+    static const char key[] = "hostname ";
+    BOOL              quote = !ami_config_hostname_valid(name);
+    ULONG             n = 0;
+    const char       *p;
+
+    if (name == NULL || out == NULL)
+        return 0;
+    for (p = key; *p != '\0'; p++)
+    {
+        if (n + 1 >= cap)
+            return 0;
+        out[n++] = *p;
+    }
+    if (quote)
+    {
+        if (n + 1 >= cap)
+            return 0;
+        out[n++] = '"';
+    }
+    for (p = name; *p != '\0'; p++)
+    {
+        if (quote && (*p == '"' || *p == '*'))
+        {
+            if (n + 1 >= cap)
+                return 0;
+            out[n++] = '*';
+        }
+        if (n + 1 >= cap)
+            return 0;
+        out[n++] = *p;
+    }
+    if (quote)
+    {
+        if (n + 1 >= cap)
+            return 0;
+        out[n++] = '"';
+    }
+    if (n + 2 > cap)
+        return 0;
+    out[n++] = '\n';
+    out[n] = '\0';
+    return n;
+}

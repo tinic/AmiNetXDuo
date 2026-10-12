@@ -817,6 +817,11 @@ ULONG ami_cfg_keyword_line_file(const char *path, const char *keyword);
 BOOL ami_cfg_resolver_hostname(char *buf, char *out, ULONG outlen);
 /* The same for a file, read whole through ami_cfg_read_file(). */
 BOOL ami_cfg_resolver_hostname_file(const char *path, char *out, ULONG outlen);
+/* The name_resolution line that gives this machine `name`, newline included:
+   bare when ami_config_hostname_valid(), else quoted with '"' and '*'
+   escaped AmigaDOS style, so ami_cfg_resolver_hostname() reads `name` back.
+   Returns its length, or 0 when it does not fit in `cap`. */
+ULONG ami_cfg_hostname_line(const char *name, char *out, ULONG cap);
 
 /* How many KEY=VALUE pairs of an interface file name `key` or `alias` (NULL
    for none), lexed exactly as ami_cfg_parse_interface() lexes them: comments

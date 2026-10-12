@@ -210,18 +210,15 @@ static LONG rehome_devices(const char *path, STRPTR *drawers)
 static LONG copy_hostline(const char *from, const char *to)
 {
     char  name[AMI_CFG_NAME_LEN];
-    char  line[AMI_CFG_NAME_LEN + 16];
+    char  line[2 * AMI_CFG_NAME_LEN + 16];
     BPTR  fh;
-    LONG  n = 0, got;
-    const char *p;
+    LONG  n, got;
 
     if (!ami_cfg_resolver_hostname_file(from, name, sizeof(name)))
         return RETURN_WARN;
-    for (p = "hostname "; *p != '\0'; p++)
-        line[n++] = *p;
-    for (p = name; *p != '\0' && n < (LONG)sizeof(line) - 1; p++)
-        line[n++] = *p;
-    line[n++] = '\n';
+    n = (LONG)ami_cfg_hostname_line(name, line, sizeof(line));
+    if (n == 0)
+        return RETURN_ERROR;
     fh = Open((CONST_STRPTR)to, MODE_NEWFILE);
     if (fh == 0)
         return RETURN_ERROR;

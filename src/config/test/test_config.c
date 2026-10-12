@@ -2457,6 +2457,24 @@ static void test_resolver_hostname(void)
     strcpy(big + 4090, "\nhostname straddle\n");
     CHECK(ami_cfg_resolver_hostname(big, name, sizeof(name)));
     CHECK_STR(name, "straddle");
+    /* Written by ami_cfg_hostname_line(), read back by the parser. */
+    {
+        static const char *const names[] =
+            { "plain", "my amiga", "a#b", "q\"u*o;te" };
+        char line[96];
+        unsigned k;
+
+        for (k = 0; k < sizeof(names) / sizeof(names[0]); k++)
+        {
+            CHECK(ami_cfg_hostname_line(names[k], line, sizeof(line)) > 0);
+            buf = dup_text(line);
+            CHECK(ami_cfg_resolver_hostname(buf, name, sizeof(name)));
+            CHECK_STR(name, names[k]);
+            free(buf);
+        }
+        CHECK(ami_cfg_hostname_line("plain", line, 10) == 0);
+    }
+
     for (i = 0; i < 6000; i++)
         big[i] = (i % 64 == 63) ? '\n' : '#';
     strcpy(big + 6000, "\nhostname far\n");
