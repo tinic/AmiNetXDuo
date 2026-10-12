@@ -1007,7 +1007,12 @@ if [ "$DRAWER" = 1 ]; then
     [ "$PRISM2" = 1 ] ||
         WIFI_DEVICE=AmiNetXDuo:Devs/Networks/anxwifipi.device
 fi
-WIFI_AN_LINE="  ${CMD_PFX}AddNetInterface DEVS:NetInterfaces/$WIFI_IFNAME QUIET TIMEOUT=$WIFI_TIMEOUT"
+# The block as the micro profile writes it, commented out: in the foreground.
+WIFI_AN_FG="  ${CMD_PFX}AddNetInterface DEVS:NetInterfaces/$WIFI_IFNAME QUIET TIMEOUT=$WIFI_TIMEOUT"
+WIFI_AN_LINE=$WIFI_AN_FG
+# Behind another interface the Wi-Fi starts in the background.
+[ "$WIFI_PRIMARY" = 1 ] ||
+    WIFI_AN_LINE="  Run >NIL: <NIL: ${CMD_PFX}AddNetInterface DEVS:NetInterfaces/$WIFI_IFNAME QUIET TIMEOUT=$WIFI_TIMEOUT"
 # A Prism2 card as the primary starts outside the guard, after it.
 [ "$WIFI_MODE" = prism2pi ] &&
     WIFI_AN_LINE="${CMD_PFX}AddNetInterface DEVS:NetInterfaces/$WIFI_IFNAME QUIET TIMEOUT=$WIFI_TIMEOUT"
@@ -2747,7 +2752,7 @@ if [ -n "$EXPECTED_SECOND_IF" ] && [ -n "$NS_FILE" ]; then
     elif [ "$WIFI_START" = 1 ] && ! grep -Fqx -- "$WIFI_AN_LINE" "$NS_FILE"; then
         echo "!! Emu68 secondary interface $EXPECTED_SECOND_IF is not started after $EXPECTED_IF"
         fail=1
-    elif [ "$WIFI_START" = 0 ] && grep -Fqx -- "$WIFI_AN_LINE" "$NS_FILE"; then
+    elif [ "$WIFI_START" = 0 ] && grep -Fqx -e "$WIFI_AN_LINE" -e "$WIFI_AN_FG" "$NS_FILE"; then
         echo "!! a one-interface stack starts $EXPECTED_SECOND_IF too"
         fail=1
     else
@@ -3010,7 +3015,7 @@ else
     elif [ -n "$NS_FILE" ]; then
         if [ "$WM_NS_LIVE" = 0 ] &&
            grep -Fqx -- ";    $WM_CMD_WANT DEVICE=$WIFI_DEVICE UNIT=0" "$NS_FILE" &&
-           grep -Fqx -- ";$WIFI_AN_LINE" "$NS_FILE"; then
+           grep -Fqx -- ";$WIFI_AN_FG" "$NS_FILE"; then
             echo "  ok      Wi-Fi not started; its lines are there, commented"
         else
             wifi_bad "S:Network-Startup for an unstarted Wi-Fi: live=$WM_NS_LIVE, commented lines missing"
