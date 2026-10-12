@@ -909,6 +909,19 @@ fi
 
 python3 "$INSTALL/tools/checkscript.py" "$TREE/Install-AmiNetXDuo"
 python3 "$INSTALL/tools/checkscript.py" "$TREE/Uninstall-AmiNetXDuo"
+# The installer and the uninstaller tell our programs from another stack's
+# or the user's by the name AmiNetXDuo inside them.
+_unmarked=0
+for _f in "$TREE"/C/* "$TREE"/C/fat/* "$TREE"/Libs/* "$TREE"/Devs/Networks/anx*.device \
+          "$TREE"/Devs/Networks/fat/anx*.device; do
+    [ -f "$_f" ] || continue
+    case "$_f" in *.info) continue ;; esac
+    if ! LC_ALL=C grep -a -q AmiNetXDuo "$_f"; then
+        echo "!! ${_f#"$TREE"/} does not contain the name AmiNetXDuo" >&2
+        _unmarked=1
+    fi
+done
+[ "$_unmarked" = 0 ] || exit 1
 python3 "$INSTALL/tools/showicon.py" "$TREE"/*.info >/dev/null
 
 echo

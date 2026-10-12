@@ -26,6 +26,7 @@
 (welcome "Removing AmiNetXDuo.")
 
 ; Asked at every level, Novice included.
+(set USER_WAS @user-level)
 (user 1)
 (set GO
   (askbool
@@ -43,7 +44,7 @@
                "reboot."))
     (choices "Yes, remove it" "No")
     (default 1)))
-(user 0)
+(user USER_WAS)
 
 (if (= GO 0)
     (abort "AmiNetXDuo is still installed.\n\nNothing was changed."))
@@ -102,11 +103,13 @@
 
 (set DONE "")
 (if NOT_BACK
-    (set DONE (cat DONE "Some files of the other stack could not be put "
-                   "back.  They are still in the AmiNetXDuo drawer's Backup, "
-                   "and T:AmiNetXDuo-NotRestored lists them.  "
-                   "S:AmiNetXDuo-Files stays, so Uninstall-AmiNetXDuo can "
-                   "be run again.\n\n")))
+    (set DONE (cat DONE "Some files of the other stack were not put back: "
+                   "a file changed since the installation is in the place of "
+                   "one, or a copy failed.  T:AmiNetXDuo-NotRestored lists "
+                   "each with its copy in the AmiNetXDuo drawer's Backup, to "
+                   "compare and copy back by hand.  Backup and "
+                   "S:AmiNetXDuo-Files stay, so Uninstall-AmiNetXDuo can be "
+                   "run again.\n\n")))
 (if KEPT
     (set DONE (cat DONE "Files changed since the installation are kept; "
                    "T:AmiNetXDuo-Kept lists them.\n\n")))

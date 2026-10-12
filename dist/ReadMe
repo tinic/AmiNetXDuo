@@ -381,13 +381,15 @@ order:
     changed since stays, and T:AmiNetXDuo-Kept lists it
   - each library, command and driver that names AmiNetXDuo
   - each .old file that names AmiNetXDuo, and each file of another stack
-    that the installer renamed to .old
+    that the installer renamed to .old, where the original's place is free
 
 Then each file of another stack that the installer replaced goes back
 where it was, from the lowest-numbered Backup drawer that holds it, and
-only where nothing is in its place.  A file that cannot be put back is
-listed in T:AmiNetXDuo-NotRestored; Backup and S:AmiNetXDuo-Files then
-stay, and Uninstall-AmiNetXDuo can be run again.  Otherwise the drawer's
+only where nothing is in its place.  A file that is not put back -- the
+copy failed, or a file changed since the installation is in its place --
+is listed in T:AmiNetXDuo-NotRestored with its Backup copy, to compare and
+copy back by hand; Backup and S:AmiNetXDuo-Files then stay, and
+Uninstall-AmiNetXDuo can be run again.  Otherwise the drawer's
 own files go, and the drawer with them when nothing else is in it.
 
 Backup holds another stack's libraries, its commands with the same names as

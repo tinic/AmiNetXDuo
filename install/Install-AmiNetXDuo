@@ -2376,13 +2376,39 @@
                               "Free space on that volume and run the installer "
                               "again."))
                 ))
+              ; An earlier drawer's copy of the same name goes back first.
+              (set BK_LOW "")
+              (set BK_N 1)
+              (while (AND (= (strlen BK_LOW) 0) (<= BK_N BK_MAX))
+                (
+                  (set BK_C (tackon (tackon (tackon D_BACKUP_TOP ("%ld" BK_N)) BK_SUB)
+                                    (fileonly BK_SRC)))
+                  (if (exists BK_C (noreq)) (set BK_LOW BK_C))
+                  (set BK_N (+ BK_N 1))
+                ))
+              ; Something else in its place -- a file of ours changed since
+              ; -- is not written over, and Backup stays for it.
+              (set BK_SAME (cat "  \"" REC_SF "\" \"" BK_SRC "\" \"" BK_FILE "\" BYTES\n"
+                                "  If WARN\n"))
+              (set BK_CLASH (cat "    Echo >>T:AmiNetXDuo-NotRestored \"" BK_SRC
+                                 " is not the one in " BK_FILE "\"\n"))
               (set BK_RESTORE
                 (cat BK_RESTORE
                      "If NOT EXISTS \"" BK_SRC "\"\n"
                      "  Copy \"" BK_FILE "\" TO \"" BK_SRC "\" CLONE QUIET\n"
                      "  If ERROR\n"
                      "    Delete >NIL: \"" BK_SRC "\" QUIET\n"
-                     "    Echo >>T:AmiNetXDuo-NotRestored \"" BK_SRC "\"\n"
+                     "    Echo >>T:AmiNetXDuo-NotRestored \"" BK_SRC
+                     " could not be copied from " BK_FILE "\"\n"
+                     "  EndIf\n"
+                     "Else\n"
+                     BK_SAME
+                     (if (> (strlen BK_LOW) 0)
+                         (cat "    \"" REC_SF "\" \"" BK_SRC "\" \"" BK_LOW "\" BYTES\n"
+                              "    If WARN\n"
+                              "  " BK_CLASH
+                              "    EndIf\n")
+                         BK_CLASH)
                      "  EndIf\n"
                      "EndIf\n"))
             ))
@@ -2438,12 +2464,21 @@
       (set BK_SUB "")
       (P_is_ours)
       (set BK_SUB RO_SUB)
-      (if (AND (= IS_OURS 0) (> (strlen RO_LB) 0))
-          (if (= 0 (run ("\"%s\" \"%s\" \"%s\" BYTES" S_SAMEFILE REC_F RO_LB)
-                        (quiet) (safe)))
-              (set IS_OURS 1)))
       (if IS_OURS
-          (set REC_TEXT (cat REC_TEXT "Delete >NIL: \"" REC_F "\" QUIET\n")))
+          (set REC_TEXT (cat REC_TEXT "Delete >NIL: \"" REC_F "\" QUIET\n"))
+          ; The other stack's file, renamed: it goes only where the
+          ; original's place is free for its Backup copy to come back to.
+          (if (> (strlen RO_LB) 0)
+              (set REC_TEXT
+                (cat REC_TEXT
+                     "If NOT EXISTS \"" (substr REC_F 0 (- (strlen REC_F) 4)) "\"\n"
+                     "  If EXISTS \"" REC_F "\"\n"
+                     "    \"" REC_SF "\" \"" REC_F "\" \"" RO_LB "\" BYTES\n"
+                     "    If NOT WARN\n"
+                     "      Delete >NIL: \"" REC_F "\" QUIET\n"
+                     "    EndIf\n"
+                     "  EndIf\n"
+                     "EndIf\n"))))
     ))
 )
 

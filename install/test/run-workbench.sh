@@ -94,6 +94,9 @@
 #                stays missing, and Backup, the drawer and the record stay
 #   hostsedit    adds a line to DEVS:Internet/hosts: the file stays
 #   drawerfile   saves a file in the AmiNetXDuo drawer: it and the drawer stay
+#   nsedit       adds a line to our S:Network-Startup (needs -f): it stays,
+#                the other stack's stays in Backup, and Backup, its .old and
+#                the record stay
 # -P replaces the throw-away archive's InstallNetProbe with one that exits
 # RETURN_FAIL for every query (fail) or with a file that is not a program
 # (broken): the Installer must fall back to the full stack and the driver
@@ -1127,6 +1130,9 @@ case "$UNINSTALL_PREP" in
         ANSWER_LINES+=("1|PREUNINSTALL|Echo >>DEVS:Internet/hosts \"10.0.0.9 nas\"") ;;
     drawerfile)
         ANSWER_LINES+=("1|PREUNINSTALL|Echo >SYS:AmiNetXDuo/notes \"mine\"") ;;
+    nsedit)
+        [ -n "$FOREIGN_MODE" ] || { echo "-X nsedit needs -f" >&2; exit 2; }
+        ANSWER_LINES+=("1|PREUNINSTALL|Echo >>S:Network-Startup \"; mine\"") ;;
     *) echo "unknown -X: $UNINSTALL_PREP" >&2; exit 2 ;;
 esac
 [ -z "$UNINSTALL_PREP" ] || [ "$UNINSTALL" = 1 ] || { echo "-X needs -u" >&2; exit 2; }
@@ -2383,7 +2389,18 @@ if [ "$UNINSTALL" = 1 ]; then
     case "$UNINSTALL_PREP" in
         restorefail)
             _drawer_stays=1
-            _before=$(printf '%s\n' "$_before" | grep -v -E $'\tLibs/bsdsocket\\.library$' || true)
+            # Its Backup copy gone, the other stack's library stays as the
+            # .old the installation renamed it to: the one copy left.
+            _lib=$(printf '%s\n' "$_before" | sed -n $'s/\t\\(Libs\\/bsdsocket\\.library\\)$/ \\1/p' | cut -d' ' -f1)
+            _old=$(amiga_path Libs/bsdsocket.library.old 2>/dev/null || true)
+            if [ -n "$_old" ] && [ "$(shasum < "$_old" | cut -d' ' -f1)" = "$_lib" ]; then
+                echo "  ok      the other stack's library stays as bsdsocket.library.old"
+            else
+                echo "!! the other stack's library is gone"
+                _u_ok=0
+            fi
+            _before=$(printf '%s\n' "$_before" | grep -v -E $'\tLibs/bsdsocket\\.library(\\.old)?$' || true)
+            _after=$(printf '%s\n' "$_after" | grep -v -E $'\tLibs/bsdsocket\\.library\\.old$' || true)
             _after=$(printf '%s\n' "$_after" | grep -v -E $'\tAmiNetXDuo(/|\\.info$)' || true)
             if amiga_path AmiNetXDuo/Backup/1/Libs/usergroup.library >/dev/null 2>&1 &&
                amiga_path S/AmiNetXDuo-Files >/dev/null 2>&1; then
@@ -2401,6 +2418,23 @@ if [ "$UNINSTALL" = 1 ]; then
                 echo "!! the hosts file edited after the install went"
                 _u_ok=0
             fi ;;
+        nsedit)
+            _drawer_stays=1
+            _ns=$(amiga_path S/Network-Startup 2>/dev/null || true)
+            _nsold=$(amiga_path S/Network-Startup.old 2>/dev/null || true)
+            if [ -n "$_ns" ] && grep -qx '; mine' "$_ns" &&
+               [ -n "$_nsold" ] &&
+               amiga_path AmiNetXDuo/Backup/1/S/Network-Startup >/dev/null 2>&1 &&
+               amiga_path S/AmiNetXDuo-Files >/dev/null 2>&1; then
+                echo "  ok      the edited S:Network-Startup stays; the other stack's stays in Backup and as .old"
+            else
+                echo "!! the edited S:Network-Startup, its .old, Backup or the record went"
+                _u_ok=0
+            fi
+            _strip_ns=$'\tS/Network-Startup(\\.old)?$'
+            _before=$(printf '%s\n' "$_before" | grep -v -E "$_strip_ns" || true)
+            _after=$(printf '%s\n' "$_after" | grep -v -E "$_strip_ns" |
+                     grep -v -E $'\tAmiNetXDuo(/|\\.info$)' || true) ;;
         drawerfile)
             _drawer_stays=1
             _left=$(find "$HD/AmiNetXDuo" -mindepth 1 ! -name '*.uaem' -printf '%P\n' 2>/dev/null | sort | tr '\n' ' ')
@@ -2421,7 +2455,7 @@ if [ "$UNINSTALL" = 1 ]; then
         echo "!! the driver returned $INSTALL_STATUS"
         _u_ok=0
     fi
-    if [ "$UNINSTALL_PREP" != restorefail ] &&
+    if [ "$UNINSTALL_PREP" != restorefail ] && [ "$UNINSTALL_PREP" != nsedit ] &&
        amiga_path S/AmiNetXDuo-Files >/dev/null 2>&1; then
         echo "!! S:AmiNetXDuo-Files is still there"
         _u_ok=0
