@@ -280,6 +280,13 @@ aminetxduo_add_tool(tool_netprefs NetPrefs SOURCES netprefs.c netprefs_text.c
     netprefs_layout.c)
 aminetxduo_add_tool(tool_netmeter NetMeter NX SOURCES netmeter.c netmeter_fmt.c)
 
+# The Wi-Fi window.  Scans, joins through WirelessManager's
+# ENV:Sys/Wireless.prefs and restarts it; never joins or sets a key itself.
+# LIST and STATUS print the same answers from a Shell.
+aminetxduo_add_tool(tool_netwirelessprefs NetWirelessPrefs
+    SOURCES netwirelessprefs.c netwireless_dev.c netwireless_sig.c
+            netwireless_prefs.c)
+
 # AddNetRoute and DeleteNetRoute are one source, the same way Online and
 # Offline are: they parse the same destination and differ in one library call.
 # Config-only, they reach the live routing table through NetStackControl()
