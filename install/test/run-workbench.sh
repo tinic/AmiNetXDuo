@@ -1244,9 +1244,13 @@ fi
 # -w cnetkeep: the cnet example, its comments naming prism2.device, as the
 # board's eth0 before the install: "Keep it" keeps it, and no Wi-Fi.
 if [ "$WIFI_MODE" = cnetkeep ]; then
-    mkdir -p "$HD/Devs/NetInterfaces"
-    sed "s|^DEVICE=cnet.device|DEVICE=DEVS:${SANA2_DIR:+$SANA2_DIR/}$SANA2_DRIVER|" \
+    # DEVICE as the Installer writes it, and the rest of a kept setup.
+    _kd=$SANA2_DRIVER
+    [ "$SANA2_DIR" = Networks ] && _kd=DEVS:Networks/$SANA2_DRIVER
+    mkdir -p "$HD/Devs/NetInterfaces" "$HD/Devs/Internet"
+    sed "s|^DEVICE=cnet.device|DEVICE=$_kd|" \
         "$ROOT/install/examples/NetInterfaces/cnet" > "$HD/Devs/NetInterfaces/eth0"
+    cp "$ROOT/install/examples/Internet/name_resolution" "$HD/Devs/Internet/"
     grep -q "prism2.device" "$HD/Devs/NetInterfaces/eth0" || {
         echo "!! the cnet example no longer names prism2.device" >&2; exit 2; }
     echo "==> cnetkeep fixture: DEVS:NetInterfaces/eth0 from the cnet example"
