@@ -9,6 +9,11 @@
 #define CIS_FUNC_LAN            6
 #define CIS_FUNCE_LAN_TECH      0x01
 #define CIS_LAN_TECH_WIRELESS   0x07
+#define CISTPL_NULL             0x00
+#define CISTPL_MANFID           0x20
+#define CISTPL_FUNCID           0x21
+#define CISTPL_FUNCE            0x22
+#define CISTPL_END              0xff
 
 /* 802.11 PC Cards by MANFID: the tables of Linux hostap_cs.c, orinoco_cs.c,
    spectrum_cs.c, airo_cs.c and atmel_cs.c (v6.6).  Pairs, because 3Com's 0x0101 also
@@ -66,4 +71,53 @@ int netprobe_pc_kind(const NetprobeCis *cis)
     if (!cis->have_funcid || cis->funcid != CIS_FUNC_LAN)
         return NETPROBE_PC_NONE;
     return wireless(cis) ? NETPROBE_PC_NONE : NETPROBE_PC_NE2000;
+}
+
+int netprobe_cis_walk(uint8_t (*read)(void *ctx, uint32_t n), void *ctx,
+                      uint32_t size, NetprobeCis *cis)
+{
+    uint32_t pos = 0;
+
+    while (pos + 1 < size)
+    {
+        uint8_t  code = read(ctx, pos);
+        uint8_t  link;
+        uint32_t body;
+
+        if (code == CISTPL_END)
+            break;
+        if (code == CISTPL_NULL)
+        {
+            pos++;
+            continue;
+        }
+        link = read(ctx, pos + 1);
+        if (link == 0xff)
+            break;
+        body = pos + 2;
+        if (body + link > size)
+            break;
+
+        if (code == CISTPL_MANFID && link >= 4 && !cis->have_manf)
+        {
+            cis->manf = (uint16_t)(((uint16_t)read(ctx, body + 1) << 8) |
+                                   read(ctx, body));
+            cis->prod = (uint16_t)(((uint16_t)read(ctx, body + 3) << 8) |
+                                   read(ctx, body + 2));
+            cis->have_manf = 1;
+        }
+        else if (code == CISTPL_FUNCID && link >= 1 && !cis->have_funcid)
+        {
+            cis->funcid = read(ctx, body);
+            cis->have_funcid = 1;
+        }
+        else if (code == CISTPL_FUNCE && link >= 2 && !cis->have_funce)
+        {
+            cis->funce[0] = read(ctx, body);
+            cis->funce[1] = read(ctx, body + 1);
+            cis->have_funce = 1;
+        }
+        pos = body + link;
+    }
+    return cis->have_manf || cis->have_funcid;
 }

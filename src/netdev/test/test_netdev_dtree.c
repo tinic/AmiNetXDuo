@@ -64,6 +64,7 @@ static const UBYTE mmc_path[]   = "/soc/mmc@7e300000";
 #define STR(s) (const UBYTE *)(s), sizeof(s)
 
 static DtNode root, memory0, scb, genet, mdio, phy, soc, decoy, aliases, mmc;
+static DtNode mmcnr, wifi;
 static DtNode scbhi, genethi;
 
 static const Prop root_props[] =
@@ -145,9 +146,37 @@ static const Prop aliases_props[] =
     { "mmc", mmc_path, sizeof(mmc_path) },
     { NULL, NULL, 0 }
 };
+/* Disabled, as the Pi 4 and CM4 firmware trees have it. */
 static const Prop mmc_props[] =
 {
-    { "status", STR("okay") },
+    { "status", STR("disabled") },
+    { NULL, NULL, 0 }
+};
+/* The Wi-Fi's SDIO controller and the radio on it, as the CM4 firmware tree
+   has them; dtoverlay=disable-wifi (and a CM4S) has mmcnr disabled. */
+static const Prop mmcnr_okay_props[] =
+{
+    { "compatible", STR("brcm,bcm2835-mmc\0brcm,bcm2835-sdhci") },
+    { "status",     STR("okay") },
+    { NULL, NULL, 0 }
+};
+static const Prop mmcnr_off_props[] =
+{
+    { "compatible", STR("brcm,bcm2835-mmc\0brcm,bcm2835-sdhci") },
+    { "status",     STR("disabled") },
+    { NULL, NULL, 0 }
+};
+static const Prop wifi_props[] =
+{
+    { "compatible", STR("brcm,bcm4329-fmac") },
+    { "reg",        one, 4 },
+    { NULL, NULL, 0 }
+};
+static const Prop cm4_root_props[] =
+{
+    { "#address-cells", root_ac, 4 },
+    { "#size-cells",    root_sc, 4 },
+    { "compatible",     STR("raspberrypi,4-compute-module\0brcm,bcm2711") },
     { NULL, NULL, 0 }
 };
 /* A second GENET node, disabled, and listed BEFORE the real one: the walk
@@ -162,7 +191,8 @@ static const Prop decoy_props[] =
 
 static DtNode *root_children[]  = { &aliases, &soc, &memory0, &scb, &scbhi, NULL };
 static DtNode *scbhi_children[] = { &genethi, NULL };
-static DtNode *soc_children[]   = { &decoy, &mmc, NULL };
+static DtNode *soc_children[]   = { &decoy, &mmc, &mmcnr, NULL };
+static DtNode *mmcnr_children[] = { &wifi, NULL };
 static DtNode *scb_children[]   = { &genet, NULL };
 static DtNode *genet_children[] = { &mdio, NULL };
 static DtNode *mdio_children[]  = { &phy, NULL };
@@ -180,6 +210,8 @@ static void build(void)
     decoy   = (DtNode){ "ethernet@7d000000", &soc, none, decoy_props };
     aliases = (DtNode){ "aliases", &root, none, aliases_props };
     mmc     = (DtNode){ "mmc@7e300000", &soc, none, mmc_props };
+    mmcnr   = (DtNode){ "mmcnr@7e300000", &soc, mmcnr_children, mmcnr_okay_props };
+    wifi    = (DtNode){ "wifi@1", &mmcnr, none, wifi_props };
     scbhi   = (DtNode){ "scb-hi", &root, scbhi_children, scbhi_props };
     genethi = (DtNode){ "ethernet@7d580000", &scbhi, none, genethi_props };
 }
@@ -290,6 +322,16 @@ int main(void)
                      "raspberrypi,5-model-b"), 0);
     expect_ulong("mmc alias", netdev_dtree_alias_present("mmc"), 1);
     expect_ulong("missing alias", netdev_dtree_alias_present("wifi"), 0);
+    /* The CM4 tree: mmcnr okay, the radio live. */
+    root.props = cm4_root_props;
+    expect_ulong("cm4 model", netdev_dtree_root_compatible(
+                     "raspberrypi,4-compute-module"), 1);
+    expect_ulong("cm4 wifi live", netdev_dtree_live("brcm,bcm4329-fmac"), 1);
+    /* dtoverlay=disable-wifi: mmcnr disabled, the radio below it is not. */
+    mmcnr.props = mmcnr_off_props;
+    expect_ulong("disable-wifi", netdev_dtree_live("brcm,bcm4329-fmac"), 0);
+    mmcnr.props = mmcnr_okay_props;
+    root.props = root_props;
     expect_ulong("discovery opens closed", (ULONG)(opens - closes), 0);
 
     /* The real node, through /scb's ranges, past the disabled decoy. */

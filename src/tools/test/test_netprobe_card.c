@@ -12,6 +12,26 @@
 static unsigned long checks;
 static unsigned long failures;
 
+/* A 3C589's primary chain as attribute memory holds it, CIS byte n at n:
+   DEVICE, a NULL byte, MANFID, FUNCID LAN, FUNCE, END. */
+static const unsigned char el3_cis[] =
+{
+    0x01, 0x02, 0xdf, 0xff,
+    0x00,
+    0x20, 0x04, 0x01, 0x01, 0x89, 0x05,
+    0x21, 0x02, 0x06, 0x00,
+    0x22, 0x02, 0x01, 0x02,
+    0xff
+};
+
+/* A link running past the end stops the walk. */
+static const unsigned char short_cis[] = { 0x21, 0x08, 0x06 };
+
+static uint8_t cis_read(void *ctx, uint32_t n)
+{
+    return ((const unsigned char *)ctx)[n];
+}
+
 static void expect_kind(const NetprobeCis *cis, int want, const char *what)
 {
     int got = netprobe_pc_kind(cis);
@@ -63,6 +83,29 @@ int main(void)
     expect_kind(&disk, NETPROBE_PC_NONE, "CompactFlash disk");
     /* The driver would try this one; the probe leaves it to the card page. */
     expect_kind(&bare, NETPROBE_PC_NONE, "MANFID, no FUNCID");
+
+    {
+        NetprobeCis walked = { 0, 0, 0, { 0, 0 }, 0, 0, 0 };
+        NetprobeCis none = { 0, 0, 0, { 0, 0 }, 0, 0, 0 };
+
+        checks++;
+        if (!netprobe_cis_walk(cis_read, (void *)el3_cis,
+                               (uint32_t)sizeof(el3_cis), &walked) ||
+            walked.manf != 0x0101 || walked.prod != 0x0589 ||
+            !walked.have_funce || walked.funce[1] != 0x02)
+        {
+            failures++;
+            printf("  FAIL raw walk of a 3C589\n");
+        }
+        expect_kind(&walked, NETPROBE_PC_3C589, "3C589, raw CIS");
+        checks++;
+        if (netprobe_cis_walk(cis_read, (void *)short_cis,
+                              (uint32_t)sizeof(short_cis), &none))
+        {
+            failures++;
+            printf("  FAIL a truncated tuple was read\n");
+        }
+    }
 
     printf("netprobe_card: %lu checks, %lu failures\n", checks, failures);
     return failures == 0 ? 0 : 1;

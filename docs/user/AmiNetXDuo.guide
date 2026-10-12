@@ -208,7 +208,7 @@
   At Intermediate and Expert level the Installer also offers a
   self-contained layout. Libraries, commands, configuration,
   documentation and examples then all go under the one AmiNetXDuo drawer
-  selected on the preceding page. The Installer neither moves nor replaces
+  selected on the following page. The Installer neither moves nor replaces
   files belonging to the system stack.
 
   Its S:User-Startup block assigns AmiNetXDuo: to that drawer and ADDs

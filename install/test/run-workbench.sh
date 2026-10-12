@@ -6,11 +6,11 @@
 #   install/test/run-workbench.sh [-b BUILDDIR] [-a ARCHIVE.lha]
 #                                 [-l NOVICE|AVERAGE|EXPERT] [-p CHOICE]
 #                                 [-N BOARD] [-t SECONDS] [-T SECONDS] [-k]
-#                                 [-H] [-S] [-D] [-g] [-R] [-U] [-E] [-J] [-B]
+#                                 [-H] [-S] [-D] [-g] [-R] [-U] [-E] [-B]
 #                                 [-q ANSWERS] [-x PROFILE-TRANSITION]
 #                                 [-e genet|wifi|both|genet-old|genet-old-bare]
 #                                 [-P fail|broken]
-#                                 [-c drivers]
+#                                 [-c dhcp]
 #                                 [-m core|driver|probe|minimal]
 #                                 [-C] [-M] [-V] [-I] [-z] [-W]
 #                                 [-s yes|invalid] [-O] [-n]
@@ -35,7 +35,8 @@
 # -n with -U: between the runs a hostname line is set by hand in
 # name_resolution; setting the network up again must keep it.
 # -O answers the .local page with its second button, "No .local names", on a
-# 68020: the interface must say MDNS=NO.
+# 68020: the interface must say MDNS=NO.  -O and -B need -l EXPERT, the only
+# level that draws the .local and boot pages.
 # -s types 0.pool.ntp.org as the SNTP server, a page only Expert draws;
 # `-s invalid' types a refused name first.  Without -s the question takes its
 # default, yes with pool.ntp.org, and an S:Network-Startup this installer
@@ -50,7 +51,7 @@
 #             on the card, runs it twice, and runs the real WirelessManager
 #             VERBOSE against the written prefs.
 #   keep      plants a user's Wireless.prefs and C:WirelessManager: both
-#             untouched, and the lines that start WirelessManager commented.
+#             untouched, and the lines start that C:WirelessManager.
 #   keepitlive  keepit with -e both, the kept genet file ending in a live
 #             "UNIT=0 PRIORITY=3": nothing may be appended to it.
 #   keepitfw  keepit that also empties DEVS:Firmware between the runs: the
@@ -60,7 +61,7 @@
 #             definition.
 #   userstart S:User-Startup already starts WirelessManager: commented lines.
 #   userwm    a user's C:WirelessManager (with -D: beside a drawer install):
-#             kept, none installed, commented lines, the prefs still written.
+#             kept, none installed, started by the lines, the prefs written.
 #   prism2    without -e: Cafferkey's prism2.device staged in DEVS:Networks
 #             selects PCMCIA "Prism2 wireless" beside the card, with no PC
 #             Card in the slot.  NetWirelessPrefs SETUP cannot open it, the
@@ -124,7 +125,6 @@ DRAWER_GUI=0
 RERUN=0
 RECONFIGURE=0
 EXPERT_CUSTOM=0
-NO_DRIVERS=0
 NO_BOOT=0
 ANSWER_FILE=""
 TRANSITION=""
@@ -150,7 +150,7 @@ HAND_HOST=0
 PROBE_FAULT=""
 WIFI_MODE=""
 
-while getopts "b:a:l:p:N:t:T:kHSDgRUEJBIMq:x:f:e:c:m:CVzWs:P:Ow:nuX:" opt; do
+while getopts "b:a:l:p:N:t:T:kHSDgRUEBIMq:x:f:e:c:m:CVzWs:P:Ow:nuX:" opt; do
     case "$opt" in
         b) BUILD="$OPTARG" ;;
         a) ARCHIVE="$OPTARG" ;;
@@ -167,7 +167,6 @@ while getopts "b:a:l:p:N:t:T:kHSDgRUEJBIMq:x:f:e:c:m:CVzWs:P:Ow:nuX:" opt; do
         R) RERUN=1 ;;
         U) RECONFIGURE=1 ;;
         E) EXPERT_CUSTOM=1 ;;
-        J) NO_DRIVERS=1 ;;
         B) NO_BOOT=1 ;;
         q) ANSWER_FILE="$OPTARG" ;;
         x) TRANSITION="$OPTARG" ;;
@@ -192,10 +191,10 @@ while getopts "b:a:l:p:N:t:T:kHSDgRUEJBIMq:x:f:e:c:m:CVzWs:P:Ow:nuX:" opt; do
         *) echo "usage: $0 [-b builddir] [-a archive.lha]" \
                 "[-l NOVICE|AVERAGE|EXPERT] [-p choice] [-N board]" \
                 "[-t seconds] [-T seconds] [-k] [-H] [-S] [-D] [-g] [-R] [-U] [-E]" \
-                "[-J] [-B]" \
+                "[-B]" \
                 "[-q answers] [-x full-minimal|minimal-full|full-micro|micro-full|fat-full|full-fat]" \
                 "[-f existing-stack-mode] [-e genet|wifi|both|genet-old|genet-old-bare] [-P fail|broken]" \
-                "[-c drivers] [-m core|driver|probe|minimal] [-C] [-M] [-V] [-I] [-z] [-W]" \
+                "[-c dhcp] [-m core|driver|probe|minimal] [-C] [-M] [-V] [-I] [-z] [-W]" \
                 "[-s yes|invalid] [-O] [-n]" \
                 "[-w join|keep|keepit|keepitlive|keepitfw|userstart|userwm|prism2|prism2pi|prism2keep|cnetkeep]" >&2
            exit 2 ;;
@@ -230,10 +229,8 @@ if [ "$STATIC" = "1" ] && [ "$LEVEL" = "NOVICE" ]; then
     exit 2
 fi
 
-if { [ "$NO_DRIVERS" = "1" ] || [ "$NO_BOOT" = "1" ]; } &&
-   [ "$LEVEL" = "NOVICE" ]; then
-    echo "-J and -B need -l AVERAGE or -l EXPERT: Novice draws neither" >&2
-    echo "question, so the requested non-default answer cannot be selected." >&2
+if [ "$NO_BOOT" = "1" ] && [ "$LEVEL" != "EXPERT" ]; then
+    echo "-B needs -l EXPERT: only Expert draws the boot question" >&2
     exit 2
 fi
 if [ "$RECONFIGURE" = "1" ] && [ "$LEVEL" = "NOVICE" ]; then
@@ -259,8 +256,8 @@ case "$SNTP_MODE" in
     invalid) CONFIG_ONLY=1 ;;
     *) echo "unknown SNTP mode: $SNTP_MODE" >&2; exit 2 ;;
 esac
-if [ "$MDNS_OFF" = 1 ] && [ "$LEVEL" = "NOVICE" ]; then
-    echo "-O needs -l AVERAGE or -l EXPERT: Novice draws no questions" >&2
+if [ "$MDNS_OFF" = 1 ] && [ "$LEVEL" != "EXPERT" ]; then
+    echo "-O needs -l EXPERT: only Expert draws the .local question" >&2
     exit 2
 fi
 if [ -n "$SNTP_MODE" ] && [ "$LEVEL" != "EXPERT" ]; then
@@ -372,7 +369,7 @@ if [ -n "$FOREIGN_MODE" ]; then
     }
 fi
 if [ -n "$CANCEL_MODE" ]; then
-    [ "$CANCEL_MODE" = drivers ] || {
+    [ "$CANCEL_MODE" = "dhcp" ] || {
         echo "unknown cancellation point: $CANCEL_MODE" >&2; exit 2
     }
     [ "$LEVEL" != NOVICE ] || {
@@ -383,7 +380,7 @@ fi
 if { [ -n "$CANCEL_MODE" ] || [ -n "$MISSING_MODE" ]; } &&
    { [ "$DRAWER" != 0 ] || [ -n "$TRANSITION" ] || [ -n "$FOREIGN_MODE" ] ||
      [ -n "$EMU68_FIXTURE" ] || [ "$RERUN" != 0 ] || [ "$RECONFIGURE" != 0 ] ||
-     [ "$STATIC" != 0 ] || [ "$NO_DRIVERS" != 0 ] || [ "$NO_BOOT" != 0 ] ||
+     [ "$STATIC" != 0 ] || [ "$NO_BOOT" != 0 ] ||
      [ "$TERMINAL" != 0 ] || [ "$EXPERT_CUSTOM" != 0 ] ||
      [ -n "$SNTP_MODE" ]; }; then
     echo "cancellation/corrupt-archive scenarios cannot be combined with another fixture" >&2
@@ -417,9 +414,9 @@ if [ -n "$EMU68_FIXTURE" ]; then
     esac
     { [ "$DRAWER" = "0" ] || [ "$WIFI_MODE" = userwm ]; } &&
     [ "$PICK" != "drawer" ] &&
-    [ "$NO_DRIVERS" = "0" ] && [ "$EXPERT_CUSTOM" = "0" ] &&
+    [ "$EXPERT_CUSTOM" = "0" ] &&
     [ -z "$TRANSITION" ] && [ -z "$FOREIGN_MODE" ] || {
-        echo "-e cannot be combined with a drawer, driver-decline, custom-name, transition or foreign-stack scenario" >&2
+        echo "-e cannot be combined with a drawer, custom-name, transition or foreign-stack scenario" >&2
         exit 2
     }
 fi
@@ -1057,7 +1054,7 @@ case "$WIFI_MODE" in
     join|keepit|keepitlive|keepitfw|userwm|prism2|prism2pi|prism2keep) WIFI_ANSWERED=1 ;;
 esac
 case "$WIFI_MODE" in
-    keep|userstart|userwm) WM_EXPECT_LIVE=0 ;;
+    userstart) WM_EXPECT_LIVE=0 ;;
 esac
 case "$WIFI_MODE" in
     keep|userwm) WM_USER_FIXTURE=1 ;;
@@ -1159,13 +1156,8 @@ case "$FOREIGN_MODE" in
     *-keepredo) ANSWER_LINES+=("1|BOOL|Keep it" "2|BOOL|Set them up again") ;;
 esac
 case "$CANCEL_MODE" in
-    drivers) ANSWER_LINES+=("1|ABORT|Yes, install them") ;;
+    dhcp) ANSWER_LINES+=("1|ABORT|Yes, use DHCP") ;;
 esac
-if [ "$NO_DRIVERS" = "1" ]; then
-    for ((answer_run = 1; answer_run <= DRIVE_RUNS; answer_run++)); do
-        ANSWER_LINES+=("$answer_run|BOOL|No, leave them out")
-    done
-fi
 if [ "$NO_BOOT" = "1" ]; then
     for ((answer_run = 1; answer_run <= DRIVE_RUNS; answer_run++)); do
         ANSWER_LINES+=("$answer_run|BOOL|No, I will do it")
@@ -3391,45 +3383,6 @@ ANXNET_ARCHIVE="$DEVS_ARCHIVE/anxnet.device"
 ANXNET_INSTALLED=$(amiga_path "${INST}Devs/Networks/anxnet.device" 2>/dev/null || true)
 ANXNET_OLD=$(amiga_path "${INST}Devs/Networks/anxnet.device.old" 2>/dev/null || true)
 
-if [ "$NO_DRIVERS" = "1" ]; then
-    # Declining the supplied drivers means precisely that: no new driver, no
-    # backup, and an existing file remains byte-for-byte what it was.  The
-    # selected vendor driver still boots the stack below.
-    for supplied in anxnet.device anxgenet.device anxwifipi.device; do
-        [ -f "$UNPACK/AmiNetXDuo/Devs/Networks/$supplied" ] || {
-            echo "!! archive is missing $supplied; omission cannot be tested"
-            fail=1
-        }
-    done
-    if [ -n "$STALE_DEVICE" ]; then
-        if [ -f "$STALE_DEVICE" ] &&
-           [ "$(shasum "$STALE_DEVICE" | cut -d' ' -f1)" = "$STALE_SUM" ]; then
-            echo "  ok      declining drivers preserved the existing anxnet.device"
-        else
-            echo "!! declining drivers changed the existing anxnet.device"
-            fail=1
-        fi
-    elif [ -n "$ANXNET_INSTALLED" ]; then
-        echo "!! declining drivers installed anxnet.device on a clean machine"
-        fail=1
-    else
-        echo "  ok      declining drivers left a clean DEVS:Networks untouched"
-    fi
-    for supplied in anxgenet.device anxzz9000.device anxwifipi.device; do
-        if amiga_path "${INST}Devs/Networks/$supplied" >/dev/null 2>&1; then
-            echo "!! declining drivers installed $supplied"
-            fail=1
-        fi
-    done
-    if [ -n "$ANXNET_OLD" ]; then
-        echo "!! declining drivers created anxnet.device.old"
-        fail=1
-    fi
-    ANXGENET_INSTALLED=""
-    ANXZZ9000_INSTALLED=""
-    ANXWIFIPI_INSTALLED=""
-    echo "supplied_drivers=declined"
-else
 if [ ! -f "$ANXNET_ARCHIVE" ]; then
     echo "  MISSING Devs/Networks/anxnet.device IN THE ARCHIVE"
     echo "!! the archive itself carries no driver, so what the installer did"
@@ -3633,7 +3586,6 @@ else
     else
         echo "  ok      anxnet.device.old is present after $DRIVE_RUNS installs"
     fi
-fi
 fi
 
 # -------------------------------------------------- the drawers have icons --

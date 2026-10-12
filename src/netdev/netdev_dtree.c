@@ -318,7 +318,45 @@ static APTR dt_find_compat(APTR key, const char *compat, UWORD depth)
     return NULL;
 }
 
+/* As dt_find_compat, but never into or onto a disabled node: what the
+   firmware switched off -- dtoverlay=disable-wifi, a CM4S's mmcnr -- is not
+   there, whatever it carries below. */
+static APTR dt_find_live(APTR key, const char *compat, UWORD depth)
+{
+    APTR child = NULL;
+
+    while ((child = dt_getchild(key, child)) != NULL)
+    {
+        APTR hit;
+
+        if (dt_stringlist_has(child, "status", "disabled"))
+            continue;
+        if (dt_stringlist_has(child, "compatible", compat))
+            return child;
+        if (depth != 0 &&
+            (hit = dt_find_live(child, compat, (UWORD)(depth - 1))) != NULL)
+            return hit;
+    }
+    return NULL;
+}
+
 /* -------------------------------------------------------------- lookup -- */
+
+BOOL netdev_dtree_live(const char *compat)
+{
+    APTR root;
+    BOOL found;
+
+    dt_base = OpenResource((CONST_STRPTR)"devicetree.resource");
+    if (dt_base == NULL)
+        return FALSE;
+    root = dt_openkey("/");
+    if (root == NULL)
+        return FALSE;
+    found = (BOOL)(dt_find_live(root, compat, 3) != NULL);
+    dt_closekey(root);
+    return found;
+}
 
 BOOL netdev_dtree_present(VOID)
 {
@@ -369,9 +407,12 @@ BOOL netdev_dtree_alias_present(const char *alias)
             ;
         if (n < len)
         {
+            /* The node, whatever its status.  On a Pi 4 and a CM4 the
+               firmware tree marks the "mmc" target disabled -- the Wi-Fi is
+               on mmcnr at the same address -- and anxwifipi.device reads its
+               base through the alias all the same. */
             target = dt_openkey(path);
-            if (target != NULL)
-                found = (BOOL)!dt_stringlist_has(target, "status", "disabled");
+            found = (BOOL)(target != NULL);
         }
     }
 

@@ -50,9 +50,9 @@ struct ExpansionBase *ExpansionBase;
 struct Library       *CardResource;
 
 /* card.resource's proto headers are not portable across the two supported
-   Amiga GCC layouts.  These three LVOs are the same small stubs the driver
-   uses: OwnCard -6, ReleaseCard -12, CopyTuple -72.  Each may destroy
-   d0/d1/a0/a1, so an argument register is a "+r" operand (#70). */
+   Amiga GCC layouts.  These LVOs are small stubs like the driver's:
+   OwnCard -6, ReleaseCard -12, ReadCardStatus -36, CopyTuple -72.  Each may
+   destroy d0/d1/a0/a1, so an argument register is a "+r" operand (#70). */
 static struct CardHandle *probe_own_card(struct CardHandle *handle)
 {
     register struct Library    *_a6 __asm("a6") = CardResource;
@@ -93,6 +93,19 @@ static BOOL probe_copy_tuple(struct CardHandle *handle, UBYTE *buffer,
                       : "r" (_a6), "0" (_d0)
                       : "cc", "memory");
     return (BOOL)(result != 0);
+}
+
+/* ReadCardStatus -36: Gayle's status byte, nothing claimed. */
+static UBYTE probe_card_status(VOID)
+{
+    register struct Library *_a6 __asm("a6") = CardResource;
+    register ULONG           result __asm("d0");
+
+    __asm __volatile ("jsr a6@(-0x24)"
+                      : "=r" (result)
+                      : "r" (_a6)
+                      : "d1", "a0", "a1", "cc", "memory");
+    return (UBYTE)result;
 }
 
 typedef struct ClassicCard
@@ -170,14 +183,47 @@ static BOOL classic_card_present(const char *name)
     return present;
 }
 
+/* Gayle's attribute window: CIS byte n at 0xA00000 + 2n (netdev_pcmcia.c).
+   The walk stops at the first END, long before the 64 KB of CIS bytes. */
+#define PC_ATTR_BASE      0x00a00000UL
+#define PC_ATTR_CIS_BYTES 0x00010000UL
+
+static uint8_t attr_read(void *ctx, uint32_t n)
+{
+    (VOID)ctx;
+    return *(volatile UBYTE *)(PC_ATTR_BASE + n * 2UL);
+}
+
+/* The owner's handle name, read under Forbid while the handle is live. */
+static BOOL owner_is(struct CardHandle *owner, const char *name)
+{
+    BOOL  is = FALSE;
+    char *n;
+
+    if (owner == (struct CardHandle *)-1)
+        return FALSE;
+    Forbid();
+    if (TypeOfMem(owner) != 0)
+    {
+        n = owner->cah_CardNode.ln_Name;
+        if (n != NULL && TypeOfMem(n) != 0)
+            is = same(n, name);
+    }
+    Permit();
+    return is;
+}
+
 static ULONG ignore_card_event(VOID)
 {
     return 0;
 }
 
 /* Read only the identity tuples.  IFAVAILABLE means an active driver is never
-   displaced or queued behind; in that case the Installer's driver-file
-   fallback supplies the answer.  No reset, COR write or device open occurs. */
+   displaced or queued behind.  A card another driver owns -- anxnet.device
+   started from the startup files, on a reinstall -- is read straight from
+   attribute memory instead: CopyTuple() needs the owner's handle, and a read
+   of the CIS changes nothing on a configured card.  No reset, COR write or
+   device open occurs. */
 static BOOL pcmcia_identity(NetprobeCis *cis)
 {
     static struct Interrupt  removed;
@@ -185,7 +231,9 @@ static BOOL pcmcia_identity(NetprobeCis *cis)
     static struct Interrupt  status;
     static struct CardHandle handle;
     struct CardHandle       *owner;
-    UBYTE                    tuple[6] = { 0 };
+    /* CopyTuple() writes the two header bytes, then up to size body
+       bytes; the autodoc asks for size + 8. */
+    UBYTE                    tuple[4 + 8] = { 0 };
 
     CardResource = OpenResource((CONST_STRPTR)CARDRESNAME);
     if (CardResource == NULL)
@@ -215,24 +263,32 @@ static BOOL pcmcia_identity(NetprobeCis *cis)
         /* IFAVAILABLE did not enqueue this handle, so there is nothing to
            release or remove from card.resource's owner list. */
         handle.cah_CardNode.ln_Name = NULL;
-        return FALSE;
+        if ((probe_card_status() & CARD_STATUSF_CCDET) == 0)
+            return FALSE;
+        /* prism2.device's card: a wireless card whose CIS need not say so,
+           so never an NE2000 here.  The driver file's Prism2 default stands
+           and the PCMCIA type page is drawn. */
+        if (owner_is(owner, "prism2.device"))
+            return FALSE;
+        return (BOOL)netprobe_cis_walk(attr_read, NULL, PC_ATTR_CIS_BYTES,
+                                       cis);
     }
 
-    if (probe_copy_tuple(&handle, tuple, 0x20, sizeof(tuple)) &&
+    if (probe_copy_tuple(&handle, tuple, 0x20, 4) &&
         tuple[1] >= 4)
     {
         cis->manf = (UWORD)(((UWORD)tuple[3] << 8) | tuple[2]);
         cis->prod = (UWORD)(((UWORD)tuple[5] << 8) | tuple[4]);
         cis->have_manf = 1;
     }
-    if (probe_copy_tuple(&handle, tuple, 0x21, sizeof(tuple)) &&
+    if (probe_copy_tuple(&handle, tuple, 0x21, 4) &&
         tuple[1] >= 1)
     {
         cis->funcid = tuple[2];
         cis->have_funcid = 1;
     }
     /* The first FUNCE: on an 802.11 card, its LAN technology. */
-    if (probe_copy_tuple(&handle, tuple, 0x22, sizeof(tuple)) &&
+    if (probe_copy_tuple(&handle, tuple, 0x22, 4) &&
         tuple[1] >= 2)
     {
         cis->funce[0] = tuple[2];
@@ -330,8 +386,13 @@ int main(int argc, char **argv)
     else if (args[ARG_GENETOK] != 0)
         present = genet_usable();
     else if (args[ARG_WIFIPI] != 0)
+        /* The alias is what anxwifipi.device reads its base through; the
+           live brcmfmac node under an enabled mmcnr is the radio itself.
+           A CM4S, a CM4 without wireless or dtoverlay=disable-wifi has
+           mmcnr disabled. */
         present = (BOOL)(supported_wifi_model() &&
-                         netdev_dtree_alias_present("mmc"));
+                         netdev_dtree_alias_present("mmc") &&
+                         netdev_dtree_live("brcm,bcm4329-fmac"));
     else
     {
         const char *card = (const char *)args[ARG_CARD];

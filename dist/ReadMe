@@ -97,27 +97,29 @@ The installer asks, in this order:
 
      Which stack: Everything, Minimal, Micro
        or Fat                                     (Everything; Fat on Emu68)
-     Install the three supplied network drivers  (yes)
-     Where the AmiNetXDuo drawer of documentation
-       and examples goes                          (any drawer)
      Into the system, or into its own drawer      (into the system;
                                                    Intermediate and Expert)
+     Where the AmiNetXDuo drawer of documentation
+       and examples goes                          (SYS:; Expert, and a new
+                                                   drawer installation)
      Keep an existing configuration               (yes for AmiNetXDuo's;
                                                    no for another stack's
                                                    when a device was found)
-     Which card, and for PCMCIA which card type
+     Which card, and for PCMCIA which card type   (the cards found; the
+                                                   type when the card does
+                                                   not name it)
      The interface name and unit                  (eth0, 0; Expert)
      Answer to <hostname>.local on the network    (yes on a 68020 or
-                                                   newer)
+                                                   newer; Expert)
      DHCP, or a fixed address, netmask, gateway   (DHCP)
      The name of this machine                     (amiga- and the last
                                                    three octets of the
                                                    card's address; Expert)
-     Start the network at boot                    (yes)
+     Start the network at boot                    (yes; Expert)
      Start httpd at boot, with a browser file
-       manager, text editor and Shell; which port (no)
+       manager, text editor and Shell; which port (no; the port at Expert)
      Set the clock at boot; which server          (yes, pool.ntp.org;
-                                                   the server at Expert)
+                                                   Expert)
 
 At Novice level every question takes its default without being shown.
 
@@ -297,16 +299,14 @@ WirelessManager first, then the interface, which waits at most 30 seconds
 for an address; DHCP continues after that.  With the Pi Ethernet as well,
 both start, the Ethernet first and with PRIORITY=10, so the default route
 stays on the cable, and the Wi-Fi in the background, so the boot does not
-wait for it; the micro stack starts the Ethernet only.  Where
-WirelessManager is set up on the machine already -- a copy or a
-Wireless.prefs the installer did not write, or a mention in S:User-Startup,
-S:Startup-Sequence or SYS:WBStartup -- the lines that would start a second
-copy are commented out.  S:AmiNetXDuo-WiFi lists the Wi-Fi files the
-installer created.
+wait for it; the micro stack starts the Ethernet only.  A WirelessManager
+the installer did not install is started from where it is installed.
+Where S:User-Startup, S:Startup-Sequence or SYS:WBStartup already names
+WirelessManager, the lines that would start a second copy are commented
+out.  S:AmiNetXDuo-WiFi lists the Wi-Fi files the installer created.
 
-The installer asks whether to put all three in DEVS:Networks and offers yes.
-Copying them changes nothing on its own: an interface file selects one with
-DEVICE=.  anxnet.device may also need a CARD= line when the probe has to be
+The installer puts all three in DEVS:Networks.  Copying them changes nothing
+on its own: an interface file selects one with DEVICE=.  anxnet.device may also need a CARD= line when the probe has to be
 told which board it is.  CheckNetDevice reports what anxnet.device found and
 why a card was refused.  An existing supplied driver is renamed to .old
 rather than overwritten.

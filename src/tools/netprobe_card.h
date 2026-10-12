@@ -43,4 +43,13 @@ enum
  */
 int netprobe_pc_kind(const NetprobeCis *cis);
 
+/*
+ * The same three tuples, from the card's primary CIS chain read byte by byte:
+ * read(ctx, n) is CIS byte n, size the bytes there are.  For a card another
+ * driver owns, where CopyTuple() needs the owner's handle.  Nonzero when a
+ * MANFID or a FUNCID was found.
+ */
+int netprobe_cis_walk(uint8_t (*read)(void *ctx, uint32_t n), void *ctx,
+                      uint32_t size, NetprobeCis *cis);
+
 #endif /* NETPROBE_CARD_H */

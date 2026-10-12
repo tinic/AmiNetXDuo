@@ -35,6 +35,12 @@
  * over into the file it writes.  RETURN_OK with a line written, RETURN_WARN when
  * there is none, RETURN_ERROR when either file fails.
  *
+ * DRAWER: FIRST is S:AmiNetXDuo-Files; the drawer the installation that
+ * wrote it lives in (its T:AmiNetXDuo-DrawerKept line) goes into the global
+ * variable SECOND, so the Installer can read it with getenv.  RETURN_OK with
+ * it set, RETURN_WARN when the record names none, RETURN_ERROR when the file
+ * cannot be read.
+ *
  * SPDX-License-Identifier: MIT
  */
 
@@ -43,6 +49,7 @@
 #include <dos/dos.h>
 #include <dos/dosextens.h>
 #include <dos/rdargs.h>
+#include <dos/var.h>
 #include <proto/dos.h>
 #include <proto/exec.h>
 
@@ -57,7 +64,7 @@ const char *const tool_name = "InstallSameFile";
 static const char version_tag[] __attribute__((used)) =
     TOOL_VERSTAG("InstallSameFile");
 
-#define TEMPLATE "FIRST/A,SECOND/A/M,DEVICES/S,HOSTLINE/S,BYTES/S,MARK/S"
+#define TEMPLATE "FIRST/A,SECOND/A/M,DEVICES/S,HOSTLINE/S,BYTES/S,MARK/S,DRAWER/S"
 
 /* An interface file is a few hundred bytes; the cap only bounds a stray. */
 #define DEVICES_FILE_MAX 65536L
@@ -71,6 +78,7 @@ enum
     ARG_HOSTLINE,
     ARG_BYTES,
     ARG_MARK,
+    ARG_DRAWER,
     ARG_COUNT
 };
 
@@ -326,6 +334,45 @@ static LONG has_mark(const char *file, const char *mark)
     return rc;
 }
 
+static LONG record_drawer(const char *file, const char *var)
+{
+    static const char key[] = ">T:AmiNetXDuo-DrawerKept \"";
+    BPTR  fh;
+    LONG  size, got, i, j;
+    char *buf;
+    LONG  rc = RETURN_WARN;
+
+    fh = Open((CONST_STRPTR)file, MODE_OLDFILE);
+    if (fh == 0)
+        return RETURN_ERROR;
+    Seek(fh, 0, OFFSET_END);
+    size = Seek(fh, 0, OFFSET_BEGINNING);
+    if (size <= 0 || (buf = (char *)AllocVec((ULONG)size + 1, MEMF_ANY)) == NULL)
+    {
+        Close(fh);
+        return size == 0 ? RETURN_WARN : RETURN_ERROR;
+    }
+    got = Read(fh, buf, size);
+    Close(fh);
+    if (got != size)
+        rc = RETURN_ERROR;
+    else
+        for (i = 0; i + (LONG)sizeof(key) - 1 <= size; i++)
+            if (memcmp(buf + i, key, sizeof(key) - 1) == 0)
+            {
+                i += (LONG)sizeof(key) - 1;
+                for (j = i; j < size && buf[j] != '"' && buf[j] != '\n'; j++)
+                    ;
+                if (j < size && buf[j] == '"' && j > i &&
+                    SetVar((CONST_STRPTR)var, (CONST_STRPTR)(buf + i), j - i,
+                           GVF_GLOBAL_ONLY))
+                    rc = RETURN_OK;
+                break;
+            }
+    FreeVec(buf);
+    return rc;
+}
+
 int main(int argc, char **argv)
 {
     LONG           args[ARG_COUNT] = { 0 };
@@ -343,7 +390,11 @@ int main(int argc, char **argv)
         return RETURN_ERROR;
 
     second = (STRPTR *)args[ARG_SECOND];
-    if (args[ARG_MARK] != 0)
+    if (args[ARG_DRAWER] != 0)
+        rc = (second[1] != NULL) ? RETURN_ERROR
+                                 : record_drawer((const char *)args[ARG_FIRST],
+                                                 (const char *)second[0]);
+    else if (args[ARG_MARK] != 0)
         rc = (second[1] != NULL) ? RETURN_ERROR
                                  : has_mark((const char *)args[ARG_FIRST],
                                             (const char *)second[0]);

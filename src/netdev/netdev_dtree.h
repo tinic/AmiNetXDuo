@@ -40,6 +40,8 @@ BOOL netdev_dtree_find(const char *compat, NetdevDtInfo *out);
 BOOL netdev_dtree_present(VOID);
 BOOL netdev_dtree_root_compatible(const char *compat);
 BOOL netdev_dtree_alias_present(const char *alias);
+/* A node of that compatible, with neither it nor any parent disabled. */
+BOOL netdev_dtree_live(const char *compat);
 
 /*
  * A fixed address on the bus the node `bus` (a path, "/soc") gives its

@@ -404,12 +404,12 @@
        "network named in ENV:Sys/Wireless.prefs and keeps the connection.  "
        "S:Network-Startup starts it before the Wi-Fi interface.\n\n"
        "A WirelessManager that this installer did not put on the machine, in "
-       "C:, SYS:C or this installation's own drawer, is kept as it is.  "
-       "S:Network-Startup then leaves the lines that start WirelessManager "
-       "commented out, so that two copies do not share one radio.  The same "
-       "applies when a Wireless.prefs that this installer did not write "
-       "exists, or when S:User-Startup, S:Startup-Sequence or SYS:WBStartup "
-       "names WirelessManager.\n\n"
+       "C:, SYS:C or this installation's own drawer, is kept as it is, and "
+       "S:Network-Startup starts that copy.  A Wireless.prefs that this "
+       "installer did not write is kept and used.  Only when S:User-Startup, "
+       "S:Startup-Sequence or SYS:WBStartup names WirelessManager are the "
+       "lines that start it commented out, so that two copies do not share "
+       "one radio.\n\n"
        "It is based on wpa_supplicant and is distributed under wpa_supplicant's "
        "three-clause BSD licence, Copyright (c) 2003-2010 Jouni Malinen and "
        "contributors, (c) 2011-2025 Neil Cafferkey.  The licence is installed "
@@ -1039,13 +1039,18 @@
 (if (= 0 (run PROBE_CMD (quiet) (safe)))
   (set CARD_DEFAULT (bitor CARD_DEFAULT 1024)))
 ; An NE2000 card's ID selects it too, over a driver-based default.
+; PCM_FOUND: the card named its type, so the PCMCIA page has nothing to ask.
+(set PCM_FOUND 0)
 (set PROBE_N 0)
 (while (set PROBE_CARD
          (select PROBE_N "cnet" "3c589" "3ccfem556" "3cxem556" ""))
   (
     (set PROBE_CMD ("\"%s\" CARD %s" S_NETPROBE PROBE_CARD))
     (if (= 0 (run PROBE_CMD (quiet) (safe)))
-      (set PCM_DEFAULT PROBE_N))
+      (
+        (set PCM_DEFAULT PROBE_N)
+        (set PCM_FOUND 1)
+      ))
     (set PROBE_N (+ PROBE_N 1))
   ))
 (set PROBE_CMD ("\"%s\" CARD uae" S_NETPROBE))
@@ -1065,6 +1070,10 @@
            "Update Emu68, or install Emu68's genet.device, then run this "
            "installer again.\n\n"
            "Nothing was changed."))
+
+; What the hardware itself answered, before any driver file is added: a
+; family page whose variants it settled is not drawn below Expert.
+(set PROBE_DEFAULT CARD_DEFAULT)
 
 ; If hardware was enumerated, do not also preselect stale Zorro driver files.
 ; Preserve only the devices that have no safe hardware identity to inspect.
@@ -1206,24 +1215,10 @@
 ; reference 3c589.device will not even open on it -- and the owner has asked
 ; for the installer to place it.
 ;
-; So it is offered rather than assumed: a page of its own, a default of yes,
-; and a help text that says copying it changes nothing until an interface file
-; names it.  A user upgrading a working machine can see it and decline it.  At
-; NOVICE the page is not drawn and the default is taken, which is the right
-; answer there for the same reason: the copy is inert.
-;
-; askbool returns 1 for the FIRST (choices) string, so yes is written first and
-; no inversion is needed -- see the note at DO_HTTPD, which has the opposite
-; default and does invert.  The first button being the page's default is also
-; what install/test/installdrive.c relies on.
-(set DO_ANXNET
-  (askbool
-    (prompt "Install the network drivers supplied by AmiNetXDuo?\n\n"
-            "They go into DEVS:Networks and nothing uses one until an "
-            "interface file names it.")
-    (help    H_ANXNET)
-    (choices "Yes, install them" "No, leave them out")
-    (default 1)))
+; NOT A QUESTION.  It was a page of its own until train F: the copy is inert
+; until an interface file names a driver, and a vendor driver already in DEVS:
+; still wins at P_prepare_card, so no answer but yes was ever right.
+(set DO_ANXNET 1)
 
 ; --- where the drawer of documentation goes ------------------------------
 ;
@@ -1242,20 +1237,25 @@
     (set HAVE_DRAWER 1)
   ))
 
-(set DOCPARENT
-  (askdir
-    (prompt "Select where the \"AmiNetXDuo\" drawer goes.\n\n"
-            "It holds the documentation and the examples.")
-    (help H_DOCDIR)
-    (default @default-dest)))
-
-(set DOCDIR (tackon DOCPARENT "AmiNetXDuo"))
+; A system installation has no assign, but its record names its drawer:
+; a reinstall goes back there, where Backup and Installed already are,
+; not into a second SYS:AmiNetXDuo.  InstallSameFile reads the name into
+; ENV:AmiNetXDuoDrawer, as the Installer cannot read a file.
+(if (AND (= HAVE_DRAWER 0) (exists "S:AmiNetXDuo-Files" (noreq)))
+  (if (= 0 (run ("\"%s\" S:AmiNetXDuo-Files AmiNetXDuoDrawer DRAWER" S_SAMEFILE)
+                (quiet) (safe)))
+    (
+      (set REC_DRAWER (getenv "AmiNetXDuoDrawer"))
+      (run "Delete >NIL: ENV:AmiNetXDuoDrawer QUIET" (quiet) (safe))
+      (if (AND (> (strlen REC_DRAWER) 0) (= (exists REC_DRAWER (noreq)) 2))
+          (set @default-dest (pathonly REC_DRAWER)))
+    )))
 
 ; --- system directories, or a drawer of its own --------------------------
 ;
 ; Issue #9 asked for a layout that keeps every file of this stack in one
 ; drawer.  In drawer mode every file goes below the one documentation drawer
-; chosen above, and the managed block ADDs its Libs, C and Devs to LIBS:, C:
+; chosen below, and the managed block ADDs its Libs, C and Devs to LIBS:, C:
 ; and DEVS: -- LAST, behind everything already there, the way AmiTCP and
 ; Miami did it.  The drawer answers only for what the system does not have.
 ; Putting it FIRST was tried (ActivateAmiNetXDuo, 0.26.5 to 0.28.3) and is
@@ -1313,6 +1313,21 @@
                       "Into its own drawer")
              (default 0)))
     (set DRAWER_LAYOUT 1)))
+
+; Asked at Expert, and of a new drawer install, which is the one layout where
+; the drawer holds the stack itself.  Otherwise the existing installation's
+; drawer (the assign, or the one its record names), and SYS: only for a
+; first installation.
+(set DOCPARENT @default-dest)
+(if (OR (= @user-level 2) (AND DRAWER_LAYOUT (= HAVE_DRAWER 0)))
+  (set DOCPARENT
+    (askdir
+      (prompt "Select where the \"AmiNetXDuo\" drawer goes.\n\n"
+              "It holds the documentation and the examples.")
+      (help H_DOCDIR)
+      (default @default-dest))))
+
+(set DOCDIR (tackon DOCPARENT "AmiNetXDuo"))
 
 ; A DRAWER BESIDE A LIBRARY THAT IS ALREADY IN LIBS: IS REFUSED.  The drawer
 ; is added to LIBS: last, so a bsdsocket.library the system already has --
@@ -1597,10 +1612,12 @@
 ; lines, which is also how they are removed again -- so a reinstall can tell
 ; its own copy from one the user had.  A WirelessManager that is not ours is
 ; looked for in C:, SYS:C and this layout's own C; it is never replaced, and
-; with it, or with a Wireless.prefs that is not ours, or with WirelessManager
-; named in the startup files or WBStartup, S:Network-Startup does not start
-; another one: Status recognises a running copy only by its exact command
-; name, and two supplicants on one radio fight over it.
+; S:Network-Startup starts that one.  Only WirelessManager named in the
+; startup files or WBStartup keeps S:Network-Startup from starting it:
+; Status recognises a running copy only by its exact command name, and two
+; supplicants on one radio fight over it.  A WirelessManager or a
+; Wireless.prefs that merely exists starts nothing by itself; treating
+; either as "started elsewhere" left the Wi-Fi of a real A1200 unjoined.
 (set D_WM (tackon D_C "WirelessManager"))
 (set WM_REC (if DRAWER_LAYOUT "AmiNetXDuo:C/WirelessManager" "C:WirelessManager"))
 ; What finds WM_REC's line in the record.  No volume name the drawer layout
@@ -1629,7 +1646,6 @@
                          (OR (AND HAVE_C_WM (= HAVE_D_WM 0))
                              (AND HAVE_D_WM (= WM_OURS 0)))) 1 0))
     (set WM_USER (if (AND (OR HAVE_C_WM HAVE_SYSC_WM) (= WM_OURS 0)) 1 0)))
-(set PREFS_USER (if (AND WIFI_HAVE_PREFS (= PREFS_OURS 0)) 1 0))
 (set WM_ELSEWHERE 0)
 (set WM_SCAN_N 0)
 (while (set WM_SCAN (select WM_SCAN_N "S:User-Startup" "S:Startup-Sequence"
@@ -1642,7 +1658,7 @@
             (set WM_ELSEWHERE 1)))
     (set WM_SCAN_N (+ WM_SCAN_N 1))
   ))
-(set WM_LIVE (if (OR WM_USER (OR PREFS_USER WM_ELSEWHERE)) 0 1))
+(set WM_LIVE (if WM_ELSEWHERE 0 1))
 
 (if (= KEEP_OLD 0)
   (
@@ -1650,7 +1666,8 @@
     ; boards do not: layout_box_gads() silently created zero checkboxes in a
     ; real Workbench run.  The three families with variants get compact
     ; follow-up checkmark pages, so no capability is lost and several variants
-    ; can still coexist in one machine.
+    ; can still coexist in one machine.  Below Expert a follow-up page is drawn
+    ; only when the probe found no variant of its family (PROBE_DEFAULT).
     (set CATEGORY_DEFAULT 0)
     (if (> (bitand CARD_DEFAULT 2049) 0)
       (set CATEGORY_DEFAULT (bitor CATEGORY_DEFAULT 1)))
@@ -1706,6 +1723,10 @@
           (set PI_DEFAULT (bitor PI_DEFAULT 2)))
         (if (= PI_DEFAULT 0) (set PI_DEFAULT 1))
         (set PI_MASK 0)
+        ; Only a probed Pi Wi-Fi settles the page: GENET alone leaves open
+        ; whether a radio is there to tick.
+        (if (AND (< @user-level 2) (> (bitand PROBE_DEFAULT 2048) 0))
+          (set PI_MASK PI_DEFAULT))
         (until (> PI_MASK 0)
           (set PI_MASK
             (askoptions
@@ -1733,6 +1754,8 @@
           (set ARIADNE_DEFAULT (bitor ARIADNE_DEFAULT 2)))
         (if (= ARIADNE_DEFAULT 0) (set ARIADNE_DEFAULT 1))
         (set ARIADNE_MASK 0)
+        (if (AND (< @user-level 2) (> (bitand PROBE_DEFAULT 96) 0))
+          (set ARIADNE_MASK ARIADNE_DEFAULT))
         (until (> ARIADNE_MASK 0)
           (set ARIADNE_MASK
             (askoptions
@@ -1762,6 +1785,8 @@
           (set XSURF_DEFAULT (bitor XSURF_DEFAULT 4)))
         (if (= XSURF_DEFAULT 0) (set XSURF_DEFAULT 1))
         (set XSURF_MASK 0)
+        (if (AND (< @user-level 2) (> (bitand PROBE_DEFAULT 524) 0))
+          (set XSURF_MASK XSURF_DEFAULT))
         (until (> XSURF_MASK 0)
           (set XSURF_MASK
             (askoptions
@@ -1784,9 +1809,12 @@
     (if (> (bitand CATEGORY_MASK 512) 0)
       (set CARD_MASK (bitor CARD_MASK 8192)))
 
-    ; PCMCIA is one physical slot, so its family remains a single-choice page.
+    ; PCMCIA is one physical slot, so its family remains a single-choice page,
+    ; drawn below Expert only when the card did not name its type.
     (if (> (bitand CARD_MASK 1024) 0)
       (
+        (set PCM PCM_DEFAULT)
+        (if (OR (= @user-level 2) (= PCM_FOUND 0))
         (set PCM
           (askchoice
             (prompt "Which PCMCIA card is it?")
@@ -1798,7 +1826,7 @@
               "3Com 3CXEM556"
               "Prism2 wireless"
               "Something else")
-            (default PCM_DEFAULT)))
+            (default PCM_DEFAULT))))
         (if (= PCM 5)
           (set PCM_OTHER_DEV
             (askstring
@@ -1901,9 +1929,12 @@
     ; Only the full profile carries mDNS.  Asking this on minimal or micro
     ; offered a setting those stacks could never honor.  The default is the
     ; first button: yes on a 68020 or newer, Emu68 included, no on a 68000.
+    ; Derived from the processor, so only Expert is asked.
     (if FULLSET
       (
         (set MDNS_DEF (if CPU020 1 0))
+        (set WANTMDNS MDNS_DEF)
+        (if (= @user-level 2)
         (set WANTMDNS
           (if (askbool
                 (prompt "Answer .local names on the network?")
@@ -1911,7 +1942,7 @@
                 (choices (if MDNS_DEF "Yes, answer them" "No .local names")
                          (if MDNS_DEF "No .local names" "Yes, answer them"))
                 (default 1))
-              MDNS_DEF (- 1 MDNS_DEF)))
+              MDNS_DEF (- 1 MDNS_DEF))))
       ))
 
     (set USEDHCP
@@ -2106,12 +2137,16 @@
 
 ; --- start the network at boot? ------------------------------------------
 
-(set DO_STARTUP
-  (askbool
-    (prompt "Start the network automatically when this Amiga boots?")
-    (help    H_STARTUP)
-    (choices "Yes, at boot" "No, I will do it")
-    (default 1)))
+; Yes for everybody but an Expert who says otherwise: a network that does not
+; start is not what an installation is run for.
+(set DO_STARTUP 1)
+(if (= @user-level 2)
+  (set DO_STARTUP
+    (askbool
+      (prompt "Start the network automatically when this Amiga boots?")
+      (help    H_STARTUP)
+      (choices "Yes, at boot" "No, I will do it")
+      (default 1))))
 
 ; KEEP CONFIGURATION MEANS KEEP ITS BOOT POLICY TOO.  S:Network-Startup is a
 ; user-editable configuration file in both Roadshow and AmiTCP_NG.  Replacing
@@ -2165,7 +2200,8 @@
             (default 1))
           0 1))
 
-    (if DO_HTTPD
+    ; Port 80 unless an Expert names another.
+    (if (AND DO_HTTPD (= @user-level 2))
       (
         (set HTTPD_PORT
           (asknumber
@@ -2183,20 +2219,24 @@
 ; is not held up.  pool.ntp.org unless an Expert names another server.
 ;
 ; Asked only when S:Network-Startup is generated on this run.  A kept file is
-; not touched, so a setting asked for there would never be applied.
+; not touched, so a setting asked for there would never be applied.  Asked
+; only of an Expert: the yes is right for every machine without a battery
+; clock, and harmless on the others.
 
 (set DO_SNTP    0)
 (set NTP_SERVER "pool.ntp.org")
 
 (if (AND DO_STARTUP (= KEEP_NETSTART 0))
   (
-    (set DO_SNTP
-      (askbool
-        (prompt "Set the clock from an Internet time server when this "
-                "Amiga boots?")
-        (help    H_SNTP)
-        (choices "Yes, set the clock" "No")
-        (default 1)))
+    (set DO_SNTP 1)
+    (if (= @user-level 2)
+      (set DO_SNTP
+        (askbool
+          (prompt "Set the clock from an Internet time server when this "
+                  "Amiga boots?")
+          (help    H_SNTP)
+          (choices "Yes, set the clock" "No")
+          (default 1))))
 
     (if (AND DO_SNTP (= @user-level 2))
       (
@@ -3149,8 +3189,7 @@
 
 ; --- anxnet.device, anxgenet.device, anxzz9000.device and anxwifipi.device -----------------
 ;
-; The decision, and why it changed, is at DO_ANXNET in section 4 beside the
-; question.  This is what a yes does.
+; Why it is not a question is at DO_ANXNET in section 4.
 ;
 ; DEVS:Networks/, NOT DEVS:.  That is the SANA-II convention, it is where
 ; P_dev_path looks second and what DEVICE=DEVS:Networks/anxnet.device names,
@@ -4186,12 +4225,13 @@
 ; copy already running under the same command name, and then none is
 ; started.  Run's `+' continues onto the next line in the background CLI, so
 ; the larger stack is that CLI's alone.  With WM_LIVE off the lines that
-; start WirelessManager are written commented out (see WM_USER).
+; start WirelessManager are written commented out (see WM_ELSEWHERE).
 ;
 ; When the Wi-Fi is not the primary it starts after it, the primary having
 ; PRIORITY=10.  Micro brings up one interface, so there the block is written
 ; commented out after the primary, for whoever wants to swap.
-(set WM_CMD (if WM_USER "C:WirelessManager" (cat C_PREFIX "WirelessManager")))
+(set WM_CMD (if (AND WM_USER (OR HAVE_C_WM HAVE_SYSC_WM))
+                "C:WirelessManager" (cat C_PREFIX "WirelessManager")))
 (set WIFI_TIMEOUT 30)
 (set WM_PFX (if WM_LIVE "" ";"))
 ; A Prism2 card as the primary interface starts without Wireless.prefs as
