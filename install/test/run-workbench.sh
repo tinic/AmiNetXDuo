@@ -1019,6 +1019,8 @@ if [ "$MANUAL_CARD" = "1" ]; then
 fi
 if [ "$EXPERT_CUSTOM" = "1" ]; then
     EXPECTED_IF=lan.1
+    # Set above from the default name; -E names the interface itself.
+    EXPECTED_AN_LINE="${CMD_PFX}AddNetInterface DEVS:NetInterfaces/$EXPECTED_IF QUIET"
     EXPECTED_HOST=devbox
     if [ "$INVALID_NAMES" = "1" ]; then
         # Both validators redraw askstring with its original default.  The
