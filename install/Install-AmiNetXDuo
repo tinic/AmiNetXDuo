@@ -2399,6 +2399,7 @@
 (procedure P_install_firmware
   (if (NOT (OR (exists (tackon "DEVS:Firmware" FW_NAME) (noreq))
                (exists (tackon D_FIRMWARE FW_NAME) (noreq))))
+    (
       (copyfiles
         (prompt ("Installing DEVS:Firmware/%s" FW_NAME))
         (help   (cat "The Cypress and Synaptics Wi-Fi firmware that "
@@ -2417,7 +2418,8 @@
           (run ("Echo >>S:AmiNetXDuo-Firmware \"Delete DEVS:Firmware/%s QUIET\""
                 FW_NAME)
                (prompt "Recording the firmware file for Uninstall-AmiNetXDuo")
-               (help   H_BACKUP))))
+               (help   H_BACKUP)))
+    ))
 )
 
 ; --- the Pi Wi-Fi firmware ------------------------------------------------
