@@ -35,7 +35,8 @@ void_list="$(mktemp)"; trap 'rm -f "$void_list"' EXIT
 grep -rhoE "^VOID[[:space:]]+_?(nx|tx)_[a-z0-9_]+" \
      third_party/threadx/common/inc/*.h \
      third_party/netxduo/common/inc/*.h \
-     port/threadx-amiga/inc/*.h 2>/dev/null |
+     port/threadx-amiga/inc/*.h \
+     port/threadx-amiga/src/tx_amiga_memory.h 2>/dev/null |
     awk '{print $2}' | sort -u > "$void_list"
 
 {
