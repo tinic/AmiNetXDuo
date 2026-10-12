@@ -410,22 +410,11 @@ for p in $PROGRAMS; do
     rm -f "$OUT/$p"
 done
 
-# A linker map, because tools/profiler/profreport.py cannot name a file-static
-# function without one: the linker drops those from HUNK_SYMBOL, and the only
-# route back is where the map placed each object plus nm on that object.
-# Without it every sample in a static lands silently on the preceding global
-# and the ranking looks plausible and is wrong.
-#
-# One make invocation runs one link per program and every link writes the same
-# -Wl,-Map path, so the map would describe whichever program linked last.
-# Offer it for a single program only and say so otherwise.
-MAP_FLAG=""
-if [ "$(set -- $PROGRAMS; echo $#)" = "1" ]; then
-    MAP_FLAG=" -Wl,-Map=$OUT/$PROGRAMS.map"
-else
-    echo "==> $PROGRAMS: more than one program, so no linker map is written"
-fi
-
+# A linker map per program: tools/check-pcrel-exact.py reads every input object
+# back through it, and tools/profiler/profreport.py cannot name a file-static
+# function without one (the linker drops those from HUNK_SYMBOL).  One make
+# invocation writes one -Wl,-Map path for every link it runs, so each program
+# is made on its own below.
 echo "==> building $PROGRAMS"
 MAKE_PROGRAMS=""
 WANT_SCP=0
@@ -440,12 +429,12 @@ done
 # Upstream's scp rule deliberately omits LIBS, and its Unix do_cmd() needs
 # fork().  Build the ordinary Dropbear programs through their own rules, then
 # link scp below with the Amiga process bridge and client compatibility archive.
-if [ -n "$MAKE_PROGRAMS" ]; then
+for p in $MAKE_PROGRAMS; do
     make -C "$OUT" -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)" \
-         PROGRAMS="$MAKE_PROGRAMS" \
-         LDFLAGS="$AMIGA_CLIENT_LDFLAGS -Wl,--wrap=open,--wrap=_open_r,--wrap=read,--wrap=_read_r,--wrap=write,--wrap=_write_r,--wrap=close,--wrap=spawn_command,--wrap=getenv,--wrap=ioctl,--wrap=signal$FAST_WRAPS$PROF_WRAPS$MAP_FLAG" \
+         PROGRAMS="$p" \
+         LDFLAGS="$AMIGA_CLIENT_LDFLAGS -Wl,--wrap=open,--wrap=_open_r,--wrap=read,--wrap=_read_r,--wrap=write,--wrap=_write_r,--wrap=close,--wrap=spawn_command,--wrap=getenv,--wrap=ioctl,--wrap=signal$FAST_WRAPS$PROF_WRAPS -Wl,-Map=$OUT/$p.map" \
          LIBS="${SHIM_OBJS[*]} $PROF_LIBS -Wl,--start-group -lamigaclient -lc -Wl,--end-group"
-fi
+done
 
 if [ "$WANT_SCP" = "1" ]; then
     SCP_OBJECTS=(obj/scp.o obj/atomicio.o
@@ -464,7 +453,8 @@ if [ "$WANT_SCP" = "1" ]; then
     echo "  CC amiga_scp_runner.c"
     "$AMIGA_GCC" $DB_CFLAGS $AMIGA_CLIENT_SHIM_WARN -Wall -Wextra -c -o "$SCP_RUNNER_O" \
                  "$ROOT/clients/dropbear/amiga_scp_runner.c"
-    "$AMIGA_GCC" $AMIGA_CLIENT_LINK_ARCH -o "$OUT/scp-runner" "$SCP_RUNNER_O"
+    "$AMIGA_GCC" $AMIGA_CLIENT_LINK_ARCH -Wl,-Map="$OUT/scp-runner.map" \
+                 -o "$OUT/scp-runner" "$SCP_RUNNER_O"
 
     make -C "$OUT" -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)" \
          PROGRAMS=scp "${SCP_MAKE_OBJECTS[@]}"
@@ -491,7 +481,7 @@ if [ "$WANT_SCP" = "1" ]; then
     for p in "${SCP_OBJECTS[@]}"; do SCP_PATHS+=("$OUT/$p"); done
     "$AMIGA_GCC" $AMIGA_CLIENT_LDFLAGS \
         -Wl,--wrap=open,--wrap=read,--wrap=write,--wrap=close,--wrap=fstat,--wrap=ftruncate \
-        $MAP_FLAG \
+        -Wl,-Map="$OUT/scp.map" \
         -o "$OUT/scp" "${SCP_PATHS[@]}" "$SCP_SHIM_O" \
         -Wl,--start-group -L"$AMIGA_CLIENT_LIBDIR" -lamigaclient -lc -Wl,--end-group
 
@@ -512,6 +502,17 @@ if [ "$WANT_SCP" = "1" ]; then
     done
 
 fi
+
+# The exact PC-relative relocation check, on the unstripped images.  Dropbear's
+# own links run in $OUT; scp and scp-runner name absolute paths.
+PCREL_IMAGES="$PROGRAMS"
+[ "$WANT_SCP" = "1" ] && PCREL_IMAGES="$PCREL_IMAGES scp-runner"
+for p in $PCREL_IMAGES; do
+    if ! amiga_client_check_pcrel "$OUT/$p" "$OUT/$p.map" "$OUT"; then
+        echo "!! $p: a PC-relative relocation the linker wrote is wrong or unchecked" >&2
+        exit 1
+    fi
+done
 
 # Symbols, before the sizes are reported so the numbers are the ones that ship.
 # Dropbear has a `strip` target but nothing invokes it, and STRIP= reaches only

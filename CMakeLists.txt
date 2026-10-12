@@ -1757,26 +1757,32 @@ if(_a5_bad)
     message(FATAL_ERROR "register variable pinned to a5 (the frame pointer):\n  ${_a5_msg}")
 endif()
 
-# Every linked AmigaOS image is checked for the mis-resolved 32-bit PC-relative
-# branch this toolchain emits from a cross-section tail call.  It is a POST_BUILD
-# check because the wrong address exists only in the linked image, the object
-# file's relocation is well formed.  `ping` rebooted the machine on one of these.
+# Every linked AmigaOS image gets an exact check of its 32-bit PC-relative
+# relocations: each field the linker wrote must hold target + addend - address,
+# read back against the input objects the map names.  A POST_BUILD check,
+# because the wrong address exists only in the linked image; the object file's
+# relocation is well formed.  `ping` rebooted the machine on one of these.
 # See cmake/check-pcrel-branches.cmake and docs/RESEARCH.md §25.
+find_program(AMINETXDUO_PYTHON3 NAMES python3 REQUIRED)
 function(aminetxduo_check_pcrel target)
     if(NOT CMAKE_CROSSCOMPILING)
         return()
     endif()
-    # The map is the only complete list of function entries: a hunk symbol
-    # table holds no locals.  $<TARGET_FILE>.map is the path every target in
-    # this tree that already asks for one uses, so a second ask is a no-op.
+    # The map names every input object and where it went.  $<TARGET_FILE>.map
+    # is the path every target in this tree that already asks for one uses, so
+    # a second ask is a no-op.  -save-temps keeps the LTO ltrans objects the
+    # map names, next to the image (plain -save-temps; =obj loses them); the image
+    # is byte-identical with and without it.
     target_link_options(${target} PRIVATE
-        "-Wl,-Map=$<TARGET_FILE:${target}>.map")
+        "-Wl,-Map=$<TARGET_FILE:${target}>.map"
+        "-save-temps")
     add_custom_command(TARGET ${target} POST_BUILD
         COMMAND "${CMAKE_COMMAND}"
+                "-DPYTHON3=${AMINETXDUO_PYTHON3}"
+                "-DTOOL=${CMAKE_SOURCE_DIR}/tools/check-pcrel-exact.py"
                 "-DBINARY=$<TARGET_FILE:${target}>"
                 "-DMAPFILE=$<TARGET_FILE:${target}>.map"
-                "-DOBJDUMP=${CMAKE_OBJDUMP}"
-                "-DNM=${CMAKE_NM}"
+                "-DDIRS=${CMAKE_CURRENT_BINARY_DIR}|$<TARGET_FILE_DIR:${target}>"
                 -P "${CMAKE_SOURCE_DIR}/cmake/check-pcrel-branches.cmake"
         VERBATIM)
     # And for a write to a5 inside a function framed with `link a5`: the
