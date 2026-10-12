@@ -1219,7 +1219,9 @@ UNINSTALL_DEF=""
 NETCHECK=0
 NETCHECK_DEF=""
 NETCHECK_WANT=up
-if [ "$MANUAL_CARD" = 1 ] && [ "$DRIVE_RUNS" = 1 ] && [ "$UNINSTALL" = 0 ] &&
+# The drawer arm installs twice; neither run starts the network.
+if [ "$MANUAL_CARD" = 1 ] && { [ "$DRIVE_RUNS" = 1 ] || [ "$DRAWER" = 1 ]; } &&
+   [ "$UNINSTALL" = 0 ] &&
    [ "$NO_BOOT" = 0 ] && [ "$STATIC" = 0 ]; then
     NETCHECK=1
     NETCHECK_DEF="-DDRIVE_NETCHECK=1"
