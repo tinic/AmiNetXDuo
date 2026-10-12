@@ -11,6 +11,12 @@ Add new entries under `Unreleased`; published release sections are history.
 - New Uninstall-AmiNetXDuo removes AmiNetXDuo and puts back what it
   replaced.
 
+- Installer: NetWirelessPrefs lists the Wi-Fi networks in range to join.
+
+- Installer: a Prism2 PCMCIA card gets WirelessManager and its Wi-Fi network, as the Pi Wi-Fi does.
+
+- NetWireless and NetWirelessPrefs have Workbench icons.
+
 - Installer: an update over AmiNetXDuo no longer asks to replace its own
   bsdsocket.library or says that its kept configuration is not checked.
 
