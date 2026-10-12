@@ -26,7 +26,7 @@
 # whose frame is intact at its epilogue.
 #
 # Both disassembly syntaxes are accepted (Motorola `movea.l d0,a5`, MIT
-# `moveal %d0,%a5` / `%fp`), for the reason check-pcrel-branches.cmake gives.
+# `moveal %d0,%a5` / `%fp`).
 #
 # Inputs: BINARY, MAPFILE, OBJDUMP; or DISASM, a listing, for the ctest cases.
 #
@@ -55,7 +55,7 @@ else()
     endif()
 endif()
 
-# Function entries from the map, same reading as check-pcrel-branches.cmake.
+# Function entries from the map: the start of every input .text section.
 set(entries "")
 if(MAPFILE AND EXISTS "${MAPFILE}")
     file(STRINGS "${MAPFILE}" map_lines)

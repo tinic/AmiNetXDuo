@@ -251,22 +251,21 @@ re-merged when the other moves.
 Building the examples
 ---------------------
 
-    FLAGS="-ffunction-sections -fno-optimize-sibling-calls -Wl,--gc-sections"
+    FLAGS="-ffunction-sections -Wl,--gc-sections"
 
     gcc -I Developer/include $FLAGS -o IfNames Developer/examples/IfNames.c
     gcc -I Developer/include $FLAGS -o V6Only  Developer/examples/V6Only.c
     gcc -I Developer/include $FLAGS -o TLSInfo Developer/examples/TLSInfo.c
 
-The three flags are not a size choice.  Some newlib objects carry DWARF, and
+The two flags are not a size choice.  Some newlib objects carry DWARF, and
 when one of those is pulled in, the debug sections are given load addresses,
 become loadable DATA hunks, and the linker then writes the executable with no
 relocation table at all.  It exits 0 and reports nothing.  LoadSeg() applies
 the relocations by hand, so an executable that carries none keeps every
 absolute address at its link-time value, and the program takes the machine
 down.  --gc-sections collects the debug sections away and the relocation table
-comes back.  -fno-optimize-sibling-calls travels with -ffunction-sections
-always: a cross-section tail call is the one construct this linker resolves
-twelve bytes short, into the middle of the preceding function.
+comes back.  Sibling calls are enabled since toolchain 16.2.8, whose linker
+resolves a cross-section tail call correctly.
 
 Check any AmigaOS executable for this with tools/hunkdiff.py --check.
 

@@ -731,6 +731,17 @@ stage_host() {
         return 1
     fi
 
+    # The exact PC-relative relocation check every image link runs: a crafted
+    # link with a bra.l moved 14 bytes short onto another function's entry.
+    if tools/check-pcrel-exact-selftest.sh > "$BUILD/pcrel-exact-selftest.log" 2>&1; then
+        note "pcrel exact check: $(sed -n \
+              's/^check_pcrel_exact_selftest=PASS //p' "$BUILD/pcrel-exact-selftest.log")"
+    else
+        cat "$BUILD/pcrel-exact-selftest.log"
+        fail "tools/check-pcrel-exact.py selftest"
+        return 1
+    fi
+
     # The installer must not move a live library aside before it has the new
     # one on the disk.  Text order, so it costs nothing and runs everywhere.
     if tools/check-installer-transaction.sh > "$BUILD/installer-txn.log" 2>&1; then

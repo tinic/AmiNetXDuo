@@ -78,7 +78,7 @@ TABLE = {
     # wants it that way), so its copies are counted here and it has no row
     # of its own.  A frame runs ONE copy.
     "sana2_rx.c":       [("_ami_sana2_rx_thread",    760),    # 750, carries the
-                         ("_ami_sana2_rx_deliver",   115)],   #  inlined drain
+                         ("_ami_sana2_rx_deliver",   118)],   #  inlined drain
                                                              #  loop, rx_complete,
                                                              #  post_slot and the
                                                              #  held run (gro)
@@ -89,6 +89,8 @@ TABLE = {
     # reply's bookkeeping, not per frame's work: rx_complete, post_slot and
     # deliver are what they were.  Emulator A/B a2065 five rounds +0.9%
     # receive, X-Surf 100 two rounds above its base in both, 2026-09-19.
+    # rx_deliver 115 -> 118 with sibling calls enabled (toolchain 16.2.8,
+    # -fno-optimize-sibling-calls removed): codegen, about 0.09% of receive.
     # rx_deliver 95 -> 114 with the held run: the VERIFIED test that skips the
     # verifier (a flag test and a protocol byte, in place of a 220-instruction
     # walk on every frame a device verified) and the first-buffer length the

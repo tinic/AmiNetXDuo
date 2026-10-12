@@ -19,11 +19,9 @@ target_include_directories(aminetxduo_rfb
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 # -ffunction-sections so a Shell command that only encodes does not carry the
-# scroll detector; -fno-optimize-sibling-calls travels with it, always, for the
-# 32-bit PC-relative branch this toolchain mis-resolves out of a cross-section
-# tail call (docs/RESEARCH.md 25).
+# scroll detector.
 target_compile_options(aminetxduo_rfb PRIVATE
-    -ffunction-sections -fno-optimize-sibling-calls -Wall -Wextra)
+    -ffunction-sections -Wall -Wextra)
 
 if(NOT CMAKE_CROSSCOMPILING)
     # rfb_encode.c for rfb_pal_colours(): how long the palette in front of the

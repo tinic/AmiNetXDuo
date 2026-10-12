@@ -29,7 +29,7 @@ build_arm() {
     rm -rf "$d"; mkdir -p "$d"
 
     local cflags=($ARCH $OPT $WARN -fomit-frame-pointer -fno-strict-aliasing
-                  -ffunction-sections -fno-optimize-sibling-calls -I"$HERE")
+                  -ffunction-sections -I"$HERE")
     [ "$lto" = "1" ] && cflags+=(-flto)
     [ "${4:-}" = "keep" ] && cflags+=(-DMINLIB_KEEP)
 
@@ -91,7 +91,7 @@ build_exe() {
     rm -rf "$d"; mkdir -p "$d"
 
     local cflags=($ARCH $OPT $WARN -fomit-frame-pointer -fno-strict-aliasing
-                  -ffunction-sections -fno-optimize-sibling-calls -I"$HERE")
+                  -ffunction-sections -I"$HERE")
     [ "$lto" = "1" ] && cflags+=(-flto)
     local ldflags=()
     [ "$lto" = "1" ] && ldflags+=(-flto $ARCH $OPT)

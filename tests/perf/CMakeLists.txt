@@ -442,7 +442,7 @@ if(CMAKE_CROSSCOMPILING)
     add_library(rfb_encode_020 STATIC "${CMAKE_SOURCE_DIR}/src/rfb/rfb_encode.c")
     target_include_directories(rfb_encode_020 PRIVATE ${AMINETXDUO_CORE_INCLUDES})
     target_compile_options(rfb_encode_020 PRIVATE
-        -m68020 -ffunction-sections -fno-optimize-sibling-calls -Wall -Wextra)
+        -m68020 -ffunction-sections -Wall -Wextra)
     rfb_rename_exports(rfb_encode_020 rfb020)
 
     # The tree builds at -Os and the encoder's inner loop is where that shows:
@@ -452,14 +452,14 @@ if(CMAKE_CROSSCOMPILING)
     add_library(rfb_encode_o2 STATIC "${CMAKE_SOURCE_DIR}/src/rfb/rfb_encode.c")
     target_include_directories(rfb_encode_o2 PRIVATE ${AMINETXDUO_CORE_INCLUDES})
     target_compile_options(rfb_encode_o2 PRIVATE
-        -m68000 -O2 -ffunction-sections -fno-optimize-sibling-calls
+        -m68000 -O2 -ffunction-sections
         -Wall -Wextra)
     rfb_rename_exports(rfb_encode_o2 rfbo2)
 
     add_library(rfb_encode_o220 STATIC "${CMAKE_SOURCE_DIR}/src/rfb/rfb_encode.c")
     target_include_directories(rfb_encode_o220 PRIVATE ${AMINETXDUO_CORE_INCLUDES})
     target_compile_options(rfb_encode_o220 PRIVATE
-        -m68020 -O2 -ffunction-sections -fno-optimize-sibling-calls
+        -m68020 -O2 -ffunction-sections
         -Wall -Wextra)
     rfb_rename_exports(rfb_encode_o220 rfb220)
 

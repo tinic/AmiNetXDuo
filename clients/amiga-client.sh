@@ -141,6 +141,19 @@ amiga_client_prepare()
     return 0
 }
 
+# Every 32-bit PC-relative relocation in a linked client must hold exactly
+# target + addend - address; tools/check-pcrel-exact.py reads the input objects
+# back through the link's map.  Run on the unstripped image (it needs the
+# symbols); DIRs are where the map's relative paths resolve, the link's
+# working directory first.  Non-zero on a mismatch (1) or an unchecked site (2).
+amiga_client_check_pcrel()
+{
+    local bin="$1"
+    local map="$2"
+    shift 2
+    python3 "$AMIGA_CLIENT_ROOT/tools/check-pcrel-exact.py" "$bin" "$map" "$@"
+}
+
 # A client's own source may live in third_party/ as a submodule or be cloned
 # on demand, exactly as tests/conformance/build.sh does for bsdsocktest.  The
 # pin is the submodule's recorded commit; -u is the only way past it.

@@ -1,0 +1,19 @@
+Trimmed from the hc2 link map: only hc2.obj's input sections are kept, so the
+check runs without the toolchain's crt0.o and libc.a.
+
+Linker script and memory map
+
+.text           0x00000000     0x28f8
+ .text          0x00000278       0x5c hc2.obj
+                0x000002b0                hot
+                0x000002c2                main
+ .text          0x000002d4        0xc hc2.obj
+                0x000002d4                coldpath
+
+.data           0x000028f8      0x110
+ .data          0x000028fc        0x4 hc2.obj
+                0x000028fc                keep
+
+.bss            0x00002a08       0x60
+ .bss           0x00002a28        0x4 hc2.obj
+                0x00002a28                sink
