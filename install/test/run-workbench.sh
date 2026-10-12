@@ -340,16 +340,18 @@ if [ -n "$TRANSITION" ]; then
     esac
 fi
 if [ -n "$FOREIGN_MODE" ]; then
-    [ "$LEVEL" != "NOVICE" ] || {
-        echo "-f needs -l AVERAGE or -l EXPERT so replacement can be chosen" >&2
-        exit 2
-    }
+    # Any level: the replace and keep pages for another stack are drawn at
+    # Novice too.
     case "$FOREIGN_MODE" in
-        roadshow-leave|roadshow-replace|amitcpng-leave|amitcpng-replace) ;;
+        roadshow-leave|roadshow-replace|roadshow-pretend|roadshow-keepredo|amitcpng-leave|amitcpng-replace) ;;
         *) echo "unknown existing-stack mode: $FOREIGN_MODE" >&2; exit 2 ;;
     esac
     [ "$DRAWER" = "0" ] && [ -z "$TRANSITION" ] || {
         echo "-f is a system-layout fixture and cannot be combined with -D or -x" >&2
+        exit 2
+    }
+    [ "$FOREIGN_MODE" != roadshow-keepredo ] || [ "$RERUN" = 1 ] || {
+        echo "-f roadshow-keepredo needs -R: it is two runs" >&2
         exit 2
     }
 fi
@@ -1005,7 +1007,12 @@ if [ "$DRAWER" = 1 ]; then
     [ "$PRISM2" = 1 ] ||
         WIFI_DEVICE=AmiNetXDuo:Devs/Networks/anxwifipi.device
 fi
-WIFI_AN_LINE="  ${CMD_PFX}AddNetInterface DEVS:NetInterfaces/$WIFI_IFNAME QUIET TIMEOUT=$WIFI_TIMEOUT"
+# The block as the micro profile writes it, commented out: in the foreground.
+WIFI_AN_FG="  ${CMD_PFX}AddNetInterface DEVS:NetInterfaces/$WIFI_IFNAME QUIET TIMEOUT=$WIFI_TIMEOUT"
+WIFI_AN_LINE=$WIFI_AN_FG
+# Behind another interface the Wi-Fi starts in the background.
+[ "$WIFI_PRIMARY" = 1 ] ||
+    WIFI_AN_LINE="  Run >NIL: <NIL: ${CMD_PFX}AddNetInterface DEVS:NetInterfaces/$WIFI_IFNAME QUIET TIMEOUT=$WIFI_TIMEOUT"
 # A Prism2 card as the primary starts outside the guard, after it.
 [ "$WIFI_MODE" = prism2pi ] &&
     WIFI_AN_LINE="${CMD_PFX}AddNetInterface DEVS:NetInterfaces/$WIFI_IFNAME QUIET TIMEOUT=$WIFI_TIMEOUT"
@@ -1097,6 +1104,11 @@ fi
 if [ "$RECONFIGURE" = "1" ]; then
     ANSWER_LINES+=("2|BOOL|Set them up again")
 fi
+# A reinstall over our own library is an update: no replace-library page.
+for ((answer_run = 2; answer_run <= DRIVE_RUNS; answer_run++)); do
+    ANSWER_LINES+=("$answer_run|ABSENT|Leave it alone")
+done
+
 if [ "$HAND_HOST" = "1" ]; then
     [ "$RECONFIGURE" = 1 ] || { echo "-n needs -U" >&2; exit 2; }
     ANSWER_LINES+=("1|HANDHOST|handset")
@@ -1106,6 +1118,12 @@ if [ "$MDNS_OFF" = "1" ]; then
 fi
 case "$FOREIGN_MODE" in
     *-leave) ANSWER_LINES+=("1|BOOL|Leave it alone") ;;
+    # The Installer's own pretend/log page: its five option gadgets, and
+    # gadget 2 is "Pretend to Install".
+    *-pretend) ANSWER_LINES+=("1|CHOICE|5|2|0") ;;
+    # Keep the other stack's configuration under our library, then set it up
+    # again on the second run: that run must back it up all the same.
+    *-keepredo) ANSWER_LINES+=("1|BOOL|Keep it" "2|BOOL|Set them up again") ;;
 esac
 case "$CANCEL_MODE" in
     drivers) ANSWER_LINES+=("1|ABORT|Yes, install them") ;;
@@ -1149,6 +1167,7 @@ for ((answer_run = 1; answer_run <= DRIVE_RUNS; answer_run++)); do
     # -w keepit deletes run 1's file between the runs, so run 2 writes one
     # and asks, as a first install would.
     if [ "$answer_run" -gt 1 ] && [ "$RECONFIGURE" = "0" ] &&
+       [ "$FOREIGN_MODE" != roadshow-keepredo ] &&
        [ "$WIFI_MODE" != keepit ] && [ "$WIFI_MODE" != keepitlive ] && [ "$WIFI_MODE" != keepitfw ] &&
        [ "$WIFI_MODE" != prism2keep ]; then
         ANSWER_LINES+=("$answer_run|ABSENT|Yes, set the clock")
@@ -1702,17 +1721,21 @@ esac
 # backup policy and preservation, not executing somebody else's copyrighted
 # stack in the gate.
 FOREIGN_TREE_BEFORE=""
-FOREIGN_CONFIG_BEFORE=""
 FOREIGN_OLD_BSD_SUM=""
 FOREIGN_OLD_UG_SUM=""
 FOREIGN_OLD_TLS_SUM=""
 FOREIGN_CONFIG_FILES=()
+FOREIGN_REPLACED_FILES=()
+FOREIGN_OLD_EXPECTED=""
 if [ -n "$FOREIGN_MODE" ]; then
     mkdir -p "$HD/Libs" "$HD/Devs/NetInterfaces" "$HD/Devs/Internet" \
              "$HD/Devs/Networks" "$HD/S"
-    cp "$UNPACK/AmiNetXDuo/Libs/bsdsocket.library" "$HD/Libs/bsdsocket.library"
-    cp "$UNPACK/AmiNetXDuo/Libs/usergroup.library" "$HD/Libs/usergroup.library"
-    cp "$UNPACK/AmiNetXDuo/Libs/tls.library" "$HD/Libs/tls.library"
+    # Another stack's libraries: anything that does not name AmiNetXDuo,
+    # which is how the Installer tells its own library from one to replace.
+    for _lib in bsdsocket.library usergroup.library tls.library; do
+        printf 'existing %s library: %s\n' "${FOREIGN_MODE%%-*}" "$_lib" \
+            > "$HD/Libs/$_lib"
+    done
     # Simulate a previously interrupted/older replacement too.  Declining
     # replacement must preserve these byte-for-byte; accepting it must discard
     # every stale .new and replace every stale .old with the live library that
@@ -1733,18 +1756,31 @@ if [ -n "$FOREIGN_MODE" ]; then
         > "$HD/Devs/Internet/routes"
     printf '; existing stack resolver policy -- preserve byte for byte\nhostname foreign-amiga\n' \
         > "$HD/Devs/Internet/name_resolution"
+    # A pretend run is also the one without them: nothing may write them.
+    [ "$FOREIGN_MODE" = roadshow-pretend ] ||
     for db in hosts protocols services networks; do
         printf '# existing stack %s -- preserve byte for byte\n' "$db" \
             > "$HD/Devs/Internet/$db"
     done
     printf '; existing stack boot policy -- preserve byte for byte\nC:AddNetInterface DEVS:NetInterfaces/eth0 QUIET\n' \
         > "$HD/S/Network-Startup"
-    FOREIGN_CONFIG_FILES=(
+    # A second interface of that stack under a name the installer does not
+    # write: it stays live and is kept in Backup as well.
+    printf '; existing stack second interface\nDEVICE=a2065.device\nUNIT=1\n' \
+        > "$HD/Devs/NetInterfaces/A2065"
+    # The four the Installer rewrites when it sets the network up again, which
+    # is the default for another stack's configuration; each must survive as
+    # .old.  The netdb files it never touches.
+    FOREIGN_REPLACED_FILES=(
         Devs/NetInterfaces/eth0 Devs/Internet/routes
-        Devs/Internet/name_resolution Devs/Internet/hosts
-        Devs/Internet/protocols Devs/Internet/services Devs/Internet/networks
-        S/Network-Startup
+        Devs/Internet/name_resolution S/Network-Startup
     )
+    FOREIGN_CONFIG_FILES=(
+        "${FOREIGN_REPLACED_FILES[@]}" Devs/NetInterfaces/A2065
+    )
+    [ "$FOREIGN_MODE" = roadshow-pretend ] ||
+        FOREIGN_CONFIG_FILES+=(Devs/Internet/hosts Devs/Internet/protocols
+                               Devs/Internet/services Devs/Internet/networks)
     case "$FOREIGN_MODE" in
         amitcpng-*)
             mkdir -p "$HD/ForeignAmiTCP/db"
@@ -1759,8 +1795,37 @@ if [ -n "$FOREIGN_MODE" ]; then
     FOREIGN_OLD_BSD_SUM=$(shasum "$HD/Libs/bsdsocket.library" | cut -d' ' -f1)
     FOREIGN_OLD_UG_SUM=$(shasum "$HD/Libs/usergroup.library" | cut -d' ' -f1)
     FOREIGN_OLD_TLS_SUM=$(shasum "$HD/Libs/tls.library" | cut -d' ' -f1)
-    FOREIGN_CONFIG_BEFORE=$(
-        for f in "${FOREIGN_CONFIG_FILES[@]}"; do shasum "$HD/$f"; done
+    # What each replaced file must be as .old, and what the kept ones stay.
+    # Each replaced file, the libraries and the second interface in the
+    # AmiNetXDuo drawer's Backup, byte for byte; the rest where they were.
+    # keepredo: the libraries in run 1's drawer, the configuration in run
+    # 2's; its S:Network-Startup carries run 1's marker by then.
+    _bk_cfg=1
+    [ "$FOREIGN_MODE" = roadshow-keepredo ] && _bk_cfg=2
+    FOREIGN_OLD_EXPECTED=$(
+        for f in Libs/bsdsocket.library Libs/usergroup.library Libs/tls.library; do
+            printf 'AmiNetXDuo/Backup/1/%s %s\n' "$f" "$(shasum < "$HD/$f" | cut -d' ' -f1)"
+        done
+        for f in "${FOREIGN_REPLACED_FILES[@]}" Devs/NetInterfaces/A2065; do
+            # Every interface file is kept on run 1, kept or set up again.
+            case "$f" in
+                Devs/NetInterfaces/*)
+                    printf 'AmiNetXDuo/Backup/1/%s %s\n' "$f" "$(shasum < "$HD/$f" | cut -d' ' -f1)"
+                    continue ;;
+            esac
+            if [ "$_bk_cfg" = 2 ] && [ "$f" = S/Network-Startup ]; then
+                # Run 1 kept it, and installdrive marked it between the runs.
+                printf 'AmiNetXDuo/Backup/2/%s %s\n' "$f" "$({ cat "$HD/$f"
+                    printf '; user startup policy -- installer must preserve this\n'
+                  } | shasum | cut -d' ' -f1)"
+                continue
+            fi
+            printf 'AmiNetXDuo/Backup/%s/%s %s\n' "$_bk_cfg" "$f" "$(shasum < "$HD/$f" | cut -d' ' -f1)"
+        done
+        for f in "${FOREIGN_CONFIG_FILES[@]}"; do
+            case " ${FOREIGN_REPLACED_FILES[*]} " in *" $f "*) continue ;; esac
+            printf '%s %s\n' "$f" "$(shasum < "$HD/$f" | cut -d' ' -f1)"
+        done
     )
 fi
 
@@ -2304,7 +2369,7 @@ if [ "$REFUSAL" = 1 ]; then
 fi
 
 case "$FOREIGN_MODE" in
-*-leave)
+*-leave|*-pretend)
     FOREIGN_TREE_AFTER=$(product_manifest)
     leave_ok=1
     if [ "$FOREIGN_TREE_AFTER" != "$FOREIGN_TREE_BEFORE" ]; then
@@ -2609,7 +2674,7 @@ check_file S/User-Startup
 if [ "$DRIVE_RUNS" != "1" ]; then
     NS_FILE=$(amiga_path S/Network-Startup 2>/dev/null || true)
     NS_OLD=$(amiga_path S/Network-Startup.old 2>/dev/null || true)
-    if [ "$RECONFIGURE" = "1" ]; then
+    if [ "$RECONFIGURE" = "1" ] || [ "$FOREIGN_MODE" = roadshow-keepredo ]; then
         if [ -z "$NS_FILE" ] ||
            grep -q '^; user startup policy -- installer must preserve this' \
                "$NS_FILE" 2>/dev/null ||
@@ -2637,7 +2702,8 @@ if [ "$DRIVE_RUNS" != "1" ]; then
                "$NS_FILE" 2>/dev/null; then
             echo "!! repeated install did not preserve S:Network-Startup"
             fail=1
-        elif [ -n "$NS_OLD" ]; then
+        elif [ -n "$NS_OLD" ] && [ -z "$FOREIGN_MODE" ]; then
+            # (Over another stack, run 1 itself rotated that stack's file.)
             echo "!! repeated install rotated the kept S:Network-Startup to .old"
             fail=1
         else
@@ -2686,7 +2752,7 @@ if [ -n "$EXPECTED_SECOND_IF" ] && [ -n "$NS_FILE" ]; then
     elif [ "$WIFI_START" = 1 ] && ! grep -Fqx -- "$WIFI_AN_LINE" "$NS_FILE"; then
         echo "!! Emu68 secondary interface $EXPECTED_SECOND_IF is not started after $EXPECTED_IF"
         fail=1
-    elif [ "$WIFI_START" = 0 ] && grep -Fqx -- "$WIFI_AN_LINE" "$NS_FILE"; then
+    elif [ "$WIFI_START" = 0 ] && grep -Fqx -e "$WIFI_AN_LINE" -e "$WIFI_AN_FG" "$NS_FILE"; then
         echo "!! a one-interface stack starts $EXPECTED_SECOND_IF too"
         fail=1
     else
@@ -2745,10 +2811,15 @@ fi
 # interface for the full and fat stacks on a 68020 or newer, NO on a 68000
 # and on the reduced stacks.
 _res=$(amiga_path "${INST}Devs/Internet/name_resolution" 2>/dev/null || true)
-if [ "$HAND_HOST" = 1 ]; then
+_hand_name=""
+[ "$HAND_HOST" = 1 ] && _hand_name=handset
+# Another stack's name_resolution named the machine: setting it up again
+# carries that name over.
+case "$FOREIGN_MODE" in *-replace|*-keepredo) _hand_name=foreign-amiga ;; esac
+if [ -n "$_hand_name" ]; then
     if [ "$(grep -c '^hostname' "$_res" 2>/dev/null)" = 1 ] &&
-       grep -q '^hostname handset$' "$_res"; then
-        echo "  ok      the hand-set hostname survived setting the network up again"
+       grep -q "^hostname $_hand_name\$" "$_res"; then
+        echo "  ok      the hostname set by hand ($_hand_name) survived setting the network up again"
     else
         echo "!! the hand-set hostname did not survive: $(grep '^hostname' "$_res" 2>/dev/null)"
         fail=1
@@ -2944,7 +3015,7 @@ else
     elif [ -n "$NS_FILE" ]; then
         if [ "$WM_NS_LIVE" = 0 ] &&
            grep -Fqx -- ";    $WM_CMD_WANT DEVICE=$WIFI_DEVICE UNIT=0" "$NS_FILE" &&
-           grep -Fqx -- ";$WIFI_AN_LINE" "$NS_FILE"; then
+           grep -Fqx -- ";$WIFI_AN_FG" "$NS_FILE"; then
             echo "  ok      Wi-Fi not started; its lines are there, commented"
         else
             wifi_bad "S:Network-Startup for an unstarted Wi-Fi: live=$WM_NS_LIVE, commented lines missing"
@@ -3006,20 +3077,41 @@ if [ "$DRAWER" = "1" ]; then
 fi
 
 case "$FOREIGN_MODE" in
-*-replace)
+*-replace|*-keepredo)
+    # Set up again by default: the replaced files as .old, byte for byte,
+    # the netdb files untouched, and new files of ours in their place.
     FOREIGN_CONFIG_AFTER=$(
-        for f in "${FOREIGN_CONFIG_FILES[@]}"; do
-            shasum "$HD/$f" 2>/dev/null || echo "MISSING $f"
-        done
+        while read -r _f _sum; do
+            _real=$(amiga_path "$_f" 2>/dev/null || true)
+            if [ -n "$_real" ] && [ -f "$_real" ]; then
+                printf '%s %s\n' "$_f" "$(shasum < "$_real" | cut -d' ' -f1)"
+            else
+                printf '%s MISSING\n' "$_f"
+            fi
+        done <<< "$FOREIGN_OLD_EXPECTED"
     )
-    if [ "$FOREIGN_CONFIG_AFTER" != "$FOREIGN_CONFIG_BEFORE" ]; then
-        echo "!! replacing $FOREIGN_MODE changed the kept configuration"
-        diff -u <(printf '%s\n' "$FOREIGN_CONFIG_BEFORE") \
+    if [ "$FOREIGN_CONFIG_AFTER" != "$FOREIGN_OLD_EXPECTED" ]; then
+        echo "!! replacing $FOREIGN_MODE lost a configuration file"
+        diff -u <(printf '%s\n' "$FOREIGN_OLD_EXPECTED") \
                 <(printf '%s\n' "$FOREIGN_CONFIG_AFTER") || true
         fail=1
     else
-        echo "  ok      $FOREIGN_MODE kept configuration and boot policy verbatim"
+        echo "  ok      $FOREIGN_MODE configuration set up again, the other stack's files kept in Backup"
     fi
+    for _f in "${FOREIGN_REPLACED_FILES[@]}"; do
+        if ! grep -q 'AmiNetXDuo' "$(amiga_path "$_f" 2>/dev/null || echo /nonexistent)" 2>/dev/null; then
+            echo "!! $_f is not the installer's after setting up again"
+            fail=1
+        fi
+    done
+    # Set up again over the same, unchanged files: nothing new to keep, so
+    # no second Backup drawer.
+    if [ "$RECONFIGURE" = 1 ] && amiga_path AmiNetXDuo/Backup/2 >/dev/null 2>&1; then
+        echo "!! a second run kept unchanged files again, in Backup/2"
+        fail=1
+    fi
+    # A second run renames our own first copy to .old; Backup has theirs.
+    [ "$DRIVE_RUNS" != 1 ] ||
     for spec in \
         "bsdsocket.library:$FOREIGN_OLD_BSD_SUM" \
         "usergroup.library:$FOREIGN_OLD_UG_SUM" \
@@ -3050,10 +3142,6 @@ case "$FOREIGN_MODE" in
             echo "  ok      stale $_name.new removed"
         fi
     done
-    if amiga_path S/Network-Startup.old >/dev/null 2>&1; then
-        echo "!! kept foreign S:Network-Startup was rotated to .old"
-        fail=1
-    fi
     ;;
 esac
 
@@ -3264,8 +3352,9 @@ if [ "$DRAWER" = "1" ]; then
     fi
 elif [ -n "$FOREIGN_MODE" ]; then
     # This fixture contributed only stale .new files, never a live driver.
-    # Removing those and installing fresh copies must not invent .old files.
-    if [ -n "$ANXNET_OLD" ]; then
+    # Removing those and installing fresh copies must not invent .old files;
+    # a second run keeps the first run's driver as .old, as any update does.
+    if [ -n "$ANXNET_OLD" ] && [ "$DRIVE_RUNS" = 1 ]; then
         echo "!! interrupted-staging fixture created an anxnet.device.old"
         fail=1
     else

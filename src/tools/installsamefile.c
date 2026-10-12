@@ -19,6 +19,11 @@
  * as it should be, RETURN_ERROR when it could not be read or replaced, and
  * then it is unchanged.
  *
+ * BYTES: RETURN_OK when FIRST and SECOND hold the same bytes, RETURN_WARN
+ * when they differ, RETURN_ERROR when either cannot be read.  The Installer
+ * has no compare of its own, and a backup the same as one already kept is
+ * not kept twice.
+ *
  * HOSTLINE: FIRST is a name_resolution file; the name the stack takes from it
  * (ami_cfg_resolver_hostname_file, the stack's own parser) is written to
  * SECOND as a hostname line, so the Installer can carry a name set by hand
@@ -45,7 +50,7 @@ const char *const tool_name = "InstallSameFile";
 static const char version_tag[] __attribute__((used)) =
     TOOL_VERSTAG("InstallSameFile");
 
-#define TEMPLATE "FIRST/A,SECOND/A/M,DEVICES/S,HOSTLINE/S"
+#define TEMPLATE "FIRST/A,SECOND/A/M,DEVICES/S,HOSTLINE/S,BYTES/S"
 
 /* An interface file is a few hundred bytes; the cap only bounds a stray. */
 #define DEVICES_FILE_MAX 65536L
@@ -57,6 +62,7 @@ enum
     ARG_SECOND,
     ARG_DEVICES,
     ARG_HOSTLINE,
+    ARG_BYTES,
     ARG_COUNT
 };
 
@@ -227,6 +233,43 @@ static LONG copy_hostline(const char *from, const char *to)
     return (got == n) ? RETURN_OK : RETURN_ERROR;
 }
 
+static LONG same_bytes(const char *a, const char *b)
+{
+    static UBYTE ba[2048];
+    static UBYTE bb[2048];
+    BPTR fa = Open((CONST_STRPTR)a, MODE_OLDFILE);
+    BPTR fb = Open((CONST_STRPTR)b, MODE_OLDFILE);
+    LONG rc = RETURN_OK;
+
+    if (fa == 0 || fb == 0)
+        rc = RETURN_ERROR;
+    while (rc == RETURN_OK)
+    {
+        LONG na = Read(fa, ba, sizeof(ba));
+        LONG nb = Read(fb, bb, sizeof(bb));
+        LONG i;
+
+        if (na < 0 || nb < 0)
+            rc = RETURN_ERROR;
+        else if (na != nb)
+            rc = RETURN_WARN;
+        else if (na == 0)
+            break;
+        else
+            for (i = 0; i < na; i++)
+                if (ba[i] != bb[i])
+                {
+                    rc = RETURN_WARN;
+                    break;
+                }
+    }
+    if (fa != 0)
+        Close(fa);
+    if (fb != 0)
+        Close(fb);
+    return rc;
+}
+
 int main(int argc, char **argv)
 {
     LONG           args[ARG_COUNT] = { 0 };
@@ -244,7 +287,11 @@ int main(int argc, char **argv)
         return RETURN_ERROR;
 
     second = (STRPTR *)args[ARG_SECOND];
-    if (args[ARG_HOSTLINE] != 0)
+    if (args[ARG_BYTES] != 0)
+        rc = (second[1] != NULL) ? RETURN_ERROR
+                                 : same_bytes((const char *)args[ARG_FIRST],
+                                              (const char *)second[0]);
+    else if (args[ARG_HOSTLINE] != 0)
         rc = (second[1] != NULL) ? RETURN_ERROR
                                  : copy_hostline((const char *)args[ARG_FIRST],
                                                  (const char *)second[0]);
