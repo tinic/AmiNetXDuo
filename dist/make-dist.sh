@@ -587,6 +587,21 @@ chmod 755 "$TREE/InstallWiFi"
 cp -R "$INSTALL/devs/Internet/." "$TREE/Devs/Internet/"
 cp -R "$INSTALL/examples/."      "$TREE/Examples/"
 
+# The Pi Wi-Fi firmware anxwifipi.device loads from DEVS:Firmware, with the
+# licences it is distributed under and WHENCE, which says which is whose.
+# The Installer copies the files DEVS:Firmware lacks when the Pi Wi-Fi is
+# selected.
+[ -f "$ROOT/third_party/wifipi/firmware/cyfmac43455-sdio.bin" ] || {
+    echo "missing: third_party/wifipi/firmware (git submodule update --init)" >&2
+    exit 2
+}
+mkdir -p "$TREE/Devs/Firmware"
+cp "$ROOT"/third_party/wifipi/firmware/* "$TREE/Devs/Firmware/"
+for _fw in LICENCE.cypress LICENCE.synaptics WHENCE; do
+    need "$ROOT/third_party/wifi-firmware/$_fw"
+    cp "$ROOT/third_party/wifi-firmware/$_fw" "$TREE/Devs/Firmware/"
+done
+
 # httpd's terminal page.  It ships from src/tools/web because it is the CLIENT
 # half of httpd's own protocol and has to change in the same commit the server
 # does; an archive that carried a page from a different version would fail in

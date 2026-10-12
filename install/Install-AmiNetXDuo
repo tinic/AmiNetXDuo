@@ -83,6 +83,7 @@
 (set S_README (if (> (strlen SRCDIR) 0) (tackon SRCDIR "ReadMe")   "ReadMe"))
 (set S_SAMEFILE (if (> (strlen SRCDIR) 0)
                     (tackon SRCDIR "InstallSameFile") "InstallSameFile"))
+(set S_FIRMWARE (tackon S_DEVS "Firmware"))
 (set S_NETPROBE (if (> (strlen SRCDIR) 0)
                     (tackon SRCDIR "InstallNetProbe") "InstallNetProbe"))
 
@@ -341,7 +342,8 @@
        "Ethernet in it, for a PiStorm32 running Emu68 1.1 alpha.1 or newer "
        "(DEVICE=anxgenet.device, UNIT=0).  anxwifipi.device is the third: the "
        "Pi 4's own Wi-Fi, for the same machines (DEVICE=anxwifipi.device, "
-       "UNIT=0; it needs the Wi-Fi firmware Emu68 puts in DEVS:Firmware, and "
+       "UNIT=0; it needs the Wi-Fi firmware in DEVS:Firmware, which the "
+       "installer adds when it is missing, and "
        "WirelessManager to join a network, which the installer puts in C: "
        "when the Pi Wi-Fi is selected).  "
        "anxzz9000.device is the fourth: the MNT ZZ9000's Ethernet, used when "
@@ -2296,12 +2298,51 @@
     (set dev_source S_ANXWIFIPI)
     (set dev_prompt (cat "Installing anxwifipi.device into DEVS:Networks\n\n"
                          "The Raspberry Pi 4's own Wi-Fi, for a PiStorm32 "
-                         "running Emu68.  It needs the Wi-Fi firmware Emu68 "
-                         "installs in DEVS:Firmware, and WirelessManager, "
+                         "running Emu68.  It needs the Wi-Fi firmware in "
+                         "DEVS:Firmware, and WirelessManager, "
                          "installed in C: when the Pi Wi-Fi is selected, to "
                          "join a network.  Nothing uses it until an interface "
                          "file names it."))
     (P_install_device)
+  ))
+
+; One file of the archive's Devs/Firmware, FW_NAME, unless DEVS:Firmware
+; already has it.
+(procedure P_install_firmware
+  (if (NOT (OR (exists (tackon "DEVS:Firmware" FW_NAME) (noreq))
+               (exists (tackon D_FIRMWARE FW_NAME) (noreq))))
+      (copyfiles
+        (prompt ("Installing DEVS:Firmware/%s" FW_NAME))
+        (help   (cat "The Cypress and Synaptics Wi-Fi firmware that "
+                     "anxwifipi.device loads into the Raspberry Pi's Wi-Fi "
+                     "chip, with its licences; WHENCE says which file is "
+                     "under which.  Only files DEVS:Firmware does not have "
+                     "are copied."))
+        (source (tackon S_FIRMWARE FW_NAME))
+        (dest   D_FIRMWARE)
+        (optional "nofail")))
+)
+
+; --- the Pi Wi-Fi firmware ------------------------------------------------
+;
+; anxwifipi.device loads its chip's firmware from DEVS:Firmware, where the
+; Emu68 Imager puts it.  For the Pi Wi-Fi (WIFI_SEL: selected, or a kept
+; definition names anxwifipi.device), every file of the archive's
+; Devs/Firmware that DEVS:Firmware does not have goes there, the licences
+; and WHENCE included.  A file already there is kept: it may be a newer
+; firmware the user put in.
+; The Pi's own Wi-Fi only: WIFI_DEV is the driver its definition names.
+(if (AND WIFI_SEL (patmatch "#?anxwifipi.device" WIFI_DEV))
+  (
+    (set D_FIRMWARE (tackon D_DEVS "Firmware"))
+    (makedir D_FIRMWARE
+      (prompt "Creating DEVS:Firmware")
+      (help   @makedir-help))
+    (foreach S_FIRMWARE "#?"
+      (
+        (set FW_NAME @each-name)
+        (P_install_firmware)
+      ))
   ))
 
 ; --- tls.library, if this archive has one --------------------------------
