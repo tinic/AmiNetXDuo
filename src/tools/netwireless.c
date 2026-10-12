@@ -20,6 +20,7 @@
 #include "tools.h"
 #include "netwireless_dev.h"
 #include "netwireless_sig.h"
+#include "netwireless_wm.h"
 #include "aminetxduo/version.h"
 
 #include <exec/memory.h>
@@ -79,6 +80,8 @@ static struct
     BOOL                want_menu;
     BOOL                offline;            /* the event mask's online bit  */
     LONG                assoc;              /* -1 unknown, from events      */
+    BOOL                wm_seen;            /* WirelessManager ran          */
+    BOOL                wm_gone;            /* ...and has gone since        */
     char                envbuf[24];
 
     struct MsgPort     *cxport, *appport, *tport;
@@ -214,7 +217,7 @@ static VOID nw_show(VOID)
     if (nw.envvar[0] == '\0') return;
     {
         static const char *const words[] =
-            { "No Wi-Fi unit", "Off", "Not connected", "%s %ld/4", "No answer" };
+            { "No Wi-Fi unit", "Wi-Fi off", "Not connected", "%s %ld/4", "No answer" };
         ULONG args[2];
 
         args[0] = (ULONG)nw.label;
@@ -240,7 +243,7 @@ static BOOL nw_wb_pending(VOID)
 static BOOL nw_reading(VOID)
 {
     return nw.dev_open && (nw.link == NW_LINK_UP || nw.link == NW_LINK_ERROR ||
-                           nw.events_broken || nw.event_retry);
+                           nw.wm_gone || nw.events_broken || nw.event_retry);
 }
 
 static BOOL nw_polling(VOID)
@@ -278,6 +281,20 @@ static VOID nw_refresh(BOOL event)
     if (nw.link == NW_LINK_UP && !nw.dev.signal_says)
         nw.link = nw.assoc == 1 ? NW_LINK_UP :
                   nw.assoc == 0 ? NW_LINK_DOWN : NW_LINK_ONLINE;
+    /* WirelessManager gone after it ran (Disconnect, a quit): the Wi-Fi
+       is off, whatever the radio still says, until it runs again.  Read
+       once an INTERVAL meanwhile.  Never seen, nothing is assumed: a card
+       can be on an open network without it. */
+    nw.wm_gone = FALSE;
+    if (nw.link == NW_LINK_UP || nw.link == NW_LINK_DOWN || nw.link == NW_LINK_ONLINE)
+    {
+        if (nw_wm_running(NULL, 0)) nw.wm_seen = TRUE;
+        else if (nw.wm_seen)
+        {
+            nw.wm_gone = TRUE;
+            nw.link = NW_LINK_OFF;
+        }
+    }
     tool_copy_string(label, sizeof(label), "Wi-Fi");
     switch (nw.link)
     {
@@ -290,8 +307,14 @@ static VOID nw_refresh(BOOL event)
                 nw_ssid_text(ssid, (int)len, label);
             break;
         case NW_LINK_DOWN:
+            icon = NW_ICON_JOINING;
+            tool_copy_string(label, sizeof(label), "Not connected");
+            break;
         case NW_LINK_ONLINE: icon = NW_ICON_JOINING; break;
-        case NW_LINK_OFF:   icon = NW_ICON_OFF; break;
+        case NW_LINK_OFF:
+            icon = NW_ICON_OFF;
+            tool_copy_string(label, sizeof(label), "Wi-Fi off");
+            break;
         case NW_LINK_NODEV: icon = NW_ICON_NODEV; break;
         default:            icon = NW_ICON_ERROR; break;
     }

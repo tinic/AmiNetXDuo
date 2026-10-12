@@ -905,11 +905,47 @@ int main(void)
         ws->connected = FALSE;
         ws_report(S2EVENT_OFFLINE);
         Delay(50);
-        check(env_is("Off"), "OFFLINE seen at once");
+        check(env_is("Wi-Fi off"), "OFFLINE seen at once");
         ws->online = TRUE;
         ws_report(S2EVENT_ONLINE);
         Delay(50);
         check(env_is("Not connected"), "ONLINE seen at once");
+
+        /* Disconnect in NetWirelessPrefs stops WirelessManager; the radio
+           here, as on the A1200, still answers as associated: the
+           commodity says the Wi-Fi is off within one INTERVAL, and
+           connected again once WirelessManager is back. */
+        ws->connected = TRUE;
+        ws_report(S2EVENT_CONNECT);
+        Delay(50);
+        {
+            BPTR in2 = Open((CONST_STRPTR)"NIL:", MODE_OLDFILE);
+            BPTR o2 = Open((CONST_STRPTR)"NIL:", MODE_NEWFILE);
+
+            SystemTags((CONST_STRPTR)"C:WirelessManager DEVICE=wifistub.device UNIT=0",
+                       SYS_Input, (ULONG)in2, SYS_Output, (ULONG)o2,
+                       SYS_Asynch, TRUE, TAG_DONE);
+        }
+        Delay(150);
+        check(env_is("Home 4/4"), "connected with WirelessManager running");
+        rc = run(PREFS " DISCONNECT");
+        check(rc == 0 && has("Disconnected."), "DISCONNECT stops WirelessManager");
+        Delay(75);
+        check(env_is("Wi-Fi off"),
+              "Disconnect: Wi-Fi off within one INTERVAL, the radio still associated");
+        rc = run(PREFS " DISCONNECT");
+        check(rc == 0 && has("not running"), "DISCONNECT with none running");
+        {
+            BPTR in2 = Open((CONST_STRPTR)"NIL:", MODE_OLDFILE);
+            BPTR o2 = Open((CONST_STRPTR)"NIL:", MODE_NEWFILE);
+
+            SystemTags((CONST_STRPTR)"C:WirelessManager DEVICE=wifistub.device UNIT=0",
+                       SYS_Input, (ULONG)in2, SYS_Output, (ULONG)o2,
+                       SYS_Asynch, TRUE, TAG_DONE);
+        }
+        Delay(150);
+        check(env_is("Home 4/4"), "WirelessManager back: connected again");
+        stop_wm();
 
         stop_named("NetWireless");
         Delay(25);

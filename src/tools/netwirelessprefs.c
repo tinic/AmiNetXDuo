@@ -56,7 +56,7 @@ struct Library       *GadToolsBase;
 struct Library       *IconBase;
 
 #define TEMPLATE "DEVICE/K,UNIT/K/N,INTERFACE/K,WM/K,LIST/S,STATUS/S,SETUP/S," \
-                 "JOIN/K,PASSPHRASE/K,HIDDEN/S,TO/K"
+                 "JOIN/K,PASSPHRASE/K,HIDDEN/S,TO/K,DISCONNECT/S"
 
 enum
 {
@@ -71,6 +71,7 @@ enum
     ARG_PASSPHRASE,
     ARG_HIDDEN,
     ARG_TO,
+    ARG_DISCONNECT,
     ARG_COUNT
 };
 
@@ -164,6 +165,7 @@ static struct
     BOOL            join_formless;          /* a known network, no form    */
     BOOL            join_hidden, join_open; /* its block's, for a retry    */
     BOOL            pass_saved;             /* "(saved)" in the field      */
+    BOOL            wm_seen;                /* WirelessManager ran         */
     UBYTE           conn_ssid[NW_SSID_MAX]; /* the network in use          */
     LONG            conn_len;               /* -1: none                    */
 
@@ -848,7 +850,7 @@ static VOID nw_fill_list(VOID)
 static VOID nw_refresh_status(VOID)
 {
     static const char *const words[] =
-        { "No Wi-Fi unit", "Off", "Not connected", "Connected", "Online", "No answer" };
+        { "No Wi-Fi unit", "Wi-Fi off", "Not connected", "Connected", "Online", "No answer" };
     LONG  signal = 0, noise = 0, len = -1, link, i;
     UBYTE ssid[NW_SSID_MAX], bssid[6];
     char  bars[2];
@@ -856,6 +858,13 @@ static VOID nw_refresh_status(VOID)
 
     nw.sig_text[0] = '\0';
     link = nw.dev_open ? nw_dev_link(&nw.dev, &signal, &noise) : NW_LINK_NODEV;
+    /* As NetWireless: WirelessManager gone after it ran is the Wi-Fi off,
+       whatever the radio still says. */
+    if (!nw.setup && (link == NW_LINK_UP || link == NW_LINK_DOWN || link == NW_LINK_ONLINE))
+    {
+        if (nw_wm_running(NULL, 0)) nw.wm_seen = TRUE;
+        else if (nw.wm_seen) link = NW_LINK_OFF;
+    }
     if (link != NW_LINK_UP) nw.shown_bars = 0;
     tool_copy_string(nw.net_text, sizeof(nw.net_text), words[link]);
     if (link == NW_LINK_UP)
@@ -1912,8 +1921,28 @@ static VOID nw_known_store(int how)
            puts the network on top.  Nothing is written before that. */
         if (connect && !e->has_psk && !e->open && !e->wep)
         {
-            nw.join_hidden = e->scan_ssid != 0;
-            nw_open_form(e->ssid, e->ssid_len, FALSE, nw.join_hidden);
+            UBYTE ssid[NW_SSID_MAX];
+            LONG  len = e->ssid_len, i;
+            BOOL  hidden = e->scan_ssid != 0;
+
+            /* Use keeps what it says: an order edited before the pick is
+               stored (ENV:) first.  Connect stores nothing. */
+            for (i = 0; i < len; i++) ssid[i] = e->ssid[i];
+            if (how == NW_KS_USE)
+            {
+                for (n = 0; n < kn.shown && kn.order[n] == kn.was[n]; n++)
+                    ;
+                if ((n < kn.shown || kn.shown != kn.count) &&
+                    (why = nw_store_order(kn.text, kn.len, kn.nets, kn.count,
+                                          kn.order, kn.shown, FALSE)) != NULL)
+                {
+                    nw_requester(why);
+                    return;
+                }
+                nw_close_known();
+            }
+            nw.join_hidden = hidden;
+            nw_open_form(ssid, len, FALSE, hidden);
             return;
         }
         if (connect)
@@ -2023,6 +2052,7 @@ static VOID nw_gadget_up(const struct IntuiMessage *m)
         case NW_M_SCAN: nw_scan(); break;
         case NW_M_JOIN: nw_join_pressed(); break;
         case NW_M_DISCONNECT:
+            nw.wm_seen = TRUE;
             (VOID)nw_wm_stop();
             if (nw.join_formless)
             {
@@ -2332,7 +2362,7 @@ int main(int argc, char **argv)
         {
             tool_fault(IoErr());
             tool_usage("[DEVICE <name>] [UNIT <n>] [INTERFACE <name>] "
-                       "[WM <command>] [LIST] [STATUS] [SETUP [TO <file>]] "
+                       "[WM <command>] [LIST] [STATUS] [SETUP [TO <file>]] [DISCONNECT] "
                        "[JOIN <ssid> [PASSPHRASE <text>] [HIDDEN]]",
                        "Join a Wi-Fi network, or list the networks in range.");
             if (IconBase != NULL) CloseLibrary(IconBase);
@@ -2363,6 +2393,19 @@ int main(int argc, char **argv)
         if (rda != NULL)
             tool_error("DEVS:NetInterfaces/%s names no DEVICE", (LONG)iface);
         rc = RETURN_ERROR;              /* NW_SETUP_NO_DEVICE for SETUP */
+    }
+    else if (args[ARG_DISCONNECT] != 0)
+    {
+        /* As the window's Disconnect: WirelessManager stopped. */
+        if (!nw_wm_running(NULL, 0))
+            tool_printf("WirelessManager is not running.\n");
+        else if (!nw_wm_stop())
+        {
+            tool_error("WirelessManager did not stop");
+            rc = RETURN_ERROR;
+        }
+        else
+            tool_printf("Disconnected.\n");
     }
     else if (args[ARG_LIST] != 0 || args[ARG_STATUS] != 0 || args[ARG_JOIN] != 0)
     {
