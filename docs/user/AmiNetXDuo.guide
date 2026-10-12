@@ -3377,6 +3377,8 @@
       NetWirelessPrefs LIST           networks in range, as the
                                       window orders and marks them
       NetWirelessPrefs STATUS         connected network and signal
+      NetWirelessPrefs DISCONNECT     stop WirelessManager, as the
+                                      window's Disconnect does
       NetWirelessPrefs JOIN=<name> PASSPHRASE=<text> [HIDDEN]
                                       join as the window does; without
                                       PASSPHRASE, a known network with
@@ -3393,22 +3395,29 @@
   restart WirelessManager. SETUP TO=<file> edits that file alone, not
   ENVARC: and ENV:.
 
-  NetWireless is the Wi-Fi commodity. It shows the link as an AppIcon:
-  one to four bars by signal (from -55, -66 and -77 dBm), bar outlines
-  while not connected, dotted outlines when the unit is offline, crossed
-  out with no Wi-Fi unit, and a '!' when the unit does not answer; the
-  label is the network's name (on Kickstart 3.0 and later; "Wi-Fi" before). It also adds "Wi-Fi..." to Workbench's
-  Tools menu and keeps the state in the variable ENV:WiFi, for example
-  "Home 3/4", which a Workbench 3.2 title bar shows with %e WiFi. A
-  double-click on the icon, the menu item, the hotkey and Exchange's Show
-  open NetWirelessPrefs.
+  NetWireless is the Wi-Fi commodity. It shows the link as an AppIcon: one
+  to four bars by signal (from -55, -66 and -77 dBm), bar outlines while
+  not connected, dotted outlines when the Wi-Fi is off, crossed out with
+  no Wi-Fi unit, and a '!' when the unit does not answer; the label is the
+  network's name while connected (on Kickstart 3.0 and later; "Wi-Fi"
+  before), "Not connected" or "Wi-Fi off" otherwise. It also adds "Wi-
+  Fi..." to Workbench's Tools menu and keeps the state in the variable
+  ENV:WiFi, for example "Home 3/4", "Not connected" or "Wi-Fi off", which
+  a Workbench 3.2 title bar shows with %e WiFi. A double-click on the
+  icon, the menu item, the hotkey and Exchange's Show open
+  NetWirelessPrefs.
 
   The unit reports connects and disconnects as events; the signal is read
   every INTERVAL seconds only while connected, or while a reading has
   failed, and nothing is read while not connected. A unit that reports no
-  events is read every INTERVAL seconds. A changed picture replaces the
-  AppIcon; on Workbench 3.5 and later it keeps the place it was dragged
-  to, before that it returns to a free place on the desktop.
+  events is read every INTERVAL seconds. The Wi-Fi is off while the unit
+  is offline, and once WirelessManager has stopped after it ran
+  (Disconnect stops it): anxwifipi.device still answers as associated
+  then, but no traffic passes. NetWireless says so within INTERVAL seconds
+  and reads every INTERVAL seconds until WirelessManager runs again. A
+  changed picture replaces the AppIcon; on Workbench 3.5 and later it
+  keeps the place it was dragged to, before that it returns to a free
+  place on the desktop.
 
   ToolTypes, also Shell arguments:
 
