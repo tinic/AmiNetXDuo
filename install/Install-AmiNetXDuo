@@ -2863,6 +2863,10 @@
   (set RD_KEY "Made-NetInterfaces") (P_rec_dir)
   (set REC_F (tackon D_DEVS "Internet")) (set RD_MADE MADE_INTERNET)
   (set RD_KEY "Made-Internet") (P_rec_dir)
+  (set REC_F "SYS:Tools/Commodities") (set RD_MADE MADE_COMMODITIES)
+  (set RD_KEY "Made-Commodities") (P_rec_dir)
+  (set REC_F "SYS:Tools") (set RD_MADE MADE_TOOLS)
+  (set RD_KEY "Made-Tools") (P_rec_dir)
   ((set REC_ADD (cat
          "If NOT EXISTS T:AmiNetXDuo-NotRestored\n"
          "  Delete \"" D_BACKUP_TOP "\" ALL QUIET\n"
@@ -3060,6 +3064,9 @@
 (set MADE_FIRMWARE   (if (exists (tackon D_DEVS "Firmware") (noreq)) 0 1))
 (set MADE_IFDIR      (if (exists D_IFDIR (noreq)) 0 1))
 (set MADE_INTERNET   (if (exists (tackon D_DEVS "Internet") (noreq)) 0 1))
+(set MADE_TOOLS      (if (OR DRAWER_LAYOUT (exists "SYS:Tools" (noreq))) 0 1))
+(set MADE_COMMODITIES (if (OR DRAWER_LAYOUT
+                              (exists "SYS:Tools/Commodities" (noreq))) 0 1))
 (set REC_FINAL 0)
 (P_write_record)
 
@@ -3536,6 +3543,11 @@
 (P_tool)
 (set TL_N "NetWireless")
 (set TL_D (if DRAWER_LAYOUT D_ROOT "SYS:Tools/Commodities"))
+; A Workbench installed without the Extras disk has no SYS:Tools.
+(if (AND (NOT DRAWER_LAYOUT) (NOT (exists "SYS:Tools" (noreq))))
+    (makedir "SYS:Tools" (prompt "Creating SYS:Tools") (help @makedir-help)))
+(if (AND (NOT DRAWER_LAYOUT) (NOT (exists TL_D (noreq))))
+    (makedir TL_D (prompt ("Creating %s" TL_D)) (help @makedir-help)))
 (set TL_H (cat "NetWireless is the Wi-Fi commodity: the link's state and "
                "signal as an AppIcon."))
 (P_tool)
