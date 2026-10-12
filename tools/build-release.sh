@@ -43,6 +43,8 @@ for path in \
     Libs/bsdsocket.library Libs/tls.library \
     Libs/minimal/bsdsocket.library Libs/micro/bsdsocket.library \
     Libs/fat/bsdsocket.library Libs/fat/tls.library \
+    Devs/Networks/micro/anxnet.device Devs/Networks/micro/anxgenet.device \
+    Devs/Networks/micro/anxwifipi.device \
     Devs/Networks/fat/anxnet.device C/fat/AddNetInterface \
     C/fat/ssh C/fat/scp C/fat/scp-runner \
     Flavours/full Flavours/fat Flavours/minimal Flavours/micro; do

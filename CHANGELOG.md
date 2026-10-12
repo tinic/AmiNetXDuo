@@ -5,6 +5,9 @@ Add new entries under `Unreleased`; published release sections are history.
 
 ## Unreleased
 
+- Micro's supplied network drivers reserve one hardware unit instead of four,
+  and the installer selects those smaller driver images for the micro profile.
+
 - All library profiles save 32 KiB of runtime RAM by omitting the unused
   ThreadX application-definition arena. Standalone ThreadX applications keep
   their default arena.

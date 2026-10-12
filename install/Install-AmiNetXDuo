@@ -1169,6 +1169,21 @@
 ; its option COUNT (DRIVE_PICK_OPTIONS), so its -p specs move with it.
 (if (= MINPICK 1) (set S_LIBS (tackon S_LIBSBASE "minimal")))
 (if (= MINPICK 2) (set S_LIBS (tackon S_LIBSBASE "micro")))
+; Micro's drivers reserve one hardware unit, matching its interface limit.
+(if (= MINPICK 2)
+  (
+    (set S_ANXNET    (tackon (tackon (tackon S_DEVS "Networks") "micro") "anxnet.device"))
+    (set S_ANXGENET  (tackon (tackon (tackon S_DEVS "Networks") "micro") "anxgenet.device"))
+    (set S_ANXWIFIPI (tackon (tackon (tackon S_DEVS "Networks") "micro") "anxwifipi.device"))
+    (set S_ANXZZ9000 (tackon (tackon (tackon S_DEVS "Networks") "micro") "anxzz9000.device"))
+    (set HAVE_ANXZZ9000 (if (exists S_ANXZZ9000 (noreq)) 1 0))
+    (if (NOT (AND (AND (exists S_ANXNET (noreq)) (exists S_ANXGENET (noreq)))
+                  (exists S_ANXWIFIPI (noreq))))
+        (abort "This archive has no complete micro drivers.\n\n"
+               "The download is incomplete, or was unpacked with a tool that "
+               "dropped the subdrawers.\n\n"
+               "Nothing was changed."))
+  ))
 ; MINPICK 3, fat: its own drivers and commands as well as its libraries.
 (if (= MINPICK 3)
   (

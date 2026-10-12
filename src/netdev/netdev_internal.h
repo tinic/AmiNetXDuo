@@ -62,7 +62,11 @@ static inline VOID nd_remove(struct Node *n)
 #include "netdev_mcast.h"
 #include "sana2_device.h"
 
+/* Independent of the stack's interface slots: full/minimal/fat retain four
+   hardware units, while micro's device images reserve just one. */
+#ifndef NETDEV_MAX_UNITS
 #define NETDEV_MAX_UNITS    4
+#endif
 #define NETDEV_TRACK_MAX    16
 
 struct NetdevUnit;

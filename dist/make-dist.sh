@@ -120,8 +120,8 @@ WANT_MICRO=1
 [ -z "${AMINETXDUO_DIST_NO_MICRO:-}" ] || WANT_MICRO=0
 
 # fat is the full stack at -O2 for 68020 and up (CMakePresets.json `fat`).
-# Unlike minimal and micro it carries its own drivers and commands, because
-# the CPU and level change those too: Libs/fat, Devs/Networks/fat, C/fat.
+# Like micro it carries its own drivers; fat also carries its own commands
+# because the CPU and level change those too: Libs/fat, Devs/Networks/fat, C/fat.
 FAT_BUILD="${AMINETXDUO_BUILD_FAT:-$BUILD-fat}"
 case "$FAT_BUILD" in /*) ;; *) FAT_BUILD="$ROOT/$FAT_BUILD" ;; esac
 
@@ -375,18 +375,10 @@ stage_build() {          # $1 = build dir, $2 = "" for the top or a drawer name
     fi
     chmod 755 "$libs"/*
 
-    # THE DRIVER IS STAGED ONCE, at the top, and not again in the minimal
-    # drawer.  anxnet.device is standalone -- it opens exec and expansion and
-    # nothing else, and no AMINETXDUO_* feature flag reaches src/netdev -- so
-    # the minimal build compiles the same code.  Checked rather than assumed:
-    # the two binaries are the same 25084 bytes and differ in FIVE, which are
-    # the CPU label inside the $VER: string ("any" against "68000").  Shipping
-    # a second copy of one driver is a second thing to keep in step for no
-    # difference a machine can observe.
-    #
-    # fat is the exception: -O2 -m68020 changes the drivers and the commands
-    # as well, so it stages its own of both, in Devs/Networks/fat and C/fat.
-    if [ -z "$sub" ] || [ "$sub" = "fat" ]; then
+    # Minimal shares the full drivers. Micro reserves one hardware unit per
+    # device, so it needs its own images. Fat also needs its own drivers and
+    # commands because -O2 -m68020 changes their code.
+    if [ -z "$sub" ] || [ "$sub" = "micro" ] || [ "$sub" = "fat" ]; then
         for dev in "${DEVICES[@]}"; do
             cp "$b/src/$dev.device" "$devs/"
         done
@@ -811,7 +803,7 @@ write_flavour() {  # $1 name, $2 build dir, $3 libs, $4 devs, $5 C, $6 cpu floor
 mkdir -p "$TREE/Flavours"
 write_flavour full "$BUILD" Libs Devs/Networks C 68000
 [ "$WANT_MINIMAL" = "0" ] || write_flavour minimal "$MINIMAL_BUILD" Libs/minimal Devs/Networks C 68000
-[ "$WANT_MICRO" = "0" ]   || write_flavour micro "$MICRO_BUILD" Libs/micro Devs/Networks C 68000
+[ "$WANT_MICRO" = "0" ]   || write_flavour micro "$MICRO_BUILD" Libs/micro Devs/Networks/micro C 68000
 [ "$WANT_FAT" = "0" ]     || write_flavour fat "$FAT_BUILD" Libs/fat Devs/Networks/fat C/fat 68020
 echo "==> flavours: $(cd "$TREE/Flavours" && echo *)"
 
@@ -923,6 +915,7 @@ _unmarked=0
 _checked=0
 for _f in "$TREE"/C/* "$TREE"/C/fat/* "$TREE"/Libs/* "$TREE"/Libs/*/* \
           "$TREE"/Devs/Networks/anx*.device \
+          "$TREE"/Devs/Networks/micro/anx*.device \
           "$TREE"/Devs/Networks/fat/anx*.device; do
     [ -f "$_f" ] || continue
     case "$_f" in *.info) continue ;; esac
