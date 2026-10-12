@@ -81,7 +81,7 @@ static void place_label(const NwFont *f, NwLayout *l, int id)
     {
         case NW_PLACE_LEFT:  t->x = b->x - LABEL_GAP - w; t->y = b->y + (b->h - f->height) / 2; break;
         case NW_PLACE_RIGHT: t->x = b->x + b->w + LABEL_GAP; t->y = b->y + (b->h - f->height) / 2; break;
-        case NW_PLACE_ABOVE: t->x = b->x; t->y = b->y - f->height - 2; break;
+        case NW_PLACE_ABOVE: t->x = b->x + (b->w - w) / 2; t->y = b->y - f->height - 2; break;
         default:             t->x = b->x + (b->w - w) / 2; t->y = b->y + (b->h - f->height) / 2; break;
     }
 }

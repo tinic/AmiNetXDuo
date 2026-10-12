@@ -15,7 +15,7 @@
 /* TRUE when it is running; path gets the command as it was started. */
 BOOL nw_wm_running(char *path, ULONG cap);
 
-/* Ctrl-C, again every half second, until it has gone; FALSE after five
+/* Ctrl-C, again every 2.5 seconds, until it has gone; FALSE after ten
    seconds with it still there. */
 BOOL nw_wm_stop(VOID);
 
