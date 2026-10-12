@@ -83,6 +83,7 @@
 (set S_README (if (> (strlen SRCDIR) 0) (tackon SRCDIR "ReadMe")   "ReadMe"))
 (set S_SAMEFILE (if (> (strlen SRCDIR) 0)
                     (tackon SRCDIR "InstallSameFile") "InstallSameFile"))
+(set S_FIRMWARE (tackon S_DEVS "Firmware"))
 (set S_NETPROBE (if (> (strlen SRCDIR) 0)
                     (tackon SRCDIR "InstallNetProbe") "InstallNetProbe"))
 
@@ -1402,6 +1403,7 @@
 ; --- the card ------------------------------------------------------------
 
 (set IFNAME  "eth0")
+(set CARD_MASK 0)
 (set DEVUNIT 0)
 (set USE_CARD 0)
 (set CARD_KEY "")
@@ -2101,6 +2103,34 @@
                          "a network.  Nothing uses it until an interface file "
                          "names it."))
     (P_install_device)
+  ))
+
+; --- the Pi Wi-Fi firmware ------------------------------------------------
+;
+; anxwifipi.device loads its chip's firmware from DEVS:Firmware, where the
+; Emu68 Imager puts it.  For the Pi Wi-Fi, every file of the archive's
+; Devs/Firmware that DEVS:Firmware does not have goes there, the
+; linux-firmware licences included.  A file already there is kept: it may be
+; a newer firmware the user put in.
+(if (> (bitand CARD_MASK 2048) 0)
+  (
+    (set D_FIRMWARE (tackon D_DEVS "Firmware"))
+    (makedir D_FIRMWARE
+      (prompt "Creating DEVS:Firmware")
+      (help   @makedir-help))
+    (foreach S_FIRMWARE "#?"
+      (if (NOT (OR (exists (tackon "DEVS:Firmware" @each-name) (noreq))
+                   (exists (tackon D_FIRMWARE @each-name) (noreq))))
+          (copyfiles
+            (prompt ("Installing DEVS:Firmware/%s" @each-name))
+            (help   (cat "The Broadcom and Cypress Wi-Fi firmware that "
+                         "anxwifipi.device loads into the Raspberry Pi's "
+                         "Wi-Fi chip, from linux-firmware, with its "
+                         "licences.  Only files DEVS:Firmware does not have "
+                         "are copied."))
+            (source (tackon S_FIRMWARE @each-name))
+            (dest   D_FIRMWARE)
+            (optional "nofail"))))
   ))
 
 ; --- tls.library, if this archive has one --------------------------------

@@ -1,0 +1,11 @@
+The licence texts that third_party/wifipi/firmware/ is distributed under,
+copied unchanged from linux-firmware (LICENSES/), so they ship beside the
+firmware in the archive's Devs/Firmware.
+
+  source  https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git
+  commit  1221848f23764faab10ff63bc5d9ea5d5b39a506 (main, 2026-10-11)
+
+  LICENCE.broadcom_bcm43xx  sha256 b16056fc91b82a0e3e8de8f86c2dac98201aa9dc3cbd33e8d38f1b087fcec30d
+                            brcmfmac43430/43436/43436s/43455/43456 files
+  LICENCE.cypress           sha256 ae0db6cc4db33941148df0f67de53e76a77b1b5a46b3165edb7040aa2750015f
+                            cyfmac43430/43455 files

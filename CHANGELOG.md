@@ -5,6 +5,9 @@ Add new entries under `Unreleased`; published release sections are history.
 
 ## Unreleased
 
+- Installer: the Pi Wi-Fi firmware and its licences ship in Devs/Firmware;
+  the files DEVS:Firmware lacks are copied when the Pi Wi-Fi is selected.
+
 - Installer: a PCMCIA NE2000 card with a manufacturer ID (DFE-670TXD and
   most branded clones) is detected at Novice.
 

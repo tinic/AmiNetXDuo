@@ -1049,6 +1049,15 @@ if [ "$MANUAL_CARD" = 0 ]; then
         }
     fi
 fi
+# The Wi-Fi fixture starts with one firmware file of the user's own in
+# DEVS:Firmware: the Installer must add the rest and keep that one.  -e both
+# starts with no DEVS:Firmware at all.
+FW_KEPT="brcmfmac43455-sdio.txt"
+if [ "$EMU68_FIXTURE" = wifi ]; then
+    mkdir -p "$HD/Devs/Firmware"
+    printf 'user firmware text, %s\n' "$TAG" > "$HD/Devs/Firmware/$FW_KEPT"
+    echo "==> wifi fixture: DEVS:Firmware/$FW_KEPT staged"
+fi
 # Emu68's own GENET driver, as the Emu68 Imager installs it.  Only its name
 # is read: the run stops after the configuration audit.
 if [ "$EMU68_FIXTURE" = genet-old ]; then
@@ -2294,6 +2303,41 @@ if [ -n "$EXPECTED_SECOND_IF" ]; then
            fail=1 ;;
     esac
 fi
+# THE WI-FI FIRMWARE: every archive file in DEVS:Firmware when the Pi Wi-Fi
+# is selected, byte for byte, except one the user already had; none without.
+_fw_src="$UNPACK/AmiNetXDuo/Devs/Firmware"
+_fw_dir=$(amiga_path Devs/Firmware 2>/dev/null || true)
+case "$EMU68_FIXTURE" in
+    wifi|both)
+        _fw_bad=0
+        _fw_n=0
+        for _f in "$_fw_src"/*; do
+            _b=$(basename "$_f")
+            _fw_n=$((_fw_n + 1))
+            if [ -z "$_fw_dir" ] || [ ! -f "$_fw_dir/$_b" ]; then
+                echo "!! DEVS:Firmware/$_b was not installed"
+                _fw_bad=1
+            elif [ "$EMU68_FIXTURE" = wifi ] && [ "$_b" = "$FW_KEPT" ]; then
+                grep -q '^user firmware text' "$_fw_dir/$_b" || {
+                    echo "!! DEVS:Firmware/$_b, the user's own, was replaced"
+                    _fw_bad=1; }
+            elif ! cmp -s "$_f" "$_fw_dir/$_b"; then
+                echo "!! DEVS:Firmware/$_b is not the archive's"
+                _fw_bad=1
+            fi
+        done
+        [ "$_fw_n" -ge 3 ] || { echo "!! the archive carries no Devs/Firmware"; _fw_bad=1; }
+        if [ "$_fw_bad" = 0 ]; then
+            echo "  ok      DEVS:Firmware has the archive's $_fw_n files"
+        else
+            fail=1
+        fi ;;
+    *)
+        if [ -n "$_fw_dir" ]; then
+            echo "!! DEVS:Firmware was created without the Pi Wi-Fi"
+            fail=1
+        fi ;;
+esac
 if [ -n "$EMU68_FIXTURE" ] &&
    amiga_path "${INST}Devs/NetInterfaces/eth0" >/dev/null 2>&1; then
     echo "!! Emu68 auto-detection also left a spurious eth0 definition"
