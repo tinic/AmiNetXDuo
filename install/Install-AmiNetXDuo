@@ -112,6 +112,7 @@
 (set S_WMLIC (tackon S_WIRELESS "WirelessManager-LICENSE"))
 (set S_INSTWIFI (if (> (strlen SRCDIR) 0)
                     (tackon SRCDIR "InstallWiFi") "InstallWiFi"))
+(set S_NWPREFS (tackon S_C "NetWirelessPrefs"))
 
 ; --------------------------------------------------------------------------
 ; Help texts.  Every ask.../copy... statement is required by the Installer to
@@ -368,6 +369,10 @@
   (cat "WirelessManager joins the Wi-Fi network for anxwifipi.device.  It "
        "reads the network from ENV:Sys/Wireless.prefs, which AmigaOS copies "
        "from ENVARC:Sys/Wireless.prefs at every boot.\n\n"
+       "NetWirelessPrefs opens first: it lists the networks in range, and "
+       "Join writes the chosen "
+       "one.  If it cannot open the device, or is closed without a join, "
+       "InstallWiFi asks instead.\n\n"
        "InstallWiFi asks for the network name (SSID) and the WPA or WPA2 "
        "passphrase in a window of its own and writes them in "
        "wpa_supplicant's format.  The passphrase appears as asterisks and "
@@ -1860,7 +1865,19 @@
                 (help   H_WIFI)
                 (optional "force" "nofail")))
     ; Not in a pretend run: the passphrase would sit in T: for nothing.
-    (if (= @pretend 0)
+    ; The networks in range first, from the driver the interface will name
+    ; (the archive's anxwifipi.device, not yet installed): 0 is a network
+    ; written, 5 and above (closed, no device) the window below.
+    (set WIFI_RC 5)
+    (if (AND (= @pretend 0) (exists S_NWPREFS (noreq)))
+        (set WIFI_RC (run ("\"%s\" SETUP DEVICE=\"%s\" UNIT=%ld TO %s"
+                           S_NWPREFS
+                           (if (= WIFI_DEV W_ANXWIFIPI) S_ANXWIFIPI WIFI_DEV)
+                           WIFI_UNIT WIFI_TMP)
+                          (prompt "Looking for Wi-Fi networks")
+                          (help   H_WIFI)
+                          (safe))))
+    (if (AND (= @pretend 0) (OR (<> WIFI_RC 0) (NOT (exists WIFI_TMP (noreq)))))
       (
         (set WIFI_RC (run ("\"%s\" TO %s" S_INSTWIFI WIFI_TMP)
                           (prompt "Asking for the Wi-Fi network")
@@ -1872,8 +1889,8 @@
                      "written later with a text editor; the Manual in "
                      "Aminet's driver/net/prism2v2 describes it."
                      (help H_WIFI)))
-        (set WIFI_NEW_PREFS (if (exists WIFI_TMP (noreq)) 1 0))
       ))
+    (set WIFI_NEW_PREFS (if (exists WIFI_TMP (noreq)) 1 0))
   ))
 
 ; --- the manual addresses ------------------------------------------------

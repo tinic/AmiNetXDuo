@@ -2,7 +2,7 @@
  * NetWirelessPrefs, the Wi-Fi window: the networks in range and joining
  * one, written to WirelessManager's ENV:Sys/Wireless.prefs.  From a Shell,
  * LIST and STATUS print what the window shows; SETUP is the window the
- * installer runs.
+ * installer runs, and SETUP TO <file> writes that file alone.
  *
  * WirelessManager owns the association: this program scans and reads the
  * link, writes the file and restarts WirelessManager, and never joins or
@@ -56,7 +56,7 @@ struct Library       *GadToolsBase;
 struct Library       *IconBase;
 
 #define TEMPLATE "DEVICE/K,UNIT/K/N,INTERFACE/K,WM/K,LIST/S,STATUS/S,SETUP/S," \
-                 "JOIN/K,PASSPHRASE/K,HIDDEN/S"
+                 "JOIN/K,PASSPHRASE/K,HIDDEN/S,TO/K"
 
 enum
 {
@@ -70,6 +70,7 @@ enum
     ARG_JOIN,
     ARG_PASSPHRASE,
     ARG_HIDDEN,
+    ARG_TO,
     ARG_COUNT
 };
 
@@ -119,6 +120,7 @@ static struct
     ULONG           unit;
     char            wm[NW_DEVICE_LEN];
     BOOL            setup;
+    char            to[256];                /* SETUP TO: this file alone */
     NwScan          nets[NW_LIST_MAX];
     LONG            count;
 
@@ -375,7 +377,7 @@ static char *nw_read(const char *path, ULONG *len, BOOL *missing)
 /* A new file beside the old one, then renamed over it. */
 static BOOL nw_write(const char *path, const char *data, ULONG len)
 {
-    char tmp[40];
+    char tmp[sizeof(nw.to) + 8];
     BPTR fh;
     BOOL ok;
 
@@ -421,8 +423,12 @@ static const char *nw_save_network(const UBYTE *ssid, LONG ssid_len,
     BOOL             missing;
 
     /* ENV: is what WirelessManager reads; ENVARC: when ENV: has none. */
-    old = nw_read(nw_prefs_env, &old_len, &missing);
-    if (old == NULL && missing) old = nw_read(nw_prefs_envarc, &old_len, &missing);
+    if (nw.to[0] != '\0')
+        old = nw_read(nw.to, &old_len, &missing);
+    else
+        old = nw_read(nw_prefs_env, &old_len, &missing);
+    if (old == NULL && missing && nw.to[0] == '\0')
+        old = nw_read(nw_prefs_envarc, &old_len, &missing);
     if (old == NULL && !missing)
         return "Wireless.prefs could not be read, so it was not changed.";
     count = nw_prefs_parse(old != NULL ? old : "", old_len, nets, NW_NETS_MAX);
@@ -467,6 +473,11 @@ static const char *nw_save_network(const UBYTE *ssid, LONG ssid_len,
     else if (!nw_prefs_write(old != NULL ? old : "", old_len, nets, (int)count,
                              &e, 1, out, NW_FILE_MAX + 512, &new_len))
         why = "Wireless.prefs would be too large.";
+    else if (nw.to[0] != '\0')
+    {
+        if (!nw_write(nw.to, out, (ULONG)new_len))
+            why = "Wireless.prefs could not be written.";
+    }
     else
     {
         nw_make_dir("ENVARC:Sys");
@@ -1554,7 +1565,7 @@ int main(int argc, char **argv)
         {
             tool_fault(IoErr());
             tool_usage("[DEVICE <name>] [UNIT <n>] [INTERFACE <name>] "
-                       "[WM <command>] [LIST] [STATUS] [SETUP] "
+                       "[WM <command>] [LIST] [STATUS] [SETUP [TO <file>]] "
                        "[JOIN <ssid> [PASSPHRASE <text>] [HIDDEN]]",
                        "Join a Wi-Fi network, or list the networks in range.");
             if (IconBase != NULL) CloseLibrary(IconBase);
@@ -1576,6 +1587,8 @@ int main(int argc, char **argv)
     nw.want_left = (WORD)nw_tooltype_number(dob, "LEFT");
     nw.want_top = (WORD)nw_tooltype_number(dob, "TOP");
     nw.setup = args[ARG_SETUP] != 0;
+    if (nw.setup && args[ARG_TO] != 0)
+        tool_copy_string(nw.to, sizeof(nw.to), (const char *)args[ARG_TO]);
     if (dob != NULL) FreeDiskObject(dob);
 
     if (!known)
