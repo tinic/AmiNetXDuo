@@ -82,6 +82,7 @@ static struct
     LONG                assoc;              /* -1 unknown, from events      */
     BOOL                wm_seen;            /* WirelessManager ran          */
     BOOL                wm_gone;            /* ...and has gone since        */
+    UBYTE               wm_misses;          /* readings without it, in a row */
     char                envbuf[24];
 
     struct MsgPort     *cxport, *appport, *tport;
@@ -288,12 +289,21 @@ static VOID nw_refresh(BOOL event)
     nw.wm_gone = FALSE;
     if (nw.link == NW_LINK_UP || nw.link == NW_LINK_DOWN || nw.link == NW_LINK_ONLINE)
     {
-        if (nw_wm_running(NULL, 0)) nw.wm_seen = TRUE;
-        else if (nw.wm_seen)
+        if (nw_wm_running(NULL, 0))
         {
+            nw.wm_seen = TRUE;
+            nw.wm_misses = 0;
+        }
+        else if (nw_wm_marked_off() ||
+                 (nw.wm_seen && ++nw.wm_misses >= 2))
+        {
+            /* A Disconnect at once; a quit seen twice, not the moment of
+               NetWirelessPrefs' own restart. */
             nw.wm_gone = TRUE;
             nw.link = NW_LINK_OFF;
         }
+        else if (nw.wm_seen)
+            nw.wm_gone = TRUE;          /* read again next INTERVAL */
     }
     tool_copy_string(label, sizeof(label), "Wi-Fi");
     switch (nw.link)

@@ -863,7 +863,7 @@ static VOID nw_refresh_status(VOID)
     if (!nw.setup && (link == NW_LINK_UP || link == NW_LINK_DOWN || link == NW_LINK_ONLINE))
     {
         if (nw_wm_running(NULL, 0)) nw.wm_seen = TRUE;
-        else if (nw.wm_seen) link = NW_LINK_OFF;
+        else if (nw.wm_seen || nw_wm_marked_off()) link = NW_LINK_OFF;
     }
     if (link != NW_LINK_UP) nw.shown_bars = 0;
     tool_copy_string(nw.net_text, sizeof(nw.net_text), words[link]);
@@ -2053,6 +2053,7 @@ static VOID nw_gadget_up(const struct IntuiMessage *m)
         case NW_M_JOIN: nw_join_pressed(); break;
         case NW_M_DISCONNECT:
             nw.wm_seen = TRUE;
+            nw_wm_mark_off();
             (VOID)nw_wm_stop();
             if (nw.join_formless)
             {
@@ -2388,13 +2389,8 @@ int main(int argc, char **argv)
         tool_copy_string(nw.to, sizeof(nw.to), (const char *)args[ARG_TO]);
     if (dob != NULL) FreeDiskObject(dob);
 
-    if (!known)
-    {
-        if (rda != NULL)
-            tool_error("DEVS:NetInterfaces/%s names no DEVICE", (LONG)iface);
-        rc = RETURN_ERROR;              /* NW_SETUP_NO_DEVICE for SETUP */
-    }
-    else if (args[ARG_DISCONNECT] != 0)
+    /* Only WirelessManager is stopped: no Wi-Fi unit is needed. */
+    if (args[ARG_DISCONNECT] != 0)
     {
         /* As the window's Disconnect: WirelessManager stopped. */
         if (!nw_wm_running(NULL, 0))
@@ -2406,6 +2402,13 @@ int main(int argc, char **argv)
         }
         else
             tool_printf("Disconnected.\n");
+        if (rc == RETURN_OK) nw_wm_mark_off();
+    }
+    else if (!known)
+    {
+        if (rda != NULL)
+            tool_error("DEVS:NetInterfaces/%s names no DEVICE", (LONG)iface);
+        rc = RETURN_ERROR;              /* NW_SETUP_NO_DEVICE for SETUP */
     }
     else if (args[ARG_LIST] != 0 || args[ARG_STATUS] != 0 || args[ARG_JOIN] != 0)
     {

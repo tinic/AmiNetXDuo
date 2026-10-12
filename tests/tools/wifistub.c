@@ -72,6 +72,8 @@ typedef struct WsDevice
                                            info answered whenever online   */
     BOOL          bad_key;              /* associates, never comes up       */
     char          ssid[33];             /* what S2_SETOPTIONS joined       */
+    BOOL          keep_assoc;           /* the supplicant's close does not
+                                           drop it (anxwifipi.device today) */
     APTR          assoc;                /* the request that joined it      */
     ULONG         n_setoptions;
     ULONG         scan_stamp;           /* ticks when the first scan queued */
@@ -153,7 +155,7 @@ static BPTR ws_close(register struct Device *dev __asm("a6"),
                      register struct IOSana2Req *io __asm("a1"))
 {
     /* The supplicant going takes the association with it. */
-    if ((APTR)io == ws->assoc)
+    if ((APTR)io == ws->assoc && !ws->keep_assoc)
     {
         ws->assoc = NULL;
         ws->connected = FALSE;
@@ -916,6 +918,8 @@ int main(void)
            commodity says the Wi-Fi is off within one INTERVAL, and
            connected again once WirelessManager is back. */
         ws->connected = TRUE;
+        ws->signal = -50;
+        ws->keep_assoc = TRUE;
         ws_report(S2EVENT_CONNECT);
         Delay(50);
         {
@@ -946,6 +950,7 @@ int main(void)
         Delay(150);
         check(env_is("Home 4/4"), "WirelessManager back: connected again");
         stop_wm();
+        ws->keep_assoc = FALSE;
 
         stop_named("NetWireless");
         Delay(25);
