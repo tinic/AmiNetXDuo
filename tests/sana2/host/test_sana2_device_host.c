@@ -75,6 +75,12 @@ typedef struct HostDevice
     ULONG   rx_capacity;
     BOOL    rx_capacity_fails;
     int     rx_capacity_cmds;
+
+    /* One other command answered the way offline_mode answers S2_OFFLINE:
+       0 is none. */
+    UWORD   slow_cmd;
+    int     slow_mode;          /* H_OFF_* */
+    ULONG   slow_after_ms;      /* H_OFF_LATE: the reply's delay */
 } HostDevice;
 
 /* S2_OFFLINE by SendIO(): inside BeginIO(), later, only once aborted, or
@@ -147,6 +153,9 @@ static ULONG            h_timer_due;
 static struct IORequest *h_off_pending;     /* S2_OFFLINE the device holds */
 static ULONG            h_off_due;          /* 0xFFFFFFFF: never */
 static BYTE             h_off_error;        /* what it will reply with */
+static struct IORequest *h_cmd_pending;     /* h_dev.slow_cmd, held */
+static ULONG            h_cmd_due;
+static BYTE             h_cmd_error;
 static int              h_disables;
 /* One-shot: a reply lands inside the next Disable(), just before whatever
    it protects, or just after the next Enable(). */
@@ -169,6 +178,9 @@ static void h_exec_reset(void)
     h_off_pending          = NULL;
     h_off_due              = H_NEVER;
     h_off_error            = 0;
+    h_cmd_pending          = NULL;
+    h_cmd_due              = H_NEVER;
+    h_cmd_error            = 0;
     h_disables             = 0;
     h_reply_before_disable = FALSE;
     h_reply_after_enable   = FALSE;
@@ -237,6 +249,25 @@ static void h_offline_reply(void)
         req->ios2_WireError    = h_dev.offline_wire_error;
     }
     ReplyMsg(&req->ios2_Req.io_Message);
+}
+
+LONG DoIO(struct IORequest *ioreq);
+
+/* The held slow command comes back, with what DoIO() would have answered
+   unless it was aborted. */
+static void h_cmd_reply(void)
+{
+    struct IORequest *req = h_cmd_pending;
+
+    if (req == NULL)
+        return;
+    h_cmd_pending = NULL;
+    h_cmd_due     = H_NEVER;
+
+    (VOID)DoIO(req);
+    if (h_cmd_error != 0)
+        req->io_Error = h_cmd_error;
+    ReplyMsg(&req->io_Message);
 }
 
 static void h_timer_reply(BYTE error)
@@ -311,6 +342,9 @@ ULONG Wait(ULONG mask)
 {
     ULONG due = (h_off_due < h_timer_due) ? h_off_due : h_timer_due;
 
+    if (h_cmd_due < due)
+        due = h_cmd_due;
+
     if (due == H_NEVER)
     {
         h_check(FALSE, "Wait() with nothing that can ever wake it");
@@ -323,6 +357,8 @@ ULONG Wait(ULONG mask)
         h_now_ms = due;
     if (h_off_due <= h_now_ms)
         h_offline_reply();
+    if (h_cmd_due <= h_now_ms)
+        h_cmd_reply();
     if (h_timer_due <= h_now_ms)
         h_timer_reply(0);
 
@@ -640,7 +676,28 @@ VOID SendIO(struct IORequest *req)
     ReplyMsg(&req->io_Message);
 }
 
-VOID BeginIO(struct IORequest *req) { (VOID)DoIO(req); }
+/* As DoIO() and ami_sana2_command() call it: IOF_QUICK, and done inside
+   unless h_dev.slow_cmd is to be held, which clears IOF_QUICK as a driver
+   that queues it does. */
+VOID BeginIO(struct IORequest *req)
+{
+    struct IOSana2Req *s2 = (struct IOSana2Req *)req;
+
+    if (h_dev.slow_cmd != 0 && s2->ios2_Req.io_Command == h_dev.slow_cmd &&
+        h_dev.slow_mode != H_OFF_SYNC)
+    {
+        h_check(h_cmd_pending == NULL, "one slow command at a time");
+        req->io_Flags &= (UBYTE)~IOF_QUICK;
+        req->io_Message.mn_Node.ln_Type = NT_MESSAGE;
+        h_cmd_pending = req;
+        h_cmd_error   = 0;
+        h_cmd_due     = (h_dev.slow_mode == H_OFF_LATE)
+                            ? h_now_ms + h_dev.slow_after_ms : H_NEVER;
+        return;
+    }
+
+    (VOID)DoIO(req);
+}
 
 /* 0 is "accepted" and the request still never completes: a2065.device 2.16.
    timer.device always answers, and H_OFF_ABORTABLE answers 10 ms later. */
@@ -658,6 +715,12 @@ LONG AbortIO(struct IORequest *req)
     {
         h_off_error = (BYTE)IOERR_ABORTED;
         h_off_due   = h_now_ms + 10UL;
+    }
+    if (req != NULL && req == h_cmd_pending &&
+        h_dev.slow_mode == H_OFF_ABORTABLE)
+    {
+        h_cmd_error = (BYTE)IOERR_ABORTED;
+        h_cmd_due   = h_now_ms + 10UL;
     }
     return 0;
 }
@@ -2169,6 +2232,151 @@ static void case_link_speed(void)
         h_check(ami_sana2_close(iface), "ordinary interface closes cleanly");
 }
 
+/* ------------------------------------------------ bounded attach commands -- */
+
+/* An open with h_dev.slow_cmd answered as `mode`. */
+static AmiSana2If *h_open_slow(UWORD command, int mode, ULONG after_ms,
+                               LONG *err)
+{
+    h_device_reset();
+    h_config();
+    h_dev.slow_cmd      = command;
+    h_dev.slow_mode     = mode;
+    h_dev.slow_after_ms = after_ms;
+    *err = AMI_NET_OK;
+    return ami_sana2_open(&h_cfg, err);
+}
+
+/* a. Late but inside the deadline: the open completes, and the statistics
+      the device wrote into the command's own buffer reach the caller. */
+static void case_cmd_late_reply(void)
+{
+    LONG        err;
+    AmiSana2If *iface = h_open_slow(S2_DEVICEQUERY, H_OFF_LATE, 5000UL, &err);
+
+    h_check(iface != NULL && err == AMI_NET_OK, "cmd late: the open works");
+    h_check(h_now_ms == 5000UL && h_dev.aborts == 0,
+            "cmd late: waited for the reply, no AbortIO()");
+    if (iface == NULL)
+        return;
+    h_check(iface->mtu == 1500 && iface->addr_bits == 48,
+            "cmd late: S2_DEVICEQUERY's answer was copied back");
+    h_check(iface->cmd_held == NULL, "cmd late: nothing kept");
+    h_offline_clean("cmd late");
+    h_check(ami_sana2_close(iface), "cmd late: the close frees it");
+}
+
+/* b. S2_CONFIGINTERFACE gets the slow deadline: 30 s is an answer. */
+static void case_cmd_configure_slow(void)
+{
+    LONG        err;
+    AmiSana2If *iface = h_open_slow(S2_CONFIGINTERFACE, H_OFF_LATE, 30000UL,
+                                    &err);
+
+    h_check(iface != NULL && h_dev.aborts == 0,
+            "configure slow: 30 s is inside S2_CONFIGINTERFACE's deadline");
+    h_check(AMI_SANA2_CMD_SLOW_MS > 30000UL && AMI_SANA2_CMD_WAIT_MS < 30000UL,
+            "configure slow: and past the ordinary one");
+    if (iface != NULL)
+        h_check(ami_sana2_close(iface), "configure slow: the close frees it");
+}
+
+/* c. Ignored until aborted: the deadline, the abort's answer, a failed open
+      with the request back and the device closed. */
+static void case_cmd_abort(void)
+{
+    LONG        err;
+    AmiSana2If *iface = h_open_slow(S2_CONFIGINTERFACE, H_OFF_ABORTABLE, 0UL,
+                                    &err);
+
+    h_check(iface == NULL && err == AMI_NET_ERR_DEVBAD,
+            "cmd abort: the open fails as DEVBAD");
+    h_check(h_now_ms == AMI_SANA2_CMD_SLOW_MS + 10UL && h_dev.aborts == 1,
+            "cmd abort: after the slow deadline and the abort's reply");
+    h_check(h_dev.closes == 1 && ami_sana2_retained_count() == 0,
+            "cmd abort: the request was back, so the device is closed");
+    h_offline_clean("cmd abort");
+}
+
+/* d. Answers neither: the open fails after both deadlines, no CloseDevice()
+      under the kept request, and the late reply only queues; the sweep then
+      closes and frees. */
+static void case_cmd_deaf(void)
+{
+    LONG          err;
+    AmiSana2If   *iface;
+    unsigned long signals;
+
+    iface = h_open_slow(S2_DEVICEQUERY, H_OFF_DEAF, 0UL, &err);
+    h_check(iface == NULL && err == AMI_NET_ERR_DEVBAD,
+            "cmd deaf: the open fails as DEVBAD");
+    h_check(h_now_ms == AMI_SANA2_CMD_WAIT_MS + AMI_SANA2_CMD_ABORT_MS,
+            "cmd deaf: after exactly both deadlines");
+    h_check(h_dev.aborts == 1, "cmd deaf: AbortIO() once");
+    h_check(h_dev.closes == 0 && ami_sana2_retained_count() == 1,
+            "cmd deaf: the interface is kept, the device left open");
+    h_check(h_cmd_pending != NULL &&
+            h_cmd_pending->io_Message.mn_ReplyPort->mp_Flags == PA_IGNORE &&
+            h_cmd_pending->io_Message.mn_ReplyPort->mp_SigTask == NULL,
+            "cmd deaf: its port signals nobody");
+    h_offline_clean("cmd deaf");
+
+    h_check(ami_sana2_retained_sweep(FALSE) == 1 && h_dev.closes == 0,
+            "cmd deaf: the sweep keeps it while the device holds it");
+
+    signals = h_signals;
+    h_cmd_reply();
+    h_check(h_signals == signals && h_ignored == 1,
+            "cmd deaf: the late reply queued and signalled nobody");
+    h_check(ami_sana2_retained_sweep(FALSE) == 0 && h_dev.closes == 1,
+            "cmd deaf: then the sweep closes the device and frees it");
+}
+
+/* e. A kept command refuses the rest at once: one deadline per attach, not
+      one per command.  S2_GETGLOBALSTATS at attach is not fatal by itself;
+      the S2_GETSTATIONADDRESS after it is refused without waiting. */
+static void case_cmd_held_refuses_rest(void)
+{
+    LONG        err;
+    AmiSana2If *iface = h_open_slow(S2_GETGLOBALSTATS, H_OFF_DEAF, 0UL, &err);
+
+    h_check(iface == NULL && err == AMI_NET_ERR_DEVBAD,
+            "cmd refuse: the open fails");
+    h_check(h_now_ms == AMI_SANA2_CMD_WAIT_MS + AMI_SANA2_CMD_ABORT_MS,
+            "cmd refuse: one deadline spent, not two");
+    h_check(h_dev.configure_cmds == 0,
+            "cmd refuse: S2_CONFIGINTERFACE never reached the device");
+    h_offline_clean("cmd refuse");
+
+    h_cmd_reply();
+    h_check(ami_sana2_retained_sweep(FALSE) == 0 && h_dev.closes == 1,
+            "cmd refuse: reclaimed once the device answers");
+}
+
+/* f. S2_ONLINE that never answers fails the link-up, and the close keeps the
+      interface until it does. */
+static void case_cmd_online_deaf(void)
+{
+    LONG        err;
+    AmiSana2If *iface = h_open_slow(S2_ONLINE, H_OFF_DEAF, 0UL, &err);
+
+    h_check(iface != NULL, "online deaf: the open works");
+    if (iface == NULL)
+        return;
+    h_check(ami_sana2_online(iface) == (LONG)IOERR_ABORTED && !iface->online,
+            "online deaf: the link-up fails, the interface is not online");
+    h_check(h_now_ms == AMI_SANA2_CMD_SLOW_MS + AMI_SANA2_CMD_ABORT_MS,
+            "online deaf: after the slow deadline and the abort's");
+    h_check(ami_sana2_online(iface) == (LONG)IOERR_UNITBUSY &&
+            h_dev.online_cmds == 0,
+            "online deaf: a second S2_ONLINE is refused, not sent");
+    h_check(!ami_sana2_close(iface) && h_dev.closes == 0,
+            "online deaf: the close keeps the interface");
+    h_cmd_reply();
+    h_check(ami_sana2_retained_sweep(FALSE) == 0 && h_dev.closes == 1,
+            "online deaf: reclaimed once the device answers");
+}
+
 int main(void)
 {
     printf("sana2 device: open, online, offline, close\n");
@@ -2210,6 +2418,12 @@ int main(void)
     case_offline_race_after_detach();
     case_offline_no_timer();
     case_bursty_wifi_reads();
+    case_cmd_late_reply();
+    case_cmd_configure_slow();
+    case_cmd_abort();
+    case_cmd_deaf();
+    case_cmd_held_refuses_rest();
+    case_cmd_online_deaf();
 
     h_check(ami_sana2_retained_count() == 0, "nothing is left retained");
     h_check(h_ports_made > 0, "reply ports were created");
