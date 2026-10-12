@@ -2828,9 +2828,10 @@
     ; --- name resolution ------------------------------------------------
     ;
     ; A name somebody set by hand in the file being replaced is theirs, at
-    ; every level: InstallSameFile HOSTLINE copies its active hostname line,
-    ; the commented ones left behind, and it goes into the new file.  An
-    ; Expert who types a name replaces it.
+    ; every level: InstallSameFile HOSTLINE writes the name the stack's own
+    ; parser takes from the file as a hostname line, and it goes into the new
+    ; file.  Read before P_keep_old moves the file.  An Expert who types a
+    ; name replaces it.
     (set NR_FILE (tackon D_DEVS "Internet/name_resolution"))
     (set NR_HOST "T:AmiNetXDuo-hostname")
     (set KEEP_HOST 0)
