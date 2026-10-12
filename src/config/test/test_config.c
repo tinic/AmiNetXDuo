@@ -832,6 +832,42 @@ static void test_interface_ipv6(void)
     CHECK(cfg.address6_count == 0);
 }
 
+/* The Installer's PRIORITY check (InstallWiFi PRIORITY): live pairs only,
+   lexed as the parser lexes them. */
+static void test_key_count(void)
+{
+    char buf[512];
+
+    printf("key count\n");
+
+    strcpy(buf, "DEVICE=a2065.device\nPRIORITY=5\n");
+    CHECK(ami_cfg_key_count(buf, "PRIORITY", "PRI") == 1);
+    strcpy(buf, "DEVICE=a2065.device\npri = 5\n");
+    CHECK(ami_cfg_key_count(buf, "PRIORITY", "PRI") == 1);
+    strcpy(buf, "; PRIORITY -- a note\n;PRIORITY=0\n# PRIORITY=3\n"
+                "DEVICE=a2065.device\n");
+    CHECK(ami_cfg_key_count(buf, "PRIORITY", "PRI") == 0);
+    strcpy(buf, "DEVICE=a2065.device UNIT=0 PRIORITY=7\n");
+    CHECK(ami_cfg_key_count(buf, "PRIORITY", "PRI") == 1);
+    strcpy(buf, "DEVICE=a2065.device ;PRIORITY=7\n");
+    CHECK(ami_cfg_key_count(buf, "PRIORITY", "PRI") == 0);
+    strcpy(buf, "DEVICE=a2065.device\n;PRIORITY=0\nPRIORITY=3");
+    CHECK(ami_cfg_key_count(buf, "PRIORITY", "PRI") == 1);
+    strcpy(buf, "PRIORITY=3\nPRI=4\n;PRIORITY=9\n");
+    CHECK(ami_cfg_key_count(buf, "PRIORITY", "PRI") == 2);
+    strcpy(buf, "PRIORITYX=3\nMYPRIORITY=4\n");
+    CHECK(ami_cfg_key_count(buf, "PRIORITY", "PRI") == 0);
+
+    /* The parser keeps the last PRIORITY that parses. */
+    {
+        AmiIfConfig ifc;
+
+        strcpy(buf, "DEVICE=a2065.device\nPRIORITY=3\nPRI=4\n;PRIORITY=9\n");
+        CHECK(ami_cfg_parse_interface("eth0", buf, &ifc) == AMI_CFG_OK);
+        CHECK(ifc.priority == 4);
+    }
+}
+
 static void test_address6_line(void)
 {
     ULONG second[AMI_CFG_IP6_WORDS];
@@ -2377,6 +2413,74 @@ static void test_hostname_offer(void)
     }
     CHECK(ami_config_hostname_source_text(AMI_HOSTNAME_NONE) == NULL);
     ami_config_free(&cfg);
+}
+
+/* InstallSameFile HOSTLINE: the name the stack itself takes from the file. */
+static void test_resolver_hostname(void)
+{
+    char  name[64];
+    char *buf;
+    char *big;
+    int   i;
+
+    buf = dup_text("; hostname   <name>\n;hostname amiga\n# hostname x\n");
+    CHECK(!ami_cfg_resolver_hostname(buf, name, sizeof(name)));
+    free(buf);
+
+    buf = dup_text("HOSTNAME MyAmiga\n");
+    CHECK(ami_cfg_resolver_hostname(buf, name, sizeof(name)));
+    CHECK_STR(name, "MyAmiga");
+    free(buf);
+
+    buf = dup_text("Hostname=eq-amiga\n");
+    CHECK(ami_cfg_resolver_hostname(buf, name, sizeof(name)));
+    CHECK_STR(name, "eq-amiga");
+    free(buf);
+
+    buf = dup_text("hostname first\nnameserver 1.1.1.1\nhostname last\n");
+    CHECK(ami_cfg_resolver_hostname(buf, name, sizeof(name)));
+    CHECK_STR(name, "last");
+    free(buf);
+
+    buf = dup_text("HOST 127.0.0.1 localhost\nHOST 192.168.1.9 hostline alias\n");
+    CHECK(ami_cfg_resolver_hostname(buf, name, sizeof(name)));
+    CHECK_STR(name, "hostline");
+    free(buf);
+
+    /* Past and across the 4 KB a single read would have stopped at. */
+    big = (char *)malloc(9000);
+    CHECK(big != NULL);
+    if (big == NULL)
+        return;
+    for (i = 0; i < 4090; i++)
+        big[i] = (i % 64 == 63) ? '\n' : ';';
+    strcpy(big + 4090, "\nhostname straddle\n");
+    CHECK(ami_cfg_resolver_hostname(big, name, sizeof(name)));
+    CHECK_STR(name, "straddle");
+    /* Written by ami_cfg_hostname_line(), read back by the parser. */
+    {
+        static const char *const names[] =
+            { "plain", "my amiga", "a#b", "q\"u*o;te" };
+        char line[96];
+        unsigned k;
+
+        for (k = 0; k < sizeof(names) / sizeof(names[0]); k++)
+        {
+            CHECK(ami_cfg_hostname_line(names[k], line, sizeof(line)) > 0);
+            buf = dup_text(line);
+            CHECK(ami_cfg_resolver_hostname(buf, name, sizeof(name)));
+            CHECK_STR(name, names[k]);
+            free(buf);
+        }
+        CHECK(ami_cfg_hostname_line("plain", line, 10) == 0);
+    }
+
+    for (i = 0; i < 6000; i++)
+        big[i] = (i % 64 == 63) ? '\n' : '#';
+    strcpy(big + 6000, "\nhostname far\n");
+    CHECK(ami_cfg_resolver_hostname(big, name, sizeof(name)));
+    CHECK_STR(name, "far");
+    free(big);
 }
 
 static void test_resolver(void)
@@ -4925,6 +5029,7 @@ int main(int argc, char **argv)
 #ifdef AMINETXDUO_IPV6
     test_interface_ipv6();
     test_address6_line();
+    test_key_count();
 #endif
     test_interface_roadshow();
     test_interface_filter();
@@ -4959,6 +5064,7 @@ int main(int argc, char **argv)
     test_hostname_from_hwaddr();
     test_hostname_offer();
     test_resolver();
+    test_resolver_hostname();
     test_search_domains();
     test_dhcp_search_option();
     test_ra_search_option();

@@ -450,9 +450,7 @@ def main(argv):
 
     for name, blob in icons.items():
         if args.style == "glow":
-            artwork = {"Guide.info": "Document",
-                       "Uninstall-AmiNetXDuo.info": "Install-AmiNetXDuo",
-                       }.get(name, name[:-5])
+            artwork = {"Guide.info": "Document"}.get(name, name[:-5])
             path = os.path.join(os.path.dirname(__file__), "..", "icons",
                                 "glow", artwork + ".glow")
             with open(path, "rb") as fh:

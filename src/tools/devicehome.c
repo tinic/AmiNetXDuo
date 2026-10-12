@@ -137,3 +137,4 @@ long dh_rehome(const char *old, size_t oldlen, char *out, size_t cap,
     *newlen = used;
     return rewritten;
 }
+
