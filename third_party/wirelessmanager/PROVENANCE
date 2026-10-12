@@ -1,0 +1,35 @@
+# WirelessManager 1.5, Neil Cafferkey's WPA supplicant for SANA-II wireless
+# drivers, based on Jouni Malinen's wpa_supplicant.  Vendored UNMODIFIED.
+#
+# SOURCE
+#
+#   https://aminet.net/driver/net/prism2v2.lha (prism2.device 2.9, 4.3.2025)
+#   archive sha256 25b400ef25c44af940e1887576106b8312dcd28fe6c8030fcb78804480c07bc5
+#   member         prism2v2/C/WirelessManager, 196780 bytes,
+#                  $VER: WirelessManager 1.5 (24.2.2025)
+#
+#   tools/fetch-wirelessmanager.sh downloads the archive, checks those three
+#   facts and compares the member with the copy here byte for byte.
+#
+# LICENCE
+#
+#   LICENSE beside this file is the WirelessManager notice from the archive's
+#   Manual, section "Author and Legal Information", verbatim: wpa_supplicant's
+#   three-clause BSD notice, Copyright (c) 2003-2010 Jouni Malinen and
+#   contributors, (c) 2011-2025 Neil Cafferkey.  Clause 2 requires the notice
+#   with every binary copy, so dist/make-dist.sh packs it beside the binary
+#   and the Installer copies it into the AmiNetXDuo drawer.  prism2.device,
+#   pccard.library and WaitForLink in the same archive are GPL and are not
+#   vendored.
+#
+# NOT PATCHED
+#
+#   AmiBSDNet ships WirelessManager with a binary patch for the S2_SETOPTIONS
+#   operation-state defect.  anxwifipi.device applies only the tags a request
+#   carries and rejoins only when a network is named (CHANGELOG, 1.0.0-beta3),
+#   so the unpatched 1.5 joins without it.
+#
+# The hashes below are what dist/make-dist.sh checks before packing.
+
+4f6227d1d48959cfe914359b35d9a39c2f99ad3a9ab91a1de558faa78d9a5b0c  WirelessManager
+bde32956b0e56b9eacccfeb6c857e8cb7b840f9a13eaeb0398c39a5e4fe192fd  LICENSE

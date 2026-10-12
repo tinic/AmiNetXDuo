@@ -20,6 +20,8 @@
 #include <intuition/intuitionbase.h>
 #include <dos/dos.h>
 #include <dos/dostags.h>
+#include <devices/input.h>
+#include <devices/inputevent.h>
 
 #include <proto/exec.h>
 #include <proto/dos.h>
@@ -137,6 +139,15 @@
  *   <run>|STRING|<current value>|<replacement value>
  *   <run>|ABORT|<button-label substring identifying the page>
  *   <run>|ABSENT|<button-label substring of a page that must not appear>
+ *   <run>|WIFI|<network name>|<passphrase>
+ *   <run>|NOWIFI|-
+ *   1|DROPSTARTUP|-   delete S:Network-Startup between runs instead of
+ *                     marking it, so run 2 meets "Keep it" with none
+ *   1|UNPRIORITY|<file> between runs, comment out every PRIORITY line of
+ *                     that interface file and end it with the example
+ *                     files' commented lines and no final newline
+ *   1|LIVEPRIORITY|<file> the same, then a last line "UNIT=0 PRIORITY=3"
+ *                     (two pairs, no final newline): a live PRIORITY
  *
  * Unlike the historical DRIVE_YES_LABEL/DRIVE_PICK_* switches, this can
  * answer more than one non-default question in one installation and can give
@@ -162,7 +173,12 @@ enum ActionType
     ACTION_CHOICE,
     ACTION_STRING,
     ACTION_ABORT,
-    ACTION_ABSENT
+    ACTION_ABSENT,
+    ACTION_WIFI,
+    ACTION_NOWIFI,
+    ACTION_DROPSTARTUP,
+    ACTION_UNPRIORITY,
+    ACTION_LIVEPRIORITY
 };
 
 struct DriveAction
@@ -432,6 +448,41 @@ static BOOL load_actions(VOID)
             action->type = ACTION_ABSENT;
             action->used = TRUE;
             copy_text(action->match, at, sizeof(action->match));
+        }
+        else if (strcmp(kind, "WIFI") == 0)
+        {
+            char *ssid = next_field(&at);
+            char *pass = at;
+
+            if (ssid == NULL || pass == NULL)
+            {
+                say("installdrive: malformed WIFI at line %ld\n", number);
+                Close(file);
+                return FALSE;
+            }
+            action->type = ACTION_WIFI;
+            copy_text(action->match, ssid, sizeof(action->match));
+            copy_text(action->value, pass, sizeof(action->value));
+        }
+        else if (strcmp(kind, "NOWIFI") == 0)
+        {
+            action->type = ACTION_NOWIFI;
+            action->used = TRUE;
+        }
+        else if (strcmp(kind, "UNPRIORITY") == 0 ||
+                 strcmp(kind, "LIVEPRIORITY") == 0)
+        {
+            /* Applied between runs, like DROPSTARTUP. */
+            action->type = (kind[0] == 'U') ? ACTION_UNPRIORITY
+                                            : ACTION_LIVEPRIORITY;
+            action->used = TRUE;
+            copy_text(action->match, at, sizeof(action->match));
+        }
+        else if (strcmp(kind, "DROPSTARTUP") == 0)
+        {
+            /* Applied between runs, after run 1's completeness check. */
+            action->type = ACTION_DROPSTARTUP;
+            action->used = TRUE;
         }
         else
         {
@@ -972,6 +1023,242 @@ static BOOL click(struct Window *window, struct Gadget *gadget)
 }
 
 /*
+ * THE WI-FI WINDOW IS NOT AN INSTALLER PAGE.  InstallWiFi opens it while the
+ * Installer waits in a (run), so it has none of the page gadgets and is found
+ * by its title.  The network name is set in the gadget like an askstring
+ * answer; the passphrase is TYPED, through input.device, because the gadget
+ * keeps it in its edit hook and shows only asterisks -- setting the buffer
+ * would test nothing.  Return in the passphrase field saves.  With no WIFI
+ * action the window is closed, which is Skip; NOWIFI fails the run instead.
+ */
+#define WIFI_TITLE "AmiNetXDuo Wi-Fi network"
+
+static struct Window *find_wifi_window(VOID)
+{
+    struct Screen *screen;
+    struct Window *window, *found = NULL;
+    ULONG          ilock = LockIBase(0);
+
+    for (screen = IntuitionBase->FirstScreen; screen != NULL && found == NULL;
+         screen = screen->NextScreen)
+        for (window = screen->FirstWindow; window != NULL;
+             window = window->NextWindow)
+            if (window->Title != NULL &&
+                strcmp((const char *)window->Title, WIFI_TITLE) == 0)
+            {
+                found = window;
+                break;
+            }
+    UnlockIBase(ilock);
+    return found;
+}
+
+/* The US keymap Amiberry boots with: unshifted and shifted characters by
+   raw key code.  Enough for any printable ASCII passphrase. */
+static const struct { UBYTE code; char plain; char shifted; } us_keys[] =
+{
+    {0x00,'`','~'},{0x01,'1','!'},{0x02,'2','@'},{0x03,'3','#'},
+    {0x04,'4','$'},{0x05,'5','%'},{0x06,'6','^'},{0x07,'7','&'},
+    {0x08,'8','*'},{0x09,'9','('},{0x0a,'0',')'},{0x0b,'-','_'},
+    {0x0c,'=','+'},{0x0d,'\\','|'},{0x10,'q','Q'},{0x11,'w','W'},
+    {0x12,'e','E'},{0x13,'r','R'},{0x14,'t','T'},{0x15,'y','Y'},
+    {0x16,'u','U'},{0x17,'i','I'},{0x18,'o','O'},{0x19,'p','P'},
+    {0x1a,'[','{'},{0x1b,']','}'},{0x20,'a','A'},{0x21,'s','S'},
+    {0x22,'d','D'},{0x23,'f','F'},{0x24,'g','G'},{0x25,'h','H'},
+    {0x26,'j','J'},{0x27,'k','K'},{0x28,'l','L'},{0x29,';',':'},
+    {0x2a,'\'','"'},{0x31,'z','Z'},{0x32,'x','X'},{0x33,'c','C'},
+    {0x34,'v','V'},{0x35,'b','B'},{0x36,'n','N'},{0x37,'m','M'},
+    {0x38,',','<'},{0x39,'.','>'},{0x3a,'/','?'},{0x40,' ',' '},
+    {0x44,'\r','\r'}
+};
+
+static BOOL send_key(struct IOStdReq *io, UBYTE code, UWORD qual)
+{
+    struct InputEvent ie;
+
+    memset(&ie, 0, sizeof(ie));
+    ie.ie_Class     = IECLASS_RAWKEY;
+    ie.ie_Code      = code;
+    ie.ie_Qualifier = qual;
+    io->io_Command = IND_WRITEEVENT;
+    io->io_Data    = &ie;
+    io->io_Length  = sizeof(ie);
+    if (DoIO((struct IORequest *)io) != 0)
+        return FALSE;
+    ie.ie_Code = (UWORD)(code | IECODE_UP_PREFIX);
+    if (DoIO((struct IORequest *)io) != 0)
+        return FALSE;
+    Delay(2);
+    return TRUE;
+}
+
+static BOOL type_text(const char *text)
+{
+    struct MsgPort  *port = CreateMsgPort();
+    struct IOStdReq *io = NULL;
+    BOOL             ok = FALSE;
+
+    if (port != NULL)
+        io = (struct IOStdReq *)CreateIORequest(port, sizeof(*io));
+    if (io != NULL && OpenDevice((STRPTR)"input.device", 0,
+                                 (struct IORequest *)io, 0) == 0)
+    {
+        const char *c;
+
+        ok = TRUE;
+        for (c = text; ok && *c != '\0'; c++)
+        {
+            ULONG k;
+
+            for (k = 0; k < sizeof(us_keys) / sizeof(us_keys[0]); k++)
+                if (us_keys[k].plain == *c || us_keys[k].shifted == *c)
+                    break;
+            if (k == sizeof(us_keys) / sizeof(us_keys[0]))
+            {
+                say("installdrive:   cannot type 0x%lx\n",
+                    (LONG)(UBYTE)*c);
+                ok = FALSE;
+                break;
+            }
+            ok = send_key(io, us_keys[k].code,
+                          (UWORD)(us_keys[k].plain == *c ? 0 :
+                                  IEQUALIFIER_LSHIFT));
+        }
+        CloseDevice((struct IORequest *)io);
+    }
+    if (io != NULL)
+        DeleteIORequest((struct IORequest *)io);
+    if (port != NULL)
+        DeleteMsgPort(port);
+    return ok;
+}
+
+/* A message of any class, posted the way click() posts a GADGETUP. */
+static VOID post_message(struct Window *window, ULONG cls, struct Gadget *gad)
+{
+    struct IntuiMessage *msg = (struct IntuiMessage *)
+        AllocMem(sizeof(struct IntuiMessage), MEMF_PUBLIC | MEMF_CLEAR);
+    LONG spin;
+
+    if (msg == NULL)
+        return;
+    msg->ExecMessage.mn_Node.ln_Type = NT_MESSAGE;
+    msg->ExecMessage.mn_ReplyPort    = reply_port;
+    msg->ExecMessage.mn_Length       = sizeof(struct IntuiMessage);
+    msg->Class       = cls;
+    msg->IAddress    = (APTR)gad;
+    msg->IDCMPWindow = window;
+    PutMsg(window->UserPort, &msg->ExecMessage);
+    for (spin = 0; spin < 50; spin++)
+    {
+        if (reply_port->mp_MsgList.lh_Head->ln_Succ != NULL)
+            break;
+        Delay(2);
+    }
+    drain_replies();
+}
+
+/*
+ * UNPRIORITY: the kept interface file as somebody who copied the example
+ * would have it -- PRIORITY only in comments, and no newline at the end.
+ */
+static BOOL unpriority(const char *path, BOOL live)
+{
+    static char       in[8192];
+    static char       out[8400];
+    static const char note[] = "; PRIORITY -- a note, not a setting\n;PRIORITY=0";
+    static const char lived[] = "; PRIORITY -- a note, not a setting\n;PRIORITY=0\nUNIT=0 PRIORITY=3";
+    const char       *tail = live ? lived : note;
+    LONG              tlen = live ? (LONG)sizeof(lived) - 1 : (LONG)sizeof(note) - 1;
+    BPTR              fh = Open((STRPTR)path, MODE_OLDFILE);
+    LONG              len, i, n = 0;
+    BOOL              bol = TRUE;
+
+    if (fh == 0)
+        return FALSE;
+    len = Read(fh, in, sizeof(in) - 1);
+    Close(fh);
+    if (len < 0)
+        return FALSE;
+    for (i = 0; i < len && n < (LONG)sizeof(out) - tlen - 2; i++)
+    {
+        if (bol && strncmp(in + i, "PRIORITY", 8) == 0)
+            out[n++] = ';';
+        out[n++] = in[i];
+        bol = (in[i] == '\n');
+    }
+    if (n > 0 && out[n - 1] != '\n')
+        out[n++] = '\n';
+    memcpy(out + n, tail, (size_t)tlen);
+    n += tlen;
+    fh = Open((STRPTR)path, MODE_NEWFILE);
+    if (fh == 0)
+        return FALSE;
+    i = Write(fh, out, n);
+    Close(fh);
+    return i == n;
+}
+
+static BOOL actions_dropped_startup(VOID)
+{
+    LONG i;
+
+    for (i = 0; i < action_count; i++)
+        if (actions[i].type == ACTION_DROPSTARTUP)
+            return TRUE;
+    return FALSE;
+}
+
+/* -1 failed, 0 no window, 1 a window was answered. */
+static LONG answer_wifi_window(VOID)
+{
+    struct Window *window = find_wifi_window();
+    struct Gadget *gad, *strings[2] = { NULL, NULL };
+    LONG           i, n = 0;
+
+    if (window == NULL)
+        return 0;
+
+    for (i = 0; i < action_count; i++)
+        if (actions[i].run == active_run && actions[i].type == ACTION_NOWIFI)
+        {
+            say("installdrive: NOWIFI action %ld: the Wi-Fi window opened\n",
+                i + 1);
+            return -1;
+        }
+
+    for (i = 0; i < action_count; i++)
+        if (!actions[i].used && actions[i].run == active_run &&
+            actions[i].type == ACTION_WIFI)
+            break;
+    if (i == action_count)
+    {
+        say("installdrive: Wi-Fi window, no answer for it: Skip\n", 0);
+        post_message(window, IDCMP_CLOSEWINDOW, NULL);
+        return 1;
+    }
+
+    Delay(25);
+    for (gad = window->FirstGadget; gad != NULL && n < 2; gad = gad->NextGadget)
+        if ((gad->GadgetType & GTYP_GTYPEMASK) == GTYP_STRGADGET)
+            strings[n++] = gad;
+    if (n != 2 || !set_string_value(window, strings[0], actions[i].match))
+    {
+        say("installdrive: the Wi-Fi window has no two string gadgets\n", 0);
+        return -1;
+    }
+    say("installdrive: Wi-Fi window: network set, typing the passphrase\n", 0);
+    ActivateWindow(window);
+    Delay(5);
+    ActivateGadget(strings[1], window, NULL);
+    Delay(5);
+    if (!type_text(actions[i].value) || !type_text("\r"))
+        return -1;
+    actions[i].used = TRUE;
+    return 1;
+}
+
+/*
  * One complete Installer run: start it, click Proceed on every page it puts
  * up, and return once its window has been gone for a few polls running.
  */
@@ -1041,6 +1328,20 @@ static BOOL drive_once(LONG run_number, BPTR nil_in, BPTR nil_out)
         struct Window *window;
 
         Delay(POLL_TICKS);
+
+        /* Before the Installer's own window: while this one is up the
+           Installer is inside (run) and must not be clicked. */
+        {
+            LONG wifi = answer_wifi_window();
+
+            if (wifi < 0)
+                return FALSE;
+            if (wifi > 0)
+            {
+                gone = 0;
+                continue;
+            }
+        }
 
         window = find_installer_window(&target);
 
@@ -1245,6 +1546,34 @@ int main(void)
          */
         if (run_number == 1 && DRIVE_RUNS > 1)
         {
+            LONG d;
+
+            for (d = 0; d < action_count; d++)
+                if (actions[d].type == ACTION_DROPSTARTUP)
+                    break;
+            if (d < action_count &&
+                !DeleteFile((STRPTR)"S:Network-Startup"))
+            {
+                say("installdrive: could not delete S:Network-Startup\n", 0);
+                rc = RETURN_FAIL;
+                break;
+            }
+            for (d = 0; d < action_count; d++)
+                if ((actions[d].type == ACTION_UNPRIORITY ||
+                     actions[d].type == ACTION_LIVEPRIORITY) &&
+                    !unpriority(actions[d].match,
+                                actions[d].type == ACTION_LIVEPRIORITY))
+                {
+                    say("installdrive: could not rewrite %s\n",
+                        (LONG)actions[d].match);
+                    rc = RETURN_FAIL;
+                }
+            if (rc != RETURN_OK)
+                break;
+        }
+        if (run_number == 1 && DRIVE_RUNS > 1 &&
+            !(action_count > 0 && actions_dropped_startup()))
+        {
             static const char marker[] =
                 "; user startup policy -- installer must preserve this\n";
             BPTR startup = Open((STRPTR)"S:Network-Startup", MODE_OLDFILE);
@@ -1261,6 +1590,30 @@ int main(void)
                 break;
             }
             Close(startup);
+        }
+        /* The Wi-Fi settings, where run 1 wrote any: a second install
+           must keep them, whatever it is told. */
+        if (run_number == 1 && DRIVE_RUNS > 1)
+        {
+            static const char wifi_marker[] =
+                "# user Wi-Fi settings -- installer must preserve this\n";
+            BPTR prefs = Open((STRPTR)"ENVARC:Sys/Wireless.prefs",
+                              MODE_OLDFILE);
+
+            if (prefs != 0)
+            {
+                if (Seek(prefs, 0, OFFSET_END) < 0 ||
+                    Write(prefs, (APTR)wifi_marker,
+                          sizeof(wifi_marker) - 1) !=
+                        (LONG)(sizeof(wifi_marker) - 1))
+                {
+                    say("installdrive: could not mark Wireless.prefs\n", 0);
+                    rc = RETURN_FAIL;
+                }
+                Close(prefs);
+                if (rc != RETURN_OK)
+                    break;
+            }
         }
     }
 
