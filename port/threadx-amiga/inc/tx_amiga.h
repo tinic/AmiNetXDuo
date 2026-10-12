@@ -18,7 +18,8 @@ extern "C" {
 
 /* Give ThreadX the memory tx_application_define() receives as "first unused
    memory".  Must be called before tx_kernel_enter(); otherwise the port
-   AllocMem()s TX_AMIGA_MEMORY_SIZE bytes itself.  */
+   AllocMem()s TX_AMIGA_MEMORY_SIZE bytes itself. The shared bsdsocket.library
+   supplies no default arena because its application-definition hook is empty. */
 VOID    tx_amiga_set_kernel_memory(VOID *memory, ULONG size);
 
 /* Start ThreadX on a private Exec Task and return once the scheduler is live:

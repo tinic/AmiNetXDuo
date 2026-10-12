@@ -3378,8 +3378,9 @@ esac
 # that name is there": the bytes, against the copy in the archive that was just
 # installed from, because a stale driver of the right name in the right drawer
 # is the exact failure being gated against and it passes every weaker check.
-# The fat stack installs its own drivers, from Devs/Networks/fat.
+# Micro and fat install their own drivers from their profile subdrawers.
 DEVS_ARCHIVE="$UNPACK/AmiNetXDuo/Devs/Networks"
+[ "$WANT_STACK" != micro ] || DEVS_ARCHIVE="$DEVS_ARCHIVE/micro"
 [ "$WANT_STACK" != fat ] || DEVS_ARCHIVE="$DEVS_ARCHIVE/fat"
 ANXNET_ARCHIVE="$DEVS_ARCHIVE/anxnet.device"
 ANXNET_INSTALLED=$(amiga_path "${INST}Devs/Networks/anxnet.device" 2>/dev/null || true)

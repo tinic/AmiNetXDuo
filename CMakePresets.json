@@ -108,6 +108,7 @@
           "value": "OFF"
         },
         "AMINETXDUO_MAX_INTERFACES": "1",
+        "AMINETXDUO_NETDEV_MAX_UNITS": "1",
         "AMINETXDUO_MDNS": {
           "type": "BOOL",
           "value": "OFF"

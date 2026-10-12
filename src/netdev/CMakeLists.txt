@@ -12,6 +12,12 @@
 option(AMINETXDUO_NETDEV_LINK
        "Link DEVS:Networks/anxnet.device and anxgenet.device, the SANA-II drivers" ON)
 
+set(AMINETXDUO_NETDEV_MAX_UNITS "4" CACHE STRING
+    "Hardware units reserved per network device (1..4; micro uses 1)")
+if(NOT AMINETXDUO_NETDEV_MAX_UNITS MATCHES "^[1-4]$")
+    message(FATAL_ERROR "AMINETXDUO_NETDEV_MAX_UNITS must be in 1..4")
+endif()
+
 # THE CORE: the AmigaOS device, the SANA-II command table, the queues, the
 # events, the probe record, the bus accessors and the address helpers.  Every
 # image carries all of it; netdev_roster.h decides at compile time which buses
@@ -86,6 +92,7 @@ function(anxd_add_netdev target name roster)
     set_target_properties(${target} PROPERTIES OUTPUT_NAME "${name}")
     target_compile_definitions(${target} PRIVATE
         ${roster}
+        NETDEV_MAX_UNITS=${AMINETXDUO_NETDEV_MAX_UNITS}
         "NETDEV_DEVICE_NAME=\"${name}\"")
     target_link_options(${target} PRIVATE "-Wl,-u,_netdev_romtag")
     target_link_options(${target} PRIVATE

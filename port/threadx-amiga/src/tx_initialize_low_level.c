@@ -15,6 +15,7 @@
 #define TX_SOURCE_CODE
 
 #include "tx_amiga_internal.h"
+#include "tx_amiga_memory.h"
 
 #include <devices/timer.h>
 #include <exec/interrupts.h>
@@ -49,8 +50,6 @@ ULONG           _tx_amiga_scheduler_signal    = 0UL;
 VOID           *_tx_amiga_timer_task          = (VOID *) 0;
 VOID           *_tx_amiga_adopt_task          = (VOID *) 0;
 ULONG           _tx_amiga_adopt_signal        = 0UL;
-VOID           *_tx_amiga_kernel_memory       = (VOID *) 0;
-ULONG           _tx_amiga_kernel_memory_size  = 0UL;
 
 volatile UINT   _tx_amiga_kernel_up           = TX_FALSE;
 
@@ -61,9 +60,6 @@ volatile UINT   _tx_amiga_kernel_stopping     = TX_FALSE;
 volatile UINT   _tx_amiga_timer_stop          = TX_FALSE;
 volatile ULONG  _tx_amiga_zombies             = 0UL;
 volatile ULONG  _tx_amiga_zombies_live        = 0UL;
-
-/* Set when the port allocated the kernel memory block itself.  */
-static UINT     _tx_amiga_memory_owned        = TX_FALSE;
 
 /* Stack of the tick task; allocated and freed by the port.  */
 static APTR     _tx_amiga_timer_stack         = (APTR) 0;
@@ -217,15 +213,6 @@ VOID _tx_amiga_signal_task(VOID *task, ULONG sigmask)
 
 /* ------------------------------------------------------- initialisation, */
 
-VOID tx_amiga_set_kernel_memory(VOID *memory, ULONG size)
-{
-
-    _tx_amiga_kernel_memory       =  memory;
-    _tx_amiga_kernel_memory_size  =  size;
-    _tx_amiga_memory_owned        =  TX_FALSE;
-}
-
-
 UINT tx_amiga_kernel_running(VOID)
 {
 
@@ -310,26 +297,7 @@ BYTE             sig;
     _tx_amiga_scheduler_task    =  (VOID *) me;
     _tx_amiga_scheduler_signal  =  1UL << ((ULONG) sig);
 
-    /* Reserve the region handed to tx_application_define().  */
-    if (_tx_amiga_kernel_memory == (VOID *) 0)
-    {
-        _tx_amiga_kernel_memory_size =  (ULONG) TX_AMIGA_MEMORY_SIZE;
-        _tx_amiga_kernel_memory =  (VOID *) _tx_amiga_alloc(_tx_amiga_kernel_memory_size,
-                                                     MEMF_PUBLIC | MEMF_CLEAR);
-        if (_tx_amiga_kernel_memory == (VOID *) 0)
-        {
-
-            /* Owning nothing: the flag must stay clear, or the teardown
-               FreeMem()s a NULL block.  */
-            _tx_amiga_kernel_memory_size =  0UL;
-        }
-        else
-        {
-            _tx_amiga_memory_owned =  TX_TRUE;
-        }
-    }
-
-    _tx_initialize_unused_memory =  _tx_amiga_kernel_memory;
+    _tx_amiga_application_memory_init();
 
     /* Create the periodic tick task.  It parks on SIGF_SINGLE until
        _tx_amiga_start_interrupts() lets it go.  */
@@ -1662,14 +1630,7 @@ UINT         status;
         _tx_amiga_timer_stack =  (APTR) 0;
     }
 
-    if ((_tx_amiga_memory_owned != TX_FALSE) &&
-        (_tx_amiga_kernel_memory != (VOID *) 0))
-    {
-        FreeMem(_tx_amiga_kernel_memory, _tx_amiga_kernel_memory_size);
-        _tx_amiga_kernel_memory      =  (VOID *) 0;
-        _tx_amiga_kernel_memory_size =  0UL;
-        _tx_amiga_memory_owned       =  TX_FALSE;
-    }
+    _tx_amiga_application_memory_release();
 
     /* ---- 5. back to the state tx_amiga_kernel_start() expects ------------- */
 
