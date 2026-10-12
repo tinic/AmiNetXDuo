@@ -458,8 +458,10 @@ int nw_iface_device(const char *text, size_t len, char *device, size_t cap,
                 ;
         if (ve > v && is_device && (size_t)(ve - v) < cap)
         {
-            for (k = v; k < ve; k++) *device++ = *k;
-            *device = '\0';
+            char *d = device;   /* from the start: the last DEVICE wins */
+
+            for (k = v; k < ve; k++) *d++ = *k;
+            *d = '\0';
             found = 1;
         }
         else if (ve > v && is_unit && *v >= '0' && *v <= '9')

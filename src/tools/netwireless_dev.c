@@ -101,9 +101,35 @@ LONG nw_dev_open(NwDev *d, const char *device, ULONG unit)
     d->req->ios2_Req.io_Message.mn_ReplyPort = d->port;
     d->req->ios2_BufferManagement = nw_buffer_tags;
 
-    /* As given: OpenDevice() looks for a relative name in DEVS:. */
+    /* As given (a relative name is looked for in DEVS:), then a bare name
+       in DEVS:Networks/, where the installer puts drivers, unless a
+       resident driver of that name refused. */
     err = (LONG)(BYTE)OpenDevice((CONST_STRPTR)device, unit,
                                  (struct IORequest *)d->req, 0);
+    if (err != 0)
+    {
+        char        path[128] = "Networks/";
+        const char *c;
+        ULONG       i = 9;
+        BOOL        bare = TRUE, resident;
+
+        for (c = device; *c != '\0' && i + 1 < sizeof(path); c++)
+        {
+            if (*c == ':' || *c == '/') bare = FALSE;
+            path[i++] = *c;
+        }
+        path[i] = '\0';
+        Forbid();
+        resident = FindName(&SysBase->DeviceList, (CONST_STRPTR)device) != NULL;
+        Permit();
+        if (bare && !resident && *c == '\0')
+        {
+            d->req->ios2_Req.io_Device = NULL;
+            d->req->ios2_Req.io_Unit = NULL;
+            if (OpenDevice((CONST_STRPTR)path, unit, (struct IORequest *)d->req, 0) == 0)
+                err = 0;
+        }
+    }
     if (err != 0)
     {
         d->req->ios2_Req.io_Device = NULL;
@@ -253,6 +279,9 @@ BOOL nw_dev_network(NwDev *d, UBYTE ssid[NW_SSID_MAX], LONG *ssid_len,
             else if (t->ti_Tag == NW_S2INFO_Band)
                 d->net_band5 = t->ti_Data == NW_S2BAND_A;
         }
+        /* A band the driver left out follows from the channel. */
+        if (d->net_band5 < 0 && d->net_channel > 0)
+            d->net_band5 = d->net_channel > 14;
     }
     d->req->ios2_Data = NULL;
     d->req->ios2_StatData = NULL;
