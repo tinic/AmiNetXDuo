@@ -14,7 +14,7 @@
 #                                 [-m core|driver|probe|minimal]
 #                                 [-C] [-M] [-V] [-I] [-z] [-W]
 #                                 [-s yes|invalid]
-#                                 [-w join|keep|keepit|keepitlive|userstart|userwm]
+#                                 [-w join|keep|keepit|keepitlive|userstart|userwm|prism2]
 #                                 [-f roadshow-leave|roadshow-replace|
 #                                     amitcpng-leave|amitcpng-replace]
 #
@@ -54,6 +54,11 @@
 #   userstart S:User-Startup already starts WirelessManager: commented lines.
 #   userwm    a user's C:WirelessManager (with -D: beside a drawer install):
 #             kept, none installed, commented lines, the prefs still written.
+#   prism2    without -e: Cafferkey's prism2.device staged in DEVS:Networks
+#             selects PCMCIA "Prism2 wireless" beside the card, with no PC
+#             Card in the slot.  NetWirelessPrefs SETUP cannot open it, the
+#             Installer falls back to InstallWiFi (answered), and
+#             WirelessManager is started for prism2.device after the card.
 # Without -w, an install that selects no Wi-Fi must leave none of it behind.
 # -a takes an archive as given; without it a release-only defect cannot show.
 # -e replaces the throw-away archive's InstallNetProbe with a fixture naming
@@ -143,7 +148,8 @@ while getopts "b:a:l:p:N:t:T:kHSDgRUEJBIMq:x:f:e:c:m:CVzWs:P:w:" opt; do
         z) STALE_PI_DRIVERS=1; NO_CARD=1; CONFIG_ONLY=1 ;;
         W) SPACES=1 ;;
         s) SNTP_MODE="$OPTARG" ;;
-        w) WIFI_MODE="$OPTARG" ;;
+        w) WIFI_MODE="$OPTARG"
+           [ "$OPTARG" = prism2 ] && CONFIG_ONLY=1 ;;
         *) echo "usage: $0 [-b builddir] [-a archive.lha]" \
                 "[-l NOVICE|AVERAGE|EXPERT] [-p choice] [-N board]" \
                 "[-t seconds] [-T seconds] [-k] [-H] [-S] [-D] [-g] [-R] [-U] [-E]" \
@@ -374,11 +380,14 @@ fi
 
 if [ -n "$WIFI_MODE" ]; then
     case "$WIFI_MODE" in
-        join|keep|keepit|keepitlive|userstart|userwm) ;;
+        join|keep|keepit|keepitlive|userstart|userwm|prism2) ;;
         *) echo "unknown Wi-Fi mode: $WIFI_MODE" >&2; exit 2 ;;
     esac
-    case "$EMU68_FIXTURE" in
-        wifi|both) ;;
+    case "$WIFI_MODE:$EMU68_FIXTURE" in
+        prism2:) ;;
+        prism2:*) echo "-w prism2 takes no -e: the Pi Wi-Fi would win" >&2
+                  exit 2 ;;
+        *:wifi|*:both) ;;
         *) echo "-w needs -e wifi or -e both: only then is the Pi Wi-Fi selected" >&2
            exit 2 ;;
     esac
@@ -934,6 +943,16 @@ esac
 # is inside the Wireless.prefs guard, indented, with the bounded wait.
 WIFI_SEL=0
 case "$EMU68_FIXTURE" in wifi|both) WIFI_SEL=1 ;; esac
+WIFI_IFNAME=wifipi
+WIFI_DRIVER=anxwifipi.device
+# -w prism2: the PC Card beside the board, so started after it.
+if [ "$WIFI_MODE" = prism2 ]; then
+    WIFI_SEL=1
+    WIFI_IFNAME=pcmcia
+    WIFI_DRIVER=prism2.device
+    EXPECTED_SECOND_IF=pcmcia
+    EXPECTED_SECOND_DEVICE=prism2.device
+fi
 WIFI_PRIMARY=0
 [ "$EMU68_FIXTURE" = wifi ] && WIFI_PRIMARY=1
 WIFI_START=0
@@ -942,12 +961,13 @@ if [ "$WIFI_SEL" = 1 ] && { [ "$WIFI_PRIMARY" = 1 ] || [ "$PICK" != micro ]; }; 
 fi
 WIFI_TIMEOUT=30
 CMD_PFX=C:
-WIFI_DEVICE=DEVS:Networks/anxwifipi.device
+WIFI_DEVICE=DEVS:Networks/$WIFI_DRIVER
 if [ "$DRAWER" = 1 ]; then
     CMD_PFX=AmiNetXDuo:C/
-    WIFI_DEVICE=AmiNetXDuo:Devs/Networks/anxwifipi.device
+    [ "$WIFI_MODE" = prism2 ] ||
+        WIFI_DEVICE=AmiNetXDuo:Devs/Networks/anxwifipi.device
 fi
-WIFI_AN_LINE="  ${CMD_PFX}AddNetInterface DEVS:NetInterfaces/wifipi QUIET TIMEOUT=$WIFI_TIMEOUT"
+WIFI_AN_LINE="  ${CMD_PFX}AddNetInterface DEVS:NetInterfaces/$WIFI_IFNAME QUIET TIMEOUT=$WIFI_TIMEOUT"
 if [ "$WIFI_PRIMARY" = 1 ]; then
     EXPECTED_AN_LINE="$WIFI_AN_LINE"
 else
@@ -969,7 +989,7 @@ WIFI_ANSWERED=0
 WM_EXPECT_LIVE=1
 WM_USER_FIXTURE=0
 case "$WIFI_MODE" in
-    join|keepit|keepitlive|userwm) WIFI_ANSWERED=1 ;;
+    join|keepit|keepitlive|userwm|prism2) WIFI_ANSWERED=1 ;;
 esac
 case "$WIFI_MODE" in
     keep|userstart|userwm) WM_EXPECT_LIVE=0 ;;
@@ -1162,6 +1182,15 @@ if [ "$MANUAL_CARD" = 0 ]; then
             exit 2
         }
     fi
+fi
+# -w prism2: the real prism2.device, and no PC Card for it.
+if [ "$WIFI_MODE" = prism2 ]; then
+    _prism2="${AMIGA_ASSETS:-$HOME/amiga-assets}/devs/prism2.device"
+    [ -f "$_prism2" ] || { echo "!! no $_prism2" >&2; exit 2; }
+    mkdir -p "$HD/Devs/Networks"
+    cp "$_prism2" "$HD/Devs/Networks/prism2.device"
+    chmod 755 "$HD/Devs/Networks/prism2.device"
+    echo "==> prism2 fixture: DEVS:Networks/prism2.device staged, no PC Card"
 fi
 # Emu68's own GENET driver, as the Emu68 Imager installs it.  Only its name
 # is read: the run stops after the configuration audit.

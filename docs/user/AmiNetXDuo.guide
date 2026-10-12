@@ -3427,14 +3427,14 @@
                                       created; executing it removes
                                       them
 
-  The Installer adds these when the Pi Wi-Fi is selected, at every user
-  level; WirelessManager goes into the installation's own drawer in that
-  layout. NetWirelessPrefs SETUP lists the networks in range first, and
-  Join there writes the file. When it cannot open the device or is closed
-  without a join, a window asks for the network name and passphrase.
-  Either way the passphrase appears as asterisks and does not reach the
-  installation log. A WirelessManager or Wireless.prefs the Installer did
-  not create is kept as it is.
+  The Installer adds these when the Pi Wi-Fi, or a Prism2 PCMCIA card
+  without it, is selected, at every user level; WirelessManager goes into
+  the installation's own drawer in that layout. NetWirelessPrefs SETUP
+  lists the networks in range first, and Join there writes the file. When
+  it cannot open the device or is closed without a join, a window asks for
+  the network name and passphrase. Either way the passphrase appears as
+  asterisks and does not reach the installation log. A WirelessManager or
+  Wireless.prefs the Installer did not create is kept as it is.
 
   S:Network-Startup starts the Wi-Fi only when ENV:Sys/Wireless.prefs
   exists: WirelessManager first, then the interface, which waits at most

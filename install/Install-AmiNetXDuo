@@ -106,7 +106,7 @@
                  (tackon SRCDIR "C.info") "C.info"))
 
 ; WirelessManager and its licence, in a drawer of their own: C/ is copied
-; wholesale, and these are copied only when the Pi Wi-Fi is selected.
+; wholesale, and these are copied only when the Wi-Fi is selected.
 (set S_WIRELESS (if (> (strlen SRCDIR) 0) (tackon SRCDIR "Wireless") "Wireless"))
 (set S_WM    (tackon S_WIRELESS "WirelessManager"))
 (set S_WMLIC (tackon S_WIRELESS "WirelessManager-LICENSE"))
@@ -366,7 +366,8 @@
        "the previous copy can be put back by hand."))
 
 (set H_WIFI
-  (cat "WirelessManager joins the Wi-Fi network for anxwifipi.device.  It "
+  (cat "WirelessManager joins the Wi-Fi network for anxwifipi.device, or "
+       "for prism2.device when a Prism2 PCMCIA card is selected instead.  It "
        "reads the network from ENV:Sys/Wireless.prefs, which AmigaOS copies "
        "from ENVARC:Sys/Wireless.prefs at every boot.\n\n"
        "NetWirelessPrefs opens first: it lists the networks in range, and "
@@ -379,7 +380,8 @@
        "is not written to the installation log.  An empty passphrase "
        "selects an open network.  Skip writes no file, and the Wi-Fi "
        "interface does not start until ENVARC:Sys/Wireless.prefs exists.\n\n"
-       "The window appears only when the Pi Wi-Fi is selected and there is "
+       "The window appears only when the Pi Wi-Fi or a Prism2 PCMCIA card is "
+       "selected and there is "
        "no Wireless.prefs.  An existing one is never replaced.  The Manual "
        "in Aminet's driver/net/prism2v2 describes the file, including hidden "
        "networks, WEP and several networks in one file."))
@@ -756,8 +758,11 @@
             (if WARN_DRIVER
               (message (F_NODEV DEV_NAME) (help H_CARD))))))))
 
-  ; WirelessManager opens the driver the Wi-Fi interface file names.
-  (if (= CARD_INDEX 11) (set WIFI_DEV DEV_WRITE))
+  ; WirelessManager opens the driver the Wi-Fi interface file names: the
+  ; Pi Wi-Fi's, or a Prism2 PCMCIA card's when the Pi Wi-Fi is not selected.
+  (if (OR (= CARD_INDEX 11)
+          (AND (= CARD_INDEX 10) (= PCM 4) (= (bitand CARD_MASK 2048) 0)))
+      (set WIFI_DEV DEV_WRITE))
 )
 
 ; ==========================================================================
@@ -1469,8 +1474,8 @@
 (set PCM_OTHER_DEV "mycard.device")
 (set PCM 0)
 
-; The Pi Wi-Fi.  WIFI_SEL: it is selected, or a kept definition names
-; anxwifipi.device.  WIFI_PRIMARY: it is the interface S:Network-Startup
+; The Wi-Fi: the Pi Wi-Fi, or a Prism2 PCMCIA card without it.  WIFI_SEL:
+; it is selected, or a kept definition names anxwifipi.device.  WIFI_PRIMARY: it is the interface S:Network-Startup
 ; starts first.  WIFI_START: S:Network-Startup starts it too, after the
 ; primary -- every profile but micro, which brings up one interface.
 ; WIFI_DEV is what its interface file names.
@@ -1804,6 +1809,13 @@
     ; --- the Wi-Fi ---------------------------------------------------
     (set WIFI_SEL (if (> (bitand CARD_MASK 2048) 0) 1 0))
     (set WIFI_PRIMARY (if (= PRIMARY_INDEX 11) 1 0))
+    ; A Prism2 PCMCIA card is the Wi-Fi when the Pi Wi-Fi is not selected.
+    (if (AND (= WIFI_SEL 0) (> (bitand CARD_MASK 1024) 0) (= PCM 4))
+      (
+        (set WIFI_SEL 1)
+        (set WIFI_IF "pcmcia")
+        (set WIFI_PRIMARY (if (= PRIMARY_INDEX 10) 1 0))
+      ))
     (if WIFI_PRIMARY
       (
         (set WIFI_IF IFNAME)
@@ -2567,7 +2579,7 @@
       (noposition)
       (optional "force")))
 
-; WirelessManager, for the Pi Wi-Fi only, and never over one the user had
+; WirelessManager, for the Wi-Fi only, and never over one the user had
 ; (WM_USER): that one may be the version another Wi-Fi driver on this machine
 ; was set up with.  Over our own copy, a plain copy: nothing of anybody
 ; else's is replaced, so nothing is staged.
@@ -3016,7 +3028,7 @@
       (optional "nofail")))
 
 ; WirelessManager's licence goes with every copy of the binary, and with
-; the binary's selection: the Pi Wi-Fi.  Installed here even when an
+; the binary's selection: the Wi-Fi.  Installed here even when an
 ; existing C:WirelessManager was kept, because the archive's copy is what
 ; this drawer documents.
 (if WIFI_SEL
@@ -3204,7 +3216,7 @@
     (if WIFI_SEL
         (set NS_WIFI_LATER
           (cat ";\n"
-               "; The Pi Wi-Fi is defined as " WIFI_IF " and is not started: this\n"
+               "; The Wi-Fi is defined as " WIFI_IF " and is not started: this\n"
                "; stack brings up one interface.  To use the Wi-Fi instead,\n"
                "; comment out the line above and remove the first semicolon\n"
                "; from each line below.\n"
