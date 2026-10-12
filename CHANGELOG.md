@@ -5,6 +5,8 @@ Add new entries under `Unreleased`; published release sections are history.
 
 ## Unreleased
 
+- New NetWireless commodity: Wi-Fi state and signal as an AppIcon, a Tools menu item and ENV:WiFi; the signal is read only while connected.
+
 - New NetWirelessPrefs: Wi-Fi networks in range, joining one through WirelessManager, and the link's state; Shell forms LIST, STATUS and JOIN.
 
 - Installer: a PCMCIA NE2000 card with a manufacturer ID (DFE-670TXD and

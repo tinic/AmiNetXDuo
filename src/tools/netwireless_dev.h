@@ -37,6 +37,8 @@
 #define NW_S2_GETNETWORKINFO    0xc014
 
 #define NW_S2BAND_A             0           /* 5 GHz */
+#define NW_S2BAND_B             1
+#define NW_S2BAND_G             2
 
 /* Cafferkey's sana2.h additions; anxwifipi.device reports both. */
 #define NW_S2EVENT_CONNECT      (1L << 9)
@@ -65,6 +67,8 @@ typedef struct NwDev
     BOOL               event_busy;
     struct TagItem     scan_tags[2];
     UBYTE              scan_ssid[NW_SSID_MAX + 1];
+    LONG               net_channel;     /* from nw_dev_network, -1: absent */
+    LONG               net_band5;       /* 1: 5 GHz, 0: 2.4 GHz, -1        */
 } NwDev;
 
 #define NW_IFACE_MAX            8192
@@ -90,7 +94,8 @@ BOOL nw_dev_bring_up(NwDev *d);
    the state the refusal names. */
 LONG nw_dev_signal(NwDev *d, LONG *signal, LONG *noise);
 
-/* The SSID and BSSID of the associated network (exec V39: the driver
+/* The SSID and BSSID of the associated network, and d->net_channel and
+   d->net_band5 where the driver reports them (exec V39: the driver
    allocates the answer from a pool of the caller's).  *ssid_len -1 when
    there is none. */
 BOOL nw_dev_network(NwDev *d, UBYTE ssid[NW_SSID_MAX], LONG *ssid_len,

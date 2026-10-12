@@ -123,7 +123,7 @@ It puts
 
      bsdsocket.library, usergroup.library,
      tls.library                               into LIBS:
-     NetSetup, NetPrefs, NetMeter, NetWirelessPrefs,
+     NetSetup, NetPrefs, NetMeter, NetWireless, NetWirelessPrefs,
      AddNetInterface, RemoveNetInterface,
      ConfigureNetInterface, Online, Offline,
      ShowNetStatus, ShowNetServices, GetNetStatus,
@@ -335,7 +335,7 @@ UNINSTALLING
      Delete C:NetSetup C:NetPrefs C:AddNetInterface C:RemoveNetInterface
      Delete SYS:Prefs/NetPrefs SYS:Prefs/NetPrefs.info
      Delete C:NetMeter SYS:Utilities/NetMeter SYS:Utilities/NetMeter.info
-     Delete C:NetWirelessPrefs
+     Delete C:NetWireless C:NetWirelessPrefs
      Delete C:ConfigureNetInterface C:Online C:Offline
      Delete C:ShowNetStatus C:ShowNetServices C:GetNetStatus
      Delete C:CheckNetConfig C:CheckNetDevice C:NetDevStats C:NetShutdown
