@@ -68,6 +68,9 @@ typedef struct WsDevice
     BOOL          level;                /* prism2.device: events and signal
                                            answered from the state         */
     UBYTE         ap;                   /* the access point's last byte    */
+    BOOL          prism;                /* prism2.device: signal and network
+                                           info answered whenever online   */
+    BOOL          bad_key;              /* associates, never comes up       */
     char          ssid[33];             /* what S2_SETOPTIONS joined       */
     APTR          assoc;                /* the request that joined it      */
     ULONG         n_setoptions;
@@ -188,7 +191,7 @@ static VOID ws_network_info(struct IOSana2Req *io)
     CopyMem(ws->ssid, ssid, 33);
     CopyMem((APTR)ws_mac, bssid, 6);
     bssid[5] = (UBYTE)(bssid[5] + ws->ap);
-    if (ws->level)
+    if (ws->prism)
     {
         /* prism2.device names no network: the BSSID, an ignored slot and
            the WPA element, as its GetNetworkInfo() lays them out. */
@@ -245,12 +248,15 @@ static VOID ws_begin_io(register struct Device *dev __asm("a6"),
         {
             ULONG preset = ws->online ? S2EVENT_ONLINE : S2EVENT_OFFLINE;
 
+            /* prism2.device 2.9 answers its whole state at once, with
+               LINKUP (1 << 16) once keyed; an older one only the online
+               bit, and takes no LINKUP or LINKDOWN. */
             if (ws->level)
-                preset |= ws->connected ? S2EVENT_CONNECT : S2EVENT_DISCONNECT;
+                preset |= (ws->connected ? S2EVENT_CONNECT : S2EVENT_DISCONNECT) |
+                          (ws->connected && !ws->bad_key ? 0x10000UL : 0x20000UL);
 
             ws->n_event++;
-            /* prism2.device also takes LINKUP and LINKDOWN (1 << 11, 12). */
-            if (io->ios2_WireError & ~(WS_EVENTS | (ws->level ? 0x1800UL : 0)))
+            if (io->ios2_WireError & ~(WS_EVENTS | (ws->level ? 0x30000UL : 0)))
                 ws_reply(io, S2ERR_NOT_SUPPORTED, S2WERR_BAD_EVENT);
             else if (io->ios2_WireError & preset)
             {
@@ -265,7 +271,7 @@ static VOID ws_begin_io(register struct Device *dev __asm("a6"),
             ws->n_signal++;
             if (!ws->online)
                 ws_reply(io, S2ERR_OUTOFSERVICE, S2WERR_UNIT_OFFLINE);
-            else if (!ws->connected && !ws->level)
+            else if (!ws->connected && !ws->prism)
                 ws_reply(io, S2ERR_OUTOFSERVICE, S2WERR_NOT_CONFIGURED);
             else
             {
@@ -279,7 +285,7 @@ static VOID ws_begin_io(register struct Device *dev __asm("a6"),
             ws->n_info++;
             if (!ws->online)
                 ws_reply(io, S2ERR_OUTOFSERVICE, S2WERR_UNIT_OFFLINE);
-            else if (!ws->connected && !ws->level)
+            else if (!ws->connected && !ws->prism)
                 ws_reply(io, S2ERR_OUTOFSERVICE, S2WERR_NOT_CONFIGURED);
             else
                 ws_network_info(io);
@@ -469,7 +475,7 @@ static VOID ws_replier(VOID)
     ws_alive = FALSE;
 }
 
-static BOOL ws_install(const char *name, BOOL level)
+static BOOL ws_install(const char *name, BOOL prism, BOOL level)
 {
     WsDevice *d = (WsDevice *)MakeLibrary((APTR)ws_vectors, NULL, NULL,
                                           sizeof(WsDevice), (BPTR)0);
@@ -478,6 +484,7 @@ static BOOL ws_install(const char *name, BOOL level)
     ws_new_list(&d->events);
     d->dd.dd_Library.lib_Node.ln_Type = NT_DEVICE;
     d->dd.dd_Library.lib_Node.ln_Name = (char *)name;
+    d->prism = prism;
     d->level = level;
     ws_stop = FALSE;
     d->dd.dd_Library.lib_Flags = LIBF_SUMUSED | LIBF_CHANGED;
@@ -700,7 +707,7 @@ int main(void)
     LONG        rc;
     const char *a = (const char *)GetArgStr();
 
-    if (!ws_install(ws_name, FALSE))
+    if (!ws_install(ws_name, FALSE, FALSE))
     {
         Printf((CONST_STRPTR)"could not make %s\n0 checks, 1 failures\n", (LONG)WS_NAME);
         return RETURN_FAIL;
@@ -882,7 +889,7 @@ int main(void)
     check(ws->n_scan_abort == 0, "no running scan was aborted (wifistub)");
     check(ws->dd.dd_Library.lib_OpenCnt == 0, "every opener closed (wifistub)");
     ws_remove();
-    if (!ws_install("prism2.device", TRUE))
+    if (!ws_install("prism2.device", TRUE, TRUE))
     {
         Printf((CONST_STRPTR)"could not make prism2.device\n");
         failures++;
@@ -914,6 +921,12 @@ int main(void)
         rc = run(PREFS_P2 " JOIN=Home");
         check(rc == 0 && has("Connected."), "prism2: JOIN waits for the new association");
         stop_wm();
+        ws->bad_key = TRUE;
+        rc = run(PREFS_P2 " JOIN=Home");
+        check(rc == RETURN_WARN && has("Not connected"),
+              "prism2: associated with a wrong key is not joined");
+        stop_wm();
+        ws->bad_key = FALSE;
 
         /* The commodity started on an unassociated card shows that from the
            first picture, and its requests do not spin. */
@@ -943,9 +956,71 @@ int main(void)
         Delay(25);
     }
 
+    /* prism2.device before 2.9: only the online bit at once, CONNECT and
+       DISCONNECT on a change. */
+    ws_remove();
+    if (!ws_install("prism2.device", TRUE, FALSE))
+    {
+        Printf((CONST_STRPTR)"could not make prism2.device\n");
+        failures++;
+    }
+    else
+    {
+        BPTR  in, o;
+        ULONG polls, events;
+
+        ws->configured = ws->online = TRUE;
+        ws->connected = FALSE;
+        ws->signal = -61;
+        rc = run("DH0:NetWirelessPrefs STATUS");
+        check(rc == RETURN_WARN && has("does not say whether it is associated"),
+              "old prism2: online, never connected from the signal alone");
+        in = Open((CONST_STRPTR)"NIL:", MODE_OLDFILE);
+        o = Open((CONST_STRPTR)"NIL:", MODE_NEWFILE);
+        SystemTags((CONST_STRPTR)"DH0:NetWireless INTERVAL=1", SYS_Input, (ULONG)in,
+                   SYS_Output, (ULONG)o, SYS_Asynch, TRUE, TAG_DONE);
+        Delay(100);
+        check(env_is("Online"), "old prism2: the commodity says online");
+        polls = ws->n_signal;
+        events = ws->n_event;
+        Delay(150);
+        check(ws->n_signal == polls && ws->n_event == events,
+              "old prism2: nothing polled, no event spin");
+        ws->connected = TRUE;
+        ws_report(S2EVENT_CONNECT);
+        Delay(50);
+        check(env_is("Wi-Fi 3/4"), "old prism2: CONNECT seen");
+        ws->connected = FALSE;
+        ws_report(S2EVENT_DISCONNECT);
+        Delay(50);
+        check(env_is("Not connected"), "old prism2: DISCONNECT seen");
+        stop_named("NetWireless");
+        Delay(25);
+    }
+
+    /* A self-contained installation: AmiNetXDuo:Devs/NetInterfaces is the
+       drawer the stack reads, and it is the one searched. */
+    DeleteFile((CONST_STRPTR)"DEVS:NetInterfaces/wifi0");
+    {
+        BPTR lock = Lock((CONST_STRPTR)"DH0:anxd", ACCESS_READ);
+
+        if (lock != (BPTR)0 && AssignLock((CONST_STRPTR)"AmiNetXDuo", lock))
+        {
+            ws->connected = TRUE;
+            rc = run("DH0:NetWirelessPrefs STATUS");
+            check(rc != RETURN_ERROR && has("prism2.device, unit 0"),
+                  "drawer layout: the interface in AmiNetXDuo:Devs is found");
+            AssignLock((CONST_STRPTR)"AmiNetXDuo", (BPTR)0);
+        }
+        else
+        {
+            if (lock != (BPTR)0) UnLock(lock);
+            check(FALSE, "drawer layout: AmiNetXDuo: assigned");
+        }
+    }
+
     /* No interface file names a Wi-Fi driver: the Pi driver is tried, and
        its absence is said plainly. */
-    DeleteFile((CONST_STRPTR)"DEVS:NetInterfaces/wifi0");
     rc = run("DH0:NetWirelessPrefs STATUS");
     check(rc == RETURN_ERROR && has("anxwifipi.device"),
           "nothing found: anxwifipi.device, refused with its name");

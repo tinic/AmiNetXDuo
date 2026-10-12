@@ -79,7 +79,6 @@ static struct
     BOOL                want_menu;
     BOOL                offline;            /* the event mask's online bit  */
     LONG                assoc;              /* -1 unknown, from events      */
-    BOOL                reliable;           /* signal says "not associated" */
     char                envbuf[24];
 
     struct MsgPort     *cxport, *appport, *tport;
@@ -220,7 +219,7 @@ static VOID nw_show(VOID)
 
         args[0] = (ULONG)nw.label;
         args[1] = (ULONG)nw.bars;
-        nw_format(env, words[nw.icon], args);
+        nw_format(env, nw.link == NW_LINK_ONLINE ? "Online" : words[nw.icon], args);
     }
     (VOID)SetVar((CONST_STRPTR)nw.envvar, (CONST_STRPTR)env, -1, GVF_GLOBAL_ONLY);
 }
@@ -268,15 +267,17 @@ static VOID nw_refresh(BOOL event)
     UBYTE ssid[NW_SSID_MAX], bssid[6];
     char  label[NW_SSID_MAX + 1];
     BOOL  was_up = nw.link == NW_LINK_UP;
+    BOOL  was_online = nw.link == NW_LINK_ONLINE;
     int   i;
 
     nw.link = nw.dev_open ? nw_dev_signal(&nw.dev, &signal, &noise) : NW_LINK_NODEV;
     /* A unit that refuses the signal when not associated (anxwifipi.device)
        says so itself; for one that answers whenever online (prism2.device)
-       the events say. */
-    if (nw.link == NW_LINK_DOWN) nw.reliable = TRUE;
-    if (nw.link == NW_LINK_UP && nw.assoc == 0 && !nw.reliable)
-        nw.link = NW_LINK_DOWN;
+       the events say, and before they have said, it is online and no
+       more. */
+    if (nw.link == NW_LINK_UP && !nw.dev.signal_says)
+        nw.link = nw.assoc == 1 ? NW_LINK_UP :
+                  nw.assoc == 0 ? NW_LINK_DOWN : NW_LINK_ONLINE;
     tool_copy_string(label, sizeof(label), "Wi-Fi");
     switch (nw.link)
     {
@@ -288,7 +289,8 @@ static VOID nw_refresh(BOOL event)
             else if (nw_dev_network(&nw.dev, ssid, &len, bssid) && len > 0)
                 nw_ssid_text(ssid, (int)len, label);
             break;
-        case NW_LINK_DOWN:  icon = NW_ICON_JOINING; break;
+        case NW_LINK_DOWN:
+        case NW_LINK_ONLINE: icon = NW_ICON_JOINING; break;
         case NW_LINK_OFF:   icon = NW_ICON_OFF; break;
         case NW_LINK_NODEV: icon = NW_ICON_NODEV; break;
         default:            icon = NW_ICON_ERROR; break;
@@ -296,7 +298,8 @@ static VOID nw_refresh(BOOL event)
     /* Drawn and written only when the picture or the label changes. */
     for (i = 0; label[i] == nw.label[i] && label[i] != '\0'; i++)
         ;
-    if (icon != nw.icon || label[i] != nw.label[i] || nw.bars != bars)
+    if (icon != nw.icon || label[i] != nw.label[i] || nw.bars != bars ||
+        (was_online != (nw.link == NW_LINK_ONLINE)))
     {
         nw.icon = icon;
         nw.bars = bars;
@@ -323,8 +326,8 @@ static VOID nw_event_arm(VOID)
        every bit that is true at once, so only the change from what it is
        is asked; unknown, both, and it says which. */
     assoc = NW_S2EVENT_CONNECT | NW_S2EVENT_DISCONNECT;
-    if (!nw.reliable && nw.assoc == 1) assoc = NW_S2EVENT_DISCONNECT;
-    if (!nw.reliable && nw.assoc == 0) assoc = NW_S2EVENT_CONNECT;
+    if (!nw.dev.signal_says && nw.assoc == 1) assoc = NW_S2EVENT_DISCONNECT;
+    if (!nw.dev.signal_says && nw.assoc == 0) assoc = NW_S2EVENT_CONNECT;
     (VOID)nw_dev_event_arm(&nw.dev, nw.offline ? S2EVENT_ONLINE
                                                : (S2EVENT_OFFLINE | assoc));
 }
