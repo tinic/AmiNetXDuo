@@ -5,7 +5,11 @@ Add new entries under `Unreleased`; published release sections are history.
 
 ## Unreleased
 
+- NetWireless and NetWirelessPrefs show "Wi-Fi off" after Disconnect, not the network that was connected.
 - Installer: a Wi-Fi started after another interface starts in the background, so the boot does not wait for it.
+
+- Installer: a first installation starts the network in the background and the last page states whether it came up.
+- GetNetStatus: another stack's bsdsocket.library in memory returns 10, with or without its port.
 
 - Installer: another stack's libraries, same-named commands and replaced
   configuration are kept in the AmiNetXDuo drawer's Backup.

@@ -404,7 +404,7 @@ fi
 if [ "$MANUAL_CARD" = 1 ]; then
     [ -z "$CANCEL_MODE" ] && [ -z "$MISSING_MODE" ] &&
     [ -z "$FOREIGN_MODE" ] && [ -z "$EMU68_FIXTURE" ] &&
-    [ "$DRAWER" = 0 ] && [ "$RERUN" = 0 ] && [ "$RECONFIGURE" = 0 ] &&
+    [ "$RERUN" = 0 ] && [ "$RECONFIGURE" = 0 ] &&
     [ "$NO_CARD" = 0 ] || {
         echo "-M cannot be combined with another installer fixture" >&2
         exit 2
@@ -923,7 +923,7 @@ build_driver() {
            -DDRIVE_PICK_SKIP="$skip" -DDRIVE_PAGE_PAUSE="$page_pause" \
            -DDRIVE_PAUSE_OPTIONS="$pause_options" \
            -DDRIVE_ARCHIVE_DRAWER="\"$UNPACK_AMIGA/AmiNetXDuo\"" -I"$NDK" \
-           ${UNINSTALL_DEF:+"$UNINSTALL_DEF"} \
+           ${UNINSTALL_DEF:+"$UNINSTALL_DEF"} ${NETCHECK_DEF:+"$NETCHECK_DEF"} \
            -o "$out" "$ROOT/install/test/installdrive.c" || exit 2
 }
 
@@ -1245,8 +1245,27 @@ DRIVER="$ROOT/build/installdrive-$TAG-$LEVEL"
 UNINSTALL_DEF=""
 [ "$UNINSTALL" = 0 ] ||
     UNINSTALL_DEF='-DDRIVE_UNINSTALL="SYS:AmiNetXDuo/Uninstall-AmiNetXDuo"'
+# A first installation with a board on the network starts the network: the
+# hardware-discovery runs, whose install boot has the board.  A drawer
+# installation does not start it (NETCHECK_WANT=down).
+NETCHECK=0
+NETCHECK_DEF=""
+NETCHECK_WANT=up
+# The drawer arm installs twice; neither run starts the network.
+if [ "$MANUAL_CARD" = 1 ] && { [ "$DRIVE_RUNS" = 1 ] || [ "$DRAWER" = 1 ]; } &&
+   [ "$UNINSTALL" = 0 ] &&
+   [ "$NO_BOOT" = 0 ] && [ "$STATIC" = 0 ]; then
+    NETCHECK=1
+    # GetNetStatus where this layout puts it.
+    NETCHECK_DEF='-DDRIVE_NETCHECK="C:GetNetStatus"'
+    if [ "$DRAWER" = 1 ]; then
+        NETCHECK_WANT=down
+        NETCHECK_DEF='-DDRIVE_NETCHECK="SYS:AmiNetXDuo/C/GetNetStatus"'
+    fi
+fi
 build_driver "$DRIVER" "$DRIVE_RUNS" "$YES_LABEL" "$PICK_SPEC"
 UNINSTALL_DEF=""
+NETCHECK_DEF=""
 
 rm -rf "$HD"
 rm -rf "$WORK"
@@ -2603,6 +2622,19 @@ echo "  what the installer put on a real Workbench"
 echo "============================================================"
 
 fail=0
+if [ "$NETCHECK" = 1 ]; then
+    _net=$(sed -n 's/^installdrive: netcheck //p' "$HD/installdrive.txt" 2>/dev/null)
+    echo "install_netcheck=${_net:-none} want=$NETCHECK_WANT"
+    if [ "$NETCHECK_WANT" = up ] && [ "$_net" = 0 ]; then
+        echo "  ok      the first installation left the network running"
+    elif [ "$NETCHECK_WANT" = down ] && [ "$_net" = 5 ]; then
+        echo "  ok      a drawer installation did not start the network"
+    else
+        echo "!! network after the installation: netcheck=${_net:-none}, want $NETCHECK_WANT"
+        fail=1
+    fi
+fi
+
 
 # A populated second volume is present in every scenario because Installer's
 # own default otherwise preferred Work:.  AmiNetXDuo must still land under

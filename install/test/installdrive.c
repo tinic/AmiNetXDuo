@@ -1732,6 +1732,18 @@ int main(void)
                           "DH0:uninstall-record-log.txt QUIET", NULL);
 #endif
 
+#ifdef DRIVE_NETCHECK
+    /* Whether the installation left the network running: an interface and a
+       default route, which only an AddNetInterface run this boot gives. */
+    {
+        LONG net = SystemTagList((STRPTR)
+                       DRIVE_NETCHECK " CHECK=INTERFACES,DEFAULTROUTE QUIET",
+                       NULL);
+
+        say("installdrive: netcheck %ld\n", net);
+    }
+#endif
+
     say("installdrive: %ld pages driven in total\n", clicks);
     /*
      * How many yes/no pages went past.  It is what tells "DRIVE_YES_LABEL did
