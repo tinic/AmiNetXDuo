@@ -363,14 +363,17 @@ Echo >DH0:.done "$RC"
 EOF
         ;;
     icons)
-        # C.info is snapped at 62,146 (layout-icons.py): its middle.
-        cat <<'EOF'
+        # 3.1 puts the left-out C.info at its snapshot, 62,146
+        # (layout-icons.py); 3.2 lines left-out icons up at the left.
+        local xy="X 90 Y 153"
+        [ "$OSVER" = 32 ] && xy="X 38 Y 22"
+        cat <<EOF
 FailAt 9999
 C:Wait 6
-C:WinClick "Workbench" X 90 Y 153 TIMES 2 >DH0:icons.txt
+C:WinClick "Workbench" $xy TIMES 2 >DH0:icons.txt
 C:Wait 4
 C:wbgrab TO DH0:icons.pfs >>DH0:icons.txt
-Echo >DH0:.done "$RC"
+Echo >DH0:.done "\$RC"
 EOF
         ;;
     *)
