@@ -19,6 +19,7 @@ JOBS="${AMINETXDUO_CI_JOBS:-$( (command -v nproc >/dev/null && nproc) || sysctl 
 # The configurations that must all build.  AMINETXDUO_IPV6, AMINETXDUO_TLS and
 # AMINETXDUO_CRYPTO68K_ASM each change the tree, and each has broken while the
 # others built.  `default` and `minimal` are the two the archive ships.
+# Pull requests build only PR_CROSS_ARMS below; push to main, schedule and dispatch build all.
 CROSS_CONFIGS=(
     "default:"
     # Coverage only.  `default` is the shipping arm and dist/make-dist.sh
@@ -191,6 +192,14 @@ CROSS_CONFIGS=(
     # once, so an arm of its own would prove nothing this one does not.
     "pathswap:-DAMINETXDUO_NET68K_CHECKSUM=OFF -DAMINETXDUO_NXCACHE=OFF -DAMINETXDUO_IP_ID_RANDOMIZATION=ON -DAMINETXDUO_HOT_O2=OFF -DAMINETXDUO_RX_DIRECT_COMPLETE=ON -DAMINETXDUO_TX_LAZY_COLLECT=OFF -DAMINETXDUO_TCP_CORK=ON"
 )
+
+# The pull-request subset: what ships.  `default` is built by the tier1 job;
+# fat, minimal and micro are the other archive drawers; zz9000 is the shipped
+# ZZ9000 driver.  `symbols` is here because check-hot-calls.sh answers on no
+# other arm (it skips LTO=OFF, instrumented and stripped images), and it is a
+# regression gate on the shipped image, so it has to see every change.  The
+# option-coverage arms run on push to main, the schedule and dispatch.
+PR_CROSS_ARMS=(fat minimal micro zz9000 symbols)
 
 # WHAT THE HOST STAGES BUILD IS NOT WRITTEN DOWN HERE ANY MORE.
 #
@@ -3515,10 +3524,27 @@ stage_survey() {
 # hand-written copy.  Keep the two deliberately unhosted entries out of the
 # hosted option matrix: default is built by tier1 and cpu68060 is the known
 # toolchain failure recorded by check-ci-arm-coverage.sh.
+# `--list-cross pr` narrows it to PR_CROSS_ARMS, each of which must be declared.
 if [ "${1:-}" = "--list-cross" ]; then
+    case "${2:-}" in
+        '') ;;
+        pr)
+            for want in "${PR_CROSS_ARMS[@]}"; do
+                found=0
+                for entry in "${CROSS_CONFIGS[@]}"; do
+                    [ "${entry%%:*}" = "$want" ] && found=1 && break
+                done
+                [ "$found" = 1 ] || {
+                    echo "list_cross=FAIL pr_arm_undeclared=$want" >&2; exit 1; }
+            done ;;
+        *) echo "list_cross=FAIL unknown_set=$2" >&2; exit 2 ;;
+    esac
     for entry in "${CROSS_CONFIGS[@]}"; do
         name="${entry%%:*}"
         case "$name" in default|cpu68060) continue ;; esac
+        if [ "${2:-}" = pr ]; then
+            case " ${PR_CROSS_ARMS[*]} " in *" $name "*) ;; *) continue ;; esac
+        fi
         printf '%s\n' "$name"
     done
     exit 0
