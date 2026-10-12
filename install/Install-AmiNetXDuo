@@ -500,13 +500,18 @@
        "To start this interface now:\n\n"
        "    %sAddNetInterface DEVS:NetInterfaces/%s\n"))
 
-; No %s in these two: the network was started at the end of this run.
+; No %s in these three: the network was started at the end of this run,
+; or another stack was running and it was not.
 (set F_START_NOW
   "It is running now, and starts by itself at every boot.\n")
 
 (set F_START_TRIED
-  (cat "It was started, and has no default route yet.  ShowNetStatus says "
-       "why.  It starts by itself at every boot.\n"))
+  (cat "It was started and did not come up within 40 seconds.  It starts by "
+       "itself at every boot.\n"))
+
+(set F_START_OTHER
+  (cat "Another network stack is running, so AmiNetXDuo was not started.  "
+       "Reboot to start it; it starts by itself at every boot.\n"))
 
 (set F_HTTPD
   (cat "\nFrom the next reboot, httpd serves every mounted volume on port %ld, with a file "
@@ -3814,30 +3819,40 @@
 ;  9.  Done
 ; ==========================================================================
 
-; START IT NOW on a first installation: with no bsdsocket.library before
-; this run, no other stack can be resident to clash with this one.  The
-; startup file this run wrote is what starts it, so the Wi-Fi and sntp come
-; up as they will at boot.  GetNetStatus says whether an interface and a
-; default route came of it; when not, the last page says how to start it.
+; START IT NOW on a first installation: with no bsdsocket.library in LIBS:
+; before this run, the startup file this run wrote starts the network, so
+; the Wi-Fi and sntp come up as they will at boot.  In the background: the
+; Installer waits for no driver, and polls GetNetStatus every 2 seconds for
+; an interface and a default route, for at most 40 seconds.
 (set NET_TRIED 0)
 (set NET_UP 0)
-(if (AND DO_STARTUP (= KEEP_NETSTART 0) (= OLD_BSD 0) (= DRAWER_LAYOUT 0)
-         (= @pretend 0))
-  ; 5 is "installed, not running".  AmiTCP and Miami make bsdsocket.library
-  ; from their own drawers; with one of them running GetNetStatus says 10,
-  ; and nothing is started over it.
-  (if (= 5 (run ("%sGetNetStatus QUIET" C_PREFIX) (quiet) (safe)))
-    (
-      (working "Starting the network")
-      (run "Execute S:Network-Startup"
-           (prompt "Starting the network")
-           (help   "S:Network-Startup, the file that starts it at every boot."))
-      (set NET_TRIED 1)
-      (if (= 0 (run ("%sGetNetStatus CHECK=INTERFACES,DEFAULTROUTE QUIET"
-                     C_PREFIX)
-                    (quiet)))
-          (set NET_UP 1))
-    )))
+(set NET_OTHER 0)
+(if (AND DO_STARTUP (= KEEP_NETSTART 0) (= @pretend 0))
+  (
+    ; 5 is "not running".  10 is another stack in memory: one replaced in
+    ; LIBS: by this run, or AmiTCP or Miami from their own drawers, with or
+    ; without its port.  The last page then says to reboot.
+    (set NET_RC (run ("%sGetNetStatus QUIET" C_PREFIX) (quiet) (safe)))
+    (if (= NET_RC 10) (set NET_OTHER 1))
+    (if (AND (= NET_RC 5) (= OLD_BSD 0) (= DRAWER_LAYOUT 0))
+      (
+        (working "Starting the network")
+        (run "Run >NIL: <NIL: Execute S:Network-Startup"
+             (prompt "Starting the network")
+             (help   "S:Network-Startup, the file that starts it at every boot."))
+        (set NET_TRIED 1)
+        (set NET_N 0)
+        (while (AND (= NET_UP 0) (< NET_N 20))
+          (
+            (run "C:Wait 2" (quiet))
+            (if (= 0 (run ("%sGetNetStatus CHECK=INTERFACES,DEFAULTROUTE QUIET"
+                           C_PREFIX)
+                          (quiet)))
+                (set NET_UP 1))
+            (set NET_N (+ NET_N 1))
+          ))
+      ))
+  ))
 
 (if DO_STARTUP
     (if KEEP_NETSTART
@@ -3846,7 +3861,9 @@
             (set FINAL_START F_START_NOW)
             (if NET_TRIED
                 (set FINAL_START F_START_TRIED)
-                (set FINAL_START (F_START_YES C_PREFIX START_IF)))))
+                (if NET_OTHER
+                    (set FINAL_START F_START_OTHER)
+                    (set FINAL_START (F_START_YES C_PREFIX START_IF))))))
     (set FINAL_START (F_START_NO  C_PREFIX START_IF)))
 
 ; Said again on the last page, and deliberately.  The question that turned it

@@ -634,6 +634,24 @@ BOOL tool_stack_version(char *buf, ULONG len)
     return got;
 }
 
+/*
+ * Another stack's library in memory: Miami and others make no AMITCP port, so
+ * tool_stack_library_running() does not see them.  Looking, not opening.
+ */
+BOOL tool_stack_foreign_loaded(VOID)
+{
+    struct Library *lib;
+    BOOL            foreign;
+
+    Forbid();
+    lib     = (struct Library *)FindName(&SysBase->LibList,
+                                         (CONST_STRPTR)"bsdsocket.library");
+    foreign = (BOOL)(lib != NULL && !tool_stack_is_ours(lib));
+    Permit();
+
+    return foreign;
+}
+
 BOOL tool_stack_installed(VOID)
 {
     return (BOOL)(tool_exists("LIBS:bsdsocket.library") ||

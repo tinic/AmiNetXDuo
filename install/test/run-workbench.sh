@@ -393,7 +393,7 @@ fi
 if [ "$MANUAL_CARD" = 1 ]; then
     [ -z "$CANCEL_MODE" ] && [ -z "$MISSING_MODE" ] &&
     [ -z "$FOREIGN_MODE" ] && [ -z "$EMU68_FIXTURE" ] &&
-    [ "$DRAWER" = 0 ] && [ "$RERUN" = 0 ] && [ "$RECONFIGURE" = 0 ] &&
+    [ "$RERUN" = 0 ] && [ "$RECONFIGURE" = 0 ] &&
     [ "$NO_CARD" = 0 ] || {
         echo "-M cannot be combined with another installer fixture" >&2
         exit 2
@@ -912,7 +912,7 @@ build_driver() {
            -DDRIVE_PICK_SKIP="$skip" -DDRIVE_PAGE_PAUSE="$page_pause" \
            -DDRIVE_PAUSE_OPTIONS="$pause_options" \
            -DDRIVE_ARCHIVE_DRAWER="\"$UNPACK_AMIGA/AmiNetXDuo\"" -I"$NDK" \
-           ${UNINSTALL_DEF:+"$UNINSTALL_DEF"} \
+           ${UNINSTALL_DEF:+"$UNINSTALL_DEF"} ${NETCHECK_DEF:+"$NETCHECK_DEF"} \
            -o "$out" "$ROOT/install/test/installdrive.c" || exit 2
 }
 
@@ -1214,15 +1214,20 @@ UNINSTALL_DEF=""
 [ "$UNINSTALL" = 0 ] ||
     UNINSTALL_DEF='-DDRIVE_UNINSTALL="SYS:AmiNetXDuo/Uninstall-AmiNetXDuo"'
 # A first installation with a board on the network starts the network: the
-# hardware-discovery runs, whose install boot has the board.
+# hardware-discovery runs, whose install boot has the board.  A drawer
+# installation does not start it (NETCHECK_WANT=down).
 NETCHECK=0
+NETCHECK_DEF=""
+NETCHECK_WANT=up
 if [ "$MANUAL_CARD" = 1 ] && [ "$DRIVE_RUNS" = 1 ] && [ "$UNINSTALL" = 0 ] &&
    [ "$NO_BOOT" = 0 ] && [ "$STATIC" = 0 ]; then
     NETCHECK=1
-    UNINSTALL_DEF="-DDRIVE_NETCHECK=1"
+    NETCHECK_DEF="-DDRIVE_NETCHECK=1"
+    [ "$DRAWER" = 1 ] && NETCHECK_WANT=down
 fi
 build_driver "$DRIVER" "$DRIVE_RUNS" "$YES_LABEL" "$PICK_SPEC"
 UNINSTALL_DEF=""
+NETCHECK_DEF=""
 
 rm -rf "$HD"
 rm -rf "$WORK"
@@ -2476,11 +2481,14 @@ echo "============================================================"
 
 fail=0
 if [ "$NETCHECK" = 1 ]; then
-    if grep -q '^installdrive: netcheck 0$' "$HD/installdrive.txt" 2>/dev/null; then
+    _net=$(sed -n 's/^installdrive: netcheck //p' "$HD/installdrive.txt" 2>/dev/null)
+    echo "install_netcheck=${_net:-none} want=$NETCHECK_WANT"
+    if [ "$NETCHECK_WANT" = up ] && [ "$_net" = 0 ]; then
         echo "  ok      the first installation left the network running"
+    elif [ "$NETCHECK_WANT" = down ] && [ -n "$_net" ] && [ "$_net" != 0 ]; then
+        echo "  ok      a drawer installation did not start the network"
     else
-        echo "!! the first installation did not start the network:" \
-             "$(grep '^installdrive: netcheck' "$HD/installdrive.txt" 2>/dev/null)"
+        echo "!! network after the installation: netcheck=${_net:-none}, want $NETCHECK_WANT"
         fail=1
     fi
 fi
