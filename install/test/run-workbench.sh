@@ -2348,6 +2348,19 @@ fi
 boot install "$INSTALL_TIMEOUT" "$INSTALL_CARD"
 INSTALL_STATUS=$BOOT_STATUS
 
+# Every Installer run reaches its last page: the window title says 100%.
+# A run that stops part way -- an Installer that dies -- closes earlier.
+INSTALL_RUNS_DONE=$(awk '
+    /^installdrive: run [0-9]+: starting/ { last = "" }
+    /^installdrive:   window "/ { last = $0 }
+    /^installdrive: run [0-9]+ finished/ { if (last ~ /\(100% done\)"$/) ok++; else bad++ }
+    END { printf "%d %d\n", ok, bad }' "$HD/installdrive.txt" 2>/dev/null)
+echo "installer_runs_completed=${INSTALL_RUNS_DONE% *} installer_runs_stopped=${INSTALL_RUNS_DONE#* }"
+if [ "${INSTALL_RUNS_DONE#* }" != 0 ] && [ "$REFUSAL" != 1 ]; then
+    echo "!! an Installer run stopped before its last page"
+    [ "$INSTALL_STATUS" = 0 ] && INSTALL_STATUS=21
+fi
+
 echo
 echo "---- installdrive report ----"
 cat "$HD/installdrive.txt" 2>/dev/null || echo "(none)"
@@ -2362,6 +2375,9 @@ if [ "$UNINSTALL" = 1 ]; then
     cat "$HD/uninstall-log.txt" 2>/dev/null || echo "(none written)"
     echo "uninstall_notrestored=$(wc -l < "$HD/uninstall-notrestored.txt" 2>/dev/null || echo 0)"
     echo "uninstall_kept=$(wc -l < "$HD/uninstall-kept.txt" 2>/dev/null || echo 0)"
+    echo "uninstall_waited=$(cat "$HD/uninstall-waited.txt" 2>/dev/null || echo 0)"
+    echo "---- what the record said ----"
+    cat "$HD/uninstall-record-log.txt" 2>/dev/null || echo "(none)"
     sed 's/^/  not restored: /' "$HD/uninstall-notrestored.txt" 2>/dev/null || true
     # Protection bits aside: Copy CLONE back through UAE's host files does not
     # reproduce the host mode the fixture was written with.
@@ -2373,11 +2389,16 @@ if [ "$UNINSTALL" = 1 ]; then
         _before=$(printf '%s\n' "$_before" |
             sed -E "s|^[0-9a-f]+(\tS/Network-Startup)\$|$MARKED_NS_SHA\1|" | sort)
     fi
-    # An anx driver staged before the install is an earlier AmiNetXDuo's:
-    # the install keeps it as .old and the uninstall deletes the new one.
-    _before=$(printf '%s\n' "$_before" |
-        grep -v -E $'\tDevs/Networks/anx[a-z0-9]*\\.device$' || true)
     _after=$(product_manifest | _strip)
+    # An anx driver staged before the install: the install keeps it as .old,
+    # which goes with the uninstall when it names AmiNetXDuo (the stale
+    # fixture does not).  A drawer installation leaves it alone.
+    if [ "$DRAWER" != 1 ]; then
+        _before=$(printf '%s\n' "$_before" |
+            grep -v -E $'\tDevs/Networks/anx[a-z0-9]*\\.device$' || true)
+        _after=$(printf '%s\n' "$_after" |
+            grep -v -E $'\tDevs/Networks/anx[a-z0-9]*\\.device\\.old$' || true)
+    fi
     _u_ok=1
     _drawer_stays=0
     # Our S:Network-Startup with installdrive's mark: the user's, kept.

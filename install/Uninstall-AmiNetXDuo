@@ -83,9 +83,22 @@
 
 (complete 40)
 
-(run ("Execute %s" REC)
+(if (exists "T:AmiNetXDuo-Done" (noreq))
+    (delete "T:AmiNetXDuo-Done" (optional "force" "nofail")))
+; What the record's commands say goes to T:AmiNetXDuo-Log.
+(run ("Execute >T:AmiNetXDuo-Log %s" REC)
      (prompt "Deleting AmiNetXDuo's files and putting back what it replaced")
      (help "The AmigaDOS script the installer wrote of what it installed."))
+; The record's last line says it is done; wait for it, bounded.
+(set WAITED 0)
+(while (AND (NOT (exists "T:AmiNetXDuo-Done" (noreq))) (< WAITED 120))
+  (
+    (run "Wait 1" (safe))
+    (set WAITED (+ WAITED 1))
+  ))
+(if (> WAITED 0)
+    (run ("Echo >T:AmiNetXDuo-Waited \"%ld\"" WAITED) (safe)))
+(delete "T:AmiNetXDuo-Done" (optional "force" "nofail"))
 
 (set NOT_BACK (exists "T:AmiNetXDuo-NotRestored" (noreq)))
 (set KEPT     (exists "T:AmiNetXDuo-Kept" (noreq)))

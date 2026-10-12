@@ -1726,6 +1726,10 @@ int main(void)
                           "DH0:uninstall-notrestored.txt QUIET", NULL);
     SystemTagList((STRPTR)"Copy >NIL: T:AmiNetXDuo-Kept "
                           "DH0:uninstall-kept.txt QUIET", NULL);
+    SystemTagList((STRPTR)"Copy >NIL: T:AmiNetXDuo-Waited "
+                          "DH0:uninstall-waited.txt QUIET", NULL);
+    SystemTagList((STRPTR)"Copy >NIL: T:AmiNetXDuo-Log "
+                          "DH0:uninstall-record-log.txt QUIET", NULL);
 #endif
 
     say("installdrive: %ld pages driven in total\n", clicks);

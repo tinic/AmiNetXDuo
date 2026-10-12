@@ -2278,16 +2278,16 @@
 (set BK_ARCH "")
 (procedure P_is_ours
   (set IS_OURS 0)
-  (if (= 0 (run ("Search >NIL: FROM \"%s\" SEARCH AmiNetXDuo QUIET" BK_SRC)
+  (if (= 0 (run ("\"%s\" \"%s\" AmiNetXDuo MARK" S_SAMEFILE BK_SRC)
                 (quiet) (safe)))
       (set IS_OURS 1))
   (if (= IS_OURS 0)
-      (if (= 0 (run ("Search >NIL: FROM \"%s\" SEARCH \"Written by NetSetup\" QUIET"
-                     BK_SRC)
+      (if (= 0 (run ("\"%s\" \"%s\" \"Written by NetSetup\" MARK"
+                     S_SAMEFILE BK_SRC)
                     (quiet) (safe)))
           (set IS_OURS 1)))
   (if (AND (= IS_OURS 0) (> (strlen BK_MARK) 0))
-      (if (= 0 (run ("Search >NIL: FROM \"%s\" SEARCH \"%s\" QUIET" BK_SRC BK_MARK)
+      (if (= 0 (run ("\"%s\" \"%s\" \"%s\" MARK" S_SAMEFILE BK_SRC BK_MARK)
                     (quiet) (safe)))
           (set IS_OURS 1)))
   (if (AND (= IS_OURS 0) (> (strlen BK_ARCH) 0))
@@ -2338,6 +2338,7 @@
 ; and into BK_RESTORE the lines that put it back where it was: only where
 ; nothing is there by then, so a file the user has since changed stays.
 (set BK_RESTORE "")
+(set BK_PART 0)
 (procedure P_backup
   (if (AND (= @pretend 0) (exists BK_SRC (noreq)))
     (
@@ -2375,7 +2376,7 @@
                               (optional "force" "nofail")))
                   ; And this run's drawer: without its Restore it would
                   ; pass for a kept copy in the next run.
-                  (run ("Delete >NIL: \"%s\" ALL QUIET FORCE" D_BACKUP)
+                  (run ("Delete \"%s\" ALL QUIET FORCE" D_BACKUP)
                        (prompt ("Removing %s" D_BACKUP))
                        (help   H_BACKUP))
                   (abort (cat "The copy of " BK_SRC " into " BK_DIR " failed.  "
@@ -2407,7 +2408,7 @@
                      "If NOT EXISTS \"" BK_SRC "\"\n"
                      "  Copy \"" BK_FILE "\" TO \"" BK_SRC "\" CLONE QUIET\n"
                      "  If ERROR\n"
-                     "    Delete >NIL: \"" BK_SRC "\" QUIET\n"
+                     "    Delete \"" BK_SRC "\" QUIET\n"
                      "    Echo >>T:AmiNetXDuo-NotRestored \"" BK_SRC
                      " could not be copied from " BK_FILE "\"\n"
                      "  EndIf\n"
@@ -2421,6 +2422,16 @@
                          BK_CLASH)
                      "  EndIf\n"
                      "EndIf\n"))
+              (if (> (strlen BK_RESTORE) 2000)
+                (
+                  (set BK_PART (+ BK_PART 1))
+                  (textfile
+                    (prompt "Writing the Backup drawer's Restore script")
+                    (help   H_BACKUP)
+                    (dest   (tackon D_BACKUP ("RestorePart%ld" BK_PART)))
+                    (append BK_RESTORE))
+                  (set BK_RESTORE "")
+                ))
             ))
         ))
     ))
@@ -2447,10 +2458,56 @@
 ; Installed/Remove.
 (set REC_SF (tackon D_INSTALLED "InstallSameFile"))
 
+; An Installer string has a length limit, and the record is longer: it is
+; written in parts, Installed/Part<n> and Installed/RemovePart<n>, which
+; P_rec_join puts together with Type.
+(procedure P_rec_flush
+  (if (> (strlen REC_TEXT) 0)
+    (
+      (set REC_PART (+ REC_PART 1))
+      (textfile
+        (prompt "Writing the record of this installation")
+        (help   H_BACKUP)
+        (dest   (tackon D_INSTALLED ("Part%ld" REC_PART)))
+        (append REC_TEXT))
+      (set REC_TEXT "")
+    ))
+)
+(procedure P_rec_maybe
+  (if (> (strlen REC_TEXT) 2000) (P_rec_flush))
+)
+(procedure P_rem_flush
+  (if (> (strlen REM_TEXT) 0)
+    (
+      (set REM_PART (+ REM_PART 1))
+      (textfile
+        (prompt "Writing the record of this installation")
+        (help   H_BACKUP)
+        (dest   (tackon D_INSTALLED ("RemovePart%ld" REM_PART)))
+        (append REM_TEXT))
+      (set REM_TEXT "")
+    ))
+)
+; JN_DEST, after its first lines (already written), gets JN_STEM1 ..
+; JN_STEM<JN_N>, each deleted after.
+(procedure P_rec_join
+  (set JN_I 1)
+  (while (<= JN_I JN_N)
+    (
+      (set JN_F (tackon D_INSTALLED ("%s%ld" JN_STEM JN_I)))
+      (run ("Type >>\"%s\" \"%s\"" JN_DEST JN_F)
+           (prompt "Writing the record of this installation")
+           (help   H_BACKUP))
+      (delete JN_F (optional "force" "nofail"))
+      (set JN_I (+ JN_I 1))
+    ))
+)
+
 ; REC_F, a program this installation put there: another stack's or the
 ; user's file of that name is in Backup, and comes back after.
 (procedure P_rec_ours
-  (set REC_TEXT (cat REC_TEXT "Delete >NIL: \"" REC_F "\" QUIET\n"))
+  (set REC_TEXT (cat REC_TEXT "Delete \"" REC_F "\" QUIET\n"))
+  (P_rec_maybe)
 )
 
 ; REC_F a .old in REC_SUB, deleted when it is ours, or the other stack's
@@ -2479,7 +2536,7 @@
       (P_is_ours)
       (set BK_SUB RO_SUB)
       (if IS_OURS
-          (set REC_TEXT (cat REC_TEXT "Delete >NIL: \"" REC_F "\" QUIET\n"))
+          (set REC_TEXT (cat REC_TEXT "Delete \"" REC_F "\" QUIET\n"))
           ; The other stack's file, renamed: it goes only where the
           ; original's place is free for its Backup copy to come back to.
           (if (> (strlen RO_LB) 0)
@@ -2489,7 +2546,7 @@
                      "  If EXISTS \"" REC_F "\"\n"
                      "    \"" REC_SF "\" \"" REC_F "\" \"" RO_LB "\" BYTES\n"
                      "    If NOT WARN\n"
-                     "      Delete >NIL: \"" REC_F "\" QUIET\n"
+                     "      Delete \"" REC_F "\" QUIET\n"
                      "    EndIf\n"
                      "  EndIf\n"
                      "EndIf\n"))))
@@ -2508,7 +2565,7 @@
             (help   H_BACKUP)
             (dest   RD_MARK)
             (append "; made by the AmiNetXDuo installer\n")))
-      (set REC_TEXT (cat REC_TEXT "Delete >NIL: \"" REC_F "\" QUIET\n"))
+      (set REC_TEXT (cat REC_TEXT "Delete \"" REC_F "\" QUIET\n"))
     ))
 )
 
@@ -2526,16 +2583,20 @@
               (set RT_SUBDST (tackon RT_DST RT_NAME))
               (foreach RT_SUBSRC "#?"
                 (if (< @each-type 0)
-                    (set REC_TEXT
-                      (cat REC_TEXT "Delete >NIL: \""
-                           (tackon RT_SUBDST @each-name) "\" QUIET\n"))))
-              (set REC_TEXT (cat REC_TEXT "Delete >NIL: \"" RT_SUBDST "\" QUIET\n"))
+                    (
+                      (set REC_TEXT
+                        (cat REC_TEXT "Delete \""
+                             (tackon RT_SUBDST @each-name) "\" QUIET\n"))
+                      (P_rec_maybe)
+                    )))
+              (set REC_TEXT (cat REC_TEXT "Delete \"" RT_SUBDST "\" QUIET\n"))
             )
             (set REC_TEXT
-              (cat REC_TEXT "Delete >NIL: \"" (tackon RT_DST RT_NAME) "\" QUIET\n")))
+              (cat REC_TEXT "Delete \"" (tackon RT_DST RT_NAME) "\" QUIET\n")))
+          (P_rec_maybe)
         ))
       (if RT_SELF
-          (set REC_TEXT (cat REC_TEXT "Delete >NIL: \"" RT_DST "\" QUIET\n")))
+          (set REC_TEXT (cat REC_TEXT "Delete \"" RT_DST "\" QUIET\n")))
     ))
 )
 
@@ -2588,6 +2649,7 @@
                      "    Delete \"" SN_T "\" QUIET\n"
                      "  EndIf\n"
                      "EndIf\n")))
+          (if (> (strlen REM_TEXT) 2000) (P_rem_flush))
         ))
     ))
   (set BK_MARK "")
@@ -2612,6 +2674,7 @@
   (if REC_FINAL
     (
       (set REM_TEXT "")
+      (set REM_PART 0)
       (set SN_WROTE 0)
       (set SN_FRESH (if (= KEEP_OLD 0) 1 0))
       (set BK_SUB "Devs/NetInterfaces")
@@ -2669,19 +2732,25 @@
             ))
         ))
       (set BK_SUB "")
+      (P_rem_flush)
       (textfile
         (prompt "Writing the record of the configuration this installation wrote")
         (help   H_BACKUP)
         (dest   (tackon D_INSTALLED "Remove"))
         (append "; Remove -- written by the AmiNetXDuo installer.\n")
-        (append "FailAt 21\n")
-        (append REM_TEXT))
+        (append "FailAt 21\n"))
+      (set JN_DEST (tackon D_INSTALLED "Remove"))
+      (set JN_STEM "RemovePart")
+      (set JN_N REM_PART)
+      (P_rec_join)
     ))
 
   (set REC_TEXT "")
+  (set REC_PART 0)
   (set REC_F (tackon D_INSTALLED "Remove"))
   (set REC_TEXT
     (cat "Delete >NIL: T:AmiNetXDuo-NotRestored QUIET\n"
+         "Echo \"record started\"\n"
          "Delete >NIL: T:AmiNetXDuo-Kept QUIET\n"
          "Delete >NIL: T:AmiNetXDuo-DrawerKept QUIET\n"
          "If EXISTS \"" REC_F "\"\n"
@@ -2743,8 +2812,8 @@
   (set REC_TEXT
     (cat REC_TEXT
          "If NOT EXISTS T:AmiNetXDuo-NotRestored\n"
-         "  Delete >NIL: \"" D_BACKUP_TOP "\" ALL QUIET\n"
-         "  Delete >NIL: \"" D_INSTALLED "\" ALL QUIET\n"
+         "  Delete \"" D_BACKUP_TOP "\" ALL QUIET\n"
+         "  Delete \"" D_INSTALLED "\" ALL QUIET\n"
          "EndIf\n"))
   ; The drawer's own files, by name.
   (set RT_SELF 0)
@@ -2759,7 +2828,7 @@
                                     "Terminal.info" "WirelessManager-LICENSE" ""))
     (
       (set REC_TEXT
-        (cat REC_TEXT "Delete >NIL: \"" (tackon DOCDIR REC_SUB) "\" QUIET\n"))
+        (cat REC_TEXT "Delete \"" (tackon DOCDIR REC_SUB) "\" QUIET\n"))
       (set REC_N (+ REC_N 1))
     ))
   (if DRAWER_LAYOUT
@@ -2768,7 +2837,7 @@
       (while (set REC_SUB (select REC_N "NetPrefs.info" "NetMeter.info" "C.info" ""))
         (
           (set REC_TEXT
-            (cat REC_TEXT "Delete >NIL: \"" (tackon D_ROOT REC_SUB) "\" QUIET\n"))
+            (cat REC_TEXT "Delete \"" (tackon D_ROOT REC_SUB) "\" QUIET\n"))
           (set REC_N (+ REC_N 1))
         ))
       (set RT_SELF 0)
@@ -2776,14 +2845,14 @@
       (set RT_SRC S_FIRMWARE) (set RT_DST (tackon D_DEVS "Firmware")) (P_rec_tree)
       (set REC_TEXT
         (cat REC_TEXT
-             "Delete >NIL: \"" (tackon D_C "fat") "\" QUIET\n"
-             "Delete >NIL: \"" (tackon D_DEVS "Firmware") "\" QUIET\n"
-             "Delete >NIL: \"" (tackon D_DEVS "Networks") "\" QUIET\n"
-             "Delete >NIL: \"" D_IFDIR "\" QUIET\n"
-             "Delete >NIL: \"" (tackon D_DEVS "Internet") "\" QUIET\n"
-             "Delete >NIL: \"" D_DEVS "\" QUIET\n"
-             "Delete >NIL: \"" D_LIBS "\" QUIET\n"
-             "Delete >NIL: \"" D_C "\" QUIET\n"))
+             "Delete \"" (tackon D_C "fat") "\" QUIET\n"
+             "Delete \"" (tackon D_DEVS "Firmware") "\" QUIET\n"
+             "Delete \"" (tackon D_DEVS "Networks") "\" QUIET\n"
+             "Delete \"" D_IFDIR "\" QUIET\n"
+             "Delete \"" (tackon D_DEVS "Internet") "\" QUIET\n"
+             "Delete \"" D_DEVS "\" QUIET\n"
+             "Delete \"" D_LIBS "\" QUIET\n"
+             "Delete \"" D_C "\" QUIET\n"))
     ))
   ; Assign EXISTS first: naming an assign that is not there asks for a volume.
   (set REC_TEXT
@@ -2798,13 +2867,15 @@
              "")
          "  Assign AmiNetXDuo:\n"
          "EndIf\n"
-         "Delete >NIL: \"" DOCDIR "\" QUIET\n"
+         "Delete \"" DOCDIR "\" QUIET\n"
          "If EXISTS \"" DOCDIR "\"\n"
          "  Echo >T:AmiNetXDuo-DrawerKept \"" DOCDIR "\"\n"
          "Else\n"
-         "  Delete >NIL: \"" DOCDIR ".info\" QUIET\n"
-         "EndIf\n"))
+         "  Delete \"" DOCDIR ".info\" QUIET\n"
+         "EndIf\n"
+         "Echo >T:AmiNetXDuo-Done \"done\"\n"))
 
+  (P_rec_flush)
   (textfile
     (prompt "Writing S:AmiNetXDuo-Files")
     (help   "The record of this installation that Uninstall-AmiNetXDuo, in the "
@@ -2814,8 +2885,11 @@
     (append ";\n")
     (append "; Uninstall-AmiNetXDuo executes this after it has removed the\n")
     (append "; S:User-Startup block and the Wi-Fi and firmware files.\n")
-    (append "FailAt 21\n")
-    (append REC_TEXT))
+    (append "FailAt 21\n"))
+  (set JN_DEST "S:AmiNetXDuo-Files")
+  (set JN_STEM "Part")
+  (set JN_N REC_PART)
+  (P_rec_join)
   ))
 )
 
@@ -2887,14 +2961,31 @@
   ))
 
 ; Where this run kept anything: the lines that put it back.
-(if (AND (> (strlen D_BACKUP) 0) (> (strlen BK_RESTORE) 0))
+(if (AND (> (strlen D_BACKUP) 0) (OR (> (strlen BK_RESTORE) 0) (> BK_PART 0)))
+  (
+    (set BK_PART (+ BK_PART 1))
+    (textfile
+      (prompt "Writing the Backup drawer's Restore script")
+      (help   H_BACKUP)
+      (dest   (tackon D_BACKUP ("RestorePart%ld" BK_PART)))
+      (append BK_RESTORE))
     (textfile
       (prompt "Writing the Backup drawer's Restore script")
       (help   H_BACKUP)
       (dest   (tackon D_BACKUP "Restore"))
       (append "; Restore -- written by the AmiNetXDuo installer.\n")
-      (append "FailAt 21\n")
-      (append BK_RESTORE)))
+      (append "FailAt 21\n"))
+    (set JN_I 1)
+    (while (<= JN_I BK_PART)
+      (
+        (set JN_F (tackon D_BACKUP ("RestorePart%ld" JN_I)))
+        (run ("Type >>\"%s\" \"%s\"" (tackon D_BACKUP "Restore") JN_F)
+             (prompt "Writing the Backup drawer's Restore script")
+             (help   H_BACKUP))
+        (delete JN_F (optional "force" "nofail"))
+        (set JN_I (+ JN_I 1))
+      ))
+  ))
 
 ; The drawers this installation makes, so that the uninstaller removes them
 ; again when they are empty, and the record, before anything is replaced:
