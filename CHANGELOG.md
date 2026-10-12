@@ -5,6 +5,9 @@ Add new entries under `Unreleased`; published release sections are history.
 
 ## Unreleased
 
+- Installer: a first installation starts the network at the end, and the
+  last page says when it is running.
+
 - Installer: another stack's libraries, same-named commands and replaced
   configuration are kept in the AmiNetXDuo drawer's Backup.
 

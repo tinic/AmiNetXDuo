@@ -1295,6 +1295,18 @@ int main(void)
             }
     }
 
+#ifdef DRIVE_NETCHECK
+    /* Whether the installation left the network running: an interface and a
+       default route, which only an AddNetInterface run this boot gives. */
+    {
+        LONG net = SystemTagList((STRPTR)
+                       "C:GetNetStatus CHECK=INTERFACES,DEFAULTROUTE QUIET",
+                       NULL);
+
+        say("installdrive: netcheck %ld\n", net);
+    }
+#endif
+
     say("installdrive: %ld pages driven in total\n", clicks);
     /*
      * How many yes/no pages went past.  It is what tells "DRIVE_YES_LABEL did

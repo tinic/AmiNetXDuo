@@ -430,6 +430,9 @@
 ; %s twice: the command's name, which in the drawer layout goes through the
 ; AmiNetXDuo: assign (C_PREFIX, set once the layout is known), and the
 ; interface.
+(set F_START_NOW
+  "It is running now, and starts by itself at every boot.\n")
+
 (set F_START_YES
   (cat "It starts by itself at the next reboot.  To start it now:\n\n"
        "    %sAddNetInterface DEVS:NetInterfaces/%s\n"))
@@ -3131,10 +3134,30 @@
 ;  9.  Done
 ; ==========================================================================
 
+; START IT NOW on a first installation: with no bsdsocket.library before
+; this run, no other stack can be resident to clash with this one.  The
+; startup file this run wrote is what starts it, so the Wi-Fi and sntp come
+; up as they will at boot.  GetNetStatus says whether an interface and a
+; default route came of it; when not, the last page says how to start it.
+(set NET_UP 0)
+(if (AND DO_STARTUP (= KEEP_NETSTART 0) (= OLD_BSD 0) (= DRAWER_LAYOUT 0)
+         (= @pretend 0))
+  (
+    (run "Execute S:Network-Startup"
+         (prompt "Starting the network")
+         (help   "S:Network-Startup, the file that starts it at every boot."))
+    (if (= 0 (run ("%sGetNetStatus CHECK=INTERFACES,DEFAULTROUTE QUIET" C_PREFIX)
+                  (prompt "Checking that the network is up")
+                  (help   "GetNetStatus answers whether an interface is up and a default route exists.")))
+        (set NET_UP 1))
+  ))
+
 (if DO_STARTUP
     (if KEEP_NETSTART
         (set FINAL_START (F_START_KEPT C_PREFIX START_IF))
-        (set FINAL_START (F_START_YES C_PREFIX START_IF)))
+        (if NET_UP
+            (set FINAL_START F_START_NOW)
+            (set FINAL_START (F_START_YES C_PREFIX START_IF))))
     (set FINAL_START (F_START_NO  C_PREFIX START_IF)))
 
 ; Said again on the last page, and deliberately.  The question that turned it

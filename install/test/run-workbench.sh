@@ -1011,6 +1011,13 @@ DRIVER="$ROOT/build/installdrive-$TAG-$LEVEL"
 UNINSTALL_DEF=""
 [ "$UNINSTALL" = 0 ] ||
     UNINSTALL_DEF='-DDRIVE_UNINSTALL="SYS:AmiNetXDuo/Uninstall-AmiNetXDuo"'
+# A first installation with a board on the network starts the network: the
+# hardware-discovery runs, whose install boot has the board.
+NETCHECK=0
+if [ "$MANUAL_CARD" = 1 ] && [ "$DRIVE_RUNS" = 1 ] && [ "$UNINSTALL" = 0 ]; then
+    NETCHECK=1
+    UNINSTALL_DEF="-DDRIVE_NETCHECK=1"
+fi
 build_driver "$DRIVER" "$DRIVE_RUNS" "$YES_LABEL" "$PICK_SPEC"
 UNINSTALL_DEF=""
 
@@ -2149,6 +2156,16 @@ echo "  what the installer put on a real Workbench"
 echo "============================================================"
 
 fail=0
+if [ "$NETCHECK" = 1 ]; then
+    if grep -q '^installdrive: netcheck 0$' "$HD/installdrive.txt" 2>/dev/null; then
+        echo "  ok      the first installation left the network running"
+    else
+        echo "!! the first installation did not start the network:" \
+             "$(grep '^installdrive: netcheck' "$HD/installdrive.txt" 2>/dev/null)"
+        fail=1
+    fi
+fi
+
 
 # A populated second volume is present in every scenario because Installer's
 # own default otherwise preferred Work:.  AmiNetXDuo must still land under
