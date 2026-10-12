@@ -1737,6 +1737,10 @@ if [ -n "$FOREIGN_MODE" ]; then
     # 2's; its S:Network-Startup carries run 1's marker by then.
     _bk_cfg=1
     [ "$FOREIGN_MODE" = roadshow-keepredo ] && _bk_cfg=2
+    # The user's own S:Network-Startup by the end, which uninstalling restores.
+    MARKED_NS_SHA=$({ cat "$HD/S/Network-Startup"
+        printf '; user startup policy -- installer must preserve this\n'
+      } | shasum | cut -d' ' -f1)
     FOREIGN_OLD_EXPECTED=$(
         for f in Libs/bsdsocket.library Libs/usergroup.library Libs/tls.library; do
             printf 'AmiNetXDuo/Backup/1/%s %s\n' "$f" "$(shasum < "$HD/$f" | cut -d' ' -f1)"
@@ -2258,6 +2262,11 @@ if [ "$UNINSTALL" = 1 ]; then
     _strip() { grep -v -E '\.(old|old\.info|new)$' | grep -v -E $'^D\t' |
                grep -v -E '\.uaem$' | cut -f3- | sort; }
     _before=$(printf '%s\n' "$ZERO_DIFF_BEFORE" | _strip)
+    if [ "$FOREIGN_MODE" = roadshow-keepredo ]; then
+        # installdrive edited S:Network-Startup between the runs.
+        _before=$(printf '%s\n' "$_before" |
+            sed -E "s|^[0-9a-f]+(\tS/Network-Startup)\$|$MARKED_NS_SHA\1|" | sort)
+    fi
     _after=$(product_manifest | _strip)
     _u_ok=1
     if [ "$_before" != "$_after" ]; then
