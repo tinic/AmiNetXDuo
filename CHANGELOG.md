@@ -5,6 +5,8 @@ Add new entries under `Unreleased`; published release sections are history.
 
 ## Unreleased
 
+- Installer: a Wi-Fi started after another interface starts in the background, so the boot does not wait for it.
+
 - Installer: NetWirelessPrefs lists the Wi-Fi networks in range to join.
 
 - Installer: a Prism2 PCMCIA card gets WirelessManager and its Wi-Fi network, as the Pi Wi-Fi does.

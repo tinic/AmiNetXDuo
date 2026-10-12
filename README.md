@@ -74,7 +74,8 @@ selected, at every installer level:
   exists: WirelessManager first, then the interface, which waits at most 30
   seconds for an address. With the Pi's Ethernet as well, both start, and
   the Ethernet's `PRIORITY=10` keeps the default route on the cable; the
-  micro stack starts only the Ethernet.
+  Wi-Fi then starts in the background, so the boot does not wait for it.
+  The micro stack starts only the Ethernet.
 - Where WirelessManager is already set up on the machine (a copy or a
   `Wireless.prefs` the installer did not write, or a mention in
   `S:User-Startup`, `S:Startup-Sequence` or `SYS:WBStartup`), the lines that

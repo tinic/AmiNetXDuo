@@ -3453,7 +3453,8 @@
   exists: WirelessManager first, then the interface, which waits at most
   30 seconds for an address; DHCP continues after the boot goes on. With
   the Pi Ethernet as well, both start, the Ethernet first with
-  PRIORITY=10, so the default route stays on the cable; the micro stack
+  PRIORITY=10, so the default route stays on the cable, and the Wi-Fi in
+  the background, so the boot does not wait for it; the micro stack
   starts the Ethernet only. Where WirelessManager is set up on the
   machine already -- a copy or a Wireless.prefs the Installer did not
   create, or a mention in S:User-Startup, S:Startup-Sequence or
