@@ -387,17 +387,22 @@ ULONG _tx_time_get(VOID) { return 0; }
 UWORD ami_sana2_bound_count(VOID) { return 1; }
 VOID ami_sana2_block_enter(VOID) { }
 VOID ami_sana2_block_leave(VOID) { }
-/* The teardown's CMD_FLUSH goes through the bounded command; recorded. */
-static int                h_commands;
-static UWORD              h_command_last;
-static AmiSana2If        *h_command_iface;
-static struct IOSana2Req *h_command_req;
+/* The teardown's CMD_FLUSH goes through the bounded command; recorded.
+   Copied at the call: the request is the caller's stack frame. */
+static int             h_commands;
+static UWORD           h_command_last;
+static AmiSana2If     *h_command_iface;
+static struct Device  *h_command_device;
+static struct Unit    *h_command_unit;
+static struct MsgPort *h_command_port;
 LONG ami_sana2_command(AmiSana2If *ifp, struct IOSana2Req *req, UWORD command)
 {
     h_commands++;
-    h_command_last  = command;
-    h_command_iface = ifp;
-    h_command_req   = req;
+    h_command_last   = command;
+    h_command_iface  = ifp;
+    h_command_device = req->ios2_Req.io_Device;
+    h_command_unit   = req->ios2_Req.io_Unit;
+    h_command_port   = req->ios2_Req.io_Message.mn_ReplyPort;
     return 0;
 }
 
@@ -2357,12 +2362,12 @@ static void test_flush_is_bounded(void)
             "flush: one CMD_FLUSH through ami_sana2_command()");
     h_check(h_command_iface == &iface,
             "flush: on the reader's interface");
-    h_check(h_command_req != NULL &&
-            h_command_req->ios2_Req.io_Device ==
-                iface.templ.ios2_Req.io_Device &&
-            h_command_req->ios2_Req.io_Unit == iface.templ.ios2_Req.io_Unit,
+    h_check(h_command_device == iface.templ.ios2_Req.io_Device &&
+            h_command_unit == iface.templ.ios2_Req.io_Unit,
             "flush: from the interface's template");
-    h_check(h_port_deletes == deletes, "flush: no reply port of its own");
+    h_check(h_command_port == iface.templ.ios2_Req.io_Message.mn_ReplyPort &&
+            h_port_deletes == deletes,
+            "flush: no reply port of its own");
 }
 
 int main(void)
