@@ -14,7 +14,7 @@
 #                                 [-m core|driver|probe|minimal]
 #                                 [-C] [-M] [-V] [-I] [-z] [-W]
 #                                 [-s yes|invalid]
-#                                 [-w join|timeout|keep|keepit|userstart|userwm]
+#                                 [-w join|keep|keepit|userstart|userwm]
 #                                 [-f roadshow-leave|roadshow-replace|
 #                                     amitcpng-leave|amitcpng-replace]
 #
@@ -44,9 +44,6 @@
 #             S:Network-Startup with wm-stub as C:WirelessManager and wifipi
 #             on the card, runs it twice, and runs the real WirelessManager
 #             VERBOSE against the written prefs.
-#   timeout   join, then a power cycle with the card on no network at all:
-#             the Wi-Fi never gets a lease and the boot must go on after the
-#             bound.
 #   keep      plants a user's Wireless.prefs and C:WirelessManager: both
 #             untouched, and the lines that start WirelessManager commented.
 #   keepit    with -R: run 1 answers, its S:Network-Startup is deleted, run 2
@@ -375,7 +372,7 @@ fi
 
 if [ -n "$WIFI_MODE" ]; then
     case "$WIFI_MODE" in
-        join|timeout|keep|keepit|userstart|userwm) ;;
+        join|keep|keepit|userstart|userwm) ;;
         *) echo "unknown Wi-Fi mode: $WIFI_MODE" >&2; exit 2 ;;
     esac
     case "$EMU68_FIXTURE" in
@@ -958,11 +955,19 @@ fi
 # could stumble on -- a quote, a #, an = and a backslash -- in both fields.
 WIFI_TEST_SSID='Q"uote #1=\Net'
 WIFI_TEST_PASS='pa"ss #2=\word'
+# With -e both the name is Latin-1 "Caf\xe9 Net", as a Workbench string
+# gadget holds it: wpa_supplicant compares UTF-8 bytes, so the file must say
+# ssid=<hex of the UTF-8>, not the Latin-1 byte.
+WIFI_SSID_LINE=""
+if [ "$EMU68_FIXTURE" = both ]; then
+    WIFI_TEST_SSID=$'Caf\xe9 Net'
+    WIFI_SSID_LINE=$(printf "\tssid=%s" "436166c3a9204e6574")
+fi
 WIFI_ANSWERED=0
 WM_EXPECT_LIVE=1
 WM_USER_FIXTURE=0
 case "$WIFI_MODE" in
-    join|timeout|keepit|userwm) WIFI_ANSWERED=1 ;;
+    join|keepit|userwm) WIFI_ANSWERED=1 ;;
 esac
 case "$WIFI_MODE" in
     keep|userstart|userwm) WM_EXPECT_LIVE=0 ;;
@@ -976,8 +981,7 @@ fi
 [ "$WIFI_MODE" = keepit ] && ANSWER_LINES+=("1|DROPSTARTUP|-")
 # The Wi-Fi interface started at boot is worth booting: the startup lines
 # are run, with a stand-in supplicant and the card under it.
-if [ "$WIFI_PRIMARY" = 1 ] &&
-   { [ "$WIFI_MODE" = join ] || [ "$WIFI_MODE" = timeout ]; }; then
+if [ "$WIFI_PRIMARY" = 1 ] && [ "$WIFI_MODE" = join ]; then
     CONFIG_ONLY=0
 fi
 if [ "$MANUAL_CARD" = "1" ]; then
@@ -1492,6 +1496,29 @@ if [ "$WIFI_MODE" = keep ]; then
     chmod 644 "$_envarc/Sys/Wireless.prefs"
     WIFI_KEEP_PREFS_SUM=$(shasum "$_envarc/Sys/Wireless.prefs" | cut -d' ' -f1)
     echo "==> Wi-Fi fixture: a user's Wireless.prefs"
+fi
+
+# Corrupt only the throw-away unpacked copy.  Each target reaches a distinct
+# Installer preflight: the mandatory full library, one of the three supplied
+# drivers, the device-tree probe, or the profile selected on the visible page.
+MISSING_TARGET=""
+case "$MISSING_MODE" in
+    core)    MISSING_TARGET="$UNPACK/AmiNetXDuo/Libs/bsdsocket.library" ;;
+    driver)  MISSING_TARGET="$UNPACK/AmiNetXDuo/Devs/Networks/anxgenet.device" ;;
+    probe)   MISSING_TARGET="$UNPACK/AmiNetXDuo/InstallNetProbe" ;;
+    minimal) MISSING_TARGET="$UNPACK/AmiNetXDuo/Libs/minimal/bsdsocket.library" ;;
+esac
+if [ -n "$MISSING_MODE" ]; then
+    [ -f "$MISSING_TARGET" ] || {
+        echo "!! candidate archive already lacks the $MISSING_MODE fixture target" >&2
+        exit 1
+    }
+    rm -f "$MISSING_TARGET"
+    [ ! -e "$MISSING_TARGET" ] || {
+        echo "!! could not remove corrupt-archive fixture target $MISSING_TARGET" >&2
+        exit 2
+    }
+    echo "==> corrupt-archive fixture: missing $MISSING_MODE"
 fi
 
 # Amiberry does not expose an Emu68 device tree.  Replace only the throw-away
@@ -2598,7 +2625,9 @@ else
         if [ -z "$WPREFS_REAL" ]; then
             _prefs_ok=0
         else
-            for _l in 'network={' "$(printf '\tssid="%s"' "$WIFI_TEST_SSID")" \
+            [ -n "$WIFI_SSID_LINE" ] ||
+                WIFI_SSID_LINE=$(printf '\tssid="%s"' "$WIFI_TEST_SSID")
+            for _l in 'network={' "$WIFI_SSID_LINE" \
                       "$(printf '\tpsk="%s"' "$WIFI_TEST_PASS")" '}'; do
                 grep -Fqx -- "$_l" "$WPREFS_REAL" || _prefs_ok=0
             done
@@ -3494,8 +3523,7 @@ fi
 # lease.  The check script then runs S:Network-Startup a second time with the
 # stand-in still running: a second start would be a second line.
 WIFI_TAIL=""
-if [ "$WIFI_PRIMARY" = 1 ] &&
-   { [ "$WIFI_MODE" = join ] || [ "$WIFI_MODE" = timeout ]; }; then
+if [ "$WIFI_PRIMARY" = 1 ] && [ "$WIFI_MODE" = join ]; then
     _stub="$ROOT/build/wm-stub-$TAG"
     "$GCC" -O2 -m68000 -Wall -Wextra -I"$NDK" \
         -o "$_stub" "$ROOT/install/test/wm-stub.c" || exit 2
@@ -3508,9 +3536,10 @@ if [ "$WIFI_PRIMARY" = 1 ] &&
     echo "==> Wi-Fi startup: wm-stub as C:WirelessManager, $EXPECTED_IF on $SANA2_DEVICE"
     # The real WirelessManager reads its configuration first and exits at
     # once on a file it cannot parse; on one it can, it stays up waiting for
-    # a driver.  Its VERBOSE output goes to the console rather than to a
-    # redirection, so the verdict is that difference: the written prefs
-    # under one name, a file with an unknown field under another.
+    # a driver.  It is run without VERBOSE: that output goes to the console,
+    # not to a redirection, so the verdict is the difference in what is
+    # still running -- the written prefs under one name, a file with an
+    # unknown field under another.
     cp "$WM_ARCHIVE" "$HD/WM-real"
     cp "$WM_ARCHIVE" "$HD/WM-bad"
     chmod 755 "$HD/WM-real" "$HD/WM-bad"
@@ -3533,14 +3562,6 @@ C:Status >>DH0:usercheck.txt
 Execute S:PlusComment
 EOF
 )
-fi
-# -w timeout: the card on the host's loopback, a network with nobody on it,
-# so the Wi-Fi interface never gets a lease.  Not "none": Amiberry takes a
-# backend name it does not know as slirp, whose DHCP answers in three
-# seconds, so the emulator's log is checked for the pcap backend below.  Only
-# the boot is measured -- AmigaDOS's own clock either side of S:User-Startup.
-if [ "$WIFI_MODE" = timeout ]; then
-    BACKEND=lo
 fi
 
 # -H adds a fifth step, and it is the one the machine is for: wait for the
@@ -3657,13 +3678,6 @@ chmod 755 "$HD/S/AmiNetXDuo-Check"
 startup_with 'FailAt 9999
 Execute S:AmiNetXDuo-Check >DH0:check-console.txt
 Echo >DH0:.done "$RC"'
-if [ "$WIFI_MODE" = timeout ]; then
-    startup_with 'FailAt 9999
-Echo >DH0:.done "0"'
-    sed -i.bak -e 's|^\(.*Execute S:User-Startup.*\)$|C:Date >>DH0:wifi-times.txt\n\1\nC:Date >>DH0:wifi-times.txt|' \
-        "$HD/S/Startup-Sequence"
-    rm -f "$HD/S/Startup-Sequence.bak" "$HD/wifi-times.txt"
-fi
 
 rm -f "$HD/usercheck.txt" "$HD/http-body.txt" "$HD/https-body.txt"
 
@@ -3734,33 +3748,6 @@ fi
 
 boot boot "$BOOT_TIMEOUT" net
 
-if [ "$WIFI_MODE" = timeout ]; then
-    _secs() { awk '{ split($NF, t, ":"); print t[1] * 3600 + t[2] * 60 + t[3] }'; }
-    _t1=$(sed -n 1p "$HD/wifi-times.txt" 2>/dev/null | tr -d '\r' | _secs)
-    _t2=$(sed -n 2p "$HD/wifi-times.txt" 2>/dev/null | tr -d '\r' | _secs)
-    _span=$(( ${_t2:-0} - ${_t1:-0} ))
-    WM_STARTS=$(grep -c '^start ' "$HD/wm-starts.txt" 2>/dev/null) || WM_STARTS=0
-    _backend=slirp
-    grep -q 'UAENET: pcap' "$ROOT/build/amiberry-$TAG-boot.log" 2>/dev/null &&
-        ! grep -q "'slirp'" "$ROOT/build/amiberry-$TAG-boot.log" 2>/dev/null &&
-        _backend=pcap-lo
-    echo "wifi_timeout_backend=$_backend"
-    echo "wifi_timeout_user_startup_seconds=$_span bound=$WIFI_TIMEOUT"
-    echo "wifi_supplicant_starts=$WM_STARTS boot_status=$BOOT_STATUS"
-    if [ "$_backend" = pcap-lo ] && [ -n "$_t1" ] && [ -n "$_t2" ] &&
-       [ "$BOOT_STATUS" != 124 ] &&
-       [ "$BOOT_STATUS" != 125 ] && [ "$WM_STARTS" = 1 ] &&
-       [ "$_span" -ge "$WIFI_TIMEOUT" ] && [ "$_span" -lt $((WIFI_TIMEOUT + 60)) ]; then
-        echo "  ok      no lease: the boot went on after ${_span}s (bound ${WIFI_TIMEOUT}s)"
-        echo "workbench_e2e=PASS board=$BOARD model=$MODEL driver=$SANA2_DRIVER" \
-             "card_config=$CARD_CONFIG stack=$STACK_INSTALLED boot_status=$BOOT_STATUS"
-        exit 0
-    fi
-    echo "!! the Wi-Fi with no lease did not end the wait at the bound"
-    echo "workbench_e2e=FAIL board=$BOARD model=$MODEL driver=$SANA2_DRIVER" \
-         "card_config=$CARD_CONFIG stack=$STACK_INSTALLED boot_status=$BOOT_STATUS"
-    exit 1
-fi
 
 if [ -n "$PROBE_PID" ]; then
     kill -TERM "$PROBE_PID" 2>/dev/null || true

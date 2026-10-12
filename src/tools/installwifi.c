@@ -10,8 +10,9 @@
  *
  *   InstallWiFi TO <file>
  *
- * RETURN_OK when TO was written, RETURN_WARN when the user skipped, and
- * RETURN_FAIL when there was no window to ask in or TO could not be written.
+ * RETURN_OK when TO was written, RETURN_WARN when the user skipped,
+ * RETURN_ERROR when the arguments do not parse (ReadArgs), and RETURN_FAIL
+ * when there was no window to ask in or TO could not be written.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -35,6 +36,7 @@
 #include <string.h>
 
 #include "aminetxduo/version.h"
+#include "netwireless_prefs.h"
 
 const char *const tool_name = "InstallWiFi";
 
@@ -125,32 +127,50 @@ static ULONG mask_hook(struct Hook *hook __asm("a0"),
     return ~0UL;
 }
 
-static BOOL needs_hex(const char *text)
+/* A Workbench string gadget holds ISO-8859-1; wpa_supplicant compares the
+   SSID's bytes with the access point's, which are UTF-8.  Returns the UTF-8
+   length, or -1 when it is over cap. */
+static LONG latin1_to_utf8(const char *in, unsigned char *out, LONG cap)
 {
     const unsigned char *p;
+    LONG                 n = 0;
 
-    for (p = (const unsigned char *)text; *p != '\0'; p++)
-        if (*p < 0x20 || *p > 0x7e)
-            return TRUE;
-    return FALSE;
+    for (p = (const unsigned char *)in; *p != '\0'; p++)
+    {
+        if (*p < 0x80)
+        {
+            if (n + 1 > cap) return -1;
+            out[n++] = *p;
+        }
+        else
+        {
+            if (n + 2 > cap) return -1;
+            out[n++] = (unsigned char)(0xc0 | (*p >> 6));
+            out[n++] = (unsigned char)(0x80 | (*p & 0x3f));
+        }
+    }
+    return n;
 }
 
 /*
  * wpa_supplicant takes a quoted value up to the LAST quote on its line and
  * keeps a '#' between the quotes, so any printable ASCII is written as it
- * is.  Anything else in an SSID is written as hex, which it takes unquoted.
+ * is.  Anything else in the (UTF-8) SSID is written as hex, which it takes
+ * unquoted: nw_prefs_ssid_value(), as NetWirelessPrefs writes it.
  */
 static BOOL write_prefs(const char *to, const char *ssid, const char *pass)
 {
-    static const char hex[] = "0123456789abcdef";
-    BPTR  fh = Open((CONST_STRPTR)to, MODE_NEWFILE);
-    char  line[2 * SSID_MAX + 16];
-    LONG  n = 0;
-    const unsigned char *p;
-    BOOL  ok;
+    BPTR          fh = Open((CONST_STRPTR)to, MODE_NEWFILE);
+    unsigned char utf8[NW_SSID_MAX];
+    char          value[2 * NW_SSID_MAX + 3];
+    LONG          n = latin1_to_utf8(ssid, utf8, NW_SSID_MAX);
+    BOOL          ok;
 
     if (fh == 0)
         return FALSE;
+    if (n < 0)
+        n = 0;
+    nw_prefs_ssid_value(utf8, (int)n, value);
 
     ok = FPuts(fh, (CONST_STRPTR)
         "# ENVARC:Sys/Wireless.prefs -- written by the AmiNetXDuo installer.\n"
@@ -162,23 +182,9 @@ static BOOL write_prefs(const char *to, const char *ssid, const char *pass)
         "\n"
         "network={\n") == 0;
 
-    if (needs_hex(ssid))
-    {
-        memcpy(line, "\tssid=", 6);
-        n = 6;
-        for (p = (const unsigned char *)ssid; *p != '\0'; p++)
-        {
-            line[n++] = hex[*p >> 4];
-            line[n++] = hex[*p & 15];
-        }
-        line[n++] = '\n';
-        line[n] = '\0';
-        ok = ok && FPuts(fh, (CONST_STRPTR)line) == 0;
-    }
-    else
-        ok = ok && FPuts(fh, (CONST_STRPTR)"\tssid=\"") == 0 &&
-             FPuts(fh, (CONST_STRPTR)ssid) == 0 &&
-             FPuts(fh, (CONST_STRPTR)"\"\n") == 0;
+    ok = ok && FPuts(fh, (CONST_STRPTR)"\tssid=") == 0 &&
+         FPuts(fh, (CONST_STRPTR)value) == 0 &&
+         FPuts(fh, (CONST_STRPTR)"\n") == 0;
 
     if (pass[0] != '\0')
         ok = ok && FPuts(fh, (CONST_STRPTR)"\tpsk=\"") == 0 &&
@@ -205,8 +211,12 @@ static const char *refusal(const char *ssid, const struct Secret *s,
     *in_pass = FALSE;
     if (ssid[0] == '\0')
         return "Type the network name, or Skip.";
-    if (strlen(ssid) > SSID_MAX)
-        return "A network name has at most 32 characters.";
+    {
+        unsigned char utf8[NW_SSID_MAX];
+
+        if (latin1_to_utf8(ssid, utf8, NW_SSID_MAX) < 0)
+            return "A network name has at most 32 bytes in UTF-8.";
+    }
     *in_pass = TRUE;
     if (s->len != 0 && (s->len < PASS_MIN || s->len > PASS_MAX))
         return "A passphrase has 8 to 63 characters, or none.";

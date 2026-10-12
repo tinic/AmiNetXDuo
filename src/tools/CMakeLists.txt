@@ -231,7 +231,8 @@ aminetxduo_add_tool(tool_installnetprobe InstallNetProbe
 
 # The Installer's Wi-Fi page.  Installer logs every askstring answer, so the
 # passphrase is asked here and written straight to the prefs file.
-aminetxduo_add_tool(tool_installwifi InstallWiFi SOURCES installwifi.c)
+aminetxduo_add_tool(tool_installwifi InstallWiFi
+    SOURCES installwifi.c netwireless_prefs.c)
 
 # CheckNetConfig is config-only in the strictest sense there is: it never opens
 # bsdsocket.library at all.  That is not an omission, the machine that needs

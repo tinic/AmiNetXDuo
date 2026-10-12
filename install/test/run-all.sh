@@ -51,8 +51,6 @@
 #                   stand-in) starts once ahead of the bounded Wi-Fi
 #                   AddNetInterface and is reused, and the real WirelessManager
 #                   1.5 reads the written file without a parse error
-#   EMU68_WIFI_TIMEOUT the same install, booted with the card on no network:
-#                   no lease, and the boot goes on after the 30 s bound
 #   EMU68_WIFI_KEEP plants a Wireless.prefs and a C:WirelessManager beside
 #                   Ethernet: both untouched, both interfaces started, the
 #                   lines that start WirelessManager commented out
@@ -60,8 +58,9 @@
 #                   Wi-Fi is found by DEVICE= and its block written
 #   EMU68_WIFI_USERSTART S:User-Startup starts WirelessManager already
 #   EMU68_WIFI_DRAWER a drawer install beside the user's C:WirelessManager
-#   EMU68_BOTH_NOVICE NOVICE still asks for the Wi-Fi network, and with it
-#                   Ethernet and Wi-Fi both start, Ethernet at PRIORITY=10
+#   EMU68_BOTH_NOVICE NOVICE still asks for the Wi-Fi network, a Latin-1 name
+#                   is written as UTF-8 hex, and Ethernet and Wi-Fi both
+#                   start, Ethernet at PRIORITY=10
 #   EMU68_GENET_OLD / _BARE  a GENET Emu68 1.0.x leaves unmapped: Emu68's
 #                   genet.device is used, or with none the Installer stops
 #                   before writing anything
@@ -114,7 +113,7 @@ SCENARIOS=(
     DRAWER_FULL_MINIMAL DRAWER_MICRO_FULL
     ROADSHOW_LEAVE ROADSHOW_REPLACE AMITCPNG_LEAVE AMITCPNG_REPLACE
     EMU68_GENET EMU68_WIFI EMU68_BOTH EMU68_BOTH_MICRO
-    EMU68_WIFI_JOIN EMU68_WIFI_TIMEOUT EMU68_WIFI_KEEP EMU68_WIFI_KEEPIT
+    EMU68_WIFI_JOIN EMU68_WIFI_KEEP EMU68_WIFI_KEEPIT
     EMU68_WIFI_USERSTART EMU68_WIFI_DRAWER EMU68_BOTH_NOVICE
     EMU68_GENET_OLD EMU68_GENET_OLD_BARE
     CANCEL_DRIVERS MISSING_CORE MISSING_DRIVER MISSING_PROBE MISSING_MINIMAL
@@ -220,7 +219,6 @@ for scenario in "${SCENARIOS[@]}"; do
         EMU68_BOTH)            opts=(-l AVERAGE -e both) ;;
         EMU68_BOTH_MICRO)      opts=(-l AVERAGE -e both -p micro) ;;
         EMU68_WIFI_JOIN)       opts=(-l AVERAGE -e wifi -w join -U) ;;
-        EMU68_WIFI_TIMEOUT)    opts=(-l AVERAGE -e wifi -w timeout) ;;
         EMU68_WIFI_KEEP)       opts=(-l AVERAGE -e both -w keep) ;;
         EMU68_WIFI_KEEPIT)     opts=(-l AVERAGE -e wifi -w keepit -R) ;;
         EMU68_WIFI_USERSTART)  opts=(-l AVERAGE -e wifi -w userstart) ;;

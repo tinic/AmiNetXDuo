@@ -1857,11 +1857,21 @@
                 (prompt "Removing a leftover T:AmiNetXDuo-Wireless.prefs")
                 (help   H_WIFI)
                 (optional "force" "nofail")))
-    (run ("\"%s\" TO %s" S_INSTWIFI WIFI_TMP)
-         (prompt "Asking for the Wi-Fi network")
-         (help   H_WIFI)
-         (safe))
-    (set WIFI_NEW_PREFS (if (exists WIFI_TMP (noreq)) 1 0))
+    ; Not in a pretend run: the passphrase would sit in T: for nothing.
+    (if (= @pretend 0)
+      (
+        (set WIFI_RC (run ("\"%s\" TO %s" S_INSTWIFI WIFI_TMP)
+                          (prompt "Asking for the Wi-Fi network")
+                          (help   H_WIFI)
+                          (safe)))
+        (if (>= WIFI_RC 20)
+            (message "The Wi-Fi window could not be opened, so no Wi-Fi "
+                     "network is set.  ENVARC:Sys/Wireless.prefs can be "
+                     "written later with a text editor; the Manual in "
+                     "Aminet's driver/net/prism2v2 describes it."
+                     (help H_WIFI)))
+        (set WIFI_NEW_PREFS (if (exists WIFI_TMP (noreq)) 1 0))
+      ))
   ))
 
 ; --- the manual addresses ------------------------------------------------
@@ -2716,7 +2726,8 @@
     (set PREFS_OURS 1)
   ))
 
-(if (OR WM_OURS PREFS_OURS)
+; Not in a pretend run, which created nothing to record.
+(if (AND (= @pretend 0) (OR WM_OURS PREFS_OURS))
     (textfile
       (prompt "Writing S:AmiNetXDuo-WiFi")
       (help   "The Wi-Fi files this installer created, and only those.  A "
@@ -2733,6 +2744,20 @@
                   "Delete ENVARC:Sys/Wireless.prefs ENV:Sys/Wireless.prefs QUIET\n"
                   ""))
       (safe)))
+
+; A kept Ethernet definition with the Wi-Fi starting beside it, in a
+; S:Network-Startup written on this run, gets the PRIORITY=10 a new one is
+; written with -- appended, and only where the file names no PRIORITY.
+(if (AND (AND KEEP_OLD (= KEEP_NETSTART 0))
+         (AND DO_STARTUP (AND WIFI_START (= WIFI_PRIMARY 0))))
+  (
+    (set KEPT_IF (tackon D_IFDIR OLD_IF))
+    (if (<> 0 (run ("Search >NIL: FROM \"%s\" SEARCH PRIORITY QUIET" KEPT_IF)
+                   (quiet) (safe)))
+        (run ("Echo >>\"%s\" \"PRIORITY=10\"" KEPT_IF)
+             (prompt ("Adding PRIORITY=10 to %s, ahead of the Wi-Fi" KEPT_IF))
+             (help   H_WIFI)))
+  ))
 
 ; A KEPT FILE FOLLOWS THE ASSIGN TOO.  One written before the drawer named
 ; its drivers through AmiNetXDuo: says DEVICE=SYS:AmiNetXDuo/Devs/Networks/...
