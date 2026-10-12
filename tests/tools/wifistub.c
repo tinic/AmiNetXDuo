@@ -658,6 +658,11 @@ static int ws_serve(VOID)
     CopyMem("Home", ws->ssid, 5);
     ws->configured = ws->online = ws->connected = TRUE;
     ws->signal = -52;
+    /* Four bars, then two after ten seconds: a picture that changes.  Run
+       can leave a Ctrl-C pending, so the wait starts clear. */
+    Delay(500);
+    ws->signal = -70;
+    SetSignal(0, SIGBREAKF_CTRL_C);
     Wait(SIGBREAKF_CTRL_C);
     while (ws->dd.dd_Library.lib_OpenCnt != 0) Delay(10);
     ws_remove();

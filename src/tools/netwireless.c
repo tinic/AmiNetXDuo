@@ -10,9 +10,9 @@
  * while connected.  Not connected, nothing is polled.
  *
  * Kickstart 2.04: commodities.library, workbench.library and icon.library
- * are each optional.  On Workbench 3.9 and later the AppIcon is redrawn in
- * place through WBAPPICONA_RenderHook; before that it is removed and added
- * again, which costs a position the user dragged it to.
+ * are each optional.  A new picture is a new AppIcon; from Workbench 3.9 on
+ * WBAPPICONA_PropagatePosition keeps the place it was dragged to, before
+ * that it returns to a free place.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -28,7 +28,6 @@
 #include <dos/var.h>
 #include <intuition/intuition.h>
 #include <libraries/commodities.h>
-#include <utility/hooks.h>
 #include <workbench/icon.h>
 #include <workbench/startup.h>
 #include <workbench/workbench.h>
@@ -87,7 +86,6 @@ static struct
     struct AppMenuItem *appmenu;
     BOOL                want_icon;
     UBYTE              *planes;             /* chip memory                  */
-    struct Hook         render;
 } nw;
 
 /* The AppIcon: a two-plane image whose planes are filled in chip memory. */
@@ -99,7 +97,7 @@ static struct DiskObject nw_dob =
     { NULL, 0, 0, NW_ICON_W, NW_ICON_H, GFLG_GADGIMAGE | GFLG_GADGHCOMP,
       GACT_RELVERIFY | GACT_IMMEDIATE, GTYP_BOOLGADGET, &nw_img, NULL, NULL,
       0, NULL, 0, NULL },
-    WBTOOL, NULL, NULL, NO_ICON_POSITION, NO_ICON_POSITION, NULL, NULL, 0
+    WBAPPICON, NULL, NULL, NO_ICON_POSITION, NO_ICON_POSITION, NULL, NULL, 0
 };
 
 static ULONG nw_len(const char *s)
@@ -167,17 +165,6 @@ static VOID nw_launch(VOID)
     }
 }
 
-/* The picture, drawn by Workbench 3.9 and later from the current planes. */
-static ULONG nw_render(register struct Hook *h __asm("a0"),
-                       register APTR reserved __asm("a2"),
-                       register struct AppIconRenderMsg *arm __asm("a1"))
-{
-    (VOID)h;
-    (VOID)reserved;
-    DrawImage(arm->arm_RastPort, &nw_img, arm->arm_Left, arm->arm_Top);
-    return FALSE;
-}
-
 static VOID nw_icon_remove(VOID)
 {
     if (nw.appicon != NULL) RemoveAppIcon(nw.appicon);
@@ -188,33 +175,28 @@ static VOID nw_icon_add(VOID)
 {
     struct TagItem t[2];
 
-    t[0].ti_Tag = TAG_DONE;
-    if (WorkbenchBase->lib_Version >= 44)
-    {
-        nw.render.h_Entry = (ULONG (*)())(APTR)nw_render;
-        t[0].ti_Tag = WBAPPICONA_RenderHook;
-        t[0].ti_Data = (ULONG)&nw.render;
-        t[1].ti_Tag = TAG_DONE;
-    }
+    /* Workbench 3.9 and later write a position the user dragged the icon
+       to back into nw_dob, so the next AddAppIcon puts it there again. */
+    t[0].ti_Tag = WBAPPICONA_PropagatePosition;
+    t[0].ti_Data = TRUE;
+    t[1].ti_Tag = TAG_DONE;
+    /* Before V44 the tag list must be NULL. */
     nw.appicon = AddAppIconA(0, 0, (STRPTR)nw.label, nw.appport, (BPTR)0,
-                             &nw_dob, t);
+                             &nw_dob, WorkbenchBase->lib_Version >= 44 ? t : NULL);
 }
 
-/* The AppIcon and the variable after a state change: the picture redrawn
-   in place where Workbench can, re-added where it cannot or the label
-   changed. */
-static VOID nw_show(BOOL label_changed)
+/* The AppIcon and the variable after a state change.  Workbench keeps its
+   own copy of an AppIcon's picture, and a render hook that draws the
+   picture must draw the label too (Workbench 3.2 checked), so a new picture
+   is a new AppIcon. */
+static VOID nw_show(VOID)
 {
     char  env[sizeof(nw.env)];
     int   n;
 
-    if (nw.planes != NULL)
-        nw_icon_render((int)nw.icon, (int)nw.bars, NW_ICON_W, NW_ICON_H, nw.planes);
-    if (nw.appicon != NULL && !label_changed && WorkbenchBase->lib_Version >= 44)
-        (VOID)WorkbenchControl(NULL, WBCTRLA_RedrawAppIcon, (ULONG)nw.appicon,
-                               TAG_DONE);
-    else if (nw.want_icon && nw.planes != NULL)
+    if (nw.want_icon && nw.planes != NULL)
     {
+        nw_icon_render((int)nw.icon, (int)nw.bars, NW_ICON_W, NW_ICON_H, nw.planes);
         nw_icon_remove();
         nw_icon_add();
     }
@@ -263,7 +245,7 @@ static VOID nw_refresh(VOID)
     LONG  signal = 0, noise = 0, len = -1, icon, bars = 0;
     UBYTE ssid[NW_SSID_MAX], bssid[6];
     char  label[NW_SSID_MAX + 1];
-    BOOL  was_up = nw.link == NW_LINK_UP, label_changed;
+    BOOL  was_up = nw.link == NW_LINK_UP;
     int   i;
 
     nw.link = nw.dev_open ? nw_dev_signal(&nw.dev, &signal, &noise) : NW_LINK_NODEV;
@@ -286,13 +268,12 @@ static VOID nw_refresh(VOID)
     /* Drawn and written only when the picture or the label changes. */
     for (i = 0; label[i] == nw.label[i] && label[i] != '\0'; i++)
         ;
-    label_changed = label[i] != nw.label[i];
-    if (icon != nw.icon || label_changed || nw.bars != bars)
+    if (icon != nw.icon || label[i] != nw.label[i] || nw.bars != bars)
     {
         nw.icon = icon;
         nw.bars = bars;
         tool_copy_string(nw.label, sizeof(nw.label), label);
-        nw_show(label_changed);
+        nw_show();
     }
 
     /* Polled only while connected, or when the unit has no events. */

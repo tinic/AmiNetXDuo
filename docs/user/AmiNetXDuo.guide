@@ -1188,6 +1188,7 @@
     NetPrefs          edit interfaces and boot policy from Workbench
     NetMeter          addresses and live rates in a small Workbench window
     NetWirelessPrefs  Wi-Fi networks in range, joining one, link state
+    NetWireless       Wi-Fi state and signal as an AppIcon and in ENV:WiFi
     CheckNetConfig    read the configuration files back and report faults
     NetShutdown       stop the network and the programs using it
     RemoveNetInterface  remove one interface from the stack
@@ -3351,6 +3352,38 @@
   window was closed or another NetWirelessPrefs is running, 10 when there
   is no Wi-Fi unit, and 20 when the window could not open. SETUP does not
   restart WirelessManager.
+
+  NetWireless is the Wi-Fi commodity. It shows the link as an AppIcon:
+  one to four bars by signal (from -55, -66 and -77 dBm), bar outlines
+  while not connected, dotted outlines when the unit is offline, crossed
+  out with no Wi-Fi unit, and a '!' when the unit does not answer; the
+  label is the network's name. It also adds "Wi-Fi..." to Workbench's
+  Tools menu and keeps the state in the variable ENV:WiFi, for example
+  "Home 3/4", which a Workbench 3.2 title bar shows with %e WiFi. A
+  double-click on the icon, the menu item, the hotkey and Exchange's Show
+  open NetWirelessPrefs.
+
+  The unit reports connects and disconnects as events; the signal is read
+  every INTERVAL seconds only while connected, and nothing is read while
+  not connected. A changed picture replaces the AppIcon; on Workbench 3.9
+  and later it keeps the place it was dragged to, before that it returns
+  to a free place on the desktop.
+
+  ToolTypes, also Shell arguments:
+
+      CX_PRIORITY=0         commodity priority
+      CX_POPKEY=ctrl alt w  the hotkey
+      CX_POPUP=NO           YES opens NetWirelessPrefs at start
+      DEVICE, UNIT          the Wi-Fi unit, else as NetWirelessPrefs finds it
+      INTERFACE=wifipi      the interface file DEVICE and UNIT come from
+      INTERVAL=5            seconds between signal readings
+      APPICON=YES           NO: no AppIcon
+      APPMENU=YES           NO: no Tools menu item
+      ENVVAR=WiFi           the variable; ENVVAR= with no name: none
+      QUIET                 with no Wi-Fi unit, end at once
+
+  Without commodities.library or Workbench the variable alone is kept.
+  Ctrl-C and Exchange's Remove end it.
 
   @{b}Drivers@{ub}
 

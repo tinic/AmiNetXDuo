@@ -58,10 +58,6 @@ set +e
 RUN_RC=$?
 set -e
 
-<<<<<<< HEAD
 verdict_guest "netwireless" 37 "$RUN_RC" \
-=======
-verdict_guest "netwireless" 28 "$RUN_RC" \
->>>>>>> feat/netwireless-window
     "$(verdict_hd_amiberry)/stdout.txt" "$(verdict_serial_amiberry)" && exit 0
 exit $?
