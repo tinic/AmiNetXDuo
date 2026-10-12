@@ -78,7 +78,7 @@
   ))
 
 ; The netdb files the installer adds only where there were none, by their
-; own first lines, and the certificate store, which is AmiNetXDuo's.
+; own first lines.  The certificate store is the record's.
 (set DROP_N 0)
 (while (set DROP_FILE (select DROP_N "DEVS:Internet/hosts"
                                      "DEVS:Internet/protocols"
@@ -92,11 +92,7 @@
     (P_drop_ours)
     (set DROP_N (+ DROP_N 1))
   ))
-(if (exists "DEVS:Internet/certificates" (noreq))
-    (delete "DEVS:Internet/certificates"
-            (prompt "Deleting DEVS:Internet/certificates")
-            (help "A file AmiNetXDuo put there.")
-            (optional "force" "nofail")))
+
 
 (complete 40)
 
