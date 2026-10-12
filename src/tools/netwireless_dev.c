@@ -234,6 +234,7 @@ BOOL nw_dev_network(NwDev *d, UBYTE ssid[NW_SSID_MAX], LONG *ssid_len,
     BOOL            ok = FALSE;
 
     *ssid_len = -1;
+    d->net_channel = d->net_band5 = -1;
     if (pool == NULL) return FALSE;
     d->req->ios2_Data = pool;
     d->req->ios2_StatData = NULL;
@@ -247,6 +248,10 @@ BOOL nw_dev_network(NwDev *d, UBYTE ssid[NW_SSID_MAX], LONG *ssid_len,
                 *ssid_len = nw_copy_ssid((const UBYTE *)t->ti_Data, ssid);
             else if (t->ti_Tag == NW_S2INFO_BSSID && t->ti_Data != 0)
                 CopyMem((APTR)t->ti_Data, bssid, 6);
+            else if (t->ti_Tag == NW_S2INFO_Channel)
+                d->net_channel = (LONG)t->ti_Data;
+            else if (t->ti_Tag == NW_S2INFO_Band)
+                d->net_band5 = t->ti_Data == NW_S2BAND_A;
         }
     }
     d->req->ios2_Data = NULL;

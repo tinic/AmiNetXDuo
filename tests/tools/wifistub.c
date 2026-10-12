@@ -173,7 +173,7 @@ static ULONG ws_null(VOID)
 static VOID ws_network_info(struct IOSana2Req *io)
 {
     APTR            pool = io->ios2_Data;
-    struct TagItem *t = AllocPooled(pool, sizeof(struct TagItem) * 3);
+    struct TagItem *t = AllocPooled(pool, sizeof(struct TagItem) * 5);
     UBYTE          *ssid = AllocPooled(pool, 33);
     UBYTE          *bssid = AllocPooled(pool, 6);
 
@@ -186,7 +186,10 @@ static VOID ws_network_info(struct IOSana2Req *io)
     CopyMem((APTR)ws_mac, bssid, 6);
     t[0].ti_Tag = S2INFO_SSID;  t[0].ti_Data = (ULONG)ssid;
     t[1].ti_Tag = S2INFO_BSSID; t[1].ti_Data = (ULONG)bssid;
-    t[2].ti_Tag = TAG_DONE;     t[2].ti_Data = 0;
+    /* As anxwifipi.device reports them from WiFiPi 70eae25 on. */
+    t[2].ti_Tag = S2INFO_Channel; t[2].ti_Data = 6;
+    t[3].ti_Tag = S2INFO_Band;    t[3].ti_Data = 1;
+    t[4].ti_Tag = TAG_DONE;     t[4].ti_Data = 0;
     io->ios2_StatData = t;
     ws_reply(io, 0, 0);
 }
@@ -705,6 +708,7 @@ int main(void)
     rc = run(PREFS " STATUS");
     check(rc == 0 && has("connected") && has("Network       Home") &&
           has("-61 dBm, 3 of 4 bars"), "status of an associated unit");
+    check(has("Channel       6, 2.4 GHz"), "channel and band where the driver gives them");
 
     /* Configured and online: no second configure, and no S2_ONLINE, which
        zeroes anxwifipi.device's statistics. */
