@@ -17,6 +17,11 @@
 
 #define SCP_SSH_STACK (256UL * 1024UL)
 
+/* Names the stack, as every other command does: the installer and the
+   uninstaller tell its C: copy from another one by it. */
+static const char version_tag[] __attribute__((used)) =
+    "$VER: scp-runner (AmiNetXDuo)";
+
 int main(void)
 {
     struct Task *task = FindTask(NULL);

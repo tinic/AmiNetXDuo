@@ -87,7 +87,13 @@
 # the Installer must stop before writing anything.
 # -u runs the installed SYS:AmiNetXDuo/Uninstall-AmiNetXDuo after the
 # install, in the same boot: every product file must be as it was before the
-# install, .old and .new files aside.
+# install, .old files included, .new files aside.  A S:Network-Startup of
+# ours that installdrive marked between two runs is the user's edit and stays.
+# -X, with -u, does something first, as somebody would:
+#   restorefail  deletes Backup/1's bsdsocket.library (needs -f): that file
+#                stays missing, and Backup, the drawer and the record stay
+#   hostsedit    adds a line to DEVS:Internet/hosts: the file stays
+#   drawerfile   saves a file in the AmiNetXDuo drawer: it and the drawer stay
 # -P replaces the throw-away archive's InstallNetProbe with one that exits
 # RETURN_FAIL for every query (fail) or with a file that is not a program
 # (broken): the Installer must fall back to the full stack and the driver
@@ -135,12 +141,13 @@ PICK=""
 BOARD="${AMINETXDUO_AMIBERRY_BOARD:-a2065}"
 SNTP_MODE=""
 UNINSTALL=0
+UNINSTALL_PREP=""
 MDNS_OFF=0
 HAND_HOST=0
 PROBE_FAULT=""
 WIFI_MODE=""
 
-while getopts "b:a:l:p:N:t:T:kHSDgRUEJBIMq:x:f:e:c:m:CVzWs:P:Ow:nu" opt; do
+while getopts "b:a:l:p:N:t:T:kHSDgRUEJBIMq:x:f:e:c:m:CVzWs:P:Ow:nuX:" opt; do
     case "$opt" in
         b) BUILD="$OPTARG" ;;
         a) ARCHIVE="$OPTARG" ;;
@@ -174,6 +181,7 @@ while getopts "b:a:l:p:N:t:T:kHSDgRUEJBIMq:x:f:e:c:m:CVzWs:P:Ow:nu" opt; do
         W) SPACES=1 ;;
         s) SNTP_MODE="$OPTARG" ;;
         u) UNINSTALL=1; CONFIG_ONLY=1 ;;
+        X) UNINSTALL_PREP="$OPTARG" ;;
         O) MDNS_OFF=1 ;;
         n) HAND_HOST=1 ;;
         w) WIFI_MODE="$OPTARG"
@@ -1109,6 +1117,19 @@ fi
 for ((answer_run = 2; answer_run <= DRIVE_RUNS; answer_run++)); do
     ANSWER_LINES+=("$answer_run|ABSENT|Leave it alone")
 done
+
+case "$UNINSTALL_PREP" in
+    "") ;;
+    restorefail)
+        [ -n "$FOREIGN_MODE" ] || { echo "-X restorefail needs -f" >&2; exit 2; }
+        ANSWER_LINES+=("1|PREUNINSTALL|Delete SYS:AmiNetXDuo/Backup/1/Libs/bsdsocket.library QUIET") ;;
+    hostsedit)
+        ANSWER_LINES+=("1|PREUNINSTALL|Echo >>DEVS:Internet/hosts \"10.0.0.9 nas\"") ;;
+    drawerfile)
+        ANSWER_LINES+=("1|PREUNINSTALL|Echo >SYS:AmiNetXDuo/notes \"mine\"") ;;
+    *) echo "unknown -X: $UNINSTALL_PREP" >&2; exit 2 ;;
+esac
+[ -z "$UNINSTALL_PREP" ] || [ "$UNINSTALL" = 1 ] || { echo "-X needs -u" >&2; exit 2; }
 
 if [ "$HAND_HOST" = "1" ]; then
     [ "$RECONFIGURE" = 1 ] || { echo "-n needs -U" >&2; exit 2; }
@@ -2335,7 +2356,7 @@ if [ "$UNINSTALL" = 1 ]; then
     cat "$HD/uninstall-log.txt" 2>/dev/null || echo "(none written)"
     # Protection bits aside: Copy CLONE back through UAE's host files does not
     # reproduce the host mode the fixture was written with.
-    _strip() { grep -v -E '\.(old|old\.info|new)$' | grep -v -E $'^D\t' |
+    _strip() { grep -v -E '\.new$' | grep -v -E $'^D\t' |
                grep -v -E '\.uaem$' | cut -f3- | sort; }
     _before=$(printf '%s\n' "$ZERO_DIFF_BEFORE" | _strip)
     if [ "$FOREIGN_MODE" = roadshow-keepredo ]; then
@@ -2343,15 +2364,54 @@ if [ "$UNINSTALL" = 1 ]; then
         _before=$(printf '%s\n' "$_before" |
             sed -E "s|^[0-9a-f]+(\tS/Network-Startup)\$|$MARKED_NS_SHA\1|" | sort)
     fi
-    # A driver staged from the archive before the install is AmiNetXDuo's,
-    # and goes with it.
-    for _d in "$UNPACK"/AmiNetXDuo/Devs/Networks/anx*.device; do
-        [ -f "$_d" ] || continue
-        _before=$(printf '%s\n' "$_before" |
-            grep -v -F -x "$(shasum < "$_d" | cut -d' ' -f1)	Devs/Networks/${_d##*/}" || true)
-    done
+    # An anx driver staged before the install is an earlier AmiNetXDuo's:
+    # the install keeps it as .old and the uninstall deletes the new one.
+    _before=$(printf '%s\n' "$_before" |
+        grep -v -E $'\tDevs/Networks/anx[a-z0-9]*\\.device$' || true)
     _after=$(product_manifest | _strip)
     _u_ok=1
+    _drawer_stays=0
+    # Our S:Network-Startup with installdrive's mark: the user's, kept.
+    _ns=$(amiga_path S/Network-Startup 2>/dev/null || true)
+    if [ -n "$_ns" ] && [ "$DRIVE_RUNS" -gt 1 ] &&
+       grep -q 'written by the AmiNetXDuo installer' "$_ns" &&
+       grep -qx '; user startup policy -- installer must preserve this' "$_ns"; then
+        echo "  ok      the S:Network-Startup edited after the install stays"
+        _after=$(printf '%s\n' "$_after" | grep -v -E $'\tS/Network-Startup$' || true)
+        _before=$(printf '%s\n' "$_before" | grep -v -E $'\tS/Network-Startup$' || true)
+    fi
+    case "$UNINSTALL_PREP" in
+        restorefail)
+            _drawer_stays=1
+            _before=$(printf '%s\n' "$_before" | grep -v -E $'\tLibs/bsdsocket\\.library$' || true)
+            _after=$(printf '%s\n' "$_after" | grep -v -E $'\tAmiNetXDuo(/|\\.info$)' || true)
+            if amiga_path AmiNetXDuo/Backup/1/Libs/usergroup.library >/dev/null 2>&1 &&
+               amiga_path S/AmiNetXDuo-Files >/dev/null 2>&1; then
+                echo "  ok      a file not put back keeps Backup, the drawer and the record"
+            else
+                echo "!! a file was not put back, and Backup or the record went"
+                _u_ok=0
+            fi ;;
+        hostsedit)
+            _h=$(amiga_path Devs/Internet/hosts 2>/dev/null || true)
+            if [ -n "$_h" ] && grep -q '10.0.0.9 nas' "$_h"; then
+                echo "  ok      the hosts file edited after the install stays"
+                _after=$(printf '%s\n' "$_after" | grep -v -E $'\tDevs/Internet/hosts$' || true)
+            else
+                echo "!! the hosts file edited after the install went"
+                _u_ok=0
+            fi ;;
+        drawerfile)
+            _drawer_stays=1
+            _left=$(find "$HD/AmiNetXDuo" -mindepth 1 ! -name '*.uaem' -printf '%P\n' 2>/dev/null | sort | tr '\n' ' ')
+            if [ "$_left" = "notes " ]; then
+                echo "  ok      the drawer stays with the file saved in it, and nothing else"
+            else
+                echo "!! the drawer holds: ${_left:-nothing}"
+                _u_ok=0
+            fi
+            _after=$(printf '%s\n' "$_after" | grep -v -E $'\tAmiNetXDuo(/|\\.info$)' || true) ;;
+    esac
     if [ "$_before" != "$_after" ]; then
         echo "!! uninstalling did not restore the tree"
         diff -u <(printf '%s\n' "$_before") <(printf '%s\n' "$_after") || true
@@ -2361,11 +2421,12 @@ if [ "$UNINSTALL" = 1 ]; then
         echo "!! the driver returned $INSTALL_STATUS"
         _u_ok=0
     fi
-    if amiga_path S/AmiNetXDuo-Files >/dev/null 2>&1; then
+    if [ "$UNINSTALL_PREP" != restorefail ] &&
+       amiga_path S/AmiNetXDuo-Files >/dev/null 2>&1; then
         echo "!! S:AmiNetXDuo-Files is still there"
         _u_ok=0
     fi
-    if amiga_path AmiNetXDuo >/dev/null 2>&1; then
+    if [ "$_drawer_stays" = 0 ] && amiga_path AmiNetXDuo >/dev/null 2>&1; then
         echo "!! the AmiNetXDuo drawer is still there"
         _u_ok=0
     fi

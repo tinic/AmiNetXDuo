@@ -161,6 +161,8 @@
  *                     files' commented lines and no final newline
  *   1|LIVEPRIORITY|<file> the same, then a last line "UNIT=0 PRIORITY=3"
  *                     (two pairs, no final newline): a live PRIORITY
+ *   1|PREUNINSTALL|<command> an AmigaDOS command run before the
+ *                     uninstaller, as somebody would between the two
  *
  * Unlike the historical DRIVE_YES_LABEL/DRIVE_PICK_* switches, this can
  * answer more than one non-default question in one installation and can give
@@ -193,7 +195,8 @@ enum ActionType
     ACTION_DROPFIRMWARE,
     ACTION_HANDHOST,
     ACTION_UNPRIORITY,
-    ACTION_LIVEPRIORITY
+    ACTION_LIVEPRIORITY,
+    ACTION_PREUNINSTALL
 };
 
 struct DriveAction
@@ -490,6 +493,13 @@ static BOOL load_actions(VOID)
             /* Applied between runs, like DROPSTARTUP. */
             action->type = (kind[0] == 'U') ? ACTION_UNPRIORITY
                                             : ACTION_LIVEPRIORITY;
+            action->used = TRUE;
+            copy_text(action->match, at, sizeof(action->match));
+        }
+        else if (strcmp(kind, "PREUNINSTALL") == 0)
+        {
+            /* Run before the uninstall run starts. */
+            action->type = ACTION_PREUNINSTALL;
             action->used = TRUE;
             copy_text(action->match, at, sizeof(action->match));
         }
@@ -1568,6 +1578,25 @@ int main(void)
         nil_out = Open((STRPTR)"DH0:installer-out.txt", MODE_NEWFILE);
         if (nil_out == 0)
             nil_out = Open((STRPTR)"NIL:", MODE_NEWFILE);
+
+        if (run_number > DRIVE_RUNS)
+        {
+            LONG d;
+
+            for (d = 0; d < action_count; d++)
+                if (actions[d].type == ACTION_PREUNINSTALL)
+                {
+                    say("installdrive: before uninstalling: %s\n",
+                        (LONG)actions[d].match);
+                    if (SystemTagList((STRPTR)actions[d].match, NULL) != 0)
+                    {
+                        say("installdrive: that command failed\n", 0);
+                        rc = RETURN_FAIL;
+                    }
+                }
+            if (rc != RETURN_OK)
+                break;
+        }
 
         if (!drive_once(run_number, nil_in, nil_out))
         {
