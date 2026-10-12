@@ -14,7 +14,7 @@
 #                                 [-m core|driver|probe|minimal]
 #                                 [-C] [-M] [-V] [-I] [-z] [-W]
 #                                 [-s yes|invalid]
-#                                 [-w join|keep|keepit|keepitlive|userstart|userwm]
+#                                 [-w join|keep|keepit|keepitlive|keepitfw|userstart|userwm]
 #                                 [-f roadshow-leave|roadshow-replace|
 #                                     amitcpng-leave|amitcpng-replace]
 #
@@ -48,6 +48,8 @@
 #             untouched, and the lines that start WirelessManager commented.
 #   keepitlive  keepit with -e both, the kept genet file ending in a live
 #             "UNIT=0 PRIORITY=3": nothing may be appended to it.
+#   keepitfw  keepit that also empties DEVS:Firmware between the runs: the
+#             kept definition alone must bring the firmware back.
 #   keepit    with -R: run 1 answers, its S:Network-Startup is deleted, run 2
 #             takes "Keep it" and must write the Wi-Fi block from the kept
 #             definition.
@@ -374,7 +376,7 @@ fi
 
 if [ -n "$WIFI_MODE" ]; then
     case "$WIFI_MODE" in
-        join|keep|keepit|keepitlive|userstart|userwm) ;;
+        join|keep|keepit|keepitlive|keepitfw|userstart|userwm) ;;
         *) echo "unknown Wi-Fi mode: $WIFI_MODE" >&2; exit 2 ;;
     esac
     case "$EMU68_FIXTURE" in
@@ -382,7 +384,7 @@ if [ -n "$WIFI_MODE" ]; then
         *) echo "-w needs -e wifi or -e both: only then is the Pi Wi-Fi selected" >&2
            exit 2 ;;
     esac
-    if { [ "$WIFI_MODE" = keepit ] || [ "$WIFI_MODE" = keepitlive ]; } && [ "$RERUN" != 1 ]; then
+    if { [ "$WIFI_MODE" = keepit ] || [ "$WIFI_MODE" = keepitlive ] || [ "$WIFI_MODE" = keepitfw ]; } && [ "$RERUN" != 1 ]; then
         echo "-w keepit needs -R: it is the Keep it reinstall" >&2
         exit 2
     fi
@@ -969,7 +971,7 @@ WIFI_ANSWERED=0
 WM_EXPECT_LIVE=1
 WM_USER_FIXTURE=0
 case "$WIFI_MODE" in
-    join|keepit|keepitlive|userwm) WIFI_ANSWERED=1 ;;
+    join|keepit|keepitlive|keepitfw|userwm) WIFI_ANSWERED=1 ;;
 esac
 case "$WIFI_MODE" in
     keep|userstart|userwm) WM_EXPECT_LIVE=0 ;;
@@ -982,6 +984,9 @@ if [ "$WIFI_ANSWERED" = 1 ]; then
 fi
 case "$WIFI_MODE" in
     keepit|keepitlive) ANSWER_LINES+=("1|DROPSTARTUP|-") ;;
+    # keepitfw: run 2 meets an empty DEVS:Firmware with only the kept
+    # anxwifipi definition to say the Pi Wi-Fi is there.
+    keepitfw) ANSWER_LINES+=("1|DROPSTARTUP|-" "1|DROPFIRMWARE|-") ;;
 esac
 # With the Ethernet as well, the kept genet file is left with PRIORITY only
 # in comments, as the example files have it, and no final newline: run 2
@@ -1072,7 +1077,7 @@ for ((answer_run = 1; answer_run <= DRIVE_RUNS; answer_run++)); do
     # -w keepit deletes run 1's file between the runs, so run 2 writes one
     # and asks, as a first install would.
     if [ "$answer_run" -gt 1 ] && [ "$RECONFIGURE" = "0" ] &&
-       [ "$WIFI_MODE" != keepit ] && [ "$WIFI_MODE" != keepitlive ]; then
+       [ "$WIFI_MODE" != keepit ] && [ "$WIFI_MODE" != keepitlive ] && [ "$WIFI_MODE" != keepitfw ]; then
         ANSWER_LINES+=("$answer_run|ABSENT|Yes, set the clock")
     elif [ -n "$SNTP_MODE" ]; then
         ANSWER_LINES+=("$answer_run|BOOL|Yes, set the clock")
@@ -1164,12 +1169,13 @@ if [ "$MANUAL_CARD" = 0 ]; then
     fi
 fi
 # The Wi-Fi fixture starts with two firmware files of the user's own in
-# DEVS:Firmware, a .txt and a .bin: the Installer must keep both, leave out
-# the .clm_blob of that .bin (the two are one build) and add the rest.  -e
+# DEVS:Firmware, a .txt and a .bin: the Installer must keep both and add the
+# rest, the .bin's missing .clm_blob included (the driver needs one).  -e
 # both starts with no DEVS:Firmware at all.
 FW_KEPT="brcmfmac43455-sdio.txt cyfmac43455-sdio.bin"
-FW_SKIPPED="cyfmac43455-sdio.clm_blob"
-if [ "$EMU68_FIXTURE" = wifi ]; then
+if [ "$EMU68_FIXTURE" = wifi ] && [ "$WIFI_MODE" = keepitfw ]; then
+    FW_KEPT=""
+elif [ "$EMU68_FIXTURE" = wifi ]; then
     mkdir -p "$HD/Devs/Firmware"
     for _f in $FW_KEPT; do
         printf 'user firmware, %s\n' "$TAG" > "$HD/Devs/Firmware/$_f"
@@ -2463,11 +2469,7 @@ case "$EMU68_FIXTURE" in
         for _f in "$_fw_src"/*; do
             _b=$(basename "$_f")
             _fw_n=$((_fw_n + 1))
-            if [ "$EMU68_FIXTURE" = wifi ] && [ "$_b" = "$FW_SKIPPED" ]; then
-                [ ! -e "$_fw_dir/$_b" ] || {
-                    echo "!! DEVS:Firmware/$_b was added beside the user's .bin"
-                    _fw_bad=1; }
-            elif [ "$EMU68_FIXTURE" = wifi ] &&
+            if [ "$EMU68_FIXTURE" = wifi ] &&
                  case " $FW_KEPT " in *" $_b "*) true ;; *) false ;; esac; then
                 grep -q '^user firmware' "$_fw_sys/$_b" 2>/dev/null || {
                     echo "!! DEVS:Firmware/$_b, the user's own, was replaced"
@@ -2519,7 +2521,7 @@ if [ "$DRIVE_RUNS" != "1" ]; then
         else
             echo "  ok      reconfigure replaced startup and preserved its .old"
         fi
-    elif [ "$WIFI_MODE" = keepit ] || [ "$WIFI_MODE" = keepitlive ]; then
+    elif [ "$WIFI_MODE" = keepit ] || [ "$WIFI_MODE" = keepitlive ] || [ "$WIFI_MODE" = keepitfw ]; then
         # installdrive deleted run 1's file; Keep it with no S:Network-Startup
         # writes a new one, and the Wi-Fi block below must be in it.
         if [ -z "$NS_FILE" ]; then

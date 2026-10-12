@@ -1457,7 +1457,6 @@
 ; --- the card ------------------------------------------------------------
 
 (set IFNAME  "eth0")
-(set CARD_MASK 0)
 (set DEVUNIT 0)
 (set USE_CARD 0)
 (set CARD_KEY "")
@@ -2331,24 +2330,15 @@
 ; definition names anxwifipi.device), every file of the archive's
 ; Devs/Firmware that DEVS:Firmware does not have goes there, the licences
 ; and WHENCE included.  A file already there is kept: it may be a newer
-; firmware the user put in.  So is the .clm_blob of a .bin already there:
-; the two are one build.
-(if WIFI_SEL
+; firmware the user put in.
+; The Pi's own Wi-Fi only: WIFI_DEV is the driver its definition names.
+(if (AND WIFI_SEL (patmatch "#?anxwifipi.device" WIFI_DEV))
   (
     (set D_FIRMWARE (tackon D_DEVS "Firmware"))
     (makedir D_FIRMWARE
       (prompt "Creating DEVS:Firmware")
       (help   @makedir-help))
-    ; The .clm_blob files first, while every .bin there is still the user's.
-    (foreach S_FIRMWARE "#?.clm_blob"
-      (
-        (set FW_NAME @each-name)
-        (set FW_BIN (cat (substr FW_NAME 0 (- (strlen FW_NAME) 9)) ".bin"))
-        (if (NOT (OR (exists (tackon "DEVS:Firmware" FW_BIN) (noreq))
-                     (exists (tackon D_FIRMWARE FW_BIN) (noreq))))
-            (P_install_firmware))
-      ))
-    (foreach S_FIRMWARE "~(#?.clm_blob)"
+    (foreach S_FIRMWARE "#?"
       (
         (set FW_NAME @each-name)
         (P_install_firmware)
