@@ -1720,6 +1720,14 @@ int main(void)
             }
     }
 
+#ifdef DRIVE_UNINSTALL
+    /* The uninstaller's lists, onto the disk the harness reads. */
+    SystemTagList((STRPTR)"Copy >NIL: T:AmiNetXDuo-NotRestored "
+                          "DH0:uninstall-notrestored.txt QUIET", NULL);
+    SystemTagList((STRPTR)"Copy >NIL: T:AmiNetXDuo-Kept "
+                          "DH0:uninstall-kept.txt QUIET", NULL);
+#endif
+
     say("installdrive: %ld pages driven in total\n", clicks);
     /*
      * How many yes/no pages went past.  It is what tells "DRIVE_YES_LABEL did

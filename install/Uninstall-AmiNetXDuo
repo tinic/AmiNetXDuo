@@ -104,8 +104,8 @@
 (set DONE "")
 (if NOT_BACK
     (set DONE (cat DONE "Some files of the other stack were not put back: "
-                   "a file changed since the installation is in the place of "
-                   "one, or a copy failed.  T:AmiNetXDuo-NotRestored lists "
+                   "a file in its place was changed after the installation, "
+                   "or a copy failed.  T:AmiNetXDuo-NotRestored lists "
                    "each with its copy in the AmiNetXDuo drawer's Backup, to "
                    "compare and copy back by hand.  Backup and "
                    "S:AmiNetXDuo-Files stay, so Uninstall-AmiNetXDuo can be "

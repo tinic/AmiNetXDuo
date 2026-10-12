@@ -2360,6 +2360,9 @@ cat "$HD/install-log.txt" 2>/dev/null || echo "(none written)"
 if [ "$UNINSTALL" = 1 ]; then
     echo "---- Uninstall log ----"
     cat "$HD/uninstall-log.txt" 2>/dev/null || echo "(none written)"
+    echo "uninstall_notrestored=$(wc -l < "$HD/uninstall-notrestored.txt" 2>/dev/null || echo 0)"
+    echo "uninstall_kept=$(wc -l < "$HD/uninstall-kept.txt" 2>/dev/null || echo 0)"
+    sed 's/^/  not restored: /' "$HD/uninstall-notrestored.txt" 2>/dev/null || true
     # Protection bits aside: Copy CLONE back through UAE's host files does not
     # reproduce the host mode the fixture was written with.
     _strip() { grep -v -E '\.new$' | grep -v -E $'^D\t' |
@@ -2393,10 +2396,12 @@ if [ "$UNINSTALL" = 1 ]; then
             # .old the installation renamed it to: the one copy left.
             _lib=$(printf '%s\n' "$_before" | sed -n $'s/\t\\(Libs\\/bsdsocket\\.library\\)$/ \\1/p' | cut -d' ' -f1)
             _old=$(amiga_path Libs/bsdsocket.library.old 2>/dev/null || true)
-            if [ -n "$_old" ] && [ "$(shasum < "$_old" | cut -d' ' -f1)" = "$_lib" ]; then
+            if [ -n "$_old" ] && [ "$(shasum < "$_old" | cut -d' ' -f1)" = "$_lib" ] &&
+               grep -q '^LIBS:bsdsocket.library could not be copied from ' \
+                   "$HD/uninstall-notrestored.txt" 2>/dev/null; then
                 echo "  ok      the other stack's library stays as bsdsocket.library.old"
             else
-                echo "!! the other stack's library is gone"
+                echo "!! the other stack's library is gone, or NotRestored does not name it"
                 _u_ok=0
             fi
             _before=$(printf '%s\n' "$_before" | grep -v -E $'\tLibs/bsdsocket\\.library(\\.old)?$' || true)
@@ -2422,9 +2427,13 @@ if [ "$UNINSTALL" = 1 ]; then
             _drawer_stays=1
             _ns=$(amiga_path S/Network-Startup 2>/dev/null || true)
             _nsold=$(amiga_path S/Network-Startup.old 2>/dev/null || true)
+            _ns_orig=$(printf '%s\n' "$_before" | sed -n $'s/\t\\(S\\/Network-Startup\\)$/ \\1/p' | cut -d' ' -f1)
+            _ns_bk=$(amiga_path AmiNetXDuo/Backup/1/S/Network-Startup 2>/dev/null || true)
             if [ -n "$_ns" ] && grep -qx '; mine' "$_ns" &&
-               [ -n "$_nsold" ] &&
-               amiga_path AmiNetXDuo/Backup/1/S/Network-Startup >/dev/null 2>&1 &&
+               [ -n "$_nsold" ] && [ -n "$_ns_bk" ] && [ -n "$_ns_orig" ] &&
+               [ "$(shasum < "$_nsold" | cut -d' ' -f1)" = "$_ns_orig" ] &&
+               [ "$(shasum < "$_ns_bk" | cut -d' ' -f1)" = "$_ns_orig" ] &&
+               grep -q '^S:Network-Startup is not the one in ' "$HD/uninstall-notrestored.txt" 2>/dev/null &&
                amiga_path S/AmiNetXDuo-Files >/dev/null 2>&1; then
                 echo "  ok      the edited S:Network-Startup stays; the other stack's stays in Backup and as .old"
             else

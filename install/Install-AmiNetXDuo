@@ -2318,11 +2318,13 @@
   (while (AND (= KEPT 0) (<= KB_N BK_MAX))
     (
       (set KB_DIR (tackon (tackon D_BACKUP_TOP ("%ld" KB_N)) BK_SUB))
+      (set KB_DONE (exists (tackon (tackon D_BACKUP_TOP ("%ld" KB_N)) "Restore")
+                           (noreq)))
       (set KB_I 0)
       (while (AND (= KEPT 0) (< KB_I 2))
         (
           (set KB_F (tackon KB_DIR (select KB_I KB_NAME KB_BASE)))
-          (if (exists KB_F (noreq))
+          (if (AND KB_DONE (exists KB_F (noreq)))
               (if (= 0 (run ("\"%s\" \"%s\" \"%s\" BYTES" S_SAMEFILE BK_SRC KB_F)
                             (quiet) (safe)))
                   (set KEPT 1)))
@@ -2371,6 +2373,11 @@
                               (prompt ("Removing the incomplete %s" BK_FILE))
                               (help   H_BACKUP)
                               (optional "force" "nofail")))
+                  ; And this run's drawer: without its Restore it would
+                  ; pass for a kept copy in the next run.
+                  (run ("Delete >NIL: \"%s\" ALL QUIET FORCE" D_BACKUP)
+                       (prompt ("Removing %s" D_BACKUP))
+                       (help   H_BACKUP))
                   (abort (cat "The copy of " BK_SRC " into " BK_DIR " failed.  "
                               "Nothing on the disk has been replaced.\n\n"
                               "Free space on that volume and run the installer "
@@ -2383,7 +2390,10 @@
                 (
                   (set BK_C (tackon (tackon (tackon D_BACKUP_TOP ("%ld" BK_N)) BK_SUB)
                                     (fileonly BK_SRC)))
-                  (if (exists BK_C (noreq)) (set BK_LOW BK_C))
+                  (if (AND (exists BK_C (noreq))
+                           (exists (tackon (tackon D_BACKUP_TOP ("%ld" BK_N)) "Restore")
+                                   (noreq)))
+                      (set BK_LOW BK_C))
                   (set BK_N (+ BK_N 1))
                 ))
               ; Something else in its place -- a file of ours changed since
@@ -2445,7 +2455,9 @@
 
 ; REC_F a .old in REC_SUB, deleted when it is ours, or the other stack's
 ; renamed by this installation: the lowest Backup copy of its name has its
-; bytes, and comes back after.  Decided here, as it is now.
+; bytes, and its Restore, after, puts that copy back.  Before the Restores,
+; because a Restore of the other stack's own .old needs the name free; a
+; Restore that fails lists the path and Backup keeps the bytes.
 (procedure P_rec_old
   (set RO_BASE (fileonly (substr REC_F 0 (- (strlen REC_F) 4))))
   (set RO_LB "")
@@ -2454,7 +2466,9 @@
     (
       (set RO_C (tackon (tackon (tackon D_BACKUP_TOP ("%ld" RO_N)) REC_SUB)
                         RO_BASE))
-      (if (exists RO_C (noreq)) (set RO_LB RO_C))
+      (if (AND (exists RO_C (noreq))
+               (exists (tackon (tackon D_BACKUP_TOP ("%ld" RO_N)) "Restore") (noreq)))
+          (set RO_LB RO_C))
       (set RO_N (+ RO_N 1))
     ))
   (if (exists REC_F (noreq))

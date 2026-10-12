@@ -912,16 +912,23 @@ python3 "$INSTALL/tools/checkscript.py" "$TREE/Uninstall-AmiNetXDuo"
 # The installer and the uninstaller tell our programs from another stack's
 # or the user's by the name AmiNetXDuo inside them.
 _unmarked=0
-for _f in "$TREE"/C/* "$TREE"/C/fat/* "$TREE"/Libs/* "$TREE"/Devs/Networks/anx*.device \
+_checked=0
+for _f in "$TREE"/C/* "$TREE"/C/fat/* "$TREE"/Libs/* "$TREE"/Libs/*/* \
+          "$TREE"/Devs/Networks/anx*.device \
           "$TREE"/Devs/Networks/fat/anx*.device; do
     [ -f "$_f" ] || continue
     case "$_f" in *.info) continue ;; esac
+    _checked=$((_checked + 1))
     if ! LC_ALL=C grep -a -q AmiNetXDuo "$_f"; then
         echo "!! ${_f#"$TREE"/} does not contain the name AmiNetXDuo" >&2
         _unmarked=1
     fi
 done
 [ "$_unmarked" = 0 ] || exit 1
+if [ "$_checked" -lt 60 ]; then
+    echo "!! only $_checked programs checked for the name AmiNetXDuo" >&2
+    exit 1
+fi
 python3 "$INSTALL/tools/showicon.py" "$TREE"/*.info >/dev/null
 
 echo
