@@ -169,7 +169,8 @@
   (cat "mDNS makes this Amiga reachable by a .local name.  It also lets "
        "ShowNetServices list the other machines on the network.  No name "
        "server is necessary.\n\n"
-       "mDNS is on by default on a 68020 or newer and off on a 68000.  The "
+       "mDNS is on by default on a 68020 or newer and off on a 68000 or "
+       "68010.  The "
        "responder joins a multicast group on this interface.  Every .local "
        "query on the network then becomes work for this Amiga, even when the "
        "query is about another machine.  On a 68000 that cost is enough to "
@@ -1667,7 +1668,8 @@
           (if (askbool
                 (prompt "Answer .local names on the network?")
                 (help    H_MDNS)
-                (choices (if MDNS_DEF "Yes" "No") (if MDNS_DEF "No" "Yes"))
+                (choices (if MDNS_DEF "Yes, answer them" "No .local names")
+                         (if MDNS_DEF "No .local names" "Yes, answer them"))
                 (default 1))
               MDNS_DEF (- 1 MDNS_DEF)))
       ))

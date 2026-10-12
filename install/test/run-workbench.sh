@@ -13,7 +13,7 @@
 #                                 [-c drivers]
 #                                 [-m core|driver|probe|minimal]
 #                                 [-C] [-M] [-V] [-I] [-z] [-W]
-#                                 [-s yes|invalid]
+#                                 [-s yes|invalid] [-O]
 #                                 [-f roadshow-leave|roadshow-replace|
 #                                     amitcpng-leave|amitcpng-replace]
 #
@@ -31,6 +31,8 @@
 # Options which answer an Installer page need -l AVERAGE or EXPERT.  -H also
 # needs AMINETXDUO_PEER, a THIRD machine (this host's frames do not come back
 # round to its own pcap), or it exits 3.
+# -O answers the .local page with its second button, "No .local names", on a
+# 68020: the interface must say MDNS=NO.
 # -s types 0.pool.ntp.org as the SNTP server, a page only Expert draws;
 # `-s invalid' types a refused name first.  Without -s the question takes its
 # default, yes with pool.ntp.org, and an S:Network-Startup this installer
@@ -87,9 +89,10 @@ INST=
 PICK=""
 BOARD="${AMINETXDUO_AMIBERRY_BOARD:-a2065}"
 SNTP_MODE=""
+MDNS_OFF=0
 PROBE_FAULT=""
 
-while getopts "b:a:l:p:N:t:T:kHSDgRUEJBIMq:x:f:e:c:m:CVzWs:P:" opt; do
+while getopts "b:a:l:p:N:t:T:kHSDgRUEJBIMq:x:f:e:c:m:CVzWs:P:O" opt; do
     case "$opt" in
         b) BUILD="$OPTARG" ;;
         a) ARCHIVE="$OPTARG" ;;
@@ -122,6 +125,7 @@ while getopts "b:a:l:p:N:t:T:kHSDgRUEJBIMq:x:f:e:c:m:CVzWs:P:" opt; do
         z) STALE_PI_DRIVERS=1; NO_CARD=1; CONFIG_ONLY=1 ;;
         W) SPACES=1 ;;
         s) SNTP_MODE="$OPTARG" ;;
+        O) MDNS_OFF=1 ;;
         *) echo "usage: $0 [-b builddir] [-a archive.lha]" \
                 "[-l NOVICE|AVERAGE|EXPERT] [-p choice] [-N board]" \
                 "[-t seconds] [-T seconds] [-k] [-H] [-S] [-D] [-g] [-R] [-U] [-E]" \
@@ -191,6 +195,10 @@ case "$SNTP_MODE" in
     invalid) CONFIG_ONLY=1 ;;
     *) echo "unknown SNTP mode: $SNTP_MODE" >&2; exit 2 ;;
 esac
+if [ "$MDNS_OFF" = 1 ] && [ "$LEVEL" = "NOVICE" ]; then
+    echo "-O needs -l AVERAGE or -l EXPERT: Novice draws no questions" >&2
+    exit 2
+fi
 if [ -n "$SNTP_MODE" ] && [ "$LEVEL" != "EXPERT" ]; then
     echo "-s needs -l EXPERT: only Expert draws the SNTP server page" >&2
     exit 2
@@ -907,6 +915,8 @@ if [ "$EXPERT_CUSTOM" = "1" ]; then
         # deliberately invalid first value has been refused.
         ANSWER_LINES+=("1|STRING|eth0|-bad")
         ANSWER_LINES+=("1|STRING|eth0|$EXPECTED_IF")
+        # The hostname page is the only askstring with an empty default, so
+        # an empty match names it and nothing else.
         ANSWER_LINES+=("1|STRING||bad name")
         ANSWER_LINES+=("1|STRING||$EXPECTED_HOST")
     else
@@ -916,6 +926,9 @@ if [ "$EXPERT_CUSTOM" = "1" ]; then
 fi
 if [ "$RECONFIGURE" = "1" ]; then
     ANSWER_LINES+=("2|BOOL|Set them up again")
+fi
+if [ "$MDNS_OFF" = "1" ]; then
+    ANSWER_LINES+=("1|BOOL|No .local names")
 fi
 case "$FOREIGN_MODE" in
     *-leave) ANSWER_LINES+=("1|BOOL|Leave it alone") ;;
@@ -2426,13 +2439,16 @@ if [ "$EXPERT_CUSTOM" = 0 ] &&
         echo "  ok      name_resolution leaves the derived hostname"
     fi
 fi
+# A transition's run 2 keeps run 1's file, written for run 1's stack.
 _pif=$(amiga_path "${INST}Devs/NetInterfaces/$EXPECTED_IF" 2>/dev/null || true)
-if grep -q 'written by the AmiNetXDuo' "$_pif" 2>/dev/null; then
+if grep -q 'written by the AmiNetXDuo' "$_pif" 2>/dev/null &&
+   { [ -z "$TRANSITION" ] || [ "$RECONFIGURE" = 1 ]; }; then
     _want_mdns=NO
     case "$STACK_INSTALLED:$MODEL" in
         full:A500*|full:A600*|full:A1000*|full:A2000*) ;;
         full:*|fat:*) _want_mdns=YES ;;
     esac
+    [ "$MDNS_OFF" = 0 ] || _want_mdns=NO
     if grep -q "^MDNS=$_want_mdns" "$_pif"; then
         echo "  ok      $EXPECTED_IF has MDNS=$_want_mdns"
     else

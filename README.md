@@ -134,7 +134,7 @@ unpack it, and run `Install-AmiNetXDuo`. It asks:
 | Where the `AmiNetXDuo` drawer of documentation and examples goes | any drawer; nothing in it is needed for the network |
 | Into the system (`LIBS:`, `C:`, `DEVS:`), or into its own drawer, added last to those assigns; refused if `LIBS:` already has a `bsdsocket.library` (Intermediate and Expert) | into the system |
 | Which card, and the interface name | the driver found in `DEVS:` |
-| Answer to `<hostname>.local` on the network | yes on a 68020 or newer, no on a 68000 |
+| Answer to `<hostname>.local` on the network | yes on a 68020 or newer, no on a 68000 or 68010 |
 | DHCP, or a fixed address, netmask and gateway | DHCP |
 | The machine's name (Expert) | `amiga-` and the card's last three address octets |
 | Start the network at boot | yes |

@@ -106,7 +106,7 @@ The installer asks, in this order:
      Which card, and for PCMCIA which card type
      The interface name and unit                  (eth0, 0; Expert)
      Answer to <hostname>.local on the network    (yes on a 68020 or
-                                                   newer, no on a 68000)
+                                                   newer)
      DHCP, or a fixed address, netmask, gateway   (DHCP)
      The name of this machine                     (amiga- and the last
                                                    three octets of the
@@ -181,8 +181,8 @@ machine.
 A second run of the installer over a working installation is safe.  It
 notices the existing configuration and offers to leave it exactly as it is,
 and it only ever replaces its own block in S:User-Startup.  A kept
-configuration keeps its S:Network-Startup; a new one renames the existing
-file to S:Network-Startup.old.
+configuration keeps its S:Network-Startup; a new one that starts the network
+at boot renames the existing file to S:Network-Startup.old.
 
 
 HOW THE NETWORK STARTS
