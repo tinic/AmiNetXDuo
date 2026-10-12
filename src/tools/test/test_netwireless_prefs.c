@@ -309,6 +309,20 @@ static void test_iface(void)
           unit == 3, "a longer keyword is not DEVICE");
     check(!nw_iface_device(a, sizeof(a) - 1, dev, 8, &unit),
           "a DEVICE too long for the buffer is not taken");
+    {
+        /* Two DEVICE lines that each fit: the last wins, written from the
+           start, never after the first (which ran past the buffer). */
+        static const char two[] =
+            "DEVICE=abcdefghijklmn.device\n"
+            "DEVICE=short.device\n";
+        struct { char buf[24]; char canary[16]; } b;
+
+        memset(&b, 'x', sizeof(b));
+        check(nw_iface_device(two, sizeof(two) - 1, b.buf, sizeof(b.buf), &unit) &&
+              strcmp(b.buf, "short.device") == 0, "the last DEVICE line wins");
+        check(b.canary[0] == 'x' && b.canary[15] == 'x',
+              "nothing written past the buffer");
+    }
 }
 
 int main(void)

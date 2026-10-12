@@ -75,6 +75,8 @@ static struct
     LONG                icon;               /* NW_ICON_*                    */
     char                label[NW_SSID_MAX + 1];
     BOOL                events_broken;
+    BOOL                event_retry;        /* asked again on the next tick */
+    BOOL                want_menu;
     BOOL                offline;            /* the event mask's online bit  */
     char                envbuf[24];
 
@@ -223,10 +225,26 @@ static VOID nw_show(VOID)
 
 /* ------------------------------------------------------------ state -- */
 
-static BOOL nw_polling(VOID)
+/* The timer runs while connected, while a reading failed, while the event
+   request waits to be asked again, for a unit without events, and until
+   Workbench has taken the AppIcon and the menu item (a start before
+   LoadWB).  Not connected and nothing pending, it does not run. */
+static BOOL nw_wb_pending(VOID)
+{
+    return nw.appport != NULL &&
+           ((nw.want_icon && nw.planes != NULL && nw.appicon == NULL) ||
+            (nw.want_menu && nw.appmenu == NULL));
+}
+
+static BOOL nw_reading(VOID)
 {
     return nw.dev_open && (nw.link == NW_LINK_UP || nw.link == NW_LINK_ERROR ||
-                           nw.events_broken);
+                           nw.events_broken || nw.event_retry);
+}
+
+static BOOL nw_polling(VOID)
+{
+    return nw_reading() || nw_wb_pending();
 }
 
 static VOID nw_timer_arm(VOID)
@@ -256,7 +274,7 @@ static VOID nw_refresh(BOOL event)
     {
         case NW_LINK_UP:
             icon = NW_ICON_CONNECTED;
-            bars = nw_bars(signal);
+            bars = nw_bars_held(signal, nw.icon == NW_ICON_CONNECTED ? (int)nw.bars : 0);
             if (was_up && !event)
                 tool_copy_string(label, sizeof(label), nw.label);
             else if (nw_dev_network(&nw.dev, ssid, &len, bssid) && len > 0)
@@ -425,7 +443,8 @@ int main(int argc, char **argv)
     nw.appport = CreateMsgPort();
     if (WorkbenchBase != NULL && IntuitionBase != NULL && nw.appport != NULL)
     {
-        if (nw_opt_yes(ARG_APPMENU, TRUE))
+        nw.want_menu = nw_opt_yes(ARG_APPMENU, TRUE);
+        if (nw.want_menu)
             nw.appmenu = AddAppMenuItemA(0, 0, (STRPTR)"Wi-Fi...", nw.appport, NULL);
         nw.want_icon = nw_opt_yes(ARG_APPICON, TRUE);
         if (nw.want_icon &&
@@ -474,19 +493,34 @@ int main(int argc, char **argv)
             LONG  err = nw.dev.event->ios2_Req.io_Error;
             ULONG got = nw.dev.event->ios2_WireError;
 
-            /* A unit without events is polled; an aborted request (a
-               CMD_FLUSH from another opener) is asked again. */
+            /* A unit without events is polled.  Any other refusal (an
+               aborted request, a CMD_FLUSH from another opener) is asked
+               again on the next tick, never at once: a driver that refuses
+               every request must not spin. */
             if (err == IOERR_NOCMD || err == S2ERR_NOT_SUPPORTED)
                 nw.events_broken = TRUE;
+            else if (err != 0)
+                nw.event_retry = TRUE;
             if (err == 0 && (got & S2EVENT_OFFLINE)) nw.offline = TRUE;
             if (err == 0 && (got & S2EVENT_ONLINE)) nw.offline = FALSE;
-            nw_event_arm();
+            if (err == 0) nw_event_arm();
             nw_refresh(TRUE);
         }
         if ((sigs & tim) && GetMsg(nw.tport) != NULL)
         {
             nw.tarmed = FALSE;
-            if (nw_polling()) nw_refresh(FALSE);
+            if (nw.event_retry)
+            {
+                nw.event_retry = FALSE;
+                nw_event_arm();
+            }
+            if (nw.want_menu && nw.appmenu == NULL && nw.appport != NULL)
+                nw.appmenu = AddAppMenuItemA(0, 0, (STRPTR)"Wi-Fi...", nw.appport, NULL);
+            if (nw.want_icon && nw.planes != NULL && nw.appicon == NULL)
+                nw_icon_add();
+            /* The unit is read only for its own reasons. */
+            if (nw_reading()) nw_refresh(FALSE);
+            else if (nw_polling()) nw_timer_arm();
         }
     }
 
