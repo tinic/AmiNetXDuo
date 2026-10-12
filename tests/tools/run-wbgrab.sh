@@ -11,7 +11,8 @@
 # netprefs.pfs, netprefs-1.pfs ... netprefs-4.pfs; netprefs_window is the
 # window's box for cropping.  -s netwireless grabs NetWirelessPrefs against
 # tests/tools/wifistub.c's unit with the NetWireless AppIcon beside it, then
-# its join form, as netwireless.pfs and netwireless-1.pfs.
+# its join form and the Known networks window, as netwireless.pfs,
+# netwireless-1.pfs and netwireless-2.pfs.
 #
 # SPDX-License-Identifier: MIT
 
@@ -189,6 +190,13 @@ EOF
         cp "$WINCLICK" "$HD/C/WinClick"
         chmod 755 "$HD/C/NetWirelessPrefs" "$HD/C/NetWireless" \
             "$HD/C/WifiStub" "$HD/C/WinClick"
+        # Three known networks, for the Known networks window.
+        mkdir -p "$HD/Prefs/Env-Archive/Sys"
+        printf '%s\n' "# known networks" \
+            'network={' '	ssid="Home"' '	psk=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef' \
+            '	priority=3' '}' 'network={' '	ssid="Cafe"' '	key_mgmt=NONE' '	priority=2' '}' \
+            'network={' '	ssid="Attic"' '	key_mgmt=NONE' '	scan_ssid=1' '	priority=1' '}' \
+            > "$HD/Prefs/Env-Archive/Sys/Wireless.prefs"
     fi
 
     [ -n "$DEPTH" ] && wb31_screenmode_prefs "$HD" "$DEPTH"
@@ -307,6 +315,11 @@ C:WinClick "Wi-Fi" 4 >NIL:
 C:Wait 2
 C:WinClick "Join a" 7 TIMES 0 >DH0:netwireless-join.txt
 C:wbgrab TO DH0:netwireless-1.pfs >NIL:
+C:WinClick "Join a" 14 >NIL:
+C:Wait 1
+C:WinClick "Wi-Fi" 5 >NIL:
+C:Wait 2
+C:wbgrab TO DH0:netwireless-2.pfs >NIL:
 Echo >DH0:.done "$RC"
 EOF
         ;;

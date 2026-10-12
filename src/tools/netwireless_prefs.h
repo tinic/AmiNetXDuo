@@ -67,6 +67,18 @@ int nw_prefs_write(const char *old, size_t oldlen,
                    NwBlockEdit *edits, int nedits,
                    char *out, size_t cap, size_t *newlen);
 
+/* The order a list shows the blocks in, highest priority first and file
+   order among equals: order[0..count-1] gets block indices. */
+void nw_prefs_order(const NwNetwork *nets, int count, unsigned char *order);
+
+/* The edits that store a list: order[0..shown-1] the blocks kept, top
+   first, given priorities shown..1; every other block removed.  A block
+   whose priority is already right is not edited.  edits, fields and the
+   12-byte prio strings need count entries.  Returns the number of edits. */
+int nw_prefs_order_edits(const NwNetwork *nets, int count,
+                         const unsigned char *order, int shown,
+                         NwBlockEdit *edits, NwField *fields, char (*prio)[12]);
+
 /* An ssid= value: "text" when every byte is printable ASCII, else hex, both
    as wpa_supplicant reads them.  out needs 2 * NW_SSID_MAX + 3 bytes. */
 void nw_prefs_ssid_value(const unsigned char *ssid, int len, char *out);

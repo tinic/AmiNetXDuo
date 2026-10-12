@@ -90,13 +90,14 @@ enum
 static const char nw_prefs_env[]    = "ENV:Sys/Wireless.prefs";
 static const char nw_prefs_envarc[] = "ENVARC:Sys/Wireless.prefs";
 
-enum { MENU_SCAN = 1, MENU_JOIN, MENU_SNAPSHOT, MENU_QUIT };
+enum { MENU_SCAN = 1, MENU_JOIN, MENU_KNOWN, MENU_SNAPSHOT, MENU_QUIT };
 
 static struct NewMenu nw_menu[] =
 {
     { NM_TITLE, (STRPTR)"Project",   NULL,        0, 0, NULL },
     { NM_ITEM,  (STRPTR)"Scan",      (STRPTR)"S", 0, 0, (APTR)MENU_SCAN },
     { NM_ITEM,  (STRPTR)"Join...",   (STRPTR)"J", 0, 0, (APTR)MENU_JOIN },
+    { NM_ITEM,  (STRPTR)"Known networks...", (STRPTR)"K", 0, 0, (APTR)MENU_KNOWN },
     { NM_ITEM,  NM_BARLABEL,         NULL,        0, 0, NULL },
     { NM_ITEM,  (STRPTR)"Snapshot",  NULL,        0, 0, (APTR)MENU_SNAPSHOT },
     { NM_ITEM,  NM_BARLABEL,         NULL,        0, 0, NULL },
@@ -129,7 +130,7 @@ static struct
     struct TextFont *font;
     NwLayout        lay;
     struct Menu    *menu;
-    NwWin           main, join;
+    NwWin           main, join, known;
     struct Gadget  *g[NW_L_COUNT];
     struct List     rows;
     struct Node     row[NW_LIST_MAX];
@@ -165,6 +166,23 @@ static struct
 } nw;                               /* BSS: 6 KB the file does not carry */
 
 static struct Hook nw_edit_hook, nw_row_hook;
+
+/* The Known networks window: Wireless.prefs as it was read, its blocks in
+   the order shown (highest priority first), and the ones removed. */
+static struct
+{
+    char       *text;
+    ULONG       len;
+    NwNetwork   nets[NW_NETS_MAX];
+    LONG        count;
+    UBYTE       order[NW_NETS_MAX];
+    LONG        shown;
+    LONG        sel;
+    BOOL        changed;
+    struct List list;
+    struct Node node[NW_NETS_MAX];
+    char        name[NW_NETS_MAX][NW_SSID_MAX + 12];
+} kn;
 
 static ULONG nw_len(const char *s)
 {
@@ -798,9 +816,10 @@ static BOOL nw_open_main(VOID)
     g = nw_gadget(LISTVIEW_KIND, g, NW_M_LIST, t);
     g = nw_gadget(BUTTON_KIND, g, NW_M_SCAN, NULL);
     g = nw_gadget(BUTTON_KIND, g, NW_M_JOIN, NULL);
-    t[0].ti_Tag = GA_Disabled; t[0].ti_Data = TRUE;
+    t[0].ti_Tag = GA_Disabled; t[0].ti_Data = nw.setup;
     t[1].ti_Tag = TAG_DONE;
     g = nw_gadget(BUTTON_KIND, g, NW_M_KNOWN, t);
+    t[0].ti_Data = TRUE;
     g = nw_gadget(BUTTON_KIND, g, NW_M_DISCONNECT, t);
     if (g == NULL) return FALSE;
 
@@ -1223,6 +1242,171 @@ static VOID nw_snapshot(VOID)
 
 /* ------------------------------------------------------- the loop -- */
 
+/* ----------------------------------------------------- known networks -- */
+
+static VOID nw_known_fill(VOID)
+{
+    LONG i;
+
+    nw_set(nw.known.win, NW_K_LIST, GTLV_Labels, ~0UL);
+    kn.list.lh_Head = (struct Node *)&kn.list.lh_Tail;
+    kn.list.lh_Tail = NULL;
+    kn.list.lh_TailPred = (struct Node *)&kn.list.lh_Head;
+    for (i = 0; i < kn.shown; i++)
+    {
+        const NwNetwork *n = &kn.nets[kn.order[i]];
+        char            *t = kn.name[i];
+
+        if (n->ssid_len >= 0) nw_ssid_text(n->ssid, n->ssid_len, t);
+        else tool_copy_string(t, NW_SSID_MAX + 12, "?");
+        if (n->scan_ssid) nw_append(t, NW_SSID_MAX + 12, " (hidden)");
+        if (n->disabled) nw_append(t, NW_SSID_MAX + 12, " (off)");
+        kn.node[i].ln_Name = t;
+        AddTail(&kn.list, &kn.node[i]);
+    }
+    nw_set(nw.known.win, NW_K_LIST, GTLV_Labels, (ULONG)&kn.list);
+    nw_set(nw.known.win, NW_K_LIST, GTLV_Selected, kn.sel >= 0 ? (ULONG)kn.sel : ~0UL);
+    nw_set(nw.known.win, NW_K_UP, GA_Disabled, kn.sel <= 0);
+    nw_set(nw.known.win, NW_K_DOWN, GA_Disabled, kn.sel < 0 || kn.sel + 1 >= kn.shown);
+    nw_set(nw.known.win, NW_K_REMOVE, GA_Disabled, kn.sel < 0);
+}
+
+static VOID nw_close_known(VOID)
+{
+    int i;
+
+    if (nw.known.win != NULL) CloseWindow(nw.known.win);
+    if (nw.known.glist != NULL) FreeGadgets(nw.known.glist);
+    nw.known.win = NULL;
+    nw.known.glist = NULL;
+    for (i = NW_K_LIST; i <= NW_K_CANCEL; i++) nw.g[i] = NULL;
+    if (kn.text != NULL) FreeVec(kn.text);
+    kn.text = NULL;
+}
+
+/* Wireless.prefs read, its networks highest priority first (file order
+   among equals), and the window opened on them. */
+static VOID nw_open_known(VOID)
+{
+    struct Gadget *g;
+    struct TagItem t[3];
+    BOOL           missing;
+
+    if (nw.known.win != NULL)
+    {
+        WindowToFront(nw.known.win);
+        ActivateWindow(nw.known.win);
+        return;
+    }
+    kn.text = nw_read(nw_prefs_env, &kn.len, &missing);
+    if (kn.text == NULL && missing)
+        kn.text = nw_read(nw_prefs_envarc, &kn.len, &missing);
+    if (kn.text == NULL && !missing)
+    {
+        nw_requester("Wireless.prefs could not be read.");
+        return;
+    }
+    kn.count = nw_prefs_parse(kn.text != NULL ? kn.text : "", kn.len, kn.nets,
+                              NW_NETS_MAX);
+    if (kn.count < 0 || kn.count > NW_NETS_MAX)
+    {
+        nw_requester(kn.count < 0 ? "Wireless.prefs has a network={ with no closing }."
+                                  : "Wireless.prefs has more networks than this edits.");
+        nw_close_known();
+        return;
+    }
+    nw_prefs_order(kn.nets, (int)kn.count, kn.order);
+    kn.shown = kn.count;
+    kn.sel = -1;
+    kn.changed = FALSE;
+
+    g = CreateContext(&nw.known.glist);
+    kn.list.lh_Head = (struct Node *)&kn.list.lh_Tail;
+    kn.list.lh_TailPred = (struct Node *)&kn.list.lh_Head;
+    t[0].ti_Tag = GTLV_Labels;       t[0].ti_Data = (ULONG)&kn.list;
+    t[1].ti_Tag = GTLV_ShowSelected; t[1].ti_Data = 0;
+    t[2].ti_Tag = TAG_DONE;
+    g = nw_gadget(LISTVIEW_KIND, g, NW_K_LIST, t);
+    g = nw_gadget(BUTTON_KIND, g, NW_K_UP, NULL);
+    g = nw_gadget(BUTTON_KIND, g, NW_K_DOWN, NULL);
+    g = nw_gadget(BUTTON_KIND, g, NW_K_REMOVE, NULL);
+    g = nw_gadget(BUTTON_KIND, g, NW_K_SAVE, NULL);
+    g = nw_gadget(BUTTON_KIND, g, NW_K_USE, NULL);
+    g = nw_gadget(BUTTON_KIND, g, NW_K_CANCEL, NULL);
+    if (g == NULL ||
+        (nw.known.win = nw_open(NW_WIN_KNOWN, nw.known.glist, "Known Wi-Fi networks",
+                                NW_IDCMP & ~IDCMP_MENUPICK, -1, -1)) == NULL)
+    {
+        nw_close_known();
+        return;
+    }
+    GT_RefreshWindow(nw.known.win, NULL);
+    nw_known_fill();
+}
+
+static VOID nw_known_move(LONG to)
+{
+    UBYTE b = kn.order[kn.sel];
+
+    kn.order[kn.sel] = kn.order[to];
+    kn.order[to] = b;
+    kn.sel = to;
+    kn.changed = TRUE;
+    nw_known_fill();
+}
+
+static VOID nw_known_remove(VOID)
+{
+    LONG i;
+
+    for (i = kn.sel; i + 1 < kn.shown; i++) kn.order[i] = kn.order[i + 1];
+    kn.shown--;
+    if (kn.sel >= kn.shown) kn.sel = kn.shown - 1;
+    kn.changed = TRUE;
+    nw_known_fill();
+}
+
+/* Save (ENVARC: and ENV:) or Use (ENV:): priorities from the order shown,
+   the top one highest, removed blocks taken out, everything else kept;
+   then WirelessManager, if it runs, restarted on the new file. */
+static VOID nw_known_store(BOOL save)
+{
+    static NwBlockEdit e[NW_NETS_MAX];
+    static NwField     f[NW_NETS_MAX];
+    static char        prio[NW_NETS_MAX][12];
+    char              *out;
+    size_t             len;
+    int                n;
+    BOOL               ok = FALSE;
+    const char        *why;
+
+    n = nw_prefs_order_edits(kn.nets, (int)kn.count, kn.order, (int)kn.shown,
+                             e, f, prio);
+    out = (char *)AllocVec(kn.len + 64UL * NW_NETS_MAX + 1, MEMF_ANY);
+    if (out != NULL &&
+        nw_prefs_write(kn.text != NULL ? kn.text : "", kn.len, kn.nets, (int)kn.count,
+                       e, n, out, kn.len + 64UL * NW_NETS_MAX, &len))
+    {
+        nw_make_dir("ENV:Sys");
+        ok = nw_write(nw_prefs_env, out, (ULONG)len);
+        if (ok && save)
+        {
+            nw_make_dir("ENVARC:Sys");
+            ok = nw_write(nw_prefs_envarc, out, (ULONG)len);
+        }
+    }
+    if (out != NULL) FreeVec(out);
+    if (!ok)
+    {
+        nw_requester("Wireless.prefs could not be written.");
+        return;
+    }
+    nw_close_known();
+    if (nw_wm_running(NULL, 0) && (why = nw_restart_wm()) != NULL)
+        nw_requester(why);
+    nw_refresh_status();
+}
+
 static VOID nw_timer_arm(VOID)
 {
     if (nw.treq == NULL || nw.tarmed) return;
@@ -1279,6 +1463,17 @@ static VOID nw_gadget_up(const struct IntuiMessage *m)
         }
         case NW_J_JOIN:   nw_join(); break;
         case NW_J_CANCEL: nw_cancel_join(); break;
+        case NW_M_KNOWN:  nw_open_known(); break;
+        case NW_K_LIST:
+            kn.sel = (LONG)code;
+            nw_known_fill();
+            break;
+        case NW_K_UP:     if (kn.sel > 0) nw_known_move(kn.sel - 1); break;
+        case NW_K_DOWN:   if (kn.sel >= 0 && kn.sel + 1 < kn.shown) nw_known_move(kn.sel + 1); break;
+        case NW_K_REMOVE: if (kn.sel >= 0) nw_known_remove(); break;
+        case NW_K_SAVE:   nw_known_store(TRUE); break;
+        case NW_K_USE:    nw_known_store(FALSE); break;
+        case NW_K_CANCEL: nw_close_known(); break;
         default: break;
     }
 }
@@ -1294,6 +1489,7 @@ static VOID nw_menu_pick(UWORD n)
         {
             case MENU_SCAN:     nw_scan(); break;
             case MENU_JOIN:     if (nw.dev_open) nw_open_join(); break;
+            case MENU_KNOWN:    nw_open_known(); break;
             case MENU_SNAPSHOT: nw_snapshot(); break;
             case MENU_QUIT:     nw_finish(RETURN_OK); break;
             default: break;
@@ -1317,6 +1513,7 @@ static VOID nw_window_msgs(NwWin *w)
         {
             case IDCMP_CLOSEWINDOW:
                 if (w == &nw.join) nw_cancel_join();
+                else if (w == &nw.known) nw_close_known();
                 else nw_finish(nw.setup ? NW_SETUP_CANCELLED : RETURN_OK);
                 break;
             case IDCMP_REFRESHWINDOW:
@@ -1336,9 +1533,10 @@ static VOID nw_loop(VOID)
     {
         ULONG main_sig = 1UL << nw.main.win->UserPort->mp_SigBit;
         ULONG join_sig = nw.join.win != NULL ? 1UL << nw.join.win->UserPort->mp_SigBit : 0;
+        ULONG known_sig = nw.known.win != NULL ? 1UL << nw.known.win->UserPort->mp_SigBit : 0;
         ULONG scan_sig = nw.dev_open ? 1UL << nw.dev.async->mp_SigBit : 0;
         ULONG time_sig = nw.tport != NULL ? 1UL << nw.tport->mp_SigBit : 0;
-        ULONG sigs = Wait(main_sig | join_sig | scan_sig | time_sig |
+        ULONG sigs = Wait(main_sig | join_sig | known_sig | scan_sig | time_sig |
                           SIGBREAKF_CTRL_C | SIGBREAKF_CTRL_F);
 
         if (sigs & SIGBREAKF_CTRL_C)
@@ -1360,6 +1558,7 @@ static VOID nw_loop(VOID)
             nw_timer_arm();
         }
         if (sigs & join_sig) nw_window_msgs(&nw.join);
+        if (sigs & known_sig) nw_window_msgs(&nw.known);
         if (sigs & main_sig) nw_window_msgs(&nw.main);
     }
 }
@@ -1423,6 +1622,7 @@ static int nw_window(VOID)
     }
 
     nw_close_join();
+    nw_close_known();
     if (nw.main.win != NULL)
     {
         if (nw.menu != NULL) ClearMenuStrip(nw.main.win);
