@@ -10,6 +10,7 @@
  *
  *   InstallWiFi TO <file>
  *   InstallWiFi PRIORITY <interface file>
+ *   InstallWiFi PRISM2 <interface file>
  *
  * TO: RETURN_OK when the file was written, RETURN_WARN when the user
  * skipped, RETURN_FAIL when there was no window to ask in or the file could
@@ -23,7 +24,12 @@
  * RETURN_OK when set or already set, RETURN_FAIL when the file could not be
  * read or written.
  *
- * Either form: RETURN_ERROR when the arguments do not parse (ReadArgs).
+ * PRISM2: a kept definition's live DEVICE, read as NetWireless reads it
+ * (comments never match), is prism2.device.  0 when it is, in a
+ * Networks/ drawer; 2 when it is, elsewhere (DEVS: or a bare name);
+ * RETURN_WARN when it is not; RETURN_FAIL when the file cannot be read.
+ *
+ * Any form: RETURN_ERROR when the arguments do not parse (ReadArgs).
  *
  * SPDX-License-Identifier: MIT
  */
@@ -475,22 +481,52 @@ static LONG set_priority(const char *path)
     return ok ? RETURN_OK : RETURN_FAIL;
 }
 
+static LONG kept_prism2(const char *path)
+{
+    static char   text[16384];
+    char          device[128];
+    unsigned long unit = 0;
+    BPTR          fh = Open((CONST_STRPTR)path, MODE_OLDFILE);
+    LONG          len;
+    const char   *c;
+
+    if (fh == 0)
+        return RETURN_FAIL;
+    len = Read(fh, text, sizeof(text) - 1);
+    Close(fh);
+    if (len < 0)
+        return RETURN_FAIL;
+    if (!nw_iface_device(text, (size_t)len, device, sizeof(device), &unit) ||
+        nw_wireless_driver(device) != NW_DRIVER_PRISM2)
+        return RETURN_WARN;
+    for (c = device; *c != '\0'; c++)
+        if ((c[0] == 'N' || c[0] == 'n') && strncasecmp(c, "Networks/", 9) == 0)
+            return 0;
+    return 2;
+}
+
 int main(int argc, char **argv)
 {
-    LONG           args[2] = { 0, 0 };
+    LONG           args[3] = { 0, 0, 0 };
     struct RDArgs *rda;
     LONG           rc = RETURN_FAIL;
 
     (void)argc;
     (void)argv;
 
-    rda = ReadArgs((CONST_STRPTR)"TO/K,PRIORITY/K", args, NULL);
+    rda = ReadArgs((CONST_STRPTR)"TO/K,PRIORITY/K,PRISM2/K", args, NULL);
     if (rda == NULL)
         return RETURN_ERROR;
-    if ((args[0] == 0) == (args[1] == 0))
+    if ((args[0] != 0) + (args[1] != 0) + (args[2] != 0) != 1)
     {
         FreeArgs(rda);
         return RETURN_ERROR;
+    }
+    if (args[2] != 0)
+    {
+        rc = kept_prism2((const char *)args[2]);
+        FreeArgs(rda);
+        return (int)rc;
     }
     if (args[1] != 0)
     {

@@ -34,7 +34,11 @@ class GlowIcons(unittest.TestCase):
                     "Examples.info": "Drawer", "Terminal.info": "Drawer",
                     "Developer.info": "Drawer", "AmiNetXDuo.info": "AmiNetXDuo",
                     "C/NetMeter.info": "NetMeter", "C/NetPrefs.info": "NetPrefs",
-                    "C/fat/NetMeter.info": "NetMeter", "C/fat/NetPrefs.info": "NetPrefs"}.items():
+                    "C/fat/NetMeter.info": "NetMeter", "C/fat/NetPrefs.info": "NetPrefs",
+                    "C/NetWireless.info": "NetWireless",
+                    "C/NetWirelessPrefs.info": "NetWirelessPrefs",
+                    "C/fat/NetWireless.info": "NetWireless",
+                    "C/fat/NetWirelessPrefs.info": "NetWirelessPrefs"}.items():
                 shutil.copyfile(ROOT / "install" / (source + ".info"), tree / target)
             original = {p: p.read_bytes() for p in tree.rglob("*.info")}
             subprocess.run([sys.executable, str(ROOT / "install/tools/layout-icons.py"),
