@@ -1422,7 +1422,7 @@
             Default 0.
   @{b}TIMEOUT@{ub}   Seconds for the whole operation: link-up and, on a DHCP
             interface, its lease becoming BOUND with routes and name-server
-            options installed. 0, the default, waits indefinitely. Ctrl-C
+            options installed. Default 30. 0 waits indefinitely. Ctrl-C
             stops the wait in either case.
 
   @{b}Example@{ub}
@@ -1434,12 +1434,18 @@
       eth0: already online
 
   As with @{"AddNetInterface" link ADDNETINTERFACE}, that address is the
-  one the interface holds and not the one in the file. An interface
-  that has none reports it in words:
+  one the interface holds and not the one in the file.
 
-      1> Online eth0
-      eth0: online, no address
-      Online: eth0: no address from DHCP
+  While the command waits, it prints what it waits for. When TIMEOUT
+  ends the wait first, the command says so and returns WARN. The DHCP
+  client continues to ask for a lease after the command returns:
+
+      1> Online wifipi
+      wifipi: waiting for DHCP lease
+      Online: wifipi: no DHCP lease after 30 s; still requesting
+
+  A Wi-Fi interface gets no lease until it is associated with a
+  network. Use NetWireless to examine the association.
 
 @endnode
 
@@ -3453,7 +3459,8 @@
   exists: WirelessManager first, then the interface, which waits at most
   30 seconds for an address; DHCP continues after the boot goes on. With
   the Pi Ethernet as well, both start, the Ethernet first with
-  PRIORITY=10, so the default route stays on the cable; the micro stack
+  PRIORITY=10, so the default route stays on the cable, and the Wi-Fi in
+  the background, so the boot does not wait for it; the micro stack
   starts the Ethernet only. Where WirelessManager is set up on the
   machine already -- a copy or a Wireless.prefs the Installer did not
   create, or a mention in S:User-Startup, S:Startup-Sequence or

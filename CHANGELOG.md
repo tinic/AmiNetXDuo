@@ -5,11 +5,20 @@ Add new entries under `Unreleased`; published release sections are history.
 
 ## Unreleased
 
+- Installer: a Wi-Fi started after another interface starts in the background, so the boot does not wait for it.
+
 - Installer: NetWirelessPrefs lists the Wi-Fi networks in range to join.
 
 - Installer: a Prism2 PCMCIA card gets WirelessManager and its Wi-Fi network, as the Pi Wi-Fi does.
 
 - NetWireless and NetWirelessPrefs have Workbench icons.
+
+- Installer: an update over AmiNetXDuo no longer asks to replace its own
+  bsdsocket.library or says that its kept configuration is not checked.
+
+- Installer: another stack's network configuration is set up again by
+  default when a device was found; that stack's files are kept in the
+  AmiNetXDuo drawer's Backup, and its pages appear at Novice too.
 
 - Installer: the machine's name defaults to amiga- and the card's last
   three address octets; only Expert asks for one.
