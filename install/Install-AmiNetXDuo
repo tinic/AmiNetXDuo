@@ -3023,7 +3023,16 @@
           (set BK_SRC (tackon D_C @each-name))
           (P_backup)
         )))
+    ; The tool icons C/ no longer carries, which the reinstall removes
+    ; from C: below: a user's own goes to Backup first.
     (set BK_ARCH "")
+    (set TL_I 0)
+    (while (set TL_N (select TL_I "NetPrefs.info" "NetMeter.info"
+                                  "NetWireless.info" "NetWirelessPrefs.info" ""))
+      (
+        (set BK_SRC (tackon D_C TL_N)) (P_backup)
+        (set TL_I (+ TL_I 1))
+      ))
   ))
 
 ; Where this run kept anything: the lines that put it back.
