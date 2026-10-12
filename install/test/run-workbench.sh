@@ -1496,7 +1496,7 @@ file_mode() {
 product_manifest() {
     local root file rel mode sum
     {
-    for root in Libs C Devs Prefs Utilities AmiNetXDuo AmiNetXDuo.info ForeignAmiTCP \
+    for root in Libs C Devs Prefs Utilities Tools/Commodities AmiNetXDuo AmiNetXDuo.info ForeignAmiTCP \
                 S/Startup-Sequence S/User-Startup \
                 S/Network-Startup S/Network-Startup.old \
                 S/AmiNetXDuo-drawer; do
@@ -2786,6 +2786,8 @@ if [ "$WANT_STACK" = fat ] || [ "$FAT_REFUSED" = 1 ] ||
     if [ "$DRAWER" = 0 ]; then
         _bin_cmp "Prefs/NetPrefs" "$_src_c/NetPrefs"
         _bin_cmp "Utilities/NetMeter" "$_src_c/NetMeter"
+        _bin_cmp "Prefs/NetWirelessPrefs" "$_src_c/NetWirelessPrefs"
+        _bin_cmp "Tools/Commodities/NetWireless" "$_src_c/NetWireless"
     fi
     # ssh, scp and scp-runner by name: the loop above only covers what the
     # drawer carries, so a drawer without them would pass it.  After a
@@ -3655,6 +3657,34 @@ for _d in AmiNetXDuo/Examples AmiNetXDuo/Terminal; do
         fail=1
     fi
 done
+
+# The four Workbench tools beside their icons, and no icon in C:.
+if [ "$DRAWER" = 1 ]; then
+    _tools="AmiNetXDuo/NetPrefs AmiNetXDuo/NetMeter AmiNetXDuo/NetWirelessPrefs AmiNetXDuo/NetWireless"
+else
+    _tools="Prefs/NetPrefs Utilities/NetMeter Prefs/NetWirelessPrefs Tools/Commodities/NetWireless"
+fi
+_tool_bad=0
+for _t in $_tools; do
+    if [ -n "$(amiga_path "$_t" 2>/dev/null || true)" ] &&
+       [ -n "$(amiga_path "$_t.info" 2>/dev/null || true)" ]; then
+        printf '  ok      %-32s with its icon\n' "$_t"
+    else
+        printf '  MISSING %s or %s.info\n' "$_t" "$_t"
+        _tool_bad=1
+    fi
+done
+_cdir=$(amiga_path "${INST}C" 2>/dev/null || true)
+_cinfo=""
+[ -n "$_cdir" ] && _cinfo=$(find "$_cdir" -name '*.info' -printf '%P ' 2>/dev/null)
+[ "$DRAWER" = 1 ] && [ -n "$(amiga_path AmiNetXDuo/C.info 2>/dev/null || true)" ] &&
+    _cinfo="$_cinfo C.info"
+if [ -n "$_cinfo" ]; then
+    echo "!! C: carries an icon: $_cinfo"
+    _tool_bad=1
+fi
+echo "tool_icons=$([ "$_tool_bad" = 0 ] && echo ok || echo FAIL)"
+[ "$_tool_bad" = 0 ] || fail=1
 
 # tls.library and the trust store are what https: needs, and their absence is
 # the first thing to know if the https: check fails.

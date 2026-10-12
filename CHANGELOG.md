@@ -5,6 +5,7 @@ Add new entries under `Unreleased`; published release sections are history.
 
 ## Unreleased
 
+- Installer: NetWirelessPrefs goes into SYS:Prefs and NetWireless into SYS:Tools/Commodities, or into the drawer; C: carries no icons.
 - Installer: the supplied drivers are always installed; the drawer place, .local names, boot start, httpd port and time server are Expert questions.
 - Installer: a WirelessManager already in C: is started from S:Network-Startup.
 - Installer: the Pi 4 and CM4 Wi-Fi, and a PCMCIA card already in use by a driver, are detected.

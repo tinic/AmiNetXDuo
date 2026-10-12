@@ -27,11 +27,6 @@ def edit(path, position=None, window=None):
 
 def layout(outdir):
     tree = Path(outdir) / "AmiNetXDuo"
-    # A separate C icon exposes the commands drawer in an icons-only view.
-    # The archive keeps tool icons here; private installs expose them in
-    # the parent drawer and remove the command copies' icons.
-    shutil.copyfile(tree / "Examples.info", tree / "C.info")
-    edit(tree / "C.info", (62, 146), (280, 12, 340, 176))
     positions = {
         "Install-AmiNetXDuo.info": (358, 10),
         "Uninstall-AmiNetXDuo.info": (210, 146),
@@ -47,15 +42,14 @@ def layout(outdir):
             edit(path, position)
     # Leave the parent drawer icon and reusable document/drawer icons
     # unsnapped. Their destination can already contain unrelated icons.
-    for directory in (tree / "C", tree / "C/fat"):
-        for name, xy in (("NetPrefs.info", (62, 10)),
-                         ("NetMeter.info", (210, 10)),
-                         ("NetWireless.info", (62, 70)),
-                         ("NetWirelessPrefs.info", (210, 70))):
-            path = directory / name
-            if path.exists():
-                edit(path, xy)
-
+    # Icons/ holds the tool icons a private install puts in the drawer root.
+    for name, xy in (("NetPrefs.info", (62, 10)),
+                     ("NetMeter.info", (210, 10)),
+                     ("NetWireless.info", (62, 146)),
+                     ("NetWirelessPrefs.info", (358, 146))):
+        path = tree / "Icons" / name
+        if path.exists():
+            edit(path, xy)
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
