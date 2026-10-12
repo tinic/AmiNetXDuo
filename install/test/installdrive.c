@@ -142,6 +142,8 @@
  *   <run>|WIFI|<network name>|<passphrase>
  *   <run>|NOWIFI|-
  *   1|DROPFIRMWARE|-  delete DEVS:Firmware's files between runs
+ *   1|HANDHOST|<name> between runs, append "hostname <name>" to
+ *                     DEVS:Internet/name_resolution, as somebody would
  *   1|DROPSTARTUP|-   delete S:Network-Startup between runs instead of
  *                     marking it, so run 2 meets "Keep it" with none
  *   1|UNPRIORITY|<file> between runs, comment out every PRIORITY line of
@@ -179,6 +181,7 @@ enum ActionType
     ACTION_NOWIFI,
     ACTION_DROPSTARTUP,
     ACTION_DROPFIRMWARE,
+    ACTION_HANDHOST,
     ACTION_UNPRIORITY,
     ACTION_LIVEPRIORITY
 };
@@ -477,6 +480,13 @@ static BOOL load_actions(VOID)
             /* Applied between runs, like DROPSTARTUP. */
             action->type = (kind[0] == 'U') ? ACTION_UNPRIORITY
                                             : ACTION_LIVEPRIORITY;
+            action->used = TRUE;
+            copy_text(action->match, at, sizeof(action->match));
+        }
+        else if (strcmp(kind, "HANDHOST") == 0)
+        {
+            /* Applied between runs, like DROPSTARTUP. */
+            action->type = ACTION_HANDHOST;
             action->used = TRUE;
             copy_text(action->match, at, sizeof(action->match));
         }
@@ -1566,6 +1576,23 @@ int main(void)
                 rc = RETURN_FAIL;
                 break;
             }
+            for (d = 0; d < action_count; d++)
+                if (actions[d].type == ACTION_HANDHOST)
+                {
+                    BPTR nr = Open((STRPTR)"DEVS:Internet/name_resolution",
+                                   MODE_OLDFILE);
+
+                    if (nr == 0 || Seek(nr, 0, OFFSET_END) < 0 ||
+                        FPuts(nr, (STRPTR)"hostname ") != 0 ||
+                        FPuts(nr, (STRPTR)actions[d].match) != 0 ||
+                        FPuts(nr, (STRPTR)"\n") != 0)
+                    {
+                        say("installdrive: could not set a hostname by hand\n", 0);
+                        rc = RETURN_FAIL;
+                    }
+                    if (nr != 0)
+                        Close(nr);
+                }
             for (d = 0; d < action_count; d++)
                 if (actions[d].type == ACTION_DROPFIRMWARE &&
                     SystemTagList((STRPTR)"Delete DEVS:Firmware/#? QUIET FORCE",

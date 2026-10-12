@@ -825,3 +825,76 @@ ULONG ami_cfg_nameserver_line_file(const char *path, ULONG want, UWORD occur)
 
     return found;
 }
+
+BOOL ami_cfg_resolver_hostname(char *buf, char *out, ULONG outlen)
+{
+    AmiResolverConfig res = { 0 };
+
+    if (out == NULL || outlen == 0)
+        return FALSE;
+    out[0] = '\0';
+    if (buf == NULL)
+        return FALSE;
+    ami_cfg_parse_resolver(buf, &res, out, outlen);
+    return (BOOL)(out[0] != '\0');
+}
+
+BOOL ami_cfg_resolver_hostname_file(const char *path, char *out, ULONG outlen)
+{
+    char *buf = (char *)ami_cfg_read_file(path, NULL);
+    BOOL  found;
+
+    if (out != NULL && outlen != 0)
+        out[0] = '\0';
+    if (buf == NULL)
+        return FALSE;
+    found = ami_cfg_resolver_hostname(buf, out, outlen);
+    ami_free(buf);
+    return found;
+}
+
+ULONG ami_cfg_hostname_line(const char *name, char *out, ULONG cap)
+{
+    static const char key[] = "hostname ";
+    BOOL              quote = !ami_config_hostname_valid(name);
+    ULONG             n = 0;
+    const char       *p;
+
+    if (name == NULL || out == NULL)
+        return 0;
+    for (p = key; *p != '\0'; p++)
+    {
+        if (n + 1 >= cap)
+            return 0;
+        out[n++] = *p;
+    }
+    if (quote)
+    {
+        if (n + 1 >= cap)
+            return 0;
+        out[n++] = '"';
+    }
+    for (p = name; *p != '\0'; p++)
+    {
+        if (quote && (*p == '"' || *p == '*'))
+        {
+            if (n + 1 >= cap)
+                return 0;
+            out[n++] = '*';
+        }
+        if (n + 1 >= cap)
+            return 0;
+        out[n++] = *p;
+    }
+    if (quote)
+    {
+        if (n + 1 >= cap)
+            return 0;
+        out[n++] = '"';
+    }
+    if (n + 2 > cap)
+        return 0;
+    out[n++] = '\n';
+    out[n] = '\0';
+    return n;
+}

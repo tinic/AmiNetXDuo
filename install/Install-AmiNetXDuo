@@ -181,11 +181,12 @@
   (cat "mDNS makes this Amiga reachable by a .local name.  It also lets "
        "ShowNetServices list the other machines on the network.  No name "
        "server is necessary.\n\n"
-       "mDNS is off by default.  The responder joins a multicast group on "
-       "this interface.  Every .local query on the network then becomes "
-       "work for this Amiga, even when the query is about another machine.  "
-       "On a 68000 that cost is enough to slow down everything else.  On a "
-       "fast accelerator it is not.\n\n"
+       "mDNS is on by default on a 68020 or newer and off on a 68000 or "
+       "68010.  The "
+       "responder joins a multicast group on this interface.  Every .local "
+       "query on the network then becomes work for this Amiga, even when the "
+       "query is about another machine.  On a 68000 that cost is enough to "
+       "slow down everything else.  On a faster processor it is not.\n\n"
        "MDNS= is one line in the file that this installer writes in "
        "DEVS:NetInterfaces, so it is easy to change later."))
 
@@ -233,9 +234,11 @@
 
 (set H_HOSTNAME
   (cat "The name that this Amiga calls itself.  Programs report it as the "
-       "local host name, and it appears in some log messages.\n\n"
-       "Use letters, digits and hyphens.  Do not use spaces.  \"amiga\" is "
-       "an acceptable name."))
+       "local host name, and mDNS answers to it with .local.\n\n"
+       "Left empty, the stack names the machine amiga- followed by the last "
+       "three octets of the card's address, for example amiga-490007, so two "
+       "Amigas on one network do not share a name.\n\n"
+       "Use letters, digits and hyphens.  Do not use spaces."))
 
 (set H_KEEPOLD
   (cat "This machine already has an AmiNetXDuo or Roadshow style network "
@@ -324,7 +327,7 @@
        "This question appears only when S:Network-Startup is written.  To "
        "stop setting the clock at boot, comment the line out with a leading "
        "semicolon.\n\n"
-       "The installer asks for the server next."))
+       "At Expert level the installer asks for the server next."))
 
 (set H_SNTPSERVER
   (cat "The name or address of an SNTP server.  pool.ntp.org selects a "
@@ -1806,15 +1809,20 @@
     ; who clicked "Yes"; only a NOVICE run, which takes the (default) and never
     ; draws the page, came out right.
     ; Only the full profile carries mDNS.  Asking this on minimal or micro
-    ; offered a setting those stacks could never honor.
+    ; offered a setting those stacks could never honor.  The default is the
+    ; first button: yes on a 68020 or newer, Emu68 included, no on a 68000.
     (if FULLSET
-      (set WANTMDNS
-        (if (askbool
-              (prompt "Answer .local names on the network?")
-              (help    H_MDNS)
-              (choices "No" "Yes")
-              (default 1))
-            0 1)))
+      (
+        (set MDNS_DEF (if CPU020 1 0))
+        (set WANTMDNS
+          (if (askbool
+                (prompt "Answer .local names on the network?")
+                (help    H_MDNS)
+                (choices (if MDNS_DEF "Yes, answer them" "No .local names")
+                         (if MDNS_DEF "No .local names" "Yes, answer them"))
+                (default 1))
+              MDNS_DEF (- 1 MDNS_DEF)))
+      ))
 
     (set USEDHCP
       (askbool
@@ -1979,21 +1987,25 @@
 
 ; --- the host name -------------------------------------------------------
 
-(set HOSTNAME "amiga")
+; Empty: name_resolution gets the line commented out, and the stack derives
+; amiga-<last three address octets> (src/config/config_hostname.c), so two
+; machines on one network do not both claim amiga.local.  Expert only.
+(set HOSTNAME "")
 
-(if (= KEEP_OLD 0)
+(if (AND (= KEEP_OLD 0) (= @user-level 2))
   (
     (set HOST_OK 0)
     (until HOST_OK
       (set HOSTNAME
         (askstring
-          (prompt "Type the name of this Amiga on the network.")
+          (prompt "Type the name of this Amiga on the network, or leave it "
+                  "empty for amiga- and the card's address.")
           (help   H_HOSTNAME)
-          (default "amiga")))
+          (default "")))
       (set name_in HOSTNAME)
       (set name_interface 0)
       (P_name_validate)
-      (set HOST_OK (if (= @user-level 0) 1 name_ok))
+      (set HOST_OK (if (= (strlen HOSTNAME) 0) 1 name_ok))
       (if (= HOST_OK 0)
           (message "A host name must be 1 to 63 characters and contain only "
                    "letters, digits or hyphens.  It cannot begin or end with "
@@ -2075,9 +2087,9 @@
 
 ; --- set the clock at boot? ----------------------------------------------
 ;
-; DEFAULTS TO NO, so a run that takes every default -- NOVICE included --
-; writes the same S:Network-Startup as before this question existed.  Inverted
-; the way DO_HTTPD is: "No" first, (default 1), 0 for the first button.
+; DEFAULTS TO YES: most Amigas, a PiStorm's included, have no battery clock
+; and boot in 1978.  sntp runs in the background, so a boot without a network
+; is not held up.  pool.ntp.org unless an Expert names another server.
 ;
 ; Asked only when S:Network-Startup is generated on this run.  A kept file is
 ; not touched, so a setting asked for there would never be applied.
@@ -2088,15 +2100,14 @@
 (if (AND DO_STARTUP (= KEEP_NETSTART 0))
   (
     (set DO_SNTP
-      (if (askbool
-            (prompt "Set the clock from an Internet time server when this "
-                    "Amiga boots?")
-            (help    H_SNTP)
-            (choices "No" "Yes, set the clock")
-            (default 1))
-          0 1))
+      (askbool
+        (prompt "Set the clock from an Internet time server when this "
+                "Amiga boots?")
+        (help    H_SNTP)
+        (choices "Yes, set the clock" "No")
+        (default 1)))
 
-    (if DO_SNTP
+    (if (AND DO_SNTP (= @user-level 2))
       (
         (set ask_prompt "Type the name of the time server.")
         (set ask_help   H_SNTPSERVER)
@@ -2819,6 +2830,18 @@
       (safe))
 
     ; --- name resolution ------------------------------------------------
+    ;
+    ; A name somebody set by hand in the file being replaced is theirs, at
+    ; every level: InstallSameFile HOSTLINE copies its active hostname line,
+    ; the commented ones left behind, and it goes into the new file.  An
+    ; Expert who types a name replaces it.
+    (set NR_FILE (tackon D_DEVS "Internet/name_resolution"))
+    (set NR_HOST "T:AmiNetXDuo-hostname")
+    (set KEEP_HOST 0)
+    (if (AND (= (strlen HOSTNAME) 0) (exists NR_FILE (noreq)))
+        (if (= 0 (run ("\"%s\" \"%s\" \"%s\" HOSTLINE" S_SAMEFILE NR_FILE NR_HOST)
+                      (quiet) (safe)))
+            (set KEEP_HOST 1)))
 
     (textfile
       (prompt "Writing DEVS:Internet/name_resolution")
@@ -2832,6 +2855,8 @@
       (append "; domain     <name>      added to names with no dots in them.\n")
       (append "; search     <a> <b> ..  several domains to try, in order.\n")
       (append "; hostname   <name>      what this machine calls itself.\n")
+      (append ";                        Without it: amiga- and the last\n")
+      (append ";                        three octets of the card's address.\n")
       (append ";\n")
       (append "; With CONFIGURE=DHCP the name servers arrive with the lease,\n")
       (append "; so no nameserver line is needed here.\n")
@@ -2839,8 +2864,21 @@
       (append (if USEDHCP
                   ";nameserver 192.168.1.1\n"
                   (cat "nameserver " IPDNS "\n")))
-      (append "hostname " HOSTNAME "\n")
+      (append (if (> (strlen HOSTNAME) 0)
+                  (cat "hostname " HOSTNAME "\n")
+                  (if KEEP_HOST "" ";hostname amiga\n")))
       (safe))
+    (if KEEP_HOST
+        (run ("Type %s >>\"%s\"" NR_HOST NR_FILE)
+             (prompt "Keeping the name set in DEVS:Internet/name_resolution")
+             (help   H_HOSTNAME)
+             (safe)))
+    (if (exists NR_HOST (noreq))
+        (delete NR_HOST
+                (prompt ("Removing %s" NR_HOST))
+                (help   H_HOSTNAME)
+                (optional "force" "nofail")
+                (safe)))
   ))
 
 ; --- the Wi-Fi network, for WirelessManager ------------------------------

@@ -11,6 +11,14 @@ Add new entries under `Unreleased`; published release sections are history.
 
 - NetWireless and NetWirelessPrefs have Workbench icons.
 
+- Installer: the machine's name defaults to amiga- and the card's last
+  three address octets; only Expert asks for one.
+
+- Installer: setting the clock from pool.ntp.org at boot defaults to yes;
+  only Expert asks for the server.
+
+- Installer: answering .local names defaults to yes on a 68020 or newer.
+
 - Installer: the Pi Wi-Fi firmware and its licences ship in Devs/Firmware;
   the files DEVS:Firmware lacks are copied when the Pi Wi-Fi is selected.
 
