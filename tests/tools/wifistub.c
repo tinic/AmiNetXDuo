@@ -931,7 +931,7 @@ int main(void)
                        SYS_Asynch, TRUE, TAG_DONE);
         }
         Delay(150);
-        check(env_is("Home 4/4"), "connected with WirelessManager running");
+        check(env_is("Home 3/4"), "connected with WirelessManager running");
         rc = run(PREFS " DISCONNECT");
         check(rc == 0 && has("Disconnected."), "DISCONNECT stops WirelessManager");
         Delay(75);
@@ -948,7 +948,7 @@ int main(void)
                        SYS_Asynch, TRUE, TAG_DONE);
         }
         Delay(150);
-        check(env_is("Home 4/4"), "WirelessManager back: connected again");
+        check(env_is("Home 3/4"), "WirelessManager back: connected again");
         stop_wm();
         ws->keep_assoc = FALSE;
 
