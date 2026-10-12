@@ -2803,7 +2803,8 @@
     (set KEPT_IF (tackon D_IFDIR OLD_IF))
     (if (<> 0 (run ("Search >NIL: FROM \"%s\" SEARCH PRIORITY QUIET" KEPT_IF)
                    (quiet) (safe)))
-        (run ("Echo >>\"%s\" \"PRIORITY=10\"" KEPT_IF)
+        ; "*N" first: the kept file may not end with a newline.
+        (run ("Echo >>\"%s\" \"*NPRIORITY=10\"" KEPT_IF)
              (prompt ("Adding PRIORITY=10 to %s, ahead of the Wi-Fi" KEPT_IF))
              (help   H_WIFI)))
   ))
