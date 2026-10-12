@@ -207,7 +207,9 @@ the NDK does not declare and the CPU profiler.
 | `hostname` | the name of this machine, and where the name came from |
 
 The installer copies all of them into `C:`; a system installation also places
-the `NetPrefs` program and icon in `SYS:Prefs`, and `NetMeter` in `SYS:Utilities`. Every command that resolves a name
+the `NetPrefs` and `NetWirelessPrefs` programs and icons in `SYS:Prefs`, `NetMeter` in
+`SYS:Utilities` and `NetWireless` in `SYS:Tools/Commodities`; a drawer installation places all
+four in its drawer. `C:` carries no icons. Every command that resolves a name
 takes `-4` and `-6`.
 
 ## Files, a Shell and the display in a web browser
