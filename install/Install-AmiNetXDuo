@@ -500,18 +500,22 @@
        "To start this interface now:\n\n"
        "    %sAddNetInterface DEVS:NetInterfaces/%s\n"))
 
-; No %s in these three: the network was started at the end of this run,
-; or another stack was running and it was not.
+; Started at the end of this run, or not because a stack was running: %ld
+; in F_START_TRIED is the wait in seconds.
 (set F_START_NOW
   "It is running now, and starts by itself at every boot.\n")
 
 (set F_START_TRIED
-  (cat "It was started and did not come up within 40 seconds.  It starts by "
-       "itself at every boot.\n"))
+  (cat "S:Network-Startup was run, and the network did not come up within "
+       "%ld seconds.  It starts by itself at every boot.\n"))
 
 (set F_START_OTHER
   (cat "Another network stack is running, so AmiNetXDuo was not started.  "
        "Reboot to start it; it starts by itself at every boot.\n"))
+
+(set F_START_EARLIER
+  (cat "An earlier AmiNetXDuo is running.  Reboot to start this one; it "
+       "starts by itself at every boot.\n"))
 
 (set F_HTTPD
   (cat "\nFrom the next reboot, httpd serves every mounted volume on port %ld, with a file "
@@ -3823,17 +3827,33 @@
 ; before this run, the startup file this run wrote starts the network, so
 ; the Wi-Fi and sntp come up as they will at boot.  In the background: the
 ; Installer waits for no driver, and polls GetNetStatus every 2 seconds for
-; an interface and a default route, for at most 40 seconds.
+; an interface and a default route, for at most 40 seconds, or 60 when the
+; Wi-Fi is the primary (WirelessManager joins first).
+;
+; GetNetStatus by the path this run copied it to: AmiNetXDuo: is assigned
+; only from the next boot, and naming it now asks for a volume.
+(set NET_GNS (cat "\"" (tackon D_C "GetNetStatus") "\""))
+(set NET_WAIT (if (AND WIFI_START WIFI_PRIMARY) 60 40))
 (set NET_TRIED 0)
 (set NET_UP 0)
 (set NET_OTHER 0)
+(set NET_EARLIER 0)
 (if (AND DO_STARTUP (= KEEP_NETSTART 0) (= @pretend 0))
   (
-    ; 5 is "not running".  10 is another stack in memory: one replaced in
-    ; LIBS: by this run, or AmiTCP or Miami from their own drawers, with or
-    ; without its port.  The last page then says to reboot.
-    (set NET_RC (run ("%sGetNetStatus QUIET" C_PREFIX) (quiet) (safe)))
-    (if (= NET_RC 10) (set NET_OTHER 1))
+    ; 5 is "not running".  10 is a stack in memory it cannot ask: another
+    ; stack (AmiTCP or Miami from their own drawers, with or without its
+    ; port), or an earlier AmiNetXDuo, whose library names it (VERSION).
+    ; Either way the last page says to reboot.
+    (set NET_RC (run ("%s QUIET" NET_GNS) (quiet) (safe)))
+    (if (= NET_RC 10)
+      (
+        (set NET_OTHER 1)
+        (if (= 0 (run ("%s VERSION >T:AmiNetXDuo-Stack" NET_GNS) (quiet) (safe)))
+            (if (= 0 (run "Search >NIL: FROM T:AmiNetXDuo-Stack SEARCH AmiNetXDuo QUIET"
+                          (quiet) (safe)))
+                (set NET_EARLIER 1)))
+        (delete "T:AmiNetXDuo-Stack" (optional "force" "nofail"))
+      ))
     (if (AND (= NET_RC 5) (= OLD_BSD 0) (= DRAWER_LAYOUT 0))
       (
         (working "Starting the network")
@@ -3842,11 +3862,10 @@
              (help   "S:Network-Startup, the file that starts it at every boot."))
         (set NET_TRIED 1)
         (set NET_N 0)
-        (while (AND (= NET_UP 0) (< NET_N 20))
+        (while (AND (= NET_UP 0) (< NET_N (/ NET_WAIT 2)))
           (
             (run "C:Wait 2" (quiet))
-            (if (= 0 (run ("%sGetNetStatus CHECK=INTERFACES,DEFAULTROUTE QUIET"
-                           C_PREFIX)
+            (if (= 0 (run ("%s CHECK=INTERFACES,DEFAULTROUTE QUIET" NET_GNS)
                           (quiet)))
                 (set NET_UP 1))
             (set NET_N (+ NET_N 1))
@@ -3860,10 +3879,12 @@
         (if NET_UP
             (set FINAL_START F_START_NOW)
             (if NET_TRIED
-                (set FINAL_START F_START_TRIED)
-                (if NET_OTHER
-                    (set FINAL_START F_START_OTHER)
-                    (set FINAL_START (F_START_YES C_PREFIX START_IF))))))
+                (set FINAL_START (F_START_TRIED NET_WAIT))
+                (if NET_EARLIER
+                    (set FINAL_START F_START_EARLIER)
+                    (if NET_OTHER
+                        (set FINAL_START F_START_OTHER)
+                        (set FINAL_START (F_START_YES C_PREFIX START_IF)))))))
     (set FINAL_START (F_START_NO  C_PREFIX START_IF)))
 
 ; Said again on the last page, and deliberately.  The question that turned it

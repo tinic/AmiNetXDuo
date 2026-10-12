@@ -1696,7 +1696,7 @@ int main(void)
        default route, which only an AddNetInterface run this boot gives. */
     {
         LONG net = SystemTagList((STRPTR)
-                       "C:GetNetStatus CHECK=INTERFACES,DEFAULTROUTE QUIET",
+                       DRIVE_NETCHECK " CHECK=INTERFACES,DEFAULTROUTE QUIET",
                        NULL);
 
         say("installdrive: netcheck %ld\n", net);

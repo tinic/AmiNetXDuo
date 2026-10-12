@@ -123,9 +123,10 @@ At Novice level every question takes its default without being shown.
 
 On a system installation where LIBS: held no bsdsocket.library and no
 other stack is running, the installer runs the S:Network-Startup it writes,
-in the background, and waits at most 40 seconds for an interface and a
-default route.  The last page states whether the network came up.  With
-another stack running, AmiNetXDuo starts at the next reboot.
+in the background, and waits at most 40 seconds (60 with the Wi-Fi as the
+primary interface) for an interface and a default route.  The last page
+states whether the network came up.  With another stack or an earlier
+AmiNetXDuo running, AmiNetXDuo starts at the next reboot.
 
 If the answer to the DHCP question is not known, answer yes.  Nearly every
 home network hands out addresses, and the change afterwards is one line in

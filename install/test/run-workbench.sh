@@ -1224,8 +1224,12 @@ if [ "$MANUAL_CARD" = 1 ] && { [ "$DRIVE_RUNS" = 1 ] || [ "$DRAWER" = 1 ]; } &&
    [ "$UNINSTALL" = 0 ] &&
    [ "$NO_BOOT" = 0 ] && [ "$STATIC" = 0 ]; then
     NETCHECK=1
-    NETCHECK_DEF="-DDRIVE_NETCHECK=1"
-    [ "$DRAWER" = 1 ] && NETCHECK_WANT=down
+    # GetNetStatus where this layout puts it.
+    NETCHECK_DEF='-DDRIVE_NETCHECK="C:GetNetStatus"'
+    if [ "$DRAWER" = 1 ]; then
+        NETCHECK_WANT=down
+        NETCHECK_DEF='-DDRIVE_NETCHECK="SYS:AmiNetXDuo/C/GetNetStatus"'
+    fi
 fi
 build_driver "$DRIVER" "$DRIVE_RUNS" "$YES_LABEL" "$PICK_SPEC"
 UNINSTALL_DEF=""
@@ -2487,7 +2491,7 @@ if [ "$NETCHECK" = 1 ]; then
     echo "install_netcheck=${_net:-none} want=$NETCHECK_WANT"
     if [ "$NETCHECK_WANT" = up ] && [ "$_net" = 0 ]; then
         echo "  ok      the first installation left the network running"
-    elif [ "$NETCHECK_WANT" = down ] && [ -n "$_net" ] && [ "$_net" != 0 ]; then
+    elif [ "$NETCHECK_WANT" = down ] && [ "$_net" = 5 ]; then
         echo "  ok      a drawer installation did not start the network"
     else
         echo "!! network after the installation: netcheck=${_net:-none}, want $NETCHECK_WANT"
