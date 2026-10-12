@@ -10,22 +10,22 @@ Which asset is pinned, and its expected hash, is recorded in
 | | |
 |---|---|
 | GCC | 16.2.0b (C/C++/ObjC), tinic/gcc `f098a8ef` (AmigaPorts `amiga16.2` `1d4ca5d4` + 3 m68k commits) |
-| binutils | 2.46, tinic/binutils-gdb `ffe2ad82` (AmigaPorts `amiga-2.46` `106606ef` + same-named-section PC-relative fix), no local patches |
+| binutils | 2.46, tinic/binutils-gdb `a3afdefb` (AmigaPorts `amiga-2.46` `2efe6986` + PRs #35-#37), no local patches |
 | NDK | 3.9 (`INCLUDE_VERSION` 45) + Roadshow bsdsocket/SANA-II headers |
 | Also | libnix, libgcc, libpthread, vasm, sfdc, fd2sfd, fd2pragma, gprof |
 | Prefix | `opt/m68k-amigaos/` |
 
 | Asset | Host | Size | SHA-256 |
 |---|---|---|---|
-| `m68k-amigaos-gcc-16.2.8-ndk3.9-linux-x86_64.tar.xz` | Linux x86-64 (glibc) | 41,002,012 | `98e7959f7806fe119f847feda024665cd8426ea20793034f4ee12b63f7c5678e` |
-| `m68k-amigaos-gcc-16.2.8-ndk3.9-darwin-arm64.tar.xz` | macOS arm64 | 32,425,580 | `f9f1d0d07aee53380280a1a3a8e53b734f1367dd710b89c4c07333a23daa879f` |
+| `m68k-amigaos-gcc-16.2.9-ndk3.9-linux-x86_64.tar.xz` | Linux x86-64 (glibc) | 37,791,756 | `adf6daa38acb5fef21ad692178be21e57ee7cd84d87615876d850e4fd07da431` |
+| `m68k-amigaos-gcc-16.2.9-ndk3.9-darwin-arm64.tar.xz` | macOS arm64 | 32,433,400 | `99f2e4ccd38add25a066df18a75ec363ae261708317c54c7263a17efe2ed3e2d` |
 
 **Not covered:** macOS x86-64 and Linux aarch64. There is no asset for either;
 `tools/build-toolchain.sh` builds on both.
 
 ```sh
-sha256sum m68k-amigaos-gcc-16.2.8-ndk3.9-linux-x86_64.tar.xz
-tar xJf   m68k-amigaos-gcc-16.2.8-ndk3.9-linux-x86_64.tar.xz
+sha256sum m68k-amigaos-gcc-16.2.9-ndk3.9-linux-x86_64.tar.xz
+tar xJf   m68k-amigaos-gcc-16.2.9-ndk3.9-linux-x86_64.tar.xz
 # -> opt/m68k-amigaos/bin/m68k-amigaos-gcc
 ```
 
@@ -38,10 +38,12 @@ here; its own notes describe it.
 
 ## binutils 2.46
 
-From asset series 16.2.8 binutils is tinic/binutils-gdb `ffe2ad82`: AmigaPorts
-`amiga-2.46` `106606ef` plus the same-named-section PC-relative fix
-(AmigaPorts/binutils-gdb#32). It carries the `HUNK_RELOC32` `strip`, slim-LTO
+From asset series 16.2.9 binutils is tinic/binutils-gdb `a3afdefb`: AmigaPorts
+`amiga-2.46` `2efe6986` (which includes the same-named-section PC-relative fix,
+AmigaPorts/binutils-gdb#32) plus AmigaPorts/binutils-gdb#35, #36 and #37: GAS
+byte-branch adjust and 0/-1 fixes, and ld rejects byte displacement 0/-1. It carries the `HUNK_RELOC32` `strip`, slim-LTO
 archive symbol index and C++ COMDAT `ar` repairs, so no local diffs are applied.
+Series 16.2.8 used `ffe2ad82` (`106606ef` + #32).
 Series 16.2.4 to 16.2.7 used bebbo `amiga-2.46` `a50544a9` with the three diffs
 in `tools/patches/binutils-2.46/`. Series up to 16.2.3 used 2.39.0
 (`ab4e5183f56fd83165356a03c890bf0b681d7535`).
@@ -53,7 +55,7 @@ commit rather than a branch, because bebbo's branches move.
 
 ```
 build driver   https://codeberg.org/bebbo/amiga-gcc            86f8ba62f7a5035e309600c86962681e1cbacccb
-binutils/GDB   https://github.com/tinic/binutils-gdb           ffe2ad82e34e11206efd706338b32a696185ebb4   (fix/amiga-pcrel-local-regression)
+binutils/GDB   https://github.com/tinic/binutils-gdb           a3afdefba01d87798425f28f12a567a65e6f2c4a   (fix/amiga-pcrel-byte-linkcheck)
 GCC            https://github.com/tinic/gcc                    f098a8ef44ac8d11204a3cb0c39c1e4f5cd63fc8   (amiga16.2)
 newlib         https://franke.ms/git/bebbo/newlib-cygwin       0909ae9abc18b38595425143e7a63d9e2fc31174
 libnix         https://franke.ms/git/bebbo/libnix              b7268e35510b8b7b4ccdad67fbcbb25e73189aef

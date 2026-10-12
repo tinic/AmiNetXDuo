@@ -9,8 +9,9 @@
 #   tools/build-toolchain.sh --print-pins        # what this would build
 #
 # GCC 16.2.0b + binutils 2.46 + NDK 3.9, PINNED BY COMMIT, not by branch.
-# binutils is tinic/binutils-gdb ffe2ad82 (AmigaPorts amiga-2.46 106606ef plus
-# the same-named-section PC-relative fix); it already carries the changes the
+# binutils is tinic/binutils-gdb a3afdefb (AmigaPorts amiga-2.46 2efe6986 plus
+# AmigaPorts PRs #35-#37: GAS byte-branch adjust and 0/-1 fixes, ld rejects
+# byte displacement 0/-1); it already carries the changes the
 # three diffs in tools/patches/binutils-2.46/ made, so none are applied.  This
 # tree builds at -DAMINETXDUO_LTO=ON with it.  Moving the pin back is the one PINS line below:
 # tools/patches/binutils/ still holds the 2.39 set.  Each entry records the
@@ -35,7 +36,7 @@ PIN_AMIGA_GCC_SHA="86f8ba62f7a5035e309600c86962681e1cbacccb"
 # The branch is recorded only so a human can find the commit again; nothing
 # reads it as a pin.
 PINS="
-binutils|https://github.com/tinic/binutils-gdb|ffe2ad82e34e11206efd706338b32a696185ebb4|fix/amiga-pcrel-local-regression
+binutils|https://github.com/tinic/binutils-gdb|a3afdefba01d87798425f28f12a567a65e6f2c4a|fix/amiga-pcrel-byte-linkcheck
 gcc|https://github.com/tinic/gcc|f098a8ef44ac8d11204a3cb0c39c1e4f5cd63fc8|amiga16.2
 newlib-cygwin|https://franke.ms/git/bebbo/newlib-cygwin|0909ae9abc18b38595425143e7a63d9e2fc31174|amiga
 libnix|https://franke.ms/git/bebbo/libnix|b7268e35510b8b7b4ccdad67fbcbb25e73189aef|master
@@ -424,6 +425,7 @@ case "$BU_BRANCH" in
     amiga-2.39.0) BU_PATCH_SET="binutils" ;;
     amiga-2.46)   BU_PATCH_SET="binutils-2.46" ;;
     fix/amiga-pcrel-local-regression) BU_PATCH_SET="binutils-current" ;;
+    fix/amiga-pcrel-byte-linkcheck) BU_PATCH_SET="binutils-current" ;;
     *)
         echo "!! no patch set under tools/patches/ for binutils $BU_BRANCH" >&2
         echo "   Write one and name it here.  An unpatched binutils links" >&2
