@@ -1880,19 +1880,20 @@
                   (set WIFI_SEL 1)
                   (set WIFI_DEV "anxwifipi.device")
                 )
-                ; A kept Prism2 card: DEVS:Networks or DEVS:, as it is named.
-                (if (= 0 (run ("Search >NIL: FROM \"%s\" SEARCH prism2.device QUIET"
-                               KEPT_IF)
-                              (quiet) (safe)))
-                  (
-                    (set WIFI_SEL 1)
-                    (set WIFI_PRISM 1)
-                    (set WIFI_DEV
-                      (if (= 0 (run ("Search >NIL: FROM \"%s\" SEARCH Networks/prism2.device QUIET"
-                                     KEPT_IF)
-                                    (quiet) (safe)))
-                          "DEVS:Networks/prism2.device" "prism2.device"))
-                  ))))
+                ; A kept Prism2 card, from the file's live DEVICE as the
+                ; interface parser reads it (a comment never matches):
+                ; 0 in DEVS:Networks, 2 in DEVS: or named bare.
+                (
+                  (set WIFI_KEPT_RC (run ("\"%s\" PRISM2 \"%s\"" S_INSTWIFI KEPT_IF)
+                                         (quiet) (safe)))
+                  (if (OR (= WIFI_KEPT_RC 0) (= WIFI_KEPT_RC 2))
+                    (
+                      (set WIFI_SEL 1)
+                      (set WIFI_PRISM 1)
+                      (set WIFI_DEV (if (= WIFI_KEPT_RC 0)
+                                        "DEVS:Networks/prism2.device" "prism2.device"))
+                    ))
+                )))
             (if WIFI_SEL (set WIFI_IF WIFI_NAME))
           ))
         (set WIFI_NAME_N (+ WIFI_NAME_N 1))

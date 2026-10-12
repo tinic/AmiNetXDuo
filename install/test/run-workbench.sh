@@ -14,7 +14,7 @@
 #                                 [-m core|driver|probe|minimal]
 #                                 [-C] [-M] [-V] [-I] [-z] [-W]
 #                                 [-s yes|invalid] [-O] [-n]
-#                                 [-w join|keep|keepit|keepitlive|keepitfw|userstart|userwm|prism2|prism2pi|prism2keep]
+#                                 [-w join|keep|keepit|keepitlive|keepitfw|userstart|userwm|prism2|prism2pi|prism2keep|cnetkeep]
 #                                 [-f roadshow-leave|roadshow-replace|
 #                                     amitcpng-leave|amitcpng-replace]
 #
@@ -72,6 +72,9 @@
 #             time: the card is the Wi-Fi, the Pi Wi-Fi is not set up (no
 #             wifipi file, no firmware); the card starts outside the
 #             Wireless.prefs guard, WirelessManager inside it.
+#   cnetkeep  without -e: an eth0 copied from install/examples/NetInterfaces/
+#             cnet (its comments name prism2.device) for the board is kept
+#             ("Keep it"): no Wi-Fi is set up from a comment.
 #   prism2keep  prism2 with -R: run 1 answers, its S:Network-Startup is
 #             deleted, run 2 takes "Keep it" and must write the Wi-Fi block
 #             for prism2.device from the kept pcmcia definition.
@@ -169,7 +172,7 @@ while getopts "b:a:l:p:N:t:T:kHSDgRUEJBIMq:x:f:e:c:m:CVzWs:P:Ow:n" opt; do
         O) MDNS_OFF=1 ;;
         n) HAND_HOST=1 ;;
         w) WIFI_MODE="$OPTARG"
-           [ "$OPTARG" = prism2 ] && CONFIG_ONLY=1 ;;
+           case "$OPTARG" in prism2|cnetkeep) CONFIG_ONLY=1 ;; esac ;;
         *) echo "usage: $0 [-b builddir] [-a archive.lha]" \
                 "[-l NOVICE|AVERAGE|EXPERT] [-p choice] [-N board]" \
                 "[-t seconds] [-T seconds] [-k] [-H] [-S] [-D] [-g] [-R] [-U] [-E]" \
@@ -178,7 +181,7 @@ while getopts "b:a:l:p:N:t:T:kHSDgRUEJBIMq:x:f:e:c:m:CVzWs:P:Ow:n" opt; do
                 "[-f existing-stack-mode] [-e genet|wifi|both|genet-old|genet-old-bare] [-P fail|broken]" \
                 "[-c drivers] [-m core|driver|probe|minimal] [-C] [-M] [-V] [-I] [-z] [-W]" \
                 "[-s yes|invalid] [-O] [-n]" \
-                "[-w join|keep|keepit|keepitlive|keepitfw|userstart|userwm]" >&2
+                "[-w join|keep|keepit|keepitlive|keepitfw|userstart|userwm|prism2|prism2pi|prism2keep|cnetkeep]" >&2
            exit 2 ;;
     esac
 done
@@ -405,11 +408,11 @@ fi
 
 if [ -n "$WIFI_MODE" ]; then
     case "$WIFI_MODE" in
-        join|keep|keepit|keepitlive|keepitfw|userstart|userwm|prism2|prism2pi|prism2keep) ;;
+        join|keep|keepit|keepitlive|keepitfw|userstart|userwm|prism2|prism2pi|prism2keep|cnetkeep) ;;
         *) echo "unknown Wi-Fi mode: $WIFI_MODE" >&2; exit 2 ;;
     esac
     case "$WIFI_MODE:$EMU68_FIXTURE" in
-        prism2:|prism2keep:|prism2pi:wifi) ;;
+        prism2:|prism2keep:|prism2pi:wifi|cnetkeep:) ;;
         prism2pi:*) echo "-w prism2pi needs -e wifi" >&2; exit 2 ;;
         prism2*:*) echo "-w $WIFI_MODE takes no -e: the Pi Wi-Fi would win" >&2
                    exit 2 ;;
@@ -1237,6 +1240,16 @@ if [ "$MANUAL_CARD" = 0 ]; then
             exit 2
         }
     fi
+fi
+# -w cnetkeep: the cnet example, its comments naming prism2.device, as the
+# board's eth0 before the install: "Keep it" keeps it, and no Wi-Fi.
+if [ "$WIFI_MODE" = cnetkeep ]; then
+    mkdir -p "$HD/Devs/NetInterfaces"
+    sed "s|^DEVICE=cnet.device|DEVICE=DEVS:${SANA2_DIR:+$SANA2_DIR/}$SANA2_DRIVER|" \
+        "$ROOT/install/examples/NetInterfaces/cnet" > "$HD/Devs/NetInterfaces/eth0"
+    grep -q "prism2.device" "$HD/Devs/NetInterfaces/eth0" || {
+        echo "!! the cnet example no longer names prism2.device" >&2; exit 2; }
+    echo "==> cnetkeep fixture: DEVS:NetInterfaces/eth0 from the cnet example"
 fi
 # -w prism2*: the real prism2.device, and no PC Card for it.
 if [ "$PRISM2" = 1 ]; then
