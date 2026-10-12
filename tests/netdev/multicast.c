@@ -8,13 +8,13 @@
 #include "sana2_device.h"
 
 /* SANA-II hooks use a0/a1/d0, independently of the application's C ABI. */
-asm(".text\n.globl _mcast_copy\n_mcast_copy:\n"
+asm(".text\n.globl _mtest_copy\n_mtest_copy:\n"
     "move.l %d0,%d1\nbeq.s 2f\n1: move.b (%a1)+,(%a0)+\n"
     "subq.l #1,%d1\nbne.s 1b\n2: moveq #1,%d0\nrts\n");
-extern VOID mcast_copy(VOID);
+extern VOID mtest_copy(VOID);
 static struct TagItem tags[] = {
-    { S2_CopyToBuff, (ULONG)mcast_copy },
-    { S2_CopyFromBuff, (ULONG)mcast_copy }, { TAG_DONE, 0 }
+    { S2_CopyToBuff, (ULONG)mtest_copy },
+    { S2_CopyFromBuff, (ULONG)mtest_copy }, { TAG_DONE, 0 }
 };
 
 static int checks, failures;
