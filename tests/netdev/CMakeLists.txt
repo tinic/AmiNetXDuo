@@ -14,10 +14,12 @@ endif()
 
 # Exercises real SANA-II driver rings with a controlled Ethernet loopback.
 add_executable(netmulticast_test multicast.c)
+add_executable(netmulticast_launcher multicast-launcher.c)
 target_include_directories(netmulticast_test PRIVATE
     "${CMAKE_SOURCE_DIR}/src/sana2")
 if(AMIGA_NDK_INCLUDE)
     target_include_directories(netmulticast_test PRIVATE "${AMIGA_NDK_INCLUDE}")
+    target_include_directories(netmulticast_launcher PRIVATE "${AMIGA_NDK_INCLUDE}")
 endif()
 
 add_executable(netdelay_test
