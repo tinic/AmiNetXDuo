@@ -5,6 +5,7 @@ Add new entries under `Unreleased`; published release sections are history.
 
 ## Unreleased
 
+- NetWireless and NetWirelessPrefs show "Wi-Fi off" after Disconnect, not the network that was connected.
 - Installer: a Wi-Fi started after another interface starts in the background, so the boot does not wait for it.
 
 - Installer: NetWirelessPrefs lists the Wi-Fi networks in range to join.

@@ -72,6 +72,8 @@ typedef struct WsDevice
                                            info answered whenever online   */
     BOOL          bad_key;              /* associates, never comes up       */
     char          ssid[33];             /* what S2_SETOPTIONS joined       */
+    BOOL          keep_assoc;           /* the supplicant's close does not
+                                           drop it (anxwifipi.device today) */
     APTR          assoc;                /* the request that joined it      */
     ULONG         n_setoptions;
     ULONG         scan_stamp;           /* ticks when the first scan queued */
@@ -153,7 +155,7 @@ static BPTR ws_close(register struct Device *dev __asm("a6"),
                      register struct IOSana2Req *io __asm("a1"))
 {
     /* The supplicant going takes the association with it. */
-    if ((APTR)io == ws->assoc)
+    if ((APTR)io == ws->assoc && !ws->keep_assoc)
     {
         ws->assoc = NULL;
         ws->connected = FALSE;
@@ -905,11 +907,50 @@ int main(void)
         ws->connected = FALSE;
         ws_report(S2EVENT_OFFLINE);
         Delay(50);
-        check(env_is("Off"), "OFFLINE seen at once");
+        check(env_is("Wi-Fi off"), "OFFLINE seen at once");
         ws->online = TRUE;
         ws_report(S2EVENT_ONLINE);
         Delay(50);
         check(env_is("Not connected"), "ONLINE seen at once");
+
+        /* Disconnect in NetWirelessPrefs stops WirelessManager; the radio
+           here, as on the A1200, still answers as associated: the
+           commodity says the Wi-Fi is off within one INTERVAL, and
+           connected again once WirelessManager is back. */
+        ws->connected = TRUE;
+        ws->signal = -50;
+        ws->keep_assoc = TRUE;
+        ws_report(S2EVENT_CONNECT);
+        Delay(50);
+        {
+            BPTR in2 = Open((CONST_STRPTR)"NIL:", MODE_OLDFILE);
+            BPTR o2 = Open((CONST_STRPTR)"NIL:", MODE_NEWFILE);
+
+            SystemTags((CONST_STRPTR)"C:WirelessManager DEVICE=wifistub.device UNIT=0",
+                       SYS_Input, (ULONG)in2, SYS_Output, (ULONG)o2,
+                       SYS_Asynch, TRUE, TAG_DONE);
+        }
+        Delay(150);
+        check(env_is("Home 3/4"), "connected with WirelessManager running");
+        rc = run(PREFS " DISCONNECT");
+        check(rc == 0 && has("Disconnected."), "DISCONNECT stops WirelessManager");
+        Delay(75);
+        check(env_is("Wi-Fi off"),
+              "Disconnect: Wi-Fi off within one INTERVAL, the radio still associated");
+        rc = run(PREFS " DISCONNECT");
+        check(rc == 0 && has("not running"), "DISCONNECT with none running");
+        {
+            BPTR in2 = Open((CONST_STRPTR)"NIL:", MODE_OLDFILE);
+            BPTR o2 = Open((CONST_STRPTR)"NIL:", MODE_NEWFILE);
+
+            SystemTags((CONST_STRPTR)"C:WirelessManager DEVICE=wifistub.device UNIT=0",
+                       SYS_Input, (ULONG)in2, SYS_Output, (ULONG)o2,
+                       SYS_Asynch, TRUE, TAG_DONE);
+        }
+        Delay(150);
+        check(env_is("Home 3/4"), "WirelessManager back: connected again");
+        stop_wm();
+        ws->keep_assoc = FALSE;
 
         stop_named("NetWireless");
         Delay(25);

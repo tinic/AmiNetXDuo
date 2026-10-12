@@ -101,12 +101,25 @@ static ULONG nw_cat(char *buf, ULONG n, ULONG cap, const char *s)
     return n;
 }
 
+VOID nw_wm_mark_off(VOID)
+{
+    (VOID)SetVar((CONST_STRPTR)"WiFiOff", (CONST_STRPTR)"1", 1, GVF_GLOBAL_ONLY);
+}
+
+BOOL nw_wm_marked_off(VOID)
+{
+    char v[4];
+
+    return GetVar((CONST_STRPTR)"WiFiOff", (STRPTR)v, sizeof(v), GVF_GLOBAL_ONLY) >= 0;
+}
+
 BOOL nw_wm_start(const char *command, const char *device, ULONG unit)
 {
     char line[256];
     BPTR in, out;
     LONG rc;
 
+    (VOID)DeleteVar((CONST_STRPTR)"WiFiOff", GVF_GLOBAL_ONLY);
     /* The Shell's own Stack command, then WirelessManager, both in the new
        background Shell: the same two lines S:Network-Startup runs. */
     in = Open((CONST_STRPTR)"NIL:", MODE_OLDFILE);
