@@ -1746,6 +1746,12 @@ if [ -n "$FOREIGN_MODE" ]; then
             printf 'AmiNetXDuo/Backup/1/%s %s\n' "$f" "$(shasum < "$HD/$f" | cut -d' ' -f1)"
         done
         for f in "${FOREIGN_REPLACED_FILES[@]}" Devs/NetInterfaces/A2065; do
+            # Every interface file is kept on run 1, kept or set up again.
+            case "$f" in
+                Devs/NetInterfaces/*)
+                    printf 'AmiNetXDuo/Backup/1/%s %s\n' "$f" "$(shasum < "$HD/$f" | cut -d' ' -f1)"
+                    continue ;;
+            esac
             if [ "$_bk_cfg" = 2 ] && [ "$f" = S/Network-Startup ]; then
                 # Run 1 kept it, and installdrive marked it between the runs.
                 printf 'AmiNetXDuo/Backup/2/%s %s\n' "$f" "$({ cat "$HD/$f"

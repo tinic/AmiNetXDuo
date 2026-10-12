@@ -180,12 +180,11 @@ than deleted, after a page that asks first, at every level; an earlier
 AmiNetXDuo's is replaced without one.  When a network device was found,
 another stack's network configuration is set up again by default.  The
 other stack's libraries, interface files, routes, name_resolution and
-S:Network-Startup are copied, with Copy CLONE, before anything is replaced,
-into a drawer of that installation's own under the AmiNetXDuo drawer's
-Backup, numbered one above the highest there.  Backup with the lowest
-number holds the other stack as it was first found; later ones are its
-files from later installations.  A file NetSetup or this installer wrote is
-not copied, and neither is one already kept unchanged.  A copy that fails
+S:Network-Startup, and their .old files, are copied, with Copy CLONE, before
+anything is replaced, into a drawer of that installation's own under the
+AmiNetXDuo drawer's Backup, numbered one above the highest there; each
+holds only what was new or changed since the earlier ones.  A file NetSetup
+or this installer wrote is not copied, and neither is one already kept unchanged.  A copy that fails
 stops the installation before anything is replaced.  Every library is copied in
 under a .new name first and swapped after, so a copy that fails leaves the
 installed file in place.
@@ -385,8 +384,8 @@ it is deleted.
 
 Backup holds another stack's libraries, its commands with the same names as
 AmiNetXDuo's, its NetPrefs and NetMeter, its certificate store, and its
-interface, routes, name_resolution and S:Network-Startup files, each run
-in a drawer numbered one above the highest there.
+interface, routes, name_resolution and S:Network-Startup files, and their
+.old files, each run in a drawer numbered one above the highest there.
 
 A drawer installation is the AmiNetXDuo drawer, the startup block,
 S:Network-Startup and S:AmiNetXDuo-Files.
