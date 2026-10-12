@@ -3411,13 +3411,17 @@
   every INTERVAL seconds only while connected, or while a reading has
   failed, and nothing is read while not connected. A unit that reports no
   events is read every INTERVAL seconds. The Wi-Fi is off while the unit
-  is offline, and once WirelessManager has stopped after it ran
-  (Disconnect stops it): anxwifipi.device still answers as associated
-  then, but no traffic passes. NetWireless says so within INTERVAL seconds
-  and reads every INTERVAL seconds until WirelessManager runs again. A
-  changed picture replaces the AppIcon; on Workbench 3.5 and later it
-  keeps the place it was dragged to, before that it returns to a free
-  place on the desktop.
+  is offline, after a Disconnect until WirelessManager is started again,
+  and when WirelessManager has stopped after it ran: anxwifipi.device
+  still answers as associated then, but no traffic passes. NetWireless
+  says so within INTERVAL seconds and reads every INTERVAL seconds until
+  WirelessManager runs again. A Disconnect sets the variable ENV:WiFiOff
+  (ENV: only, gone at the next boot), which NetWirelessPrefs clears when
+  it starts WirelessManager. WirelessManager is recognised by its Shell
+  command name; one started from a Workbench icon is not seen. A changed
+  picture replaces the AppIcon; on Workbench 3.5 and later it keeps the
+  place it was dragged to, before that it returns to a free place on the
+  desktop.
 
   ToolTypes, also Shell arguments:
 
