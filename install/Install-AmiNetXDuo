@@ -243,15 +243,17 @@
 (set H_KEEPOLD
   (cat "This machine already has an AmiNetXDuo or Roadshow style network "
        "configuration in DEVS:NetInterfaces.\n\n"
-       "Answer \"Keep it\" to update the software and leave the existing "
-       "configuration alone.  That is the usual choice for an update to a "
-       "newer version.  If S:Network-Startup already exists, it is kept too, "
-       "so the same interfaces continue to start at boot.\n\n"
-       "Answer \"Set them up again\" to answer all the network questions "
-       "again.  That rewrites the interface file, DEVS:Internet/routes and "
+       "\"Keep it\" updates the software and leaves the existing "
+       "configuration alone.  If S:Network-Startup already exists, it is kept "
+       "too, so the same interfaces continue to start at boot.  That is the "
+       "default when AmiNetXDuo is already installed.\n\n"
+       "\"Set them up again\" answers the network questions again.  That "
+       "rewrites the interface files, DEVS:Internet/routes and "
        "DEVS:Internet/name_resolution, and writes a new S:Network-Startup.  "
-       "The old startup file is saved as S:Network-Startup.old, but manual "
-       "changes in the three configuration files are lost."))
+       "Another stack's files are copied first into a numbered drawer under "
+       "the Backup drawer of the AmiNetXDuo drawer.  That is the default when "
+       "the configuration belongs to another stack and a network device was "
+       "found."))
 
 (set H_STARTUP
   (cat "S:User-Startup is the file that the Amiga runs at every boot.  "
@@ -407,6 +409,12 @@
        "three-clause BSD licence, Copyright (c) 2003-2010 Jouni Malinen and "
        "contributors, (c) 2011-2025 Neil Cafferkey.  The licence is installed "
        "in the AmiNetXDuo drawer as WirelessManager-LICENSE."))
+
+(set H_BACKUP
+  (cat "Files of another stack that AmiNetXDuo replaces are kept in a drawer "
+       "of their own under the Backup drawer of the AmiNetXDuo drawer: "
+       "Backup/1 for the first installation that replaced any, Backup/2 for "
+       "the next.  Nothing there is replaced later."))
 
 (set H_REPLACELIB
   (cat "There is already a bsdsocket.library on this machine.  It belongs to "
@@ -1397,13 +1405,30 @@
 ; the card and address pages merely to reach an abort at their end.
 (set REPLACE_LIB 1)
 
-(if (AND OLD_BSD (= DRAWER_LAYOUT 0))
+; WHOSE LIBRARY.  Ours names itself AmiNetXDuo inside; Roadshow's, AmiTCP's
+; and Miami's do not.  Replacing our own is an update, not a decision, so
+; the page is not drawn for it, and the configuration it left is kept by
+; default below.
+(set LIB_OURS 0)
+(if OLD_BSD
+    (if (= 0 (run ("Search >NIL: FROM \"%s\" SEARCH AmiNetXDuo QUIET" D_BSD)
+                  (quiet) (safe)))
+        (set LIB_OURS 1)))
+
+; Another stack is somebody's working network, so this page is drawn at
+; every level: (user) lifts Novice to Intermediate for it and back.
+(set LEVEL_WAS @user-level)
+(if (AND OLD_BSD (= DRAWER_LAYOUT 0) (= LIB_OURS 0))
+  (
+    (if (= LEVEL_WAS 0) (user 1))
     (set REPLACE_LIB
       (askbool
         (prompt (F_OLDLIB OLD_BSD_VER OLD_BSD_REV))
         (help    H_REPLACELIB)
         (choices "Replace it" "Leave it alone")
-        (default 1))))
+        (default 1)))
+    (if (= LEVEL_WAS 0) (user 0))
+  ))
 
 (if (= REPLACE_LIB 0)
     (abort "LIBS:bsdsocket.library is unchanged, so AmiNetXDuo is not "
@@ -1419,6 +1444,14 @@
           (if (< @each-type 0)
               (set OLD_IF @each-name)))))
 (set HAVE_OLD (if (> (strlen OLD_IF) 0) 1 0))
+
+; Ours: our library, or an interface file this installer wrote.
+(set CONFIG_OURS LIB_OURS)
+(if (AND HAVE_OLD (= CONFIG_OURS 0))
+    (if (= 0 (run ("Search >NIL: FROM \"%s\" SEARCH AmiNetXDuo QUIET"
+                   (tackon D_IFDIR OLD_IF))
+                  (quiet) (safe)))
+        (set CONFIG_OURS 1)))
 
 ; A novice run makes no decisions of its own, so with nothing detected and no
 ; existing configuration to keep, there is no honest default to fall back on.
@@ -1446,13 +1479,26 @@
 
 (set KEEP_OLD 0)
 
+; Keep is the default for our own configuration.  Another stack's is set up
+; again, its files kept in the AmiNetXDuo drawer's Backup, when there is a
+; device to set it up for: with none detected a Novice run has no card to
+; write, so it keeps that one.  The default is the page's first button either
+; way.  Another stack's configuration is drawn at Novice too, as the
+; replace page is.
+(set KEEP_DEF (if (OR CONFIG_OURS (= CARD_DEFAULT 0)) 1 0))
 (if HAVE_OLD
+  (
+    (if (AND (= LEVEL_WAS 0) (= CONFIG_OURS 0)) (user 1))
     (set KEEP_OLD
-      (askbool
-        (prompt (F_KEEPOLD OLD_IF))
-        (help H_KEEPOLD)
-        (choices "Keep it" "Set them up again")
-        (default 1))))
+      (if (askbool
+            (prompt (F_KEEPOLD OLD_IF))
+            (help H_KEEPOLD)
+            (choices (if KEEP_DEF "Keep it" "Set them up again")
+                     (if KEEP_DEF "Set them up again" "Keep it"))
+            (default 1))
+          KEEP_DEF (- 1 KEEP_DEF)))
+    (if (AND (= LEVEL_WAS 0) (= CONFIG_OURS 0)) (user 0))
+  ))
 
 ; Kept settings are not checked, and saying so is the only honest option.
 ;
@@ -1464,12 +1510,19 @@
 ; It cannot be examined: the Installer language cannot read the DEVICE= line
 ; back out of the file, so there is no name to look for. Reported by a user who
 ; took the drivers away, installed again and was told nothing.
-(if (AND HAVE_OLD KEEP_OLD)
+; Drawn for another stack's configuration, and at Expert; a routine update
+; over AmiNetXDuo's own does not need it.
+; (user) for Novice, which draws no (message) of its own.
+(if (AND HAVE_OLD KEEP_OLD (OR (= @user-level 2) (= CONFIG_OURS 0)))
+  (
+    (if (= LEVEL_WAS 0) (user 1))
     (message
       "The existing configuration for \"" OLD_IF "\" is kept as it is.\n\n"
       "It is not checked.  If the card or its driver changed since the file "
       "was written, the network does not come up.  Install again and choose "
-      "\"Set them up again\" to answer the questions again."))
+      "\"Set them up again\" to answer the questions again.")
+    (if (= LEVEL_WAS 0) (user 0))
+  ))
 
 ; --- the card ------------------------------------------------------------
 
@@ -1497,6 +1550,15 @@
 (set WIFI_DEV W_ANXWIFIPI)
 (set WIFI_UNIT 0)
 (set WIFI_TMP "T:AmiNetXDuo-Wireless.prefs")
+; It holds the Wi-Fi passphrase: an installation that stops, for any reason,
+; takes it away.
+(onerror
+  (if (exists WIFI_TMP (noreq))
+      (delete WIFI_TMP
+              (prompt "Removing T:AmiNetXDuo-Wireless.prefs")
+              (help   "It holds the Wi-Fi passphrase.")
+              (optional "force" "nofail")
+              (safe))))
 (set WIFI_NEW_PREFS 0)
 (set WIFI_HAVE_PREFS
   (if (OR (exists "ENVARC:Sys/Wireless.prefs" (noreq))
@@ -2174,6 +2236,143 @@
 ; already doing nothing here: the old file had been renamed away before it
 ; ran, so there was never a destination to compare against.
 
+; --- another stack's files, kept --------------------------------------
+;
+; Everything of another stack that this run will write over is copied first,
+; before the first file is replaced: its libraries, and when the network is
+; set up again its interface files (every one), routes, name_resolution and
+; S:Network-Startup.  A copy that fails stops the installation here, with
+; nothing on the disk changed.
+;
+; Into a drawer of this run's own under the AmiNetXDuo drawer's Backup,
+; numbered one above the highest there, made only when there is something to
+; keep, so no run writes into what an earlier one kept and the lowest number
+; is the other stack as it was first found.  A file is another stack's when
+; it names neither AmiNetXDuo nor NetSetup (which writes "Written by
+; NetSetup.").  One already kept, byte for byte, in an earlier drawer is not
+; kept again.  AmigaDOS Copy CLONE keeps protection bits, date and comment.
+; Nothing of this in a pretend run.
+(set D_BACKUP_TOP (tackon DOCDIR "Backup"))
+(set D_BACKUP "")
+(set BK_MAX 0)
+(if (= (exists D_BACKUP_TOP (noreq)) 2)
+    (foreach D_BACKUP_TOP "#?"
+      (if (AND (> @each-type 0) (patmatch (cat "#" P_DIGIT) @each-name))
+          (if (> (+ @each-name 0) BK_MAX) (set BK_MAX (+ @each-name 0))))))
+(set FOREIGN_STACK (if (AND OLD_BSD (= LIB_OURS 0) (= DRAWER_LAYOUT 0)) 1 0))
+
+; IS_OURS: BK_SRC names AmiNetXDuo, or NetSetup wrote it.
+(procedure P_is_ours
+  (set IS_OURS 0)
+  (if (= 0 (run ("Search >NIL: FROM \"%s\" SEARCH AmiNetXDuo QUIET" BK_SRC)
+                (quiet) (safe)))
+      (set IS_OURS 1)
+      (if (= 0 (run ("Search >NIL: FROM \"%s\" SEARCH \"Written by NetSetup\" QUIET"
+                     BK_SRC)
+                    (quiet) (safe)))
+          (set IS_OURS 1)))
+)
+
+; KEPT: an earlier Backup drawer holds BK_SRC, byte for byte, under its own
+; name or, for a .old file, the name it had before it was renamed so.
+(procedure P_kept_before
+  (set KEPT 0)
+  (set KB_NAME (fileonly BK_SRC))
+  (set KB_BASE KB_NAME)
+  (if (patmatch "#?.old" KB_NAME)
+      (set KB_BASE (substr KB_NAME 0 (- (strlen KB_NAME) 4))))
+  (set KB_N 1)
+  (while (AND (= KEPT 0) (<= KB_N BK_MAX))
+    (
+      (set KB_DIR (tackon (tackon D_BACKUP_TOP ("%ld" KB_N)) BK_SUB))
+      (set KB_I 0)
+      (while (AND (= KEPT 0) (< KB_I 2))
+        (
+          (set KB_F (tackon KB_DIR (select KB_I KB_NAME KB_BASE)))
+          (if (exists KB_F (noreq))
+              (if (= 0 (run ("\"%s\" \"%s\" \"%s\" BYTES" S_SAMEFILE BK_SRC KB_F)
+                            (quiet) (safe)))
+                  (set KEPT 1)))
+          (set KB_I (+ KB_I 1))
+        ))
+      (set KB_N (+ KB_N 1))
+    ))
+)
+
+; BK_SRC into this run's Backup drawer/BK_SUB when it is another stack's.
+(procedure P_backup
+  (if (AND (= @pretend 0) (exists BK_SRC (noreq)))
+    (
+      (P_is_ours)
+      (if (= IS_OURS 0) (P_kept_before))
+      (if (AND (= IS_OURS 0) (= KEPT 0))
+        (
+          (if (= (strlen D_BACKUP) 0)
+            (
+              (set D_BACKUP (tackon D_BACKUP_TOP ("%ld" (+ BK_MAX 1))))
+              (makedir DOCDIR (prompt ("Creating %s" DOCDIR)) (help H_DOCDIR))
+              (makedir D_BACKUP_TOP (prompt ("Creating %s" D_BACKUP_TOP))
+                       (help H_BACKUP))
+              (makedir D_BACKUP (prompt ("Creating %s" D_BACKUP)) (help H_BACKUP))
+            ))
+          (set BK_DIR (tackon D_BACKUP BK_SUB))
+          (if (NOT (exists (tackon BK_DIR (fileonly BK_SRC)) (noreq)))
+            (
+              (if (patmatch "#?/#?" BK_SUB)
+                  (makedir (pathonly BK_DIR)
+                           (prompt ("Creating %s" (pathonly BK_DIR)))
+                           (help H_BACKUP)))
+              (makedir BK_DIR (prompt ("Creating %s" BK_DIR)) (help H_BACKUP))
+              (if (OR (<> 0 (run ("Copy \"%s\" TO \"%s\" CLONE QUIET" BK_SRC BK_DIR)
+                                 (prompt ("Keeping %s in %s" BK_SRC BK_DIR))
+                                 (help   H_BACKUP)))
+                      (NOT (exists (tackon BK_DIR (fileonly BK_SRC)) (noreq))))
+                  (abort (cat "The copy of " BK_SRC " into " BK_DIR " failed.  "
+                              "Nothing on the disk has been replaced.\n\n"
+                              "Free space on that volume and run the installer "
+                              "again.")))
+            ))
+        ))
+    ))
+)
+
+; The libraries, and their .old copies, which the swap deletes: those may
+; be another stack's own backups.
+(if (= DRAWER_LAYOUT 0)
+  (
+    (set BK_SUB "Libs")
+    (set BK_SRC D_BSD) (P_backup)
+    (set BK_SRC D_UG)  (P_backup)
+    (set BK_SRC D_TLS) (P_backup)
+    (set BK_SRC D_BSD_OLD) (P_backup)
+    (set BK_SRC D_UG_OLD)  (P_backup)
+    (set BK_SRC D_TLS_OLD) (P_backup)
+  ))
+; Every interface file, kept or not: a kept one can still be edited (the
+; PRIORITY line InstallWiFi adds for a Wi-Fi beside it).
+(set BK_SUB "Devs/NetInterfaces")
+(if (= (exists D_IFDIR (noreq)) 2)
+    (foreach D_IFDIR "~(#?.info)"
+      (if (< @each-type 0)
+        (
+          (set BK_SRC (tackon D_IFDIR @each-name))
+          (P_backup)
+        ))))
+(if (= KEEP_OLD 0)
+  (
+    (set BK_SUB "Devs/Internet")
+    (set BK_SRC (tackon D_DEVS "Internet/routes")) (P_backup)
+    (set BK_SRC (tackon D_DEVS "Internet/name_resolution")) (P_backup)
+  ))
+(if (AND DO_STARTUP (= KEEP_NETSTART 0))
+  (
+    (set BK_SUB "S")
+    (set BK_SRC "S:Network-Startup")
+    (P_backup)
+    (set BK_SRC "S:Network-Startup.old")
+    (P_backup)
+  ))
+
 (working "Installing the libraries")
 
 ; A .new left behind by a run that was stopped between the copy and the swap.
@@ -2774,9 +2973,12 @@
     (safe))
 )
 
-(if (= KEEP_OLD 0)
+; Not in a pretend run: these textfiles are (safe), so they would write
+; anyway, over another stack's configuration among others.
+(if (AND (= KEEP_OLD 0) (= @pretend 0))
   (
     (working "Writing the network configuration")
+
 
     (set PRIMARY_IF IFNAME)
     (set PRIMARY_DHCP USEDHCP)
@@ -2802,7 +3004,10 @@
             (set IFNAME DEFAULT_IF)
             (set USEDHCP 1)
             (set WANTMDNS 0)
-            (P_write_interface)
+            ; An Expert may have named the primary like this one: the file
+            ; just written stays.
+            ; patmatch, not =: AmigaDOS names ignore case.
+            (if (NOT (patmatch PRIMARY_IF IFNAME)) (P_write_interface))
           ))
         (set CARD_INDEX (+ CARD_INDEX 1))
       ))
@@ -2833,9 +3038,10 @@
     ; --- name resolution ------------------------------------------------
     ;
     ; A name somebody set by hand in the file being replaced is theirs, at
-    ; every level: InstallSameFile HOSTLINE copies its active hostname line,
-    ; the commented ones left behind, and it goes into the new file.  An
-    ; Expert who types a name replaces it.
+    ; every level: InstallSameFile HOSTLINE writes the name the stack's own
+    ; parser takes from the file as a hostname line, and it goes into the new
+    ; file.  An Expert who types a
+    ; name replaces it.
     (set NR_FILE (tackon D_DEVS "Internet/name_resolution"))
     (set NR_HOST "T:AmiNetXDuo-hostname")
     (set KEEP_HOST 0)
@@ -2985,7 +3191,7 @@
 ; likely edited.  The stack has sane built-in defaults for all four, so
 ; overwriting somebody's services file to gain nothing would be rude.
 
-(if (exists (tackon D_DEVS "Internet/hosts") (noreq))
+(if (OR @pretend (exists (tackon D_DEVS "Internet/hosts") (noreq)))
     ""
     (textfile
       (prompt "Writing DEVS:Internet/hosts")
@@ -3002,7 +3208,7 @@
 (set NDB_N 0)
 (while (set NDB_F (select NDB_N "protocols" "services" "networks" ""))
   (
-    (if (exists (tackon (tackon D_DEVS "Internet") NDB_F) (noreq))
+    (if (OR @pretend (exists (tackon (tackon D_DEVS "Internet") NDB_F) (noreq)))
         ""
         (copyfiles
           (prompt ("Installing DEVS:Internet/%s" NDB_F))

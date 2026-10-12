@@ -102,7 +102,9 @@ The installer asks, in this order:
        and examples goes                          (any drawer)
      Into the system, or into its own drawer      (into the system;
                                                    Intermediate and Expert)
-     Keep an existing configuration               (yes, when there is one)
+     Keep an existing configuration               (yes for AmiNetXDuo's;
+                                                   no for another stack's
+                                                   when a device was found)
      Which card, and for PCMCIA which card type
      The interface name and unit                  (eth0, 0; Expert)
      Answer to <hostname>.local on the network    (yes on a 68020 or
@@ -174,8 +176,17 @@ that library to bsdsocket.library.old, or remove the other stack first.
 
 In the system layout, a bsdsocket.library already in LIBS: -- from AmiTCP,
 Miami, Genesis or Roadshow -- is renamed to bsdsocket.library.old rather
-than deleted, and the installer says so.  Every library is copied in under
-a .new name first and swapped after, so a copy that fails leaves the
+than deleted, after a page that asks first, at every level; an earlier
+AmiNetXDuo's is replaced without one.  When a network device was found,
+another stack's network configuration is set up again by default.  The
+other stack's libraries, interface files, routes, name_resolution and
+S:Network-Startup, and their .old files, are copied, with Copy CLONE, before
+anything is replaced, into a drawer of that installation's own under the
+AmiNetXDuo drawer's Backup, numbered one above the highest there; each
+holds only what was new or changed since the earlier ones.  A file NetSetup
+or this installer wrote is not copied, and neither is one already kept unchanged.  A copy that fails
+stops the installation before anything is replaced.  Every library is copied in
+under a .new name first and swapped after, so a copy that fails leaves the
 installed file in place.
 
 The Developer drawer is not installed, deliberately: it holds headers, and
@@ -374,20 +385,26 @@ UNINSTALLING
      Delete C:NetCapture C:NetTrace
      Delete DEVS:NetInterfaces/eth0
      Delete DEVS:Internet/routes DEVS:Internet/name_resolution
-     Delete DEVS:Internet/hosts DEVS:Internet/certificates
+     Delete DEVS:Internet/certificates
      Delete DEVS:Networks/anxnet.device DEVS:Networks/anxnet.device.old
      Delete DEVS:Networks/anxgenet.device DEVS:Networks/anxgenet.device.old
      Delete DEVS:Networks/anxwifipi.device DEVS:Networks/anxwifipi.device.old
      Execute S:AmiNetXDuo-WiFi
      Delete S:AmiNetXDuo-WiFi
      Delete S:Network-Startup S:Network-Startup.old
-     Delete <the AmiNetXDuo drawer> ALL
 
 and take the ";BEGIN AmiNetXDuo" .. ";END AmiNetXDuo" block out of
-S:User-Startup.  If another stack was installed before, rename
-LIBS:bsdsocket.library.old back over LIBS:bsdsocket.library.  Add QUIET to
-a Delete line whose file was never installed, such as tls.library on a
-minimal or micro installation.  S:AmiNetXDuo-WiFi exists only where the
+S:User-Startup.  If another stack was installed before, its files are in
+the AmiNetXDuo drawer's Backup, one numbered drawer per installation that
+kept anything, each holding only what was new or changed then.  Copy every
+numbered drawer's Libs, Devs and S back over LIBS:, DEVS: and S:, with
+Copy ALL CLONE, the highest number first and Backup/1 last, so that each
+file ends as the other stack had it first; then delete the AmiNetXDuo
+drawer, Backup last.  After an update, LIBS:bsdsocket.library.old is an
+earlier AmiNetXDuo, not the other stack.  DEVS:Internet/hosts and the
+netdb files stay: the installer writes them only where there were none.
+Add QUIET to a Delete line whose file was never installed, such as
+tls.library on a minimal or micro installation.  S:AmiNetXDuo-WiFi exists only where the
 Pi Wi-Fi was selected, and it deletes only the WirelessManager and
 Wireless.prefs the installer created, never ones that were there before.
 
