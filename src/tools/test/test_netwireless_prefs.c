@@ -315,12 +315,12 @@ static void test_iface(void)
         static const char two[] =
             "DEVICE=abcdefghijklmn.device\n"
             "DEVICE=short.device\n";
-        struct { char buf[24]; char canary[16]; } b;
+        struct { char buf[24]; char canary[16]; } guard;
 
-        memset(&b, 'x', sizeof(b));
-        check(nw_iface_device(two, sizeof(two) - 1, b.buf, sizeof(b.buf), &unit) &&
-              strcmp(b.buf, "short.device") == 0, "the last DEVICE line wins");
-        check(b.canary[0] == 'x' && b.canary[15] == 'x',
+        memset(&guard, 'x', sizeof(guard));
+        check(nw_iface_device(two, sizeof(two) - 1, guard.buf, sizeof(guard.buf), &unit) &&
+              strcmp(guard.buf, "short.device") == 0, "the last DEVICE line wins");
+        check(guard.canary[0] == 'x' && guard.canary[15] == 'x',
               "nothing written past the buffer");
     }
 }
