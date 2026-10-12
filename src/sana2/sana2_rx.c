@@ -2036,28 +2036,13 @@ static VOID __attribute__((noinline)) ami_sana2_rx_port_close(AmiSana2Reader *rd
  * Unit-wide rather than per-request, so it is tried second: it takes every
  * ring's queued reads with it, and another opener's too.
  */
-static VOID ami_sana2_rx_flush(AmiSana2Reader *rd)
+AMI_SANA2_BATCH_LINKAGE VOID ami_sana2_rx_flush(AmiSana2Reader *rd)
 {
-    struct MsgPort   *port;
-    struct IOSana2Req req;
+    struct IOSana2Req req = rd->iface->templ;
 
-    port = CreateMsgPort();
-    if (port == NULL)
-        return;
-
-    req = rd->iface->templ;
-    req.ios2_Req.io_Message.mn_Node.ln_Type = NT_MESSAGE;
-    req.ios2_Req.io_Message.mn_ReplyPort    = port;
-    req.ios2_Req.io_Message.mn_Length       = (UWORD)sizeof(struct IOSana2Req);
-    req.ios2_Req.io_Command                 = CMD_FLUSH;
-    req.ios2_Req.io_Error                   = 0;
-    req.ios2_WireError                      = 0;
-
-    /* Runs on the reader.  ami_sana2_do_io() picks the shape: DoIO() inside the
-       baton bracket, or SendIO() plus a green-thread sleep. */
-    (VOID)ami_sana2_do_io((struct IORequest *)&req);
-
-    DeleteMsgPort(port);
+    /* ami_sana2_command(): bounded, and a device that keeps the flush keeps
+       the interface (cmd_held), not this frame. */
+    (VOID)ami_sana2_command(rd->iface, &req, CMD_FLUSH);
 }
 
 /*
