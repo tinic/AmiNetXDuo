@@ -346,15 +346,17 @@ names the installer on its first lines), and runs S:AmiNetXDuo-Files, the
 record the installer leaves.  That record deletes the libraries, commands,
 drivers and the NetPrefs and NetMeter copies the installer put in place,
 puts back from the drawer's Backup the files of another stack that the
-installer replaced, and deletes the drawer.  Files ending in .old stay.
+installer replaced, and deletes the drawer.  Files ending in .old stay,
+the drivers' included.  A drawer whose window is open stays, empty, until
+it is deleted.
 
 Backup holds another stack's libraries, its commands with the same names as
-AmiNetXDuo's, and its interface, routes, name_resolution and
-S:Network-Startup files, each as it was the first time AmiNetXDuo replaced
-it.
+AmiNetXDuo's, its NetPrefs and NetMeter, its certificate store, and its
+interface, routes, name_resolution and S:Network-Startup files, each as it
+was the first time AmiNetXDuo replaced it.
 
-A drawer installation is the AmiNetXDuo drawer, the startup block, and
-nothing else.
+A drawer installation is the AmiNetXDuo drawer, the startup block,
+S:Network-Startup and S:AmiNetXDuo-Files.
 
 
 STATUS

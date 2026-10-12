@@ -1215,7 +1215,7 @@ file_mode() {
 product_manifest() {
     local root file rel mode sum
     {
-    for root in Libs C Devs Prefs AmiNetXDuo AmiNetXDuo.info ForeignAmiTCP \
+    for root in Libs C Devs Prefs Utilities AmiNetXDuo AmiNetXDuo.info ForeignAmiTCP \
                 S/Startup-Sequence S/User-Startup \
                 S/Network-Startup S/Network-Startup.old \
                 S/AmiNetXDuo-drawer; do
@@ -2038,6 +2038,8 @@ cat "$HD/install-log.txt" 2>/dev/null || echo "(none written)"
 # UNINSTALLED: what was there before the install is there again, and
 # nothing else, apart from the .old and .new files a replacement leaves.
 if [ "$UNINSTALL" = 1 ]; then
+    echo "---- Uninstall log ----"
+    cat "$HD/uninstall-log.txt" 2>/dev/null || echo "(none written)"
     # Protection bits aside: Copy CLONE back through UAE's host files does not
     # reproduce the host mode the fixture was written with.
     _strip() { grep -v -E '\.(old|old\.info|new)$' | grep -v -E $'^D\t' |
@@ -2056,6 +2058,10 @@ if [ "$UNINSTALL" = 1 ]; then
     fi
     if amiga_path S/AmiNetXDuo-Files >/dev/null 2>&1; then
         echo "!! S:AmiNetXDuo-Files is still there"
+        _u_ok=0
+    fi
+    if amiga_path AmiNetXDuo >/dev/null 2>&1; then
+        echo "!! the AmiNetXDuo drawer is still there"
         _u_ok=0
     fi
     if [ "$_u_ok" = 1 ]; then

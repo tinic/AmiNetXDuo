@@ -107,6 +107,8 @@
 (set S_UNINSTALL (if (> (strlen SRCDIR) 0)
                      (tackon SRCDIR "Uninstall-AmiNetXDuo") "Uninstall-AmiNetXDuo"))
 (set S_UNINSTALLICON (cat S_UNINSTALL ".info"))
+(set S_INSTALLER (if (> (strlen SRCDIR) 0)
+                     (tackon SRCDIR "Installer") "Installer"))
 
 ; --------------------------------------------------------------------------
 ; Help texts.  Every ask.../copy... statement is required by the Installer to
@@ -2298,9 +2300,22 @@
 (set HAD_C_INFO (if (exists (tackon D_C ".info") (noreq)) 1 0))
 
 ; A command of the same name that does not name AmiNetXDuo inside is
-; another stack's, or the user's, whatever library is in LIBS:.
-(if (= DRAWER_LAYOUT 0)
+; another stack's, or the user's.  Over our own library C: holds our own
+; commands, some of which (scp-runner) do not name it.
+(if (AND (= DRAWER_LAYOUT 0) (= LIB_OURS 0))
   (
+    (set BK_SUB "Prefs")
+    (set BK_SRC "SYS:Prefs/NetPrefs")
+    (if (exists BK_SRC (noreq))
+        (if (<> 0 (run ("Search >NIL: FROM %s SEARCH AmiNetXDuo QUIET" BK_SRC)
+                       (quiet) (safe)))
+            (P_backup)))
+    (set BK_SUB "Utilities")
+    (set BK_SRC "SYS:Utilities/NetMeter")
+    (if (exists BK_SRC (noreq))
+        (if (<> 0 (run ("Search >NIL: FROM %s SEARCH AmiNetXDuo QUIET" BK_SRC)
+                       (quiet) (safe)))
+            (P_backup)))
     (set BK_SUB "C")
     (foreach S_C "~(fat|#?.info)"
       (
@@ -2727,6 +2742,9 @@
 ; also the whole of the update story -- the library re-reads it when its
 ; datestamp changes, so no reboot is needed.
 
+(set BK_SUB "Devs/Internet")
+(set BK_SRC (tackon (tackon D_DEVS "Internet") "certificates"))
+(if FOREIGN_STACK (P_backup))
 (if (exists (tackon (tackon S_DEVS "Internet") "certificates") (noreq))
     (copyfiles
       (prompt (cat "Installing DEVS:Internet/certificates\n\n"
@@ -2770,7 +2788,7 @@
     (copyfiles
       (prompt "Installing Uninstall-AmiNetXDuo")
       (help   "It removes AmiNetXDuo again and puts back what it replaced of "
-              "another stack.  Double-click it.")
+              "another stack.")
       (source S_UNINSTALL)
       (dest   DOCDIR)
       (optional "force" "nofail")))
@@ -2779,6 +2797,15 @@
       (prompt "Giving Uninstall-AmiNetXDuo its icon")
       (help   @copyfiles-help)
       (source S_UNINSTALLICON)
+      (dest   DOCDIR)
+      (optional "force" "nofail")))
+; Its icon's default tool, beside it, as in the archive: Workbench finds it
+; there whatever the system has.
+(if (exists S_INSTALLER (noreq))
+    (copyfiles
+      (prompt "Installing the Installer beside Uninstall-AmiNetXDuo")
+      (help   "Commodore's Installer runs Uninstall-AmiNetXDuo.")
+      (source S_INSTALLER)
       (dest   DOCDIR)
       (optional "force" "nofail")))
 
@@ -3078,39 +3105,71 @@
 ; drawer layout keeps everything in the drawer.  The configuration files
 ; are Uninstall-AmiNetXDuo's to find: they name this installer.
 (set REC_FILES "")
+(if (exists (tackon (tackon S_DEVS "Internet") "certificates") (noreq))
+    (set REC_FILES
+      (cat "Delete \"" (tackon (tackon D_DEVS "Internet") "certificates")
+           "\" QUIET\n")))
 (if (= DRAWER_LAYOUT 0)
   (
     (set REC_FILES
-      (cat "Delete \"" D_BSD "\" \"" D_UG "\" QUIET\n"
+      (cat REC_FILES
+           "Delete \"" D_BSD "\" QUIET\n"
+           "Delete \"" D_UG "\" QUIET\n"
            (if (exists (tackon S_LIBS "tls.library") (noreq))
                (cat "Delete \"" D_TLS "\" QUIET\n") "")
-           "Delete SYS:Prefs/NetPrefs SYS:Prefs/NetPrefs.info QUIET\n"
-           "Delete SYS:Utilities/NetMeter SYS:Utilities/NetMeter.info QUIET\n"))
+           "Delete SYS:Prefs/NetPrefs QUIET\n"
+           "Delete SYS:Prefs/NetPrefs.info QUIET\n"
+           "Delete SYS:Utilities/NetMeter QUIET\n"
+           "Delete SYS:Utilities/NetMeter.info QUIET\n"))
     (if DO_ANXNET
-        (set REC_FILES
-          (cat REC_FILES
-               "Delete " (tackon D_DEVS "Networks/anxnet.device") " "
-               (tackon D_DEVS "Networks/anxgenet.device") " "
-               (tackon D_DEVS "Networks/anxwifipi.device") " "
-               (tackon D_DEVS "Networks/anxzz9000.device") " QUIET\n")))
+      (
+        (set REC_N 0)
+        (while (set REC_SUB (select REC_N "anxnet.device" "anxgenet.device"
+                                          "anxwifipi.device" "anxzz9000.device"
+                                          ""))
+          (
+            (set REC_FILES
+              (cat REC_FILES "Delete \""
+                   (tackon (tackon D_DEVS "Networks") REC_SUB) "\" QUIET\n"))
+            (set REC_N (+ REC_N 1))
+          ))
+      ))
     (foreach S_C "~(fat)"
       (set REC_FILES
         (cat REC_FILES "Delete \"" (tackon D_C @each-name) "\" QUIET\n")))
-    (if (= HAD_C_INFO 0)
+    (if (OR (= HAD_C_INFO 0) LIB_OURS)
         (set REC_FILES
           (cat REC_FILES "Delete \"" (tackon D_C ".info") "\" QUIET\n")))
-    (set REC_N 0)
-    (while (set REC_SUB (select REC_N "Libs" "C" "Devs" "S" ""))
-      (
-        (set REC_FILES
-          (cat REC_FILES
-               "If EXISTS \"" (tackon D_BACKUP REC_SUB) "\"\n"
-               "  Copy \"" (tackon D_BACKUP REC_SUB) "\" "
-               (select REC_N "LIBS:" "C:" "DEVS:" "S:") " ALL CLONE QUIET\n"
-               "EndIf\n"))
-        (set REC_N (+ REC_N 1))
-      ))
   ))
+
+; Back from Backup, in either layout, and the drawer's assigns away so
+; nothing holds the drawer.  A drawer whose Workbench window is open stays,
+; empty, until it is closed.
+(set REC_N 0)
+(while (set REC_SUB (select REC_N "Libs" "C" "Devs" "S" "Prefs" "Utilities" ""))
+  (
+    (set REC_FILES
+      (cat REC_FILES
+           "If EXISTS \"" (tackon D_BACKUP REC_SUB) "\"\n"
+           "  Copy \"" (tackon D_BACKUP REC_SUB) "\" "
+           (select REC_N "LIBS:" "C:" "DEVS:" "S:" "SYS:Prefs" "SYS:Utilities")
+           " ALL CLONE QUIET\n"
+           "EndIf\n"))
+    (set REC_N (+ REC_N 1))
+  ))
+; Assign EXISTS first: naming an assign that is not there asks for a volume.
+(set REC_FILES
+  (cat REC_FILES
+       "Assign >NIL: AmiNetXDuo: EXISTS\n"
+       "If WARN\n"
+       "Else\n"
+       (if DRAWER_LAYOUT
+           (cat "  Assign LIBS: AmiNetXDuo:Libs REMOVE\n"
+                "  Assign C: AmiNetXDuo:C REMOVE\n"
+                "  Assign DEVS: AmiNetXDuo:Devs REMOVE\n")
+           "")
+       "  Assign AmiNetXDuo:\n"
+       "EndIf\n"))
 
 (textfile
   (prompt "Writing S:AmiNetXDuo-Files")
@@ -3125,8 +3184,7 @@
   (append "FailAt 21\n")
   (append REC_FILES)
   (append ("Delete \"%s\" ALL QUIET FORCE\n" DOCDIR))
-  (append ("Delete \"%s.info\" QUIET\n" DOCDIR))
-  (safe))
+  (append ("Delete \"%s.info\" QUIET\n" DOCDIR)))
 
 (complete 100)
 
