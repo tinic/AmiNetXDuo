@@ -4174,6 +4174,10 @@
 (set WM_PFX (if WM_LIVE "" ";"))
 ; A Prism2 card as the primary interface starts without Wireless.prefs as
 ; well (an open network needs none): only WirelessManager waits for it.
+; Behind another interface the Wi-Fi starts in the background, so a
+; missing network or a wrong key never holds the boot; as the primary, the
+; boot waits for it, bounded, so that sntp and httpd after it have a network.
+(set WIFI_AN_RUN (if WIFI_PRIMARY "" "Run >NIL: <NIL: "))
 (set WIFI_WM_LINES
   (cat "If EXISTS ENV:Sys/Wireless.prefs\n"
        "  " WM_PFX "Status >NIL: COMMAND=" WM_CMD "\n"
@@ -4188,14 +4192,17 @@
            C_PREFIX "AddNetInterface DEVS:NetInterfaces/" WIFI_IF
            (" QUIET TIMEOUT=%ld\n" WIFI_TIMEOUT))
       (cat WIFI_WM_LINES
-           "  " C_PREFIX "AddNetInterface DEVS:NetInterfaces/" WIFI_IF
+           "  " WIFI_AN_RUN C_PREFIX "AddNetInterface DEVS:NetInterfaces/" WIFI_IF
            (" QUIET TIMEOUT=%ld\n" WIFI_TIMEOUT)
            "EndIf\n")))
 (set WIFI_NOTE
   (cat ";\n"
        "; Wi-Fi: with ENV:Sys/Wireless.prefs, WirelessManager joins that\n"
-       "; network, then the interface asks for an address and waits at most\n"
-       "; " ("%ld" WIFI_TIMEOUT) " seconds; DHCP goes on asking after the boot continues.\n"
+       (if WIFI_PRIMARY
+           (cat "; network, then the interface asks for an address and waits at most\n"
+                "; " ("%ld" WIFI_TIMEOUT) " seconds; DHCP goes on asking after the boot continues.\n")
+           (cat "; network, then the interface asks for an address in the\n"
+                "; background, so the boot does not wait for it.\n"))
        (if (AND WIFI_PRISM WIFI_PRIMARY)
            "; Without the file the card starts alone, for an open network.\n"
            "; Without the file the Wi-Fi does not start.\n")

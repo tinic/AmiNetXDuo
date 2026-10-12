@@ -241,8 +241,8 @@ static BOOL ami_sana2_detaching_entry(NX_IP_DRIVER *driver_req,
         ami_sana2_unbind(iface);
         return TRUE;
 
-    /* DoIO() with no deadline, under nx_ip_protection, to a device just taken
-       offline: nx_ip_interface_detach() leaves every group this way.  The
+    /* A device command, bounded by ami_sana2_command(), under
+       nx_ip_protection, to a device just taken offline: nx_ip_interface_detach() leaves every group this way.  The
        filter goes with the CloseDevice() that follows: at once from
        ami_sana2_close(), or for a retained interface from
        ami_sana2_retained_sweep() (sana2_device.c) once the device gives its

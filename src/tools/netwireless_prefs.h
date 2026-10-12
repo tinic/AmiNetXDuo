@@ -71,6 +71,12 @@ int nw_prefs_write(const char *old, size_t oldlen,
    order among equals: order[0..count-1] gets block indices. */
 void nw_prefs_order(const NwNetwork *nets, int count, unsigned char *order);
 
+/* Where a network stands among the known ones: its block's position in
+   order (nw_prefs_order()), disabled blocks not counted, or -1 when no
+   block that is not disabled has this SSID. */
+int nw_prefs_rank(const NwNetwork *nets, const unsigned char *order, int count,
+                  const unsigned char *ssid, int len);
+
 /* The edits that store a list: order[0..shown-1] the blocks kept, top
    first, given priorities shown..1; every other block removed.  A block
    whose priority is already right is not edited.  edits, fields and the

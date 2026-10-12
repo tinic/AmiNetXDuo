@@ -54,7 +54,16 @@ typedef struct NwScan
     int           band5;            /* 5 GHz                              */
     unsigned      sec;              /* NW_SEC_*                           */
     int           aps;
+    int           rank;             /* NW_RANK_CONNECTED, known 1.., other */
 } NwScan;
+
+/* A list row's place: the network in use, the known ones by priority, then
+   every other one as scanned (strongest first). */
+#define NW_RANK_CONNECTED 0
+#define NW_RANK_OTHER     0x7fff
+
+/* The n entries stably sorted by rank. */
+void nw_scan_rank_sort(NwScan *list, int n);
 
 /* Adds e to the n entries of list, at most max, and returns the new count.
    One entry per SSID, the strongest access point's, strongest first; an

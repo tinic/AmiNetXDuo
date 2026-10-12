@@ -82,7 +82,7 @@ enum
 #define NW_LIST_MAX     32
 #define NW_NETS_MAX     16          /* network={} blocks edited          */
 #define NW_DEVICE_LEN   128
-#define NW_ROW_LEN      64
+#define NW_ROW_LEN      80
 #define NW_PASS_MAX     64
 #define NW_FILE_MAX     (32UL * 1024UL)
 #define NW_JOIN_WAIT    30          /* seconds for the association      */
@@ -141,6 +141,8 @@ static struct
     char            sig_text[56];
     char            status[80];
     LONG            selected;
+    UBYTE           sel_ssid[NW_SSID_MAX];  /* the selection, by name      */
+    LONG            sel_len;
     int             shown_bars;             /* the Signal line's, held     */
     ULONG           click_secs, click_micros;
     WORD            want_left, want_top;
@@ -159,6 +161,11 @@ static struct
     LONG            join_ssid_len;
     LONG            join_wait;              /* seconds left; 0: not waiting */
     BOOL            join_saved;
+    BOOL            join_formless;          /* a known network, no form    */
+    BOOL            join_hidden, join_open; /* its block's, for a retry    */
+    BOOL            pass_saved;             /* "(saved)" in the field      */
+    UBYTE           conn_ssid[NW_SSID_MAX]; /* the network in use          */
+    LONG            conn_len;               /* -1: none                    */
 
     /* one second, from timer.device */
     struct MsgPort     *tport;
@@ -184,12 +191,33 @@ static struct
     UBYTE       was[NW_NETS_MAX];      /* the order as opened */
     LONG        shown;
     LONG        sel;
+    BOOL        sel_fresh;      /* picked, and nothing edited since    */
+    ULONG       click_secs, click_micros;
     struct List list;
     struct Node node[NW_NETS_MAX];
     char        name[NW_NETS_MAX][NW_SSID_MAX + 16];
 } kn;
 
 static VOID nw_known_joining(VOID);
+static VOID nw_known_fill(VOID);
+static VOID nw_rank_scan(VOID);
+
+/* What nw_known_network() answers for a network not in Wireless.prefs. */
+static const char nw_unknown[] = "";
+#define NW_KNOWN_CHECK  0           /* only whether it is known          */
+#define NW_KNOWN_USE    1           /* to the top, in ENV:, and joined   */
+#define NW_KNOWN_SAVE   2           /* the same in ENVARC: as well       */
+static const char *nw_known_network(const UBYTE *ssid, LONG len, int what);
+
+static BOOL nw_same(const UBYTE *a, LONG al, const UBYTE *b, LONG bl)
+{
+    LONG i;
+
+    if (al != bl || al < 0) return FALSE;
+    for (i = 0; i < al && a[i] == b[i]; i++)
+        ;
+    return i == al;
+}
 
 static ULONG nw_len(const char *s)
 {
@@ -347,6 +375,18 @@ static LONG nw_shell_list(VOID)
         return RETURN_ERROR;
     }
 
+    /* As the window lists them: the network in use, the known ones, the
+       rest. */
+    {
+        LONG  sig, noise, len = -1;
+        UBYTE bssid[6];
+
+        if (nw_dev_link(&nw.dev, &sig, &noise) == NW_LINK_UP &&
+            nw_dev_network(&nw.dev, nw.conn_ssid, &len, bssid) && len >= 0)
+            nw.conn_len = len;
+        nw.count = n;
+        nw_rank_scan();
+    }
     for (i = 0; i < n; i++)
         if ((ULONG)nw.nets[i].ssid_len > width) width = (ULONG)nw.nets[i].ssid_len;
     tool_printf("Network");
@@ -357,9 +397,11 @@ static LONG nw_shell_list(VOID)
         const NwScan *e = &nw.nets[i];
 
         nw_print_ssid(e->ssid, e->ssid_len, width);
-        tool_printf("  %4ld dBm  %3ld  %s  %s\n", e->signal, (LONG)e->channel,
+        tool_printf("  %4ld dBm  %3ld  %s  %s%s\n", e->signal, (LONG)e->channel,
                     (LONG)(e->band5 ? "5   " : "2.4 "),
-                    (LONG)nw_security_label(e->sec));
+                    (LONG)nw_security_label(e->sec),
+                    (LONG)(e->rank == NW_RANK_CONNECTED ? "  (connected)"
+                           : e->rank != NW_RANK_OTHER ? "  (known)" : ""));
     }
     if (n == 0) tool_printf("No networks in range.\n");
     return RETURN_OK;
@@ -444,6 +486,48 @@ static VOID nw_make_dir(const char *path)
 
     if (lock == (BPTR)0) lock = CreateDir((CONST_STRPTR)path);
     if (lock != (BPTR)0) UnLock(lock);
+}
+
+/* text's blocks stored in order[0..shown-1], the top one highest, others
+   removed (nw_prefs_order_edits()), into ENV:, and ENVARC: first with
+   save.  NULL or what went wrong. */
+static const char *nw_store_order(const char *text, ULONG tlen,
+                                  const NwNetwork *nets, LONG count,
+                                  const UBYTE *order, LONG shown, BOOL save)
+{
+    static NwBlockEdit e[NW_NETS_MAX];
+    static NwField     f[NW_NETS_MAX];
+    static char        prio[NW_NETS_MAX][12];
+    char              *out;
+    size_t             len = NW_FILE_MAX;
+    const char        *why = NULL;
+    int                n;
+
+    n = nw_prefs_order_edits(nets, (int)count, order, (int)shown, e, f, prio);
+    out = (char *)AllocVec(NW_FILE_MAX, MEMF_ANY);
+    if (out == NULL)
+        why = "Not enough memory.";
+    else if (!nw_prefs_write(text != NULL ? text : "", tlen, nets, (int)count,
+                             e, n, out, NW_FILE_MAX - 1, &len))
+    {
+        len = NW_FILE_MAX;
+        why = "Wireless.prefs would be too large.";
+    }
+    else
+    {
+        /* ENVARC: first, as a join writes them. */
+        if (save)
+        {
+            nw_make_dir("ENVARC:Sys");
+            if (!nw_write(nw_prefs_envarc, out, (ULONG)len))
+                why = "Wireless.prefs could not be written.";
+        }
+        nw_make_dir("ENV:Sys");
+        if (why == NULL && !nw_write(nw_prefs_env, out, (ULONG)len))
+            why = "Wireless.prefs could not be written.";
+    }
+    nw_free_file(out, (ULONG)len);
+    return why;
 }
 
 /* The joined network into ENVARC: and ENV:, above every other: its block
@@ -570,6 +654,26 @@ static ULONG nw_edit(register struct Hook *h __asm("a0"),
     (VOID)h;
     if (*msg != SGH_KEY) return *msg == SGH_CLICK;
     if ((sgw->Actions & SGA_USE) == 0) return 1;
+    if (nw.pass_saved)
+    {
+        /* "(saved)" is not text: the first change replaces it. */
+        if (sgw->EditOp == EO_NOOP || sgw->EditOp == EO_MOVECURSOR ||
+            sgw->EditOp == EO_ENTER)
+            return 1;
+        nw.pass_saved = FALSE;
+        nw.pass_len = 0;
+        sgw->NumChars = 0;
+        sgw->BufferPos = 0;
+        if (sgw->EditOp == EO_INSERTCHAR || sgw->EditOp == EO_REPLACECHAR)
+        {
+            nw.pass[nw.pass_len++] = (char)sgw->Code;
+            sgw->WorkBuffer[0] = nw.pass_shown ? (char)sgw->Code : '*';
+            sgw->NumChars = sgw->BufferPos = 1;
+        }
+        nw.pass[nw.pass_len] = '\0';
+        sgw->WorkBuffer[sgw->NumChars] = '\0';
+        return 1;
+    }
     if (nw.pass_shown)
     {
         tool_copy_string(nw.pass, sizeof(nw.pass), (const char *)sgw->WorkBuffer);
@@ -610,7 +714,10 @@ static ULONG nw_draw_row(register struct Hook *h __asm("a0"),
     WORD             fh = m->lvdm_Bounds.MaxY - y + 1;
     BOOL             sel = m->lvdm_State == LVR_SELECTED;
     char             text[NW_SSID_MAX + 1];
+    const char      *mark = e->rank == NW_RANK_CONNECTED ? " (connected)"
+                          : e->rank != NW_RANK_OTHER ? " (known)" : "";
     int              b, bars = nw_bars(e->signal), x0, y0, x1, y1;
+    LONG             room;
     ULONG            n;
 
     (VOID)h;
@@ -631,12 +738,16 @@ static ULONG nw_draw_row(register struct Hook *h __asm("a0"),
             Draw(rp, x1, y1); Draw(rp, x0, y1);
         }
     }
+    /* The name shortened, never the marker. */
     nw_ssid_text(e->ssid, e->ssid_len, text);
-    for (n = nw_len(text); n > 0 && (LONG)TextLength(rp, (CONST_STRPTR)text, n) >
-                                    nw.lay.level_x - nw.lay.bars_w - 12; n--)
+    room = nw.lay.level_x - nw.lay.bars_w - 12 -
+           (LONG)TextLength(rp, (CONST_STRPTR)mark, nw_len(mark));
+    for (n = nw_len(text); n > 0 && (LONG)TextLength(rp, (CONST_STRPTR)text, n) > room;
+         n--)
         ;
     Move(rp, x + nw.lay.bars_w + 8, y + rp->TxBaseline);
     Text(rp, (CONST_STRPTR)text, n);
+    Text(rp, (CONST_STRPTR)mark, nw_len(mark));
     nw_decimal(e->signal, text);
     nw_append(text, sizeof(text), " dBm");
     Move(rp, x + nw.lay.level_x, y + rp->TxBaseline);
@@ -655,6 +766,39 @@ static ULONG nw_draw_row(register struct Hook *h __asm("a0"),
     return LVCB_OK;
 }
 
+/* The scan list's order: the network in use, then the known ones by
+   priority, then the rest as scanned. */
+static NwNetwork nw_kn_nets[NW_NETS_MAX];   /* Wireless.prefs, read here   */
+
+static VOID nw_rank_scan(VOID)
+{
+    UBYTE  order[NW_NETS_MAX];
+    char  *text;
+    ULONG  len;
+    BOOL   missing;
+    LONG   count = 0, i, r;
+
+    text = nw_read_prefs(&len, &missing);
+    if (text != NULL)
+    {
+        count = nw_prefs_parse(text, len, nw_kn_nets, NW_NETS_MAX);
+        if (count < 0) count = 0;
+        if (count > NW_NETS_MAX) count = NW_NETS_MAX;
+        nw_prefs_order(nw_kn_nets, (int)count, order);
+    }
+    for (i = 0; i < nw.count; i++)
+    {
+        NwScan *e = &nw.nets[i];
+
+        r = count > 0 ? nw_prefs_rank(nw_kn_nets, order, (int)count, e->ssid,
+                                      e->ssid_len) : -1;
+        e->rank = nw_same(e->ssid, e->ssid_len, nw.conn_ssid, nw.conn_len)
+                  ? NW_RANK_CONNECTED : r >= 0 ? (int)r + 1 : NW_RANK_OTHER;
+    }
+    nw_scan_rank_sort(nw.nets, (int)nw.count);
+    nw_free_file(text, len);
+}
+
 /* The list rows from nw.nets: their text for GadTools V37, drawn on V39. */
 static VOID nw_fill_list(VOID)
 {
@@ -670,6 +814,8 @@ static VOID nw_fill_list(VOID)
         char         *t = nw.row_text[i];
 
         nw_ssid_text(e->ssid, e->ssid_len, t);
+        nw_append(t, NW_ROW_LEN, e->rank == NW_RANK_CONNECTED ? " (connected)"
+                               : e->rank != NW_RANK_OTHER ? " (known)" : "");
         nw_append(t, NW_ROW_LEN, "  ");
         nw_decimal(e->signal, t + nw_len(t));
         nw_append(t, NW_ROW_LEN, " dBm  ");
@@ -677,8 +823,25 @@ static VOID nw_fill_list(VOID)
         nw.row[i].ln_Name = t;
         AddTail(&nw.rows, &nw.row[i]);
     }
+    /* The selection follows its network into the new order. */
     nw.selected = -1;
-    nw_set(nw.main.win, NW_M_LIST, GTLV_Labels, (ULONG)&nw.rows);
+    for (i = 0; i < nw.count && nw.selected < 0; i++)
+        if (nw_same(nw.nets[i].ssid, nw.nets[i].ssid_len, nw.sel_ssid, nw.sel_len))
+            nw.selected = i;
+    {
+        struct TagItem t[4];
+
+        t[0].ti_Tag = GTLV_Labels;   t[0].ti_Data = (ULONG)&nw.rows;
+        t[1].ti_Tag = GTLV_Selected; t[1].ti_Data = nw.selected >= 0 ? (ULONG)nw.selected : ~0UL;
+        t[2].ti_Tag = TAG_DONE;
+        if (nw.selected >= 0 && GadToolsBase->lib_Version >= 39)
+        {
+            t[2].ti_Tag = GTLV_MakeVisible; t[2].ti_Data = (ULONG)nw.selected;
+            t[3].ti_Tag = TAG_DONE;
+        }
+        if (nw.g[NW_M_LIST] != NULL)
+            GT_SetGadgetAttrsA(nw.g[NW_M_LIST], nw.main.win, NULL, t);
+    }
 }
 
 /* The Network and Signal lines, from the unit. */
@@ -686,9 +849,10 @@ static VOID nw_refresh_status(VOID)
 {
     static const char *const words[] =
         { "No Wi-Fi unit", "Off", "Not connected", "Connected", "Online", "No answer" };
-    LONG  signal = 0, noise = 0, len = -1, link;
+    LONG  signal = 0, noise = 0, len = -1, link, i;
     UBYTE ssid[NW_SSID_MAX], bssid[6];
     char  bars[2];
+    LONG  was = nw.conn_len;
 
     nw.sig_text[0] = '\0';
     link = nw.dev_open ? nw_dev_link(&nw.dev, &signal, &noise) : NW_LINK_NODEV;
@@ -698,6 +862,8 @@ static VOID nw_refresh_status(VOID)
     {
         if (nw_dev_network(&nw.dev, ssid, &len, bssid) && len >= 0)
             nw_ssid_text(ssid, (int)len, nw.net_text);
+        else
+            len = -1;
         nw_decimal(signal, nw.sig_text);
         nw_append(nw.sig_text, sizeof(nw.sig_text), " dBm, ");
         /* With the commodity's hysteresis, so the two agree. */
@@ -719,6 +885,16 @@ static VOID nw_refresh_status(VOID)
     nw_set(nw.main.win, NW_M_SIGNAL, GTTX_Text, (ULONG)nw.sig_text);
     nw_set(nw.main.win, NW_M_DISCONNECT, GA_Disabled,
            nw.setup || !nw_wm_running(NULL, 0));
+    /* The network in use changed: both lists say so. */
+    if (link != NW_LINK_UP) len = -1;
+    if (!nw_same(ssid, len, nw.conn_ssid, nw.conn_len) && (len >= 0 || was >= 0))
+    {
+        for (i = 0; i < len; i++) nw.conn_ssid[i] = ssid[i];
+        nw.conn_len = len;
+        nw_rank_scan();
+        nw_fill_list();
+        nw_known_fill();
+    }
 }
 
 static VOID nw_scan(VOID)
@@ -741,6 +917,7 @@ static VOID nw_scan_done(VOID)
     LONG n = nw_dev_scan_collect(&nw.dev, nw.nets, NW_LIST_MAX);
 
     nw.count = n < 0 ? 0 : n;
+    nw_rank_scan();
     nw_fill_list();
     nw_set(nw.main.win, NW_M_SCAN, GA_Disabled, FALSE);
     SetWindowTitles(nw.main.win, (STRPTR)(nw.setup ? "Wi-Fi Setup" : "Wi-Fi"),
@@ -923,6 +1100,7 @@ static VOID nw_wipe_pass(VOID)
 
     for (i = 0; i < (int)sizeof(nw.pass); i++) nw.pass[i] = '\0';
     nw.pass_len = 0;
+    nw.pass_saved = FALSE;
     nw_set(nw.join.win, NW_J_PASS, GTST_String, (ULONG)"");
 }
 
@@ -936,8 +1114,13 @@ static VOID nw_close_join(VOID)
     nw.join.win = NULL;
     nw.join.glist = NULL;
     for (i = NW_J_SSID; i <= NW_J_CANCEL; i++) nw.g[i] = NULL;
-    nw.join_wait = 0;
-    nw_known_joining();
+    if (nw.join_wait != 0 && !nw.join_formless)
+    {
+        /* The wait ends with the form: no "(connecting...)" left. */
+        nw.join_wait = 0;
+        nw_known_joining();
+        nw_known_fill();
+    }
 }
 
 static VOID nw_join_status(const char *s)
@@ -946,13 +1129,17 @@ static VOID nw_join_status(const char *s)
     nw_set(nw.join.win, NW_J_STATUS, GTTX_Text, (ULONG)nw.status);
 }
 
-/* The join form, for the network selected, or empty for a hidden one. */
-static VOID nw_open_join(VOID)
+static const char nw_saved_text[] = "(saved)";
+static const char nw_saved_note[] = "The saved key is used unless a new one is typed.";
+
+/* The join form for ssid (len < 0: empty, for a hidden network).  A known
+   network's field says "(saved)": its stored key is used unless a new
+   passphrase is typed. */
+static VOID nw_open_form(const UBYTE *ssid, LONG len, BOOL open, BOOL hidden)
 {
     static char    ssid_text[NW_SSID_MAX + 1];
-    const NwScan  *e = nw.selected >= 0 ? &nw.nets[nw.selected] : NULL;
     struct Gadget *g;
-    struct TagItem t[4];
+    struct TagItem t[5];
 
     if (nw.join.win != NULL)
     {
@@ -960,24 +1147,22 @@ static VOID nw_open_join(VOID)
         ActivateWindow(nw.join.win);
         return;
     }
-    if (e != NULL && !nw_security_joinable(e->sec))
-    {
-        nw_requester("WirelessManager cannot join a network with this security.");
-        return;
-    }
     ssid_text[0] = '\0';
     nw.scan_ssid_len = 0;
-    if (e != NULL)
+    if (len >= 0)
     {
-        nw_ssid_text(e->ssid, e->ssid_len, ssid_text);
-        CopyMem((APTR)e->ssid, nw.scan_ssid, (ULONG)e->ssid_len);
-        nw.scan_ssid_len = e->ssid_len;
+        nw_ssid_text(ssid, (int)len, ssid_text);
+        CopyMem((APTR)ssid, nw.scan_ssid, (ULONG)len);
+        nw.scan_ssid_len = len;
     }
     nw.pass_len = 0;
     nw.pass[0] = '\0';
     nw.pass_shown = FALSE;
-    nw.open_network = e != NULL && e->sec == 0;
-    nw.status[0] = '\0';
+    nw.open_network = open;
+    nw.pass_saved = !open && len > 0 &&
+                    nw_known_network(ssid, len, NW_KNOWN_CHECK) == NULL;
+    tool_copy_string(nw.status, sizeof(nw.status),
+                     nw.pass_saved ? nw_saved_note : "");
 
     g = CreateContext(&nw.join.glist);
     t[0].ti_Tag = GTST_String;   t[0].ti_Data = (ULONG)ssid_text;
@@ -991,13 +1176,16 @@ static VOID nw_open_join(VOID)
     t[0].ti_Tag = GTST_MaxChars; t[0].ti_Data = NW_PASS_MAX;
     t[1].ti_Tag = GTST_EditHook; t[1].ti_Data = (ULONG)&nw_edit_hook;
     t[2].ti_Tag = GA_Disabled;   t[2].ti_Data = nw.open_network;
-    t[3].ti_Tag = TAG_DONE;
+    t[3].ti_Tag = GTST_String;   t[3].ti_Data = (ULONG)(nw.pass_saved ? nw_saved_text : "");
+    t[4].ti_Tag = TAG_DONE;
     g = nw_gadget(STRING_KIND, g, NW_J_PASS, t);
     g = nw_gadget(CHECKBOX_KIND, g, NW_J_SHOW, NULL);
-    t[0].ti_Tag = GTCB_Checked;  t[0].ti_Data = (e == NULL);
+    t[0].ti_Tag = GTCB_Checked;  t[0].ti_Data = hidden;
     t[1].ti_Tag = TAG_DONE;
     g = nw_gadget(CHECKBOX_KIND, g, NW_J_HIDDEN, t);
     t[0].ti_Tag = GTTX_Border;   t[0].ti_Data = TRUE;
+    t[1].ti_Tag = GTTX_Text;     t[1].ti_Data = (ULONG)nw.status;
+    t[2].ti_Tag = TAG_DONE;
     g = nw_gadget(TEXT_KIND, g, NW_J_STATUS, t);
     g = nw_gadget(BUTTON_KIND, g, NW_J_JOIN, NULL);
     g = nw_gadget(BUTTON_KIND, g, NW_J_CANCEL, NULL);
@@ -1009,8 +1197,22 @@ static VOID nw_open_join(VOID)
         return;
     }
     GT_RefreshWindow(nw.join.win, NULL);
-    (VOID)ActivateGadget(nw.g[e != NULL && !nw.open_network ? NW_J_PASS : NW_J_SSID],
+    (VOID)ActivateGadget(nw.g[len >= 0 && !nw.open_network ? NW_J_PASS : NW_J_SSID],
                          nw.join.win, NULL);
+}
+
+/* The form for the network selected, or empty for a hidden one. */
+static VOID nw_open_join(VOID)
+{
+    const NwScan *e = nw.selected >= 0 ? &nw.nets[nw.selected] : NULL;
+
+    if (e != NULL && !nw_security_joinable(e->sec))
+    {
+        nw_requester("WirelessManager cannot join a network with this security.");
+        return;
+    }
+    nw_open_form(e != NULL ? e->ssid : NULL, e != NULL ? e->ssid_len : -1,
+                 e != NULL && e->sec == 0, e == NULL);
 }
 
 /* The form frozen while the key is derived, Cancel left alone; the busy
@@ -1065,6 +1267,28 @@ static VOID nw_finish(int rc)
     nw.done = TRUE;
 }
 
+/* The form's SSID text as bytes in out: a scanned name shown unedited is
+   its own bytes, which the gadget showed with '?' for control characters.
+   Returns the length, 0 when there is none to join. */
+static LONG nw_form_ssid(const char *ssid, UBYTE *out)
+{
+    char hex[NW_SSID_MAX + 1];
+    LONG len = (LONG)nw_len(ssid), i;
+
+    if (len < 1 || len > NW_SSID_MAX) return 0;
+    nw_ssid_text(nw.scan_ssid, (int)nw.scan_ssid_len, hex);
+    for (i = 0; hex[i] != '\0' && hex[i] == ssid[i]; i++)
+        ;
+    if (nw.scan_ssid_len > 0 && hex[i] == ssid[i])
+    {
+        len = nw.scan_ssid_len;
+        for (i = 0; i < len; i++) out[i] = nw.scan_ssid[i];
+    }
+    else
+        for (i = 0; i < len; i++) out[i] = (UBYTE)ssid[i];
+    return len;
+}
+
 /* The SSID and passphrase checked, the key derived and the network saved.
    Returns NULL or what went wrong. */
 static const char *nw_join_save(const char *ssid, const char *pass, int pass_len,
@@ -1073,21 +1297,9 @@ static const char *nw_join_save(const char *ssid, const char *pass, int pass_len
     const char *why = NULL;
     char        hex[2 * NW_KEY_LEN + 1];
     UBYTE       key[NW_KEY_LEN];
-    LONG        len = (LONG)nw_len(ssid), kind, i;
+    LONG        len = nw_form_ssid(ssid, nw.join_ssid), kind, i;
 
-    if (len < 1 || len > NW_SSID_MAX) return "Type the name of the network.";
-    /* A scanned name shown unedited is joined by its own bytes, which the
-       gadget showed with '?' for control characters. */
-    nw_ssid_text(nw.scan_ssid, (int)nw.scan_ssid_len, hex);
-    for (i = 0; hex[i] != '\0' && hex[i] == ssid[i]; i++)
-        ;
-    if (nw.scan_ssid_len > 0 && hex[i] == ssid[i])
-    {
-        len = nw.scan_ssid_len;
-        for (i = 0; i < len; i++) nw.join_ssid[i] = nw.scan_ssid[i];
-    }
-    else
-        for (i = 0; i < len; i++) nw.join_ssid[i] = (UBYTE)ssid[i];
+    if (len == 0) return "Type the name of the network.";
     nw.join_ssid_len = len;
     if (!open)
     {
@@ -1126,6 +1338,67 @@ static const char *nw_restart_wm(VOID)
     if (!nw_wm_start(nw.wm, nw.device, nw.unit))
         return "WirelessManager could not be started.";
     return NULL;
+}
+
+/* WirelessManager restarted for ssid, and the association waited for. */
+static const char *nw_start_join(const UBYTE *ssid, LONG len)
+{
+    const char *why;
+    LONG        i;
+
+    for (i = 0; i < len; i++) nw.join_ssid[i] = ssid[i];
+    nw.join_ssid_len = len;
+    why = nw_restart_wm();
+    if (why == NULL)
+    {
+        nw.join_wait = NW_JOIN_WAIT;
+        nw_known_joining();
+    }
+    return why;
+}
+
+/* ssid's block in Wireless.prefs, one WirelessManager can use (a key, or
+   open, not disabled): nw_unknown when there is none (or in SETUP).  With
+   NW_KNOWN_USE or NW_KNOWN_SAVE it is moved to the top and joined with the
+   key it has.  NULL or what went wrong. */
+static const char *nw_known_network(const UBYTE *ssid, LONG len, int what)
+{
+    UBYTE       order[NW_NETS_MAX];
+    char       *text;
+    ULONG       tlen;
+    BOOL        missing;
+    LONG        count, i, at = -1;
+    const char *why = NULL;
+
+    if (nw.setup || len <= 0) return nw_unknown;
+    text = nw_read_prefs(&tlen, &missing);
+    if (text == NULL) return nw_unknown;
+    count = nw_prefs_parse(text, tlen, nw_kn_nets, NW_NETS_MAX);
+    for (i = 0; i < count && i < NW_NETS_MAX && at < 0; i++)
+        if (!nw_kn_nets[i].disabled &&
+            (nw_kn_nets[i].has_psk || nw_kn_nets[i].open || nw_kn_nets[i].wep) &&
+            nw_same(nw_kn_nets[i].ssid, nw_kn_nets[i].ssid_len, ssid, len))
+            at = i;
+    if (at < 0 || count > NW_NETS_MAX)
+    {
+        nw_free_file(text, tlen);
+        return nw_unknown;
+    }
+    nw.join_hidden = nw_kn_nets[at].scan_ssid != 0;
+    nw.join_open = nw_kn_nets[at].open != 0;
+    if (what != NW_KNOWN_CHECK)
+    {
+        nw_prefs_order(nw_kn_nets, (int)count, order);
+        for (i = 0; order[i] != at; i++)
+            ;
+        for (; i > 0; i--) order[i] = order[i - 1];
+        order[0] = (UBYTE)at;
+        why = nw_store_order(text, tlen, nw_kn_nets, count, order, count,
+                             what == NW_KNOWN_SAVE);
+    }
+    nw_free_file(text, tlen);
+    if (why == NULL && what != NW_KNOWN_CHECK) why = nw_start_join(ssid, len);
+    return why;
 }
 
 /* Associated with the SSID of the join? */
@@ -1168,12 +1441,22 @@ static BOOL nw_joined(VOID)
 /* JOIN from a Shell: saved, WirelessManager restarted, 30 s to associate. */
 static LONG nw_shell_join(const char *ssid, const char *pass, BOOL hidden)
 {
-    const char *why = nw_join_save(ssid, pass != NULL ? pass : "",
-                                   pass != NULL ? (int)nw_len(pass) : 0,
-                                   pass == NULL, hidden, NULL);
+    const char *why = nw_unknown;
     LONG        t;
 
-    if (why == NULL) why = nw_restart_wm();
+    /* Without PASSPHRASE: a known network with the key it has, else open. */
+    if (pass == NULL)
+        why = nw_known_network((const UBYTE *)ssid, (LONG)nw_len(ssid),
+                               NW_KNOWN_SAVE);
+    if (why == nw_unknown)
+    {
+        why = nw_join_save(ssid, pass != NULL ? pass : "",
+                           pass != NULL ? (int)nw_len(pass) : 0,
+                           pass == NULL, hidden, NULL);
+        if (why == NULL) why = nw_restart_wm();
+    }
+    else if (why == NULL)
+        tool_printf("Joining the known network.\n");
     if (why != NULL)
     {
         tool_error("%s", (LONG)why);
@@ -1198,7 +1481,22 @@ static VOID nw_join(VOID)
 {
     struct StringInfo *si = (struct StringInfo *)nw.g[NW_J_SSID]->SpecialInfo;
     const char *why;
+    UBYTE       ssid[NW_SSID_MAX];
+    LONG        len;
 
+    if (nw.join_wait != 0) return;      /* one join at a time */
+    if (!nw.open_network && nw.pass_len == 0 &&
+        (len = nw_form_ssid((const char *)si->Buffer, ssid)) > 0 &&
+        (why = nw_known_network(ssid, len, NW_KNOWN_SAVE)) != nw_unknown)
+    {
+        nw_join_status(why != NULL ? why : "Waiting for the connection.");
+        if (why == NULL)
+        {
+            nw_rank_scan();
+            nw_fill_list();
+        }
+        return;
+    }
     nw_join_busy(TRUE);
     why = nw_join_save((const char *)si->Buffer, nw.pass, nw.pass_len,
                        nw.open_network,
@@ -1229,6 +1527,52 @@ static VOID nw_join(VOID)
     }
 }
 
+/* A join without the form: the main window's two lines say how it goes. */
+static VOID nw_show_connecting(const char *text)
+{
+    char name[NW_SSID_MAX + 1];
+
+    nw_ssid_text(nw.join_ssid, (int)nw.join_ssid_len, name);
+    tool_copy_string(nw.net_text, sizeof(nw.net_text), "Connecting to ");
+    nw_append(nw.net_text, sizeof(nw.net_text), name);
+    tool_copy_string(nw.sig_text, sizeof(nw.sig_text), text);
+    nw_set(nw.main.win, NW_M_NETWORK, GTTX_Text, (ULONG)nw.net_text);
+    nw_set(nw.main.win, NW_M_SIGNAL, GTTX_Text, (ULONG)nw.sig_text);
+}
+
+/* A known network's join begun without the form: the lists reordered,
+   and the progress in the main window. */
+static VOID nw_connecting(VOID)
+{
+    nw.join_formless = TRUE;
+    nw_rank_scan();
+    nw_fill_list();
+    nw_known_fill();
+    nw_show_connecting("Waiting for the connection.");
+}
+
+/* Join in the main window: a known network at once, with its saved key;
+   any other through the form. */
+static VOID nw_join_pressed(VOID)
+{
+    const NwScan *e = nw.selected >= 0 ? &nw.nets[nw.selected] : NULL;
+    const char   *why;
+
+    /* One join at a time. */
+    if (nw.join_wait != 0 && nw.join.win == NULL) return;
+    if (e != NULL && nw.join.win == NULL && nw.join_wait == 0)
+    {
+        why = nw_known_network(e->ssid, e->ssid_len, NW_KNOWN_SAVE);
+        if (why != nw_unknown)
+        {
+            if (why != NULL) nw_requester(why);
+            else nw_connecting();
+            return;
+        }
+    }
+    nw_open_join();
+}
+
 /* Once a second while a join waits: associated with that SSID yet? */
 static VOID nw_join_tick(VOID)
 {
@@ -1237,20 +1581,30 @@ static VOID nw_join_tick(VOID)
     if (nw.join_wait <= 0) return;
     if (nw_joined())
     {
+        nw.join_formless = FALSE;
         nw_close_join();
         nw_refresh_status();
+        nw_known_fill();
         return;
     }
     if (--nw.join_wait == 0)
     {
         nw_known_joining();
+        /* The saved key did not do: the form, to type a new one. */
+        if (nw.join_formless && nw.join.win == NULL)
+            nw_open_form(nw.join_ssid, nw.join_ssid_len, nw.join_open,
+                         nw.join_hidden);
+        nw.join_formless = FALSE;
         nw_join_status("Not connected after 30 seconds.");
+        nw_refresh_status();
+        nw_known_fill();
         return;
     }
     tool_copy_string(text, sizeof(text), "Waiting for the connection: ");
     nw_decimal(nw.join_wait, text + nw_len(text));
     nw_append(text, sizeof(text), " s");
-    nw_join_status(text);
+    if (nw.join.win != NULL) nw_join_status(text);
+    else nw_show_connecting(text);
 }
 
 /* -------------------------------------------------------- the icon -- */
@@ -1356,12 +1710,14 @@ static VOID nw_known_joining(VOID)
     if (nw.known.win == NULL) return;
     nw_set(nw.known.win, NW_K_SAVE, GA_Disabled, nw.join_wait != 0);
     nw_set(nw.known.win, NW_K_USE, GA_Disabled, nw.join_wait != 0);
+    nw_set(nw.known.win, NW_K_CONNECT, GA_Disabled, nw.join_wait != 0 || kn.sel < 0);
 }
 
 static VOID nw_known_fill(VOID)
 {
     LONG i;
 
+    if (nw.known.win == NULL) return;
     nw_set(nw.known.win, NW_K_LIST, GTLV_Labels, ~0UL);
     kn.list.lh_Head = (struct Node *)&kn.list.lh_Tail;
     kn.list.lh_Tail = NULL;
@@ -1370,11 +1726,25 @@ static VOID nw_known_fill(VOID)
     {
         const NwNetwork *n = &kn.nets[kn.order[i]];
         char            *t = kn.name[i];
+        char             mark[40], name[NW_SSID_MAX + 1];
+        ULONG            room;
 
-        if (n->ssid_len >= 0) nw_ssid_text(n->ssid, n->ssid_len, t);
-        else tool_copy_string(t, NW_SSID_MAX + 16, "?");
-        if (n->scan_ssid) nw_append(t, NW_SSID_MAX + 16, " (hidden)");
-        if (n->disabled) nw_append(t, NW_SSID_MAX + 16, " (off)");
+        /* Latin-1 has no ellipsis character: three full stops. */
+        mark[0] = '\0';
+        if (n->scan_ssid) nw_append(mark, sizeof(mark), " (hidden)");
+        if (n->disabled) nw_append(mark, sizeof(mark), " (off)");
+        if (nw.join_wait > 0 &&
+            nw_same(n->ssid, n->ssid_len, nw.join_ssid, nw.join_ssid_len))
+            nw_append(mark, sizeof(mark), " (connecting...)");
+        else if (nw_same(n->ssid, n->ssid_len, nw.conn_ssid, nw.conn_len))
+            nw_append(mark, sizeof(mark), " (connected)");
+        if (n->ssid_len >= 0) nw_ssid_text(n->ssid, n->ssid_len, name);
+        else tool_copy_string(name, sizeof(name), "?");
+        /* The name shortened, never the markers. */
+        room = sizeof(kn.name[0]) - 1 - nw_len(mark);
+        if (nw_len(name) > room) name[room] = '\0';
+        tool_copy_string(t, sizeof(kn.name[0]), name);
+        nw_append(t, sizeof(kn.name[0]), mark);
         kn.node[i].ln_Name = t;
         AddTail(&kn.list, &kn.node[i]);
     }
@@ -1410,31 +1780,24 @@ static VOID nw_close_known(VOID)
     if (nw.known.glist != NULL) FreeGadgets(nw.known.glist);
     nw.known.win = NULL;
     nw.known.glist = NULL;
-    for (i = NW_K_LIST; i <= NW_K_CANCEL; i++) nw.g[i] = NULL;
+    for (i = NW_K_LIST; i <= NW_K_CONNECT; i++) nw.g[i] = NULL;
     nw_free_file(kn.text, kn.len);
     kn.text = NULL;
 }
 
 /* Wireless.prefs read, its networks highest priority first (file order
-   among equals), and the window opened on them. */
-static VOID nw_open_known(VOID)
+   among equals).  FALSE, said, when it cannot be edited. */
+static BOOL nw_known_load(VOID)
 {
-    struct Gadget *g;
-    struct TagItem t[3];
-    BOOL           missing;
-    LONG           i;
+    BOOL missing;
+    LONG i;
 
-    if (nw.known.win != NULL)
-    {
-        WindowToFront(nw.known.win);
-        ActivateWindow(nw.known.win);
-        return;
-    }
+    nw_free_file(kn.text, kn.len);
     kn.text = nw_read_prefs(&kn.len, &missing);
     if (kn.text == NULL && !missing)
     {
         nw_requester("Wireless.prefs could not be read.");
-        return;
+        return FALSE;
     }
     kn.count = nw_prefs_parse(kn.text != NULL ? kn.text : "", kn.len, kn.nets,
                               NW_NETS_MAX);
@@ -1442,13 +1805,34 @@ static VOID nw_open_known(VOID)
     {
         nw_requester(kn.count < 0 ? "Wireless.prefs has a network={ with no closing }."
                                   : "Wireless.prefs has more networks than this edits.");
-        nw_close_known();
-        return;
+        return FALSE;
     }
     nw_prefs_order(kn.nets, (int)kn.count, kn.order);
     for (i = 0; i < kn.count; i++) kn.was[i] = kn.order[i];
     kn.shown = kn.count;
     kn.sel = -1;
+    kn.sel_fresh = FALSE;
+    return TRUE;
+}
+
+/* The window opened on Wireless.prefs' networks. */
+static VOID nw_open_known(VOID)
+{
+    struct Gadget *g;
+    struct TagItem t[3];
+
+    if (nw.known.win != NULL)
+    {
+        WindowToFront(nw.known.win);
+        ActivateWindow(nw.known.win);
+        return;
+    }
+    kn.text = NULL;
+    if (!nw_known_load())
+    {
+        nw_close_known();
+        return;
+    }
 
     g = CreateContext(&nw.known.glist);
     kn.list.lh_Head = (struct Node *)&kn.list.lh_Tail;
@@ -1460,6 +1844,7 @@ static VOID nw_open_known(VOID)
     g = nw_gadget(BUTTON_KIND, g, NW_K_UP, NULL);
     g = nw_gadget(BUTTON_KIND, g, NW_K_DOWN, NULL);
     g = nw_gadget(BUTTON_KIND, g, NW_K_REMOVE, NULL);
+    g = nw_gadget(BUTTON_KIND, g, NW_K_CONNECT, NULL);
     g = nw_gadget(BUTTON_KIND, g, NW_K_SAVE, NULL);
     g = nw_gadget(BUTTON_KIND, g, NW_K_USE, NULL);
     g = nw_gadget(BUTTON_KIND, g, NW_K_CANCEL, NULL);
@@ -1482,6 +1867,7 @@ static VOID nw_known_move(LONG to)
     kn.order[kn.sel] = kn.order[to];
     kn.order[to] = b;
     kn.sel = to;
+    kn.sel_fresh = FALSE;
     nw_known_fill();
 }
 
@@ -1492,29 +1878,56 @@ static VOID nw_known_remove(VOID)
     for (i = kn.sel; i + 1 < kn.shown; i++) kn.order[i] = kn.order[i + 1];
     kn.shown--;
     if (kn.sel >= kn.shown) kn.sel = kn.shown - 1;
+    kn.sel_fresh = FALSE;
     nw_known_fill();
 }
 
+#define NW_KS_USE     0
+#define NW_KS_SAVE    1
+#define NW_KS_CONNECT 2
+
 /* Save (ENVARC: and ENV:) or Use (ENV:): priorities from the order shown,
    the top one highest, removed blocks taken out, everything else kept;
-   then WirelessManager, if it runs, restarted on the new file. */
-static VOID nw_known_store(BOOL save)
+   then WirelessManager, if it runs, restarted on the new file.  Connect,
+   and Use with a network picked that is not the one in use, nothing
+   moved or removed since the pick: that network moved to the top and
+   joined (Save only stores).  Connect writes ENVARC: too, as Join does,
+   and keeps the window open on the new file. */
+static VOID nw_known_store(int how)
 {
-    static NwBlockEdit e[NW_NETS_MAX];
-    static NwField     f[NW_NETS_MAX];
-    static char        prio[NW_NETS_MAX][12];
-    char              *out;
-    size_t             len = NW_FILE_MAX;
-    int                n;
-    const char        *why = NULL;
-    BOOL               moved = kn.shown != kn.count;
+    const char *why = NULL;
+    BOOL        moved = kn.shown != kn.count, connect = FALSE;
+    LONG        n, at = -1;
 
     if (nw.join_wait != 0) return;
-    /* Nothing moved or removed, in the end: nothing written, nothing
-       restarted. */
-    for (n = 0; !moved && n < (int)kn.shown; n++)
+    if (kn.sel >= 0 && how != NW_KS_SAVE)
+    {
+        const NwNetwork *e = &kn.nets[kn.order[kn.sel]];
+
+        connect = e->ssid_len > 0 && !e->disabled &&
+                  (how == NW_KS_CONNECT ||
+                   (kn.sel_fresh &&
+                    !nw_same(e->ssid, e->ssid_len, nw.conn_ssid, nw.conn_len)));
+        /* Nothing to join with: the form, for its passphrase; its Join
+           puts the network on top.  Nothing is written before that. */
+        if (connect && !e->has_psk && !e->open && !e->wep)
+        {
+            nw.join_hidden = e->scan_ssid != 0;
+            nw_open_form(e->ssid, e->ssid_len, FALSE, nw.join_hidden);
+            return;
+        }
+        if (connect)
+        {
+            at = kn.order[kn.sel];
+            for (n = kn.sel; n > 0; n--) kn.order[n] = kn.order[n - 1];
+            kn.order[0] = (UBYTE)at;
+            kn.sel = 0;
+        }
+    }
+    /* Nothing moved or removed, in the end: nothing written. */
+    for (n = 0; !moved && n < kn.shown; n++)
         if (kn.order[n] != kn.was[n]) moved = TRUE;
-    if (!moved)
+    if (!moved && !connect)
     {
         nw_close_known();
         return;
@@ -1539,39 +1952,34 @@ static VOID nw_known_store(BOOL save)
             return;
         }
     }
-    n = nw_prefs_order_edits(kn.nets, (int)kn.count, kn.order, (int)kn.shown,
-                             e, f, prio);
-    out = (char *)AllocVec(NW_FILE_MAX, MEMF_ANY);
-    if (out == NULL)
-        why = "Not enough memory.";
-    else if (!nw_prefs_write(kn.text != NULL ? kn.text : "", kn.len, kn.nets,
-                             (int)kn.count, e, n, out, NW_FILE_MAX - 1, &len))
-    {
-        len = NW_FILE_MAX;
-        why = "Wireless.prefs would be too large.";
-    }
-    else
-    {
-        /* ENVARC: first, as a join writes them. */
-        if (save)
-        {
-            nw_make_dir("ENVARC:Sys");
-            if (!nw_write(nw_prefs_envarc, out, (ULONG)len))
-                why = "Wireless.prefs could not be written.";
-        }
-        nw_make_dir("ENV:Sys");
-        if (why == NULL && !nw_write(nw_prefs_env, out, (ULONG)len))
-            why = "Wireless.prefs could not be written.";
-    }
-    nw_free_file(out, (ULONG)len);
+    if (moved)
+        why = nw_store_order(kn.text, kn.len, kn.nets, kn.count, kn.order,
+                             kn.shown, how != NW_KS_USE);
     if (why != NULL)
     {
         nw_requester(why);
         return;
     }
+    if (connect)
+    {
+        const NwNetwork *e = &kn.nets[at];
+
+        nw.join_hidden = e->scan_ssid != 0;
+        nw.join_open = e->open != 0;
+        why = nw_start_join(e->ssid, e->ssid_len);
+        if (how == NW_KS_CONNECT && nw_known_load())
+            kn.sel = 0;
+        else
+            nw_close_known();
+        if (why != NULL) nw_requester(why);
+        else nw_connecting();
+        return;
+    }
     nw_close_known();
     if (nw_wm_running(NULL, 0) && (why = nw_restart_wm()) != NULL)
         nw_requester(why);
+    nw_rank_scan();
+    nw_fill_list();
     nw_refresh_status();
 }
 
@@ -1601,15 +2009,28 @@ static VOID nw_gadget_up(const struct IntuiMessage *m)
         case NW_M_LIST:
             if ((LONG)code == nw.selected && nw.dev_open &&
                 DoubleClick(nw.click_secs, nw.click_micros, m->Seconds, m->Micros))
-                nw_open_join();
-            nw.selected = (LONG)code;
+                nw_join_pressed();
+            nw.selected = (LONG)code < nw.count ? (LONG)code : -1;
+            nw.sel_len = -1;
+            if (nw.selected >= 0)
+            {
+                nw.sel_len = nw.nets[nw.selected].ssid_len;
+                CopyMem(nw.nets[nw.selected].ssid, nw.sel_ssid, (ULONG)nw.sel_len);
+            }
             nw.click_secs = m->Seconds;
             nw.click_micros = m->Micros;
             break;
         case NW_M_SCAN: nw_scan(); break;
-        case NW_M_JOIN: nw_open_join(); break;
+        case NW_M_JOIN: nw_join_pressed(); break;
         case NW_M_DISCONNECT:
             (VOID)nw_wm_stop();
+            if (nw.join_formless)
+            {
+                nw.join_formless = FALSE;
+                nw.join_wait = 0;
+                nw_known_joining();
+                nw_known_fill();
+            }
             nw_refresh_status();
             break;
         case NW_J_SECURITY:
@@ -1617,12 +2038,31 @@ static VOID nw_gadget_up(const struct IntuiMessage *m)
             if (nw.open_network) nw_wipe_pass();
             nw_set(nw.join.win, NW_J_PASS, GA_Disabled, nw.open_network);
             break;
+        case NW_J_SSID:
+        {
+            /* A known name typed: its saved key is offered. */
+            struct StringInfo *si = (struct StringInfo *)g->SpecialInfo;
+            UBYTE ssid[NW_SSID_MAX];
+            LONG  len = nw_form_ssid((const char *)si->Buffer, ssid);
+            BOOL  saved = !nw.open_network && nw.pass_len == 0 && len > 0 &&
+                          nw_known_network(ssid, len, NW_KNOWN_CHECK) == NULL;
+
+            if (saved != nw.pass_saved)
+            {
+                nw.pass_saved = saved;
+                nw_set(nw.join.win, NW_J_PASS, GTST_String,
+                       (ULONG)(saved ? nw_saved_text : ""));
+                nw_join_status(saved ? nw_saved_note : "");
+            }
+            break;
+        }
         case NW_J_SHOW:
         {
             static char stars[NW_PASS_MAX + 1];
             int i;
 
             nw.pass_shown = (g->Flags & GFLG_SELECTED) != 0;
+            if (nw.pass_saved) break;
             for (i = 0; i < nw.pass_len; i++) stars[i] = '*';
             stars[i] = '\0';
             nw_set(nw.join.win, NW_J_PASS, GTST_String,
@@ -1633,14 +2073,24 @@ static VOID nw_gadget_up(const struct IntuiMessage *m)
         case NW_J_CANCEL: nw_cancel_join(); break;
         case NW_M_KNOWN:  nw_open_known(); break;
         case NW_K_LIST:
+            if ((LONG)code == kn.sel &&
+                DoubleClick(kn.click_secs, kn.click_micros, m->Seconds, m->Micros))
+            {
+                nw_known_store(NW_KS_CONNECT);
+                break;
+            }
             kn.sel = (LONG)code < kn.shown ? (LONG)code : -1;
+            kn.sel_fresh = kn.sel >= 0;
+            kn.click_secs = m->Seconds;
+            kn.click_micros = m->Micros;
             nw_known_fill();
             break;
         case NW_K_UP:     if (kn.sel > 0) nw_known_move(kn.sel - 1); break;
         case NW_K_DOWN:   if (kn.sel >= 0 && kn.sel + 1 < kn.shown) nw_known_move(kn.sel + 1); break;
         case NW_K_REMOVE: if (kn.sel >= 0) nw_known_remove(); break;
-        case NW_K_SAVE:   nw_known_store(TRUE); break;
-        case NW_K_USE:    nw_known_store(FALSE); break;
+        case NW_K_SAVE:    nw_known_store(NW_KS_SAVE); break;
+        case NW_K_USE:     nw_known_store(NW_KS_USE); break;
+        case NW_K_CONNECT: if (kn.sel >= 0) nw_known_store(NW_KS_CONNECT); break;
         case NW_K_CANCEL: nw_close_known(); break;
         default: break;
     }
@@ -1656,7 +2106,7 @@ static VOID nw_menu_pick(UWORD n)
         switch ((ULONG)GTMENUITEM_USERDATA(item))
         {
             case MENU_SCAN:     nw_scan(); break;
-            case MENU_JOIN:     if (nw.dev_open) nw_open_join(); break;
+            case MENU_JOIN:     if (nw.dev_open) nw_join_pressed(); break;
             case MENU_KNOWN:    nw_open_known(); break;
             case MENU_SNAPSHOT: nw_snapshot(); break;
             case MENU_QUIT:     nw_finish(RETURN_OK); break;
@@ -1869,6 +2319,8 @@ int main(int argc, char **argv)
     BOOL               known;
 
     nw.selected = -1;
+    nw.conn_len = -1;
+    nw.sel_len = -1;
     IconBase = OpenLibrary("icon.library", 37);
     if (argc == 0)
         nw.wbs = (struct WBStartup *)argv;

@@ -5,6 +5,8 @@ Add new entries under `Unreleased`; published release sections are history.
 
 ## Unreleased
 
+- Installer: a Wi-Fi started after another interface starts in the background, so the boot does not wait for it.
+
 - Installer: another stack's libraries, same-named commands and replaced
   configuration are kept in the AmiNetXDuo drawer's Backup.
 
