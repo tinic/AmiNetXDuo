@@ -272,6 +272,14 @@ jobs:
           tools/ci-arm.sh -n "socket options, getsockopt/setsockopt/IoctlSocket" --
           tests/sockopt/run-sockopt.sh -b build/ci/default
 
+      # The Wi-Fi tools against a Wi-Fi unit the guest makes at run time:
+      # Amiberry has no Pi Wi-Fi.  Ends `<N> checks, 0 failures`.
+      - name: NetWireless against a stub Wi-Fi unit
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: >-
+          tools/ci-arm.sh -n "NetWireless, stub Wi-Fi unit" --
+          tests/tools/run-netwireless.sh -b build/ci/default
+
       # src/crypto68k's assembly against the portable C it also compiles, on
       # the machine.  The host tier runs the same vectors every push and cannot
       # reach the assembly at all: it is m68k, and it is DIFFERENT code per

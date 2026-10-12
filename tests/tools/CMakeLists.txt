@@ -66,6 +66,18 @@ endif()
 target_compile_options(test_cardwatch PRIVATE -Wall -Wextra)
 set_target_properties(test_cardwatch PROPERTIES OUTPUT_NAME "CardWatch")
 
+# A Wi-Fi SANA-II unit made at run time, and NetWirelessPrefs run against
+# it: tests/tools/run-netwireless.sh.
+add_executable(test_wifistub wifistub.c)
+target_include_directories(test_wifistub PRIVATE
+    ${AMINETXDUO_CORE_INCLUDES}
+    "${CMAKE_SOURCE_DIR}/src/sana2")
+if(AMIGA_NDK_INCLUDE)
+    target_include_directories(test_wifistub PRIVATE "${AMIGA_NDK_INCLUDE}")
+endif()
+target_compile_options(test_wifistub PRIVATE -Wall -Wextra)
+set_target_properties(test_wifistub PROPERTIES OUTPUT_NAME "WifiStub")
+
 add_executable(test_clockset clockset.c)
 target_include_directories(test_clockset PRIVATE ${AMINETXDUO_CORE_INCLUDES})
 if(AMIGA_NDK_INCLUDE)

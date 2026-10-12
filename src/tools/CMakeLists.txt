@@ -227,7 +227,7 @@ aminetxduo_add_tool(tool_installsamefile InstallSameFile
 # The other Installer-only primitive: identify Emu68's supported on-board
 # network devices from its device tree without opening either device.
 aminetxduo_add_tool(tool_installnetprobe InstallNetProbe
-    SOURCES installnetprobe.c ../netdev/netdev_dtree.c)
+    SOURCES installnetprobe.c netprobe_card.c ../netdev/netdev_dtree.c)
 
 # The Installer's Wi-Fi page.  Installer logs every askstring answer, so the
 # passphrase is asked here and written straight to the prefs file.
@@ -283,6 +283,13 @@ aminetxduo_add_tool(tool_netsetup NetSetup SOURCES netsetup.c ${TOOLS_DEVDIAG})
 aminetxduo_add_tool(tool_netprefs NetPrefs SOURCES netprefs.c netprefs_text.c
     netprefs_layout.c)
 aminetxduo_add_tool(tool_netmeter NetMeter NX SOURCES netmeter.c netmeter_fmt.c)
+
+# The Wi-Fi window.  Scans, joins through WirelessManager's
+# ENV:Sys/Wireless.prefs and restarts it; never joins or sets a key itself.
+# LIST and STATUS print the same answers from a Shell.
+aminetxduo_add_tool(tool_netwirelessprefs NetWirelessPrefs
+    SOURCES netwirelessprefs.c netwireless_dev.c netwireless_sig.c
+            netwireless_prefs.c)
 
 # AddNetRoute and DeleteNetRoute are one source, the same way Online and
 # Offline are: they parse the same destination and differ in one library call.
@@ -930,6 +937,16 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(test_netmeter_fmt PRIVATE -Wall -Wextra)
     set_target_properties(test_netmeter_fmt PROPERTIES C_STANDARD 11)
 
+    # InstallNetProbe's PC Card decision: NE2000 by anxnet.device's rule, less
+    # the 802.11 cards.
+    add_executable(test_netprobe_card
+        test/test_netprobe_card.c
+        netprobe_card.c)
+    target_include_directories(test_netprobe_card PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    target_compile_options(test_netprobe_card PRIVATE -Wall -Wextra)
+    set_target_properties(test_netprobe_card PROPERTIES C_STANDARD 11)
+
     # A kept interface file's DEVICE line follows the AmiNetXDuo: assign
     # (InstallSameFile DEVICES): only our drivers in this drawer move.
     add_executable(test_devicehome
@@ -950,6 +967,43 @@ if(NOT CMAKE_CROSSCOMPILING)
         "${CMAKE_CURRENT_SOURCE_DIR}")
     target_compile_options(test_netprefs_layout PRIVATE -Wall -Wextra)
     set_target_properties(test_netprefs_layout PROPERTIES C_STANDARD 11)
+
+    # NetWireless edits WirelessManager's Wireless.prefs, which users also
+    # edit by hand: an unchanged save is byte for byte, an edit touches only
+    # its lines.  The interface file's DEVICE and UNIT come from the same
+    # module.
+    add_executable(test_netwireless_prefs
+        test/test_netwireless_prefs.c
+        netwireless_prefs.c)
+    target_include_directories(test_netwireless_prefs PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    target_compile_options(test_netwireless_prefs PRIVATE -Wall -Wextra)
+    set_target_properties(test_netwireless_prefs PROPERTIES C_STANDARD 11)
+
+    # The WPA key against IEEE 802.11i Annex H.4, over the vendored SHA-1
+    # itself: a wrong key looks exactly like a right one.
+    add_executable(test_netwireless_key
+        test/test_netwireless_key.c
+        netwireless_key.c
+        "${AMINETXDUO_NETXDUO}/crypto_libraries/src/nx_crypto_sha1.c")
+    target_include_directories(test_netwireless_key PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${AMINETXDUO_NETXDUO}/crypto_libraries/inc")
+    target_compile_definitions(test_netwireless_key PRIVATE
+        NX_CRYPTO_STANDALONE_ENABLE)
+    target_compile_options(test_netwireless_key PRIVATE -Wall -Wextra)
+    set_target_properties(test_netwireless_key PROPERTIES C_STANDARD 11)
+
+    # Security labels from element layouts, the bar thresholds, and the
+    # AppIcon's bar picture as Image planes.
+    add_executable(test_netwireless_sig
+        test/test_netwireless_sig.c
+        netwireless_sig.c)
+    target_include_directories(test_netwireless_sig PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    target_compile_options(test_netwireless_sig PRIVATE -Wall -Wextra)
+    set_target_properties(test_netwireless_sig PROPERTIES C_STANDARD 11)
 
     target_include_directories(test_fetchurl PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}")
@@ -1182,6 +1236,10 @@ if(NOT CMAKE_CROSSCOMPILING)
     add_test(NAME devicehome_rewrites_only_ours COMMAND test_devicehome)
     add_test(NAME netprefs_font_layout COMMAND test_netprefs_layout)
     add_test(NAME netmeter_arithmetic COMMAND test_netmeter_fmt)
+    add_test(NAME netprobe_pcmcia_kind COMMAND test_netprobe_card)
+    add_test(NAME netwireless_prefs_text COMMAND test_netwireless_prefs)
+    add_test(NAME netwireless_wpa_key COMMAND test_netwireless_key)
+    add_test(NAME netwireless_signal COMMAND test_netwireless_sig)
     add_test(NAME console_clipboard_text COMMAND test_clipftxt)
     add_test(NAME httpframe_bodies COMMAND test_httpframe)
     add_test(NAME httplock_rfc4918 COMMAND test_httplock)
