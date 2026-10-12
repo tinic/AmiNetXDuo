@@ -19,18 +19,78 @@ examples/Internet/          routes, name_resolution, hosts, service_discovery
 
 tools/makeicon.py           writes the .info files
 tools/showicon.py           reads one back and draws it, independently
+tools/compile-glowicons.py  compiles transparent two-state PNG artwork (Pillow)
+icons/glow/                 compiled color images, previews and PNG masters
 tools/checkscript.py        static checks on the Installer script
 
 test/run-workbench.sh       installs the archive on a real Workbench 3.1
 test/installdrive.c         drives the Installer inside the guest
 test/bootcheck.c            boots the installed machine and checks it works
 test/icontest.c             hands the generated .info files to icon.library
+test/test_glowicons.py      checks classic fallback, color data and malformed inputs
 test/smbprobe.c             SMB mount probe, driven by test/run-smbmount.sh
 test/peer-drill.sh          what the second machine does to the Amiga
 ```
 
 The user-facing text in the archive is `dist/ReadMe` and `docs/user/`. This file
 is not shipped.
+
+## Icons
+
+The default `.info` files combine the original classic four-color images and
+launch settings with 48x48, 128-color GlowIcons. Color-capable `icon.library` versions
+display the new artwork; stock older libraries load the classic fallback.
+Normal and selected color states have identical transparent bounds; the selected
+state adds an inward gold rim while keeping interior pixels stationary. This adds
+22,454 bytes across the seven icon templates and no library code.
+
+The main drawer defaults to 620x236 pixels and fits a 640x256 Workbench.
+Packaging places the main icons on a four-column grid. Private installations
+put NetMeter and NetPrefs in the parent AmiNetXDuo drawer; command copies
+remain in `C/` for CLI compatibility, without duplicate Workbench icons.
+The commands drawer has a 340x116 window. Generic document/drawer
+templates and the parent AmiNetXDuo icon stay unsnapped so reusing them in
+other drawers does not give unrelated icons overlapping fixed positions.
+
+Packaging needs only Python's standard library. To build a classic-only
+archive, set `AMINETXDUO_ICON_STYLE=classic` when invoking `dist/make-dist.sh`.
+For separate icon templates:
+
+```sh
+python3 install/tools/makeicon.py build/classic-icons --style classic
+python3 install/tools/makeicon.py build/glow-icons --style glow
+```
+
+Artwork regeneration, including palette reduction and GlowIcon encoding:
+
+```sh
+python3 install/tools/compile-glowicons.py --outdir install/icons/glow \
+    install/icons/glow/masters/*.png
+python3 install/tools/makeicon.py install
+python3 install/tools/showicon.py install/*.info
+python3 install/test/test_glowicons.py
+```
+
+Only artwork regeneration requires Pillow. Each PNG master contains a normal
+state on the left and a selected reference on the right. The compiler frames both
+states together, reserves transparent pen zero and encodes IFF FACE/IMAG
+chunks with byte-depth PackBits compression. Both color palettes are stored
+explicitly. The independent validator checks chunk lengths, RLE expansion,
+palette indices and both states, rather than accepting arbitrary trailing data.
+
+`icontest` validates all seven icons and their metadata through the native
+library. On V44+ it also validates both color states and checks the decoded
+pixels/palettes are preserved by `PutDiskObject`. Optional arguments name an
+icon directory and report file, allowing a RAM-only run:
+
+```text
+icontest RAM:GlowIcons RAM:glowicons-report.txt
+```
+
+On an old library a native write can retain only the classic representation;
+the native test checks its metadata and fallback. Installing a newer icon set
+again restores the color extension. MUI application images and MagicWB palette
+icons are separate formats and are not part of this GlowIcon set.
 
 ## The script
 
