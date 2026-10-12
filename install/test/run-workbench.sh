@@ -979,6 +979,12 @@ if [ "$WIFI_ANSWERED" = 1 ]; then
     ANSWER_LINES+=("1|WIFI|$WIFI_TEST_SSID|$WIFI_TEST_PASS")
 fi
 [ "$WIFI_MODE" = keepit ] && ANSWER_LINES+=("1|DROPSTARTUP|-")
+# With the Ethernet as well, the kept genet file is left with PRIORITY only
+# in comments, as the example files have it, and no final newline: run 2
+# must still add a PRIORITY=10 line of its own.
+if [ "$WIFI_MODE" = keepit ] && [ "$EMU68_FIXTURE" = both ]; then
+    ANSWER_LINES+=("1|UNPRIORITY|DEVS:NetInterfaces/genet")
+fi
 # The Wi-Fi interface started at boot is worth booting: the startup lines
 # are run, with a stand-in supplicant and the card under it.
 if [ "$WIFI_PRIMARY" = 1 ] && [ "$WIFI_MODE" = join ]; then
@@ -2697,7 +2703,8 @@ else
         fi
         if [ "$WIFI_PRIMARY" = 0 ]; then
             _pif=$(amiga_path "${INST}Devs/NetInterfaces/$EXPECTED_IF" 2>/dev/null || true)
-            if [ -n "$_pif" ] && grep -qx 'PRIORITY=10' "$_pif"; then
+            if [ -n "$_pif" ] && grep -qx 'PRIORITY=10' "$_pif" &&
+               { [ "$WIFI_MODE" != keepit ] || grep -qx ';PRIORITY=0' "$_pif"; }; then
                 echo "  ok      $EXPECTED_IF carries PRIORITY=10, ahead of the Wi-Fi"
             else
                 wifi_bad "$EXPECTED_IF has no PRIORITY=10 while the Wi-Fi starts too"

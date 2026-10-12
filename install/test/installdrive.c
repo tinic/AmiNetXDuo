@@ -143,6 +143,9 @@
  *   <run>|NOWIFI|-
  *   1|DROPSTARTUP|-   delete S:Network-Startup between runs instead of
  *                     marking it, so run 2 meets "Keep it" with none
+ *   1|UNPRIORITY|<file> between runs, comment out every PRIORITY line of
+ *                     that interface file and end it with the example
+ *                     files' commented lines and no final newline
  *
  * Unlike the historical DRIVE_YES_LABEL/DRIVE_PICK_* switches, this can
  * answer more than one non-default question in one installation and can give
@@ -171,7 +174,8 @@ enum ActionType
     ACTION_ABSENT,
     ACTION_WIFI,
     ACTION_NOWIFI,
-    ACTION_DROPSTARTUP
+    ACTION_DROPSTARTUP,
+    ACTION_UNPRIORITY
 };
 
 struct DriveAction
@@ -461,6 +465,13 @@ static BOOL load_actions(VOID)
         {
             action->type = ACTION_NOWIFI;
             action->used = TRUE;
+        }
+        else if (strcmp(kind, "UNPRIORITY") == 0)
+        {
+            /* Applied between runs, like DROPSTARTUP. */
+            action->type = ACTION_UNPRIORITY;
+            action->used = TRUE;
+            copy_text(action->match, at, sizeof(action->match));
         }
         else if (strcmp(kind, "DROPSTARTUP") == 0)
         {
@@ -1142,6 +1153,44 @@ static VOID post_message(struct Window *window, ULONG cls, struct Gadget *gad)
     drain_replies();
 }
 
+/*
+ * UNPRIORITY: the kept interface file as somebody who copied the example
+ * would have it -- PRIORITY only in comments, and no newline at the end.
+ */
+static BOOL unpriority(const char *path)
+{
+    static char       in[8192];
+    static char       out[8400];
+    static const char tail[] = "; PRIORITY -- a note, not a setting\n;PRIORITY=0";
+    BPTR              fh = Open((STRPTR)path, MODE_OLDFILE);
+    LONG              len, i, n = 0;
+    BOOL              bol = TRUE;
+
+    if (fh == 0)
+        return FALSE;
+    len = Read(fh, in, sizeof(in) - 1);
+    Close(fh);
+    if (len < 0)
+        return FALSE;
+    for (i = 0; i < len && n < (LONG)sizeof(out) - (LONG)sizeof(tail) - 2; i++)
+    {
+        if (bol && strncmp(in + i, "PRIORITY", 8) == 0)
+            out[n++] = ';';
+        out[n++] = in[i];
+        bol = (in[i] == '\n');
+    }
+    if (n > 0 && out[n - 1] != '\n')
+        out[n++] = '\n';
+    memcpy(out + n, tail, sizeof(tail) - 1);
+    n += sizeof(tail) - 1;
+    fh = Open((STRPTR)path, MODE_NEWFILE);
+    if (fh == 0)
+        return FALSE;
+    i = Write(fh, out, n);
+    Close(fh);
+    return i == n;
+}
+
 static BOOL actions_dropped_startup(VOID)
 {
     LONG i;
@@ -1501,6 +1550,16 @@ int main(void)
                 rc = RETURN_FAIL;
                 break;
             }
+            for (d = 0; d < action_count; d++)
+                if (actions[d].type == ACTION_UNPRIORITY &&
+                    !unpriority(actions[d].match))
+                {
+                    say("installdrive: could not rewrite %s\n",
+                        (LONG)actions[d].match);
+                    rc = RETURN_FAIL;
+                }
+            if (rc != RETURN_OK)
+                break;
         }
         if (run_number == 1 && DRIVE_RUNS > 1 &&
             !(action_count > 0 && actions_dropped_startup()))

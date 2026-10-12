@@ -2796,18 +2796,21 @@
 
 ; A kept Ethernet definition with the Wi-Fi starting beside it, in a
 ; S:Network-Startup written on this run, gets the PRIORITY=10 a new one is
-; written with -- appended, and only where the file names no PRIORITY.
+; written with, unless a live line already sets PRIORITY.  InstallWiFi does
+; it: Search cannot tell ";PRIORITY=0", as the example files carry it, from
+; a setting, and that left such a file without one.
 (if (AND (AND KEEP_OLD (= KEEP_NETSTART 0))
          (AND DO_STARTUP (AND WIFI_START (= WIFI_PRIMARY 0))))
-  (
-    (set KEPT_IF (tackon D_IFDIR OLD_IF))
-    (if (<> 0 (run ("Search >NIL: FROM \"%s\" SEARCH PRIORITY QUIET" KEPT_IF)
-                   (quiet) (safe)))
-        ; "*N" first: the kept file may not end with a newline.
-        (run ("Echo >>\"%s\" \"*NPRIORITY=10\"" KEPT_IF)
-             (prompt ("Adding PRIORITY=10 to %s, ahead of the Wi-Fi" KEPT_IF))
-             (help   H_WIFI)))
-  ))
+  (if (= @pretend 0)
+    (
+      (set KEPT_IF (tackon D_IFDIR OLD_IF))
+      (if (<> 0 (run ("\"%s\" PRIORITY \"%s\"" S_INSTWIFI KEPT_IF)
+                     (prompt ("Adding PRIORITY=10 to %s, ahead of the Wi-Fi" KEPT_IF))
+                     (help   H_WIFI)
+                     (safe)))
+          (message ("%s could not be given PRIORITY=10.  Add the line by hand to keep the default route on the cable." KEPT_IF)
+                   (help H_WIFI)))
+    )))
 
 ; A KEPT FILE FOLLOWS THE ASSIGN TOO.  One written before the drawer named
 ; its drivers through AmiNetXDuo: says DEVICE=SYS:AmiNetXDuo/Devs/Networks/...

@@ -9,10 +9,20 @@
  * Like InstallNetProbe it ships beside the Installer, not in C:.
  *
  *   InstallWiFi TO <file>
+ *   InstallWiFi PRIORITY <interface file>
  *
- * RETURN_OK when TO was written, RETURN_WARN when the user skipped,
- * RETURN_ERROR when the arguments do not parse (ReadArgs), and RETURN_FAIL
- * when there was no window to ask in or TO could not be written.
+ * TO: RETURN_OK when the file was written, RETURN_WARN when the user
+ * skipped, RETURN_FAIL when there was no window to ask in or the file could
+ * not be written.
+ *
+ * PRIORITY: the kept Ethernet definition of a reinstall where the Wi-Fi now
+ * starts beside it.  A line PRIORITY=10 is appended unless an uncommented
+ * PRIORITY or PRI line already sets one; the Installer cannot tell a
+ * commented line from a live one (Search matches anywhere in a line).
+ * RETURN_OK when set or already set, RETURN_FAIL when the file could not be
+ * read or written.
+ *
+ * Either form: RETURN_ERROR when the arguments do not parse (ReadArgs).
  *
  * SPDX-License-Identifier: MIT
  */
@@ -427,18 +437,92 @@ out:
     return result;
 }
 
+/* Whether the line sets PRIORITY: keyword PRIORITY or PRI, any case, after
+   leading blanks, followed by '=' or a blank.  Comment lines (';' or '#')
+   do not. */
+static BOOL sets_priority(const char *p, const char *end)
+{
+    static const char *const keys[] = { "PRIORITY", "PRI" };
+    ULONG k;
+
+    while (p < end && (*p == ' ' || *p == '\t'))
+        p++;
+    for (k = 0; k < 2; k++)
+    {
+        LONG n = (LONG)strlen(keys[k]), i;
+
+        if (end - p <= n)
+            continue;
+        for (i = 0; i < n; i++)
+            if ((p[i] & ~0x20) != keys[k][i])
+                break;
+        if (i == n && (p[n] == '=' || p[n] == ' ' || p[n] == '\t'))
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static LONG set_priority(const char *path)
+{
+    static char text[16384];
+    static const char line[] = "PRIORITY=10\n";
+    BPTR        fh = Open((CONST_STRPTR)path, MODE_OLDFILE);
+    LONG        len, at = 0;
+    BOOL        ok;
+
+    if (fh == 0)
+        return RETURN_FAIL;
+    len = Read(fh, text, sizeof(text));
+    Close(fh);
+    if (len < 0 || len == (LONG)sizeof(text))
+        return RETURN_FAIL;
+
+    while (at < len)
+    {
+        LONG eol = at;
+
+        while (eol < len && text[eol] != '\n')
+            eol++;
+        if (sets_priority(text + at, text + eol))
+            return RETURN_OK;
+        at = eol + 1;
+    }
+
+    fh = Open((CONST_STRPTR)path, MODE_READWRITE);
+    if (fh == 0)
+        return RETURN_FAIL;
+    ok = Seek(fh, 0, OFFSET_END) >= 0;
+    if (ok && len > 0 && text[len - 1] != '\n')
+        ok = Write(fh, (APTR)"\n", 1) == 1;
+    ok = ok && Write(fh, (APTR)line, sizeof(line) - 1) == (LONG)(sizeof(line) - 1);
+    if (!Close(fh))
+        ok = FALSE;
+    return ok ? RETURN_OK : RETURN_FAIL;
+}
+
 int main(int argc, char **argv)
 {
-    LONG           args[1] = { 0 };
+    LONG           args[2] = { 0, 0 };
     struct RDArgs *rda;
     LONG           rc = RETURN_FAIL;
 
     (void)argc;
     (void)argv;
 
-    rda = ReadArgs((CONST_STRPTR)"TO/A", args, NULL);
+    rda = ReadArgs((CONST_STRPTR)"TO/K,PRIORITY/K", args, NULL);
     if (rda == NULL)
         return RETURN_ERROR;
+    if ((args[0] == 0) == (args[1] == 0))
+    {
+        FreeArgs(rda);
+        return RETURN_ERROR;
+    }
+    if (args[1] != 0)
+    {
+        rc = set_priority((const char *)args[1]);
+        FreeArgs(rda);
+        return (int)rc;
+    }
 
     IntuitionBase = (struct IntuitionBase *)OpenLibrary("intuition.library", 37);
     GfxBase = (struct GfxBase *)OpenLibrary("graphics.library", 37);
