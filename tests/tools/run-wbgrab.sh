@@ -11,7 +11,9 @@
 # netprefs.pfs, netprefs-1.pfs ... netprefs-4.pfs; netprefs_window is the
 # window's box for cropping.  -s netwireless grabs NetWirelessPrefs against
 # tests/tools/wifistub.c's unit with the NetWireless AppIcon beside it, then
-# its join form, as netwireless.pfs and netwireless-1.pfs.
+# its join form and the Known networks window, as netwireless.pfs,
+# netwireless-1.pfs and netwireless-2.pfs; then, with ENVARC: alone, moves
+# Home below Cafe there and saves (known_envarc).
 #
 # SPDX-License-Identifier: MIT
 
@@ -60,7 +62,7 @@ NETWIRELESSCX="$BUILD/src/tools/NetWireless"
 WIFISTUB="$BUILD/tests/tools/WifiStub"
 WINCLICK="$BUILD/tests/tools/WinClick"
 for seq in "${SEQUENCES[@]}"; do
-    [ "$seq" = netwireless ] || continue
+    [ "$seq" = netwireless ] || [ "$seq" = screens ] || continue
     [ -x "$NETWIRELESS" ] && [ -x "$NETWIRELESSCX" ] && [ -x "$WIFISTUB" ] &&
         [ -x "$WINCLICK" ] || {
         say error "no NetWirelessPrefs, NetWireless, WifiStub or WinClick under $BUILD"
@@ -190,6 +192,13 @@ EOF
         cp "$WINCLICK" "$HD/C/WinClick"
         chmod 755 "$HD/C/NetWirelessPrefs" "$HD/C/NetWireless" \
             "$HD/C/WifiStub" "$HD/C/WinClick"
+        # Three known networks, for the Known networks window.
+        mkdir -p "$HD/Prefs/Env-Archive/Sys"
+        printf '%s\n' "# known networks" \
+            'network={' '	ssid="Home"' '	psk=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef' \
+            '	priority=3' '}' 'network={' '	ssid="Cafe"' '	key_mgmt=NONE' '	priority=2' '}' \
+            'network={' '	ssid="Attic"' '	key_mgmt=NONE' '	scan_ssid=1' '	priority=1' '}' \
+            > "$HD/Prefs/Env-Archive/Sys/Wireless.prefs"
     fi
 
     [ -n "$DEPTH" ] && wb31_screenmode_prefs "$HD" "$DEPTH"
@@ -288,6 +297,29 @@ C:wbgrab TO DH0:netprefs-4.pfs >NIL:
 Echo >DH0:.done "$RC"
 EOF
         ;;
+    screens)
+        # The Wi-Fi window open beside the AppIcon, folded to its title bar
+        # by the zoom gadget, and the AppIcon alone once it has quit.
+        cat <<'EOF'
+FailAt 9999
+C:Wait 6
+Run >NIL: C:WifiStub SERVE
+C:Wait 2
+Run >NIL: C:NetWireless DEVICE=wifistub.device
+C:Wait 2
+Run >NIL: C:NetWirelessPrefs DEVICE=wifistub.device
+C:Wait 8
+C:wbgrab TO DH0:screens.pfs >DH0:screens.txt
+C:WinClick "Wi-Fi" ZIP >DH0:zip.txt
+C:Wait 2
+C:WinClick "Wi-Fi" 4 TIMES 0 >>DH0:zip.txt
+C:wbgrab TO DH0:screens-1.pfs >NIL:
+C:Break `C:Status COMMAND=C:NetWirelessPrefs` C >NIL:
+C:Wait 3
+C:wbgrab TO DH0:screens-2.pfs >NIL:
+Echo >DH0:.done "$RC"
+EOF
+        ;;
     netwireless)
         # The window once its first scan is in, then Join... (gadget 4)
         # with nothing selected: the form for a hidden network.
@@ -308,6 +340,22 @@ C:WinClick "Wi-Fi" 4 >NIL:
 C:Wait 2
 C:WinClick "Join a" 7 TIMES 0 >DH0:netwireless-join.txt
 C:wbgrab TO DH0:netwireless-1.pfs >NIL:
+C:WinClick "Join a" 14 >NIL:
+C:Wait 1
+C:WinClick "Wi-Fi" 5 >NIL:
+C:Wait 2
+C:wbgrab TO DH0:netwireless-2.pfs >NIL:
+C:WinClick "Known Wi-Fi" 21 >NIL:
+C:Wait 1
+Delete >NIL: ENV:Sys/Wireless.prefs
+C:WinClick "Wi-Fi" 5 >NIL:
+C:Wait 2
+C:WinClick "Known Wi-Fi" 15 AT 6 >NIL:
+C:WinClick "Known Wi-Fi" 17 >NIL:
+C:WinClick "Known Wi-Fi" 19 >NIL:
+C:Wait 2
+C:WinClick "Known Wi-Fi" 21 TIMES 0 >DH0:known-envarc.txt
+Type ENV:Sys/Wireless.prefs >>DH0:known-envarc.txt
 Echo >DH0:.done "$RC"
 EOF
         ;;
@@ -429,6 +477,21 @@ for seq in "${SEQUENCES[@]}"; do
     else
         say "${seq}_pfs" "MISSING"
         FAILED=1
+    fi
+
+    # Known networks with ENVARC: alone: Home moved below Cafe and saved,
+    # the window closed.
+    if [ "$seq" = netwireless ]; then
+        k="$HD/known-envarc.txt"
+        if [ -f "$k" ] && tr -d '\r\t' < "$k" |
+               awk '/ssid="Home"/{h=1} /ssid="Cafe"/{h=0} h&&/^priority=2$/{hp=1}
+                    !h&&/^priority=3$/{cp=1} /^error=no window$/{w=1}
+                    END{exit !(hp&&cp&&w)}'; then
+            say known_envarc PASS
+        else
+            say known_envarc FAIL
+            FAILED=1
+        fi
     fi
 
     [ "$BOOT_STATUS" = "0" ] || FAILED=1
