@@ -2691,7 +2691,8 @@ if [ -n "$NS_FILE" ] && [ -f "$NS_FILE" ]; then
     SNTP_LINES=$(grep -c 'sntp' "$NS_FILE" 2>/dev/null) || SNTP_LINES=0
     # Straight after the line that starts the network, or, when the Wi-Fi
     # starts, straight after the EndIf that closes its block.
-    if [ "$WIFI_START" = 1 ]; then
+    # -w prism2pi: the card is the primary and starts outside the block.
+    if [ "$WIFI_START" = 1 ] && [ "$WIFI_MODE" != prism2pi ]; then
         SNTP_NEXT=$(awk -v p="$WIFI_AN_LINE" \
                         '{ sub(/\r$/, "") } n == 2 { print; exit }
                          n == 1 { n = ($0 == "EndIf") ? 2 : 3 }
