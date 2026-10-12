@@ -25,4 +25,10 @@ typedef int (*DhOursFn)(const char *dir, void *ctx);
 long dh_rehome(const char *old, size_t oldlen, char *out, size_t cap,
                size_t *newlen, DhOursFn ours, void *ctx);
 
+/* The first active "hostname <name>" line of a name_resolution file: not
+   commented (';' or '#'), the keyword alone in its word, a name after it.
+   Copies the line, without its newline, NUL-terminated, into out; returns
+   its length, or 0 when there is none or it does not fit. */
+size_t dh_hostline(const char *buf, size_t len, char *out, size_t cap);
+
 #endif

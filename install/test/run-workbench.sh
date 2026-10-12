@@ -13,7 +13,7 @@
 #                                 [-c drivers]
 #                                 [-m core|driver|probe|minimal]
 #                                 [-C] [-M] [-V] [-I] [-z] [-W]
-#                                 [-s yes|invalid] [-O]
+#                                 [-s yes|invalid] [-O] [-n]
 #                                 [-w join|keep|keepit|keepitlive|keepitfw|userstart|userwm]
 #                                 [-f roadshow-leave|roadshow-replace|
 #                                     amitcpng-leave|amitcpng-replace]
@@ -32,6 +32,8 @@
 # Options which answer an Installer page need -l AVERAGE or EXPERT.  -H also
 # needs AMINETXDUO_PEER, a THIRD machine (this host's frames do not come back
 # round to its own pcap), or it exits 3.
+# -n with -U: between the runs a hostname line is set by hand in
+# name_resolution; setting the network up again must keep it.
 # -O answers the .local page with its second button, "No .local names", on a
 # 68020: the interface must say MDNS=NO.
 # -s types 0.pool.ntp.org as the SNTP server, a page only Expert draws;
@@ -113,10 +115,11 @@ PICK=""
 BOARD="${AMINETXDUO_AMIBERRY_BOARD:-a2065}"
 SNTP_MODE=""
 MDNS_OFF=0
+HAND_HOST=0
 PROBE_FAULT=""
 WIFI_MODE=""
 
-while getopts "b:a:l:p:N:t:T:kHSDgRUEJBIMq:x:f:e:c:m:CVzWs:P:Ow:" opt; do
+while getopts "b:a:l:p:N:t:T:kHSDgRUEJBIMq:x:f:e:c:m:CVzWs:P:Ow:n" opt; do
     case "$opt" in
         b) BUILD="$OPTARG" ;;
         a) ARCHIVE="$OPTARG" ;;
@@ -150,6 +153,7 @@ while getopts "b:a:l:p:N:t:T:kHSDgRUEJBIMq:x:f:e:c:m:CVzWs:P:Ow:" opt; do
         W) SPACES=1 ;;
         s) SNTP_MODE="$OPTARG" ;;
         O) MDNS_OFF=1 ;;
+        n) HAND_HOST=1 ;;
         w) WIFI_MODE="$OPTARG" ;;
         *) echo "usage: $0 [-b builddir] [-a archive.lha]" \
                 "[-l NOVICE|AVERAGE|EXPERT] [-p choice] [-N board]" \
@@ -157,8 +161,9 @@ while getopts "b:a:l:p:N:t:T:kHSDgRUEJBIMq:x:f:e:c:m:CVzWs:P:Ow:" opt; do
                 "[-J] [-B]" \
                 "[-q answers] [-x full-minimal|minimal-full|full-micro|micro-full|fat-full|full-fat]" \
                 "[-f existing-stack-mode] [-e genet|wifi|both|genet-old|genet-old-bare] [-P fail|broken]" \
-                "[-c drivers] [-m core|driver|probe|minimal] [-C] [-M] [-V] [-I] [-z]" \
-                "[-s yes|invalid] [-w join|keep]" >&2
+                "[-c drivers] [-m core|driver|probe|minimal] [-C] [-M] [-V] [-I] [-z] [-W]" \
+                "[-s yes|invalid] [-O] [-n]" \
+                "[-w join|keep|keepit|keepitlive|keepitfw|userstart|userwm]" >&2
            exit 2 ;;
     esac
 done
@@ -1024,8 +1029,10 @@ if [ "$MANUAL_CARD" = "1" ]; then
 fi
 if [ "$EXPERT_CUSTOM" = "1" ]; then
     EXPECTED_IF=lan.1
-    # Set above from the default name; -E names the interface itself.
-    EXPECTED_AN_LINE="${CMD_PFX}AddNetInterface DEVS:NetInterfaces/$EXPECTED_IF QUIET"
+    # Set above from the default name; -E names the interface itself.  -E
+    # and -e are refused together, so the line is never the Wi-Fi one.
+    [ "$WIFI_PRIMARY" = 1 ] ||
+        EXPECTED_AN_LINE="${CMD_PFX}AddNetInterface DEVS:NetInterfaces/$EXPECTED_IF QUIET"
     EXPECTED_HOST=devbox
     if [ "$INVALID_NAMES" = "1" ]; then
         # Both validators redraw askstring with its original default.  The
@@ -1044,6 +1051,10 @@ if [ "$EXPERT_CUSTOM" = "1" ]; then
 fi
 if [ "$RECONFIGURE" = "1" ]; then
     ANSWER_LINES+=("2|BOOL|Set them up again")
+fi
+if [ "$HAND_HOST" = "1" ]; then
+    [ "$RECONFIGURE" = 1 ] || { echo "-n needs -U" >&2; exit 2; }
+    ANSWER_LINES+=("1|HANDHOST|handset")
 fi
 if [ "$MDNS_OFF" = "1" ]; then
     ANSWER_LINES+=("1|BOOL|No .local names")
@@ -2610,7 +2621,8 @@ if [ -n "$EXPECTED_SECOND_IF" ] && [ -n "$NS_FILE" ]; then
 fi
 
 # SNTP at boot.  In every S:Network-Startup this installer writes, exactly
-# one sntp line, the exact command, straight after the AddNetInterface line:
+# one sntp line, the exact command, straight after the AddNetInterface line,
+# or after the EndIf of the Wi-Fi block when the Wi-Fi starts:
 # pool.ntp.org by default, 0.pool.ntp.org with -s.  A kept foreign file has
 # none.  On a kept reinstall the file is run 1's, verbatim, so the same holds
 # there; that run 2 did not ask is the driver's ABSENT action.
@@ -2620,13 +2632,20 @@ SNTP_LINES=0
 SNTP_AFTER=no
 if [ -n "$NS_FILE" ] && [ -f "$NS_FILE" ]; then
     SNTP_LINES=$(grep -c 'sntp' "$NS_FILE" 2>/dev/null) || SNTP_LINES=0
-    # After the line that starts the network; the Wi-Fi block of an install
-    # that starts both may sit between them.
-    SNTP_NEXT=$(awk -v p="$EXPECTED_AN_LINE" \
-                    -v q="Run >NIL: <NIL: ${SNTP_PREFIX}sntp $EXPECTED_NTP QUIET" \
-                    '{ sub(/\r$/, "") } found && $0 == q { print "yes"; exit }
-                     $0 == p { found = 1 }' "$NS_FILE")
-    [ "$SNTP_NEXT" = yes ] && SNTP_AFTER=yes
+    # Straight after the line that starts the network, or, when the Wi-Fi
+    # starts, straight after the EndIf that closes its block.
+    if [ "$WIFI_START" = 1 ]; then
+        SNTP_NEXT=$(awk -v p="$WIFI_AN_LINE" \
+                        '{ sub(/\r$/, "") } n == 2 { print; exit }
+                         n == 1 { n = ($0 == "EndIf") ? 2 : 3 }
+                         $0 == p { n = 1 }' "$NS_FILE")
+    else
+        SNTP_NEXT=$(awk -v p="$EXPECTED_AN_LINE" \
+                        '{ sub(/\r$/, "") } found { print; exit }
+                         $0 == p { found = 1 }' "$NS_FILE")
+    fi
+    [ "$SNTP_NEXT" = "Run >NIL: <NIL: ${SNTP_PREFIX}sntp $EXPECTED_NTP QUIET" ] &&
+        SNTP_AFTER=yes
 fi
 echo "startup_sntp_lines=$SNTP_LINES"
 echo "startup_sntp_after_addnetinterface=$SNTP_AFTER"
@@ -2635,7 +2654,7 @@ grep -q 'written by the AmiNetXDuo installer' "$NS_FILE" 2>/dev/null && NS_OURS=
 if [ "$NS_OURS" = yes ]; then
     if [ "$SNTP_LINES" != "1" ] || [ "$SNTP_AFTER" != "yes" ]; then
         echo "!! want one 'Run >NIL: <NIL: ${SNTP_PREFIX}sntp $EXPECTED_NTP QUIET'" \
-             "straight after AddNetInterface; lines=$SNTP_LINES after=$SNTP_AFTER"
+             "straight after the network start; lines=$SNTP_LINES after=$SNTP_AFTER"
         fail=1
     else
         echo "  ok      S:Network-Startup sets the clock from $EXPECTED_NTP"
@@ -2651,7 +2670,15 @@ fi
 # interface for the full and fat stacks on a 68020 or newer, NO on a 68000
 # and on the reduced stacks.
 _res=$(amiga_path "${INST}Devs/Internet/name_resolution" 2>/dev/null || true)
-if [ "$EXPERT_CUSTOM" = 0 ] &&
+if [ "$HAND_HOST" = 1 ]; then
+    if [ "$(grep -c '^hostname' "$_res" 2>/dev/null)" = 1 ] &&
+       grep -q '^hostname handset$' "$_res"; then
+        echo "  ok      the hand-set hostname survived setting the network up again"
+    else
+        echo "!! the hand-set hostname did not survive: $(grep '^hostname' "$_res" 2>/dev/null)"
+        fail=1
+    fi
+elif [ "$EXPERT_CUSTOM" = 0 ] &&
    grep -q 'written by the AmiNetXDuo' "$_res" 2>/dev/null; then
     if grep -q '^hostname' "$_res" || ! grep -q '^;hostname amiga$' "$_res"; then
         echo "!! name_resolution names the machine; the derived name was wanted"

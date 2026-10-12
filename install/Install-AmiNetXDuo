@@ -2770,6 +2770,18 @@
       (safe))
 
     ; --- name resolution ------------------------------------------------
+    ;
+    ; A name somebody set by hand in the file being replaced is theirs, at
+    ; every level: InstallSameFile HOSTLINE copies its active hostname line,
+    ; the commented ones left behind, and it goes into the new file.  An
+    ; Expert who types a name replaces it.
+    (set NR_FILE (tackon D_DEVS "Internet/name_resolution"))
+    (set NR_HOST "T:AmiNetXDuo-hostname")
+    (set KEEP_HOST 0)
+    (if (AND (= (strlen HOSTNAME) 0) (exists NR_FILE (noreq)))
+        (if (= 0 (run ("\"%s\" \"%s\" \"%s\" HOSTLINE" S_SAMEFILE NR_FILE NR_HOST)
+                      (quiet) (safe)))
+            (set KEEP_HOST 1)))
 
     (textfile
       (prompt "Writing DEVS:Internet/name_resolution")
@@ -2794,8 +2806,19 @@
                   (cat "nameserver " IPDNS "\n")))
       (append (if (> (strlen HOSTNAME) 0)
                   (cat "hostname " HOSTNAME "\n")
-                  ";hostname amiga\n"))
+                  (if KEEP_HOST "" ";hostname amiga\n")))
       (safe))
+    (if KEEP_HOST
+        (run ("Type %s >>\"%s\"" NR_HOST NR_FILE)
+             (prompt "Keeping the name set in DEVS:Internet/name_resolution")
+             (help   H_HOSTNAME)
+             (safe)))
+    (if (exists NR_HOST (noreq))
+        (delete NR_HOST
+                (prompt ("Removing %s" NR_HOST))
+                (help   H_HOSTNAME)
+                (optional "force" "nofail")
+                (safe)))
   ))
 
 ; --- the Wi-Fi network, for WirelessManager ------------------------------

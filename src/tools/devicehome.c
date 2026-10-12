@@ -1,6 +1,8 @@
 /* SPDX-License-Identifier: MIT */
 #include "devicehome.h"
 
+#include <string.h>
+
 /* Every driver an install writes into its Devs/Networks. */
 static const char *const dh_drivers[] =
 {
@@ -136,4 +138,40 @@ long dh_rehome(const char *old, size_t oldlen, char *out, size_t cap,
     }
     *newlen = used;
     return rewritten;
+}
+
+size_t dh_hostline(const char *buf, size_t len, char *out, size_t cap)
+{
+    size_t at = 0;
+
+    while (at < len)
+    {
+        size_t start = at, end, i, n;
+
+        while (at < len && buf[at] != '\n')
+            at++;
+        end = at;
+        if (at < len)
+            at++;
+        if (end > start && buf[end - 1] == '\r')
+            end--;
+
+        i = start;
+        while (i < end && (buf[i] == ' ' || buf[i] == '\t'))
+            i++;
+        if (end - i < 9 || memcmp(buf + i, "hostname", 8) != 0 ||
+            (buf[i + 8] != ' ' && buf[i + 8] != '\t'))
+            continue;
+        n = i + 8;
+        while (n < end && (buf[n] == ' ' || buf[n] == '\t'))
+            n++;
+        if (n == end)
+            continue;
+        if (end - start + 1 > cap)
+            return 0;
+        memcpy(out, buf + start, end - start);
+        out[end - start] = '\0';
+        return end - start;
+    }
+    return 0;
 }

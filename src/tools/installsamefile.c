@@ -19,6 +19,11 @@
  * as it should be, RETURN_ERROR when it could not be read or replaced, and
  * then it is unchanged.
  *
+ * HOSTLINE: FIRST is a name_resolution file; its first active hostname line
+ * is written to SECOND, so the Installer can carry a name set by hand over
+ * into the file it writes.  RETURN_OK with a line written, RETURN_WARN when
+ * there is none, RETURN_ERROR when either file fails.
+ *
  * SPDX-License-Identifier: MIT
  */
 
@@ -38,7 +43,7 @@ const char *const tool_name = "InstallSameFile";
 static const char version_tag[] __attribute__((used)) =
     TOOL_VERSTAG("InstallSameFile");
 
-#define TEMPLATE "FIRST/A,SECOND/A/M,DEVICES/S"
+#define TEMPLATE "FIRST/A,SECOND/A/M,DEVICES/S,HOSTLINE/S"
 
 /* An interface file is a few hundred bytes; the cap only bounds a stray. */
 #define DEVICES_FILE_MAX 65536L
@@ -49,6 +54,7 @@ enum
     ARG_FIRST = 0,
     ARG_SECOND,
     ARG_DEVICES,
+    ARG_HOSTLINE,
     ARG_COUNT
 };
 
@@ -199,9 +205,36 @@ static LONG rehome_devices(const char *path, STRPTR *drawers)
     return rc;
 }
 
+static LONG copy_hostline(const char *from, const char *to)
+{
+    char  buf[4096];
+    char  line[256];
+    BPTR  fh;
+    LONG  got;
+    size_t n;
+
+    fh = Open((CONST_STRPTR)from, MODE_OLDFILE);
+    if (fh == 0)
+        return RETURN_ERROR;
+    got = Read(fh, buf, sizeof(buf));
+    Close(fh);
+    if (got < 0)
+        return RETURN_ERROR;
+    n = dh_hostline(buf, (size_t)got, line, sizeof(line) - 1);
+    if (n == 0)
+        return RETURN_WARN;
+    line[n++] = '\n';
+    fh = Open((CONST_STRPTR)to, MODE_NEWFILE);
+    if (fh == 0)
+        return RETURN_ERROR;
+    got = Write(fh, line, (LONG)n);
+    Close(fh);
+    return (got == (LONG)n) ? RETURN_OK : RETURN_ERROR;
+}
+
 int main(int argc, char **argv)
 {
-    LONG           args[ARG_COUNT] = { 0, 0, 0 };
+    LONG           args[ARG_COUNT] = { 0 };
     struct RDArgs *rda;
     STRPTR        *second;
     LONG           rc;
@@ -216,7 +249,11 @@ int main(int argc, char **argv)
         return RETURN_ERROR;
 
     second = (STRPTR *)args[ARG_SECOND];
-    if (args[ARG_DEVICES] != 0)
+    if (args[ARG_HOSTLINE] != 0)
+        rc = (second[1] != NULL) ? RETURN_ERROR
+                                 : copy_hostline((const char *)args[ARG_FIRST],
+                                                 (const char *)second[0]);
+    else if (args[ARG_DEVICES] != 0)
     {
         /* A DEVICE line naming a volume that is not mounted is simply not
            ours; it must not stop the Installer at "Please insert". */
