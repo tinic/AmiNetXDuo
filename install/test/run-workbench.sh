@@ -40,6 +40,9 @@
 # Emu68's own genet.device in DEVS:Networks: the interface must name it.
 # genet-old-bare is the same tree with no genet.device and no other driver:
 # the Installer must stop before writing anything.
+# -u runs the installed SYS:AmiNetXDuo/Uninstall-AmiNetXDuo after the
+# install, in the same boot: every product file must be as it was before the
+# install, .old and .new files aside.
 # -P replaces the throw-away archive's InstallNetProbe with one that exits
 # RETURN_FAIL for every query (fail) or with a file that is not a program
 # (broken): the Installer must fall back to the full stack and the driver
@@ -86,9 +89,10 @@ INST=
 PICK=""
 BOARD="${AMINETXDUO_AMIBERRY_BOARD:-a2065}"
 SNTP_MODE=""
+UNINSTALL=0
 PROBE_FAULT=""
 
-while getopts "b:a:l:p:N:t:T:kHSDgRUEJBIMq:x:f:e:c:m:CVzWs:P:" opt; do
+while getopts "b:a:l:p:N:t:T:kHSDgRUEJBIMq:x:f:e:c:m:CVzWs:P:u" opt; do
     case "$opt" in
         b) BUILD="$OPTARG" ;;
         a) ARCHIVE="$OPTARG" ;;
@@ -121,6 +125,7 @@ while getopts "b:a:l:p:N:t:T:kHSDgRUEJBIMq:x:f:e:c:m:CVzWs:P:" opt; do
         z) STALE_PI_DRIVERS=1; NO_CARD=1; CONFIG_ONLY=1 ;;
         W) SPACES=1 ;;
         s) SNTP_MODE="$OPTARG" ;;
+        u) UNINSTALL=1; CONFIG_ONLY=1 ;;
         *) echo "usage: $0 [-b builddir] [-a archive.lha]" \
                 "[-l NOVICE|AVERAGE|EXPERT] [-p choice] [-N board]" \
                 "[-t seconds] [-T seconds] [-k] [-H] [-S] [-D] [-g] [-R] [-U] [-E]" \
@@ -827,6 +832,7 @@ build_driver() {
            -DDRIVE_PICK_SKIP="$skip" -DDRIVE_PAGE_PAUSE="$page_pause" \
            -DDRIVE_PAUSE_OPTIONS="$pause_options" \
            -DDRIVE_ARCHIVE_DRAWER="\"$UNPACK_AMIGA/AmiNetXDuo\"" -I"$NDK" \
+           ${UNINSTALL_DEF:+"$UNINSTALL_DEF"} \
            -o "$out" "$ROOT/install/test/installdrive.c" || exit 2
 }
 
@@ -1002,7 +1008,11 @@ fi
 
 echo "==> building installdrive ($LEVEL, $DRIVE_RUNS run(s)${YES_LABEL:+, \"$YES_LABEL\"}${PICK:+, picking \"$PICK\"})"
 DRIVER="$ROOT/build/installdrive-$TAG-$LEVEL"
+UNINSTALL_DEF=""
+[ "$UNINSTALL" = 0 ] ||
+    UNINSTALL_DEF='-DDRIVE_UNINSTALL="SYS:AmiNetXDuo/Uninstall-AmiNetXDuo"'
 build_driver "$DRIVER" "$DRIVE_RUNS" "$YES_LABEL" "$PICK_SPEC"
+UNINSTALL_DEF=""
 
 rm -rf "$HD"
 rm -rf "$WORK"
@@ -1986,7 +1996,7 @@ if [ -n "$CANCEL_MODE" ] || [ -n "$MISSING_MODE" ] || [ "$NO_CARD" = 1 ] ||
     REFUSAL=1
 fi
 ZERO_DIFF_BEFORE=""
-if [ "$REFUSAL" = 1 ]; then
+if [ "$REFUSAL" = 1 ] || [ "$UNINSTALL" = 1 ]; then
     ZERO_DIFF_BEFORE=$(product_manifest)
 fi
 
@@ -2017,6 +2027,40 @@ cat "$HD/installdrive.txt" 2>/dev/null || echo "(none)"
 echo
 echo "---- Installer log ----"
 cat "$HD/install-log.txt" 2>/dev/null || echo "(none written)"
+
+# UNINSTALLED: what was there before the install is there again, and
+# nothing else, apart from the .old and .new files a replacement leaves.
+if [ "$UNINSTALL" = 1 ]; then
+    # Protection bits aside: Copy CLONE back through UAE's host files does not
+    # reproduce the host mode the fixture was written with.
+    _strip() { grep -v -E '\.(old|old\.info|new)$' | grep -v -E $'^D\t' |
+               grep -v -E '\.uaem$' | cut -f3- | sort; }
+    _before=$(printf '%s\n' "$ZERO_DIFF_BEFORE" | _strip)
+    _after=$(product_manifest | _strip)
+    _u_ok=1
+    if [ "$_before" != "$_after" ]; then
+        echo "!! uninstalling did not restore the tree"
+        diff -u <(printf '%s\n' "$_before") <(printf '%s\n' "$_after") || true
+        _u_ok=0
+    fi
+    if [ "$INSTALL_STATUS" != 0 ]; then
+        echo "!! the driver returned $INSTALL_STATUS"
+        _u_ok=0
+    fi
+    if amiga_path S/AmiNetXDuo-Files >/dev/null 2>&1; then
+        echo "!! S:AmiNetXDuo-Files is still there"
+        _u_ok=0
+    fi
+    if [ "$_u_ok" = 1 ]; then
+        echo "  ok      install then Uninstall-AmiNetXDuo left the tree as it was"
+        echo "workbench_e2e=PASS board=$BOARD model=$MODEL driver=$SANA2_DRIVER" \
+             "card_config=uninstalled stack=removed boot_status=not-run"
+        exit 0
+    fi
+    echo "workbench_e2e=FAIL board=$BOARD model=$MODEL driver=$SANA2_DRIVER" \
+         "card_config=uninstalled stack=unknown boot_status=install-$INSTALL_STATUS"
+    exit 1
+fi
 
 if [ "$REFUSAL" = 1 ]; then
     ZERO_DIFF_AFTER=$(product_manifest)

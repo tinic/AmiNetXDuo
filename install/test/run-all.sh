@@ -95,6 +95,7 @@ SCENARIOS=(
     DRAWER_FULL DRAWER_MINIMAL DRAWER_MICRO
     DRAWER_FULL_MINIMAL DRAWER_MICRO_FULL
     ROADSHOW_LEAVE ROADSHOW_REPLACE AMITCPNG_LEAVE AMITCPNG_REPLACE
+    UNINSTALL ROADSHOW_UNINSTALL
     EMU68_GENET EMU68_WIFI EMU68_BOTH EMU68_BOTH_MICRO
     EMU68_GENET_OLD EMU68_GENET_OLD_BARE
     CANCEL_DRIVERS MISSING_CORE MISSING_DRIVER MISSING_PROBE MISSING_MINIMAL
@@ -196,6 +197,8 @@ for scenario in "${SCENARIOS[@]}"; do
         ROADSHOW_REPLACE)      opts=(-l AVERAGE -f roadshow-replace) ;;
         AMITCPNG_LEAVE)        opts=(-l AVERAGE -f amitcpng-leave) ;;
         AMITCPNG_REPLACE)      opts=(-l AVERAGE -f amitcpng-replace) ;;
+        UNINSTALL)             opts=(-l NOVICE -u) ;;
+        ROADSHOW_UNINSTALL)    opts=(-l AVERAGE -f roadshow-replace -u) ;;
         EMU68_GENET)           opts=(-l AVERAGE -e genet) ;;
         EMU68_WIFI)            opts=(-l AVERAGE -e wifi) ;;
         EMU68_BOTH)            opts=(-l AVERAGE -e both) ;;

@@ -557,6 +557,8 @@ grep -q "(set VERSION_STR \"$VERSION\")" "$TREE/Install-AmiNetXDuo" || {
 }
 
 cp "$INSTALL/Install-AmiNetXDuo.info"  "$TREE/"
+cp "$INSTALL/Uninstall-AmiNetXDuo"     "$TREE/"
+cp "$INSTALL/Uninstall-AmiNetXDuo.info" "$TREE/"
 cp "$INSTALL/AmiNetXDuo.info"          "$TREE/"
 cp "$INSTALL/AmiNetXDuo.info"          "$OUTDIR/"
 
@@ -860,6 +862,7 @@ if command -v lha >/dev/null 2>&1; then
 fi
 
 python3 "$INSTALL/tools/checkscript.py" "$TREE/Install-AmiNetXDuo"
+python3 "$INSTALL/tools/checkscript.py" "$TREE/Uninstall-AmiNetXDuo"
 python3 "$INSTALL/tools/showicon.py" "$TREE"/*.info >/dev/null
 
 echo

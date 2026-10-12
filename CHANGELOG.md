@@ -5,6 +5,12 @@ Add new entries under `Unreleased`; published release sections are history.
 
 ## Unreleased
 
+- Installer: another stack's libraries, same-named commands and replaced
+  configuration are kept in the AmiNetXDuo drawer's Backup.
+
+- New Uninstall-AmiNetXDuo removes AmiNetXDuo and puts back what it
+  replaced.
+
 - Installer: an update over AmiNetXDuo no longer asks to replace its own
   bsdsocket.library; the kept-configuration notice is Expert only.
 

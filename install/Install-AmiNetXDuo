@@ -104,6 +104,9 @@
                     (tackon SRCDIR "Terminal.info") "Terminal.info"))
 (set S_CICON (if (> (strlen SRCDIR) 0)
                  (tackon SRCDIR "C.info") "C.info"))
+(set S_UNINSTALL (if (> (strlen SRCDIR) 0)
+                     (tackon SRCDIR "Uninstall-AmiNetXDuo") "Uninstall-AmiNetXDuo"))
+(set S_UNINSTALLICON (cat S_UNINSTALL ".info"))
 
 ; --------------------------------------------------------------------------
 ; Help texts.  Every ask.../copy... statement is required by the Installer to
@@ -356,6 +359,11 @@
        "already there exactly as they are.\n\n"
        "An existing driver is renamed to .old rather than being deleted, so "
        "the previous copy can be put back by hand."))
+
+(set H_BACKUP
+  (cat "Files of the stack AmiNetXDuo replaces are kept in the Backup drawer "
+       "of the AmiNetXDuo drawer, the first time only.  Uninstall-AmiNetXDuo "
+       "puts them back."))
 
 (set H_REPLACELIB
   (cat "There is already a bsdsocket.library on this machine.  It belongs to "
@@ -1928,6 +1936,46 @@
 ; already doing nothing here: the old file had been renamed away before it
 ; ran, so there was never a destination to compare against.
 
+; --- another stack's files, kept for Uninstall-AmiNetXDuo -------------
+;
+; Replacing another stack's bsdsocket.library is the point where its files
+; start to go: its libraries now, its same-named commands in C: and its
+; configuration below.  Each goes to the AmiNetXDuo drawer's Backup the
+; first time, and a later install never replaces a copy there, so
+; Uninstall-AmiNetXDuo puts back that stack as it was.
+(set D_BACKUP (tackon DOCDIR "Backup"))
+(set FOREIGN_STACK (if (AND OLD_BSD (= LIB_OURS 0) (= DRAWER_LAYOUT 0)) 1 0))
+
+; BK_SRC into D_BACKUP/BK_SUB, unless a copy is there already.
+(procedure P_backup
+  (set BK_DIR (tackon D_BACKUP BK_SUB))
+  (if (AND (exists BK_SRC (noreq))
+           (NOT (exists (tackon BK_DIR (fileonly BK_SRC)) (noreq))))
+    (
+      (makedir DOCDIR (prompt ("Creating %s" DOCDIR)) (help H_DOCDIR))
+      (makedir D_BACKUP (prompt ("Creating %s" D_BACKUP)) (help H_BACKUP))
+      (if (patmatch "#?/#?" BK_SUB)
+          (makedir (pathonly BK_DIR)
+                   (prompt ("Creating %s" (pathonly BK_DIR)))
+                   (help H_BACKUP)))
+      (makedir BK_DIR (prompt ("Creating %s" BK_DIR)) (help H_BACKUP))
+      (copyfiles
+        (prompt ("Keeping %s in %s" BK_SRC BK_DIR))
+        (help   H_BACKUP)
+        (source BK_SRC)
+        (dest   BK_DIR)
+        (optional "nofail"))
+    ))
+)
+
+(if FOREIGN_STACK
+  (
+    (set BK_SUB "Libs")
+    (set BK_SRC D_BSD) (P_backup)
+    (set BK_SRC D_UG)  (P_backup)
+    (set BK_SRC D_TLS) (P_backup)
+  ))
+
 (working "Installing the libraries")
 
 ; A .new left behind by a run that was stopped between the copy and the swap.
@@ -2243,6 +2291,25 @@
 
 (working "Installing the network commands")
 
+; The C drawer's own icon, which the copy below brings along when C: had none.
+(set HAD_C_INFO (if (exists (tackon D_C ".info") (noreq)) 1 0))
+
+; A command of the same name that does not name AmiNetXDuo inside is
+; another stack's, or the user's, whatever library is in LIBS:.
+(if (= DRAWER_LAYOUT 0)
+  (
+    (set BK_SUB "C")
+    (foreach S_C "~(fat|#?.info)"
+      (
+        (set BK_SRC (tackon D_C @each-name))
+        (if (exists BK_SRC (noreq))
+            (if (<> 0 (run ("Search >NIL: FROM \"%s\" SEARCH AmiNetXDuo QUIET"
+                            BK_SRC)
+                           (quiet) (safe)))
+                (P_backup)))
+      ))
+  ))
+
 (copyfiles
   (prompt "Installing the network commands into C:")
   (help   "AddNetInterface, Online and Offline bring an interface up and "
@@ -2412,6 +2479,11 @@
   (set FILE_OLD_DST (cat FILE_OLD_SRC FILE_OLD_SUFFIX))
   (if (exists FILE_OLD_SRC (noreq))
     (
+      (if (= CONFIG_OURS 0)
+        (
+          (set BK_SRC FILE_OLD_SRC)
+          (P_backup)
+        ))
       (if (exists FILE_OLD_DST (noreq))
           (delete FILE_OLD_DST
                   (prompt ("Removing the previous %s" FILE_OLD_DST))
@@ -2428,6 +2500,7 @@
 (procedure P_write_interface
   (set FILE_OLD_SRC (tackon (tackon D_DEVS "NetInterfaces") IFNAME))
   (set FILE_OLD_SUFFIX ".old.info")
+  (set BK_SUB "Devs/NetInterfaces")
   (P_keep_old)
   (textfile
     (prompt ("Writing DEVS:NetInterfaces/%s" IFNAME))
@@ -2531,6 +2604,7 @@
 
     (set FILE_OLD_SRC (tackon D_DEVS "Internet/routes"))
     (set FILE_OLD_SUFFIX ".old")
+    (set BK_SUB "Devs/Internet")
     (P_keep_old)
     (textfile
       (prompt "Writing DEVS:Internet/routes")
@@ -2555,6 +2629,7 @@
 
     (set FILE_OLD_SRC (tackon D_DEVS "Internet/name_resolution"))
     (set FILE_OLD_SUFFIX ".old")
+    (set BK_SUB "Devs/Internet")
     (P_keep_old)
     (textfile
       (prompt "Writing DEVS:Internet/name_resolution")
@@ -2686,6 +2761,23 @@
       (dest    DOCPARENT)
       (newname "AmiNetXDuo.info")
       (optional "nofail")))
+
+; The uninstaller, where the archive no longer has to be.
+(if (exists S_UNINSTALL (noreq))
+    (copyfiles
+      (prompt "Installing Uninstall-AmiNetXDuo")
+      (help   "It removes AmiNetXDuo again and puts back what it replaced of "
+              "another stack.  Double-click it.")
+      (source S_UNINSTALL)
+      (dest   DOCDIR)
+      (optional "force" "nofail")))
+(if (exists S_UNINSTALLICON (noreq))
+    (copyfiles
+      (prompt "Giving Uninstall-AmiNetXDuo its icon")
+      (help   @copyfiles-help)
+      (source S_UNINSTALLICON)
+      (dest   DOCDIR)
+      (optional "force" "nofail")))
 
 (if (exists S_README (noreq))
     (copyfiles
@@ -2901,6 +2993,12 @@
   (
     (if (exists "S:Network-Startup" (noreq))
       (
+        (if (= CONFIG_OURS 0)
+          (
+            (set BK_SUB "S")
+            (set BK_SRC "S:Network-Startup")
+            (P_backup)
+          ))
         (if (exists "S:Network-Startup.old" (noreq))
             (delete "S:Network-Startup.old"
                     (prompt "Removing the previous S:Network-Startup.old")
@@ -2969,6 +3067,63 @@
       (prompt "Removing AmiNetXDuo's lines from S:User-Startup, so that the "
               "network does not start by itself.")
       (help   H_STARTUP)))
+
+; --- the record Uninstall-AmiNetXDuo runs --------------------------------
+;
+; An AmigaDOS script: delete what this installation put on the disk, put
+; back the other stack's files kept in Backup, and remove the drawer.  The
+; drawer layout keeps everything in the drawer.  The configuration files
+; are Uninstall-AmiNetXDuo's to find: they name this installer.
+(set REC_FILES "")
+(if (= DRAWER_LAYOUT 0)
+  (
+    (set REC_FILES
+      (cat "Delete \"" D_BSD "\" \"" D_UG "\" QUIET\n"
+           (if (exists (tackon S_LIBS "tls.library") (noreq))
+               (cat "Delete \"" D_TLS "\" QUIET\n") "")
+           "Delete SYS:Prefs/NetPrefs SYS:Prefs/NetPrefs.info QUIET\n"
+           "Delete SYS:Utilities/NetMeter SYS:Utilities/NetMeter.info QUIET\n"))
+    (if DO_ANXNET
+        (set REC_FILES
+          (cat REC_FILES
+               "Delete " (tackon D_DEVS "Networks/anxnet.device") " "
+               (tackon D_DEVS "Networks/anxgenet.device") " "
+               (tackon D_DEVS "Networks/anxwifipi.device") " "
+               (tackon D_DEVS "Networks/anxzz9000.device") " QUIET\n")))
+    (foreach S_C "~(fat)"
+      (set REC_FILES
+        (cat REC_FILES "Delete \"" (tackon D_C @each-name) "\" QUIET\n")))
+    (if (= HAD_C_INFO 0)
+        (set REC_FILES
+          (cat REC_FILES "Delete \"" (tackon D_C ".info") "\" QUIET\n")))
+    (set REC_N 0)
+    (while (set REC_SUB (select REC_N "Libs" "C" "Devs" "S" ""))
+      (
+        (set REC_FILES
+          (cat REC_FILES
+               "If EXISTS \"" (tackon D_BACKUP REC_SUB) "\"\n"
+               "  Copy \"" (tackon D_BACKUP REC_SUB) "\" "
+               (select REC_N "LIBS:" "C:" "DEVS:" "S:") " ALL CLONE QUIET\n"
+               "EndIf\n"))
+        (set REC_N (+ REC_N 1))
+      ))
+  ))
+
+(textfile
+  (prompt "Writing S:AmiNetXDuo-Files")
+  (help   "The record of this installation that Uninstall-AmiNetXDuo, in the "
+          "AmiNetXDuo drawer, runs to remove it again.")
+  (dest   "S:AmiNetXDuo-Files")
+  (append "; S:AmiNetXDuo-Files -- written by the AmiNetXDuo installer.\n")
+  (append ";\n")
+  (append "; Uninstall-AmiNetXDuo executes this after it has removed the\n")
+  (append "; S:User-Startup block and the configuration files the\n")
+  (append "; installer wrote.\n")
+  (append "FailAt 21\n")
+  (append REC_FILES)
+  (append ("Delete \"%s\" ALL QUIET FORCE\n" DOCDIR))
+  (append ("Delete \"%s.info\" QUIET\n" DOCDIR))
+  (safe))
 
 (complete 100)
 

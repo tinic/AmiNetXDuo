@@ -1,0 +1,126 @@
+; ==========================================================================
+;
+;  AmiNetXDuo -- Commodore Installer script that removes it again
+;
+;  Install-AmiNetXDuo leaves S:AmiNetXDuo-Files, an AmigaDOS script that
+;  deletes the files it installed, puts back what it replaced of another
+;  stack (from the AmiNetXDuo drawer's Backup), and removes that drawer.
+;  This script removes the S:User-Startup block, the configuration files
+;  the installer wrote (they name it on their first line), and then runs
+;  that record.
+;
+;  SPDX-License-Identifier: MIT
+;
+; ==========================================================================
+
+(set APPNAME "AmiNetXDuo")
+(set REC     "S:AmiNetXDuo-Files")
+(set WIFIREC "S:AmiNetXDuo-WiFi")
+
+(if (NOT (exists REC (noreq)))
+    (abort "There is no S:AmiNetXDuo-Files, the record Install-AmiNetXDuo "
+           "writes of what it installed.\n\n"
+           "Nothing was changed."))
+
+(welcome "Removing AmiNetXDuo.\n\n")
+
+(set GO
+  (askbool
+    (prompt "Remove AmiNetXDuo from this Amiga?\n\n"
+            "Its files go, and what it replaced of another stack comes back.  "
+            "The network stops working at the next reboot.")
+    (help (cat "S:User-Startup loses AmiNetXDuo's lines.  The configuration "
+               "files the installer wrote are deleted; files of another stack "
+               "that it replaced are put back from the AmiNetXDuo drawer's "
+               "Backup, and that drawer is removed.\n\n"
+               "Files that end in .old stay where they are."))
+    (choices "Yes, remove it" "No")
+    (default 1)))
+
+(if (= GO 0)
+    (abort "AmiNetXDuo is still installed.\n\nNothing was changed."))
+
+(complete 0)
+
+(startup APPNAME
+  (prompt "Removing AmiNetXDuo's lines from S:User-Startup.")
+  (help   "Only the lines between ;BEGIN AmiNetXDuo and ;END AmiNetXDuo."))
+
+; The configuration this installer wrote, and nothing else: each such file
+; says so in its first lines.  A file of another stack, or one the user
+; wrote, is left where it is.
+(set MARK "written by the AmiNetXDuo")
+
+(procedure P_drop_ours
+  (if (exists DROP_FILE (noreq))
+      (if (= 0 (run ("Search >NIL: FROM \"%s\" SEARCH \"%s\" QUIET" DROP_FILE MARK)
+                    (quiet) (safe)))
+          (delete DROP_FILE
+                  (prompt ("Deleting %s" DROP_FILE))
+                  (help "A file AmiNetXDuo put there.")
+                  (optional "force" "nofail"))))
+)
+
+(if (= (exists "DEVS:NetInterfaces" (noreq)) 2)
+    (foreach "DEVS:NetInterfaces" "~(#?.info)"
+      (
+        (set DROP_FILE (tackon "DEVS:NetInterfaces" @each-name))
+        (P_drop_ours)
+      )))
+
+(set DROP_N 0)
+(while (set DROP_FILE (select DROP_N "DEVS:Internet/routes"
+                                     "DEVS:Internet/name_resolution"
+                                     "S:Network-Startup" ""))
+  (
+    (P_drop_ours)
+    (set DROP_N (+ DROP_N 1))
+  ))
+
+; The netdb files the installer adds only where there were none, by their
+; own first lines, and the certificate store, which is AmiNetXDuo's.
+(set DROP_N 0)
+(while (set DROP_FILE (select DROP_N "DEVS:Internet/hosts"
+                                     "DEVS:Internet/protocols"
+                                     "DEVS:Internet/services"
+                                     "DEVS:Internet/networks" ""))
+  (
+    (set MARK (select DROP_N "names this machine knows by itself"
+                             "-- IP protocol numbers."
+                             "-- well-known TCP and UDP port numbers."
+                             "-- names for whole networks."))
+    (P_drop_ours)
+    (set DROP_N (+ DROP_N 1))
+  ))
+(if (exists "DEVS:Internet/certificates" (noreq))
+    (delete "DEVS:Internet/certificates"
+            (prompt "Deleting DEVS:Internet/certificates")
+            (help "A file AmiNetXDuo put there.")
+            (optional "force" "nofail")))
+
+(complete 40)
+
+; WirelessManager and Wireless.prefs, when the installer put them there.
+(if (exists WIFIREC (noreq))
+  (
+    (run ("Execute %s" WIFIREC)
+         (prompt "Removing the Wi-Fi files the installer created")
+         (help "The AmigaDOS script the installer wrote of what it installed."))
+    (delete WIFIREC
+            (prompt ("Deleting %s" WIFIREC))
+            (help "A file AmiNetXDuo put there.")
+            (optional "force" "nofail"))
+  ))
+
+(run ("Execute %s" REC)
+     (prompt "Deleting AmiNetXDuo's files and putting back what it replaced")
+     (help "The AmigaDOS script the installer wrote of what it installed."))
+
+(delete REC
+        (prompt ("Deleting %s" REC))
+        (help "A file AmiNetXDuo put there.")
+        (optional "force" "nofail"))
+
+(complete 100)
+
+(exit "AmiNetXDuo is removed.  Reboot to stop the stack that is running now.")

@@ -335,37 +335,22 @@ way it always was.
 UNINSTALLING
 ------------
 
-     Delete LIBS:bsdsocket.library LIBS:usergroup.library
-     Delete LIBS:tls.library
-     Delete C:NetSetup C:NetPrefs C:AddNetInterface C:RemoveNetInterface
-     Delete SYS:Prefs/NetPrefs SYS:Prefs/NetPrefs.info
-     Delete C:NetMeter SYS:Utilities/NetMeter SYS:Utilities/NetMeter.info
-     Delete C:ConfigureNetInterface C:Online C:Offline
-     Delete C:ShowNetStatus C:ShowNetServices C:GetNetStatus
-     Delete C:CheckNetConfig C:CheckNetDevice C:NetDevStats C:NetShutdown
-     Delete C:CreateAmiNetXDuoStatusReport
-     Delete C:AddNetRoute C:DeleteNetRoute C:hostname
-     Delete C:ping C:netstat C:host C:nslookup C:arp
-     Delete C:fetch C:nc C:telnet C:tftp C:sntp C:traceroute
-     Delete C:whois C:ssh C:scp C:scp-runner C:httpd C:iperf
-     Delete C:NetCapture C:NetTrace
-     Delete DEVS:NetInterfaces/eth0
-     Delete DEVS:Internet/routes DEVS:Internet/name_resolution
-     Delete DEVS:Internet/hosts DEVS:Internet/certificates
-     Delete DEVS:Networks/anxnet.device DEVS:Networks/anxnet.device.old
-     Delete DEVS:Networks/anxgenet.device DEVS:Networks/anxgenet.device.old
-     Delete DEVS:Networks/anxwifipi.device DEVS:Networks/anxwifipi.device.old
-     Delete S:Network-Startup S:Network-Startup.old
-     Delete <the AmiNetXDuo drawer> ALL
+Uninstall-AmiNetXDuo, in the AmiNetXDuo drawer, removes AmiNetXDuo.  It
+takes the ";BEGIN AmiNetXDuo" .. ";END AmiNetXDuo" block out of
+S:User-Startup, deletes the configuration files the installer wrote (each
+names the installer on its first lines), and runs S:AmiNetXDuo-Files, the
+record the installer leaves.  That record deletes the libraries, commands,
+drivers and the NetPrefs and NetMeter copies the installer put in place,
+puts back from the drawer's Backup the files of another stack that the
+installer replaced, and deletes the drawer.  Files ending in .old stay.
 
-and take the ";BEGIN AmiNetXDuo" .. ";END AmiNetXDuo" block out of
-S:User-Startup.  If another stack was installed before, rename
-LIBS:bsdsocket.library.old back over LIBS:bsdsocket.library.  Add QUIET to
-a Delete line whose file was never installed, such as tls.library on a
-minimal or micro installation.
+Backup holds another stack's libraries, its commands with the same names as
+AmiNetXDuo's, and its interface, routes, name_resolution and
+S:Network-Startup files, each as it was the first time AmiNetXDuo replaced
+it.
 
 A drawer installation is the AmiNetXDuo drawer, the startup block, and
-nothing else: delete the drawer and take the block out.
+nothing else.
 
 
 STATUS

@@ -407,6 +407,18 @@ def main(argv):
                 " for it.  From a Shell, type \"Stack 10000\" first.)",
             ],
             stack=10000),
+        # The same Installer project, pointed at the script that removes
+        # AmiNetXDuo again; it is installed into the AmiNetXDuo drawer.
+        "Uninstall-AmiNetXDuo.info": diskobject(
+            install_icon(), WBPROJECT,
+            default_tool="Installer",
+            tooltypes=[
+                "APPNAME=AmiNetXDuo",
+                "SCRIPT=Uninstall-AmiNetXDuo",
+                "MINUSER=NOVICE",
+                "DEFUSER=AVERAGE",
+            ],
+            stack=10000),
         "AmiNetXDuo.info": diskobject(
             drawer_icon(), WBDRAWER, drawer=True, window=(10, 12, 620, 236)),
         "Drawer.info": diskobject(
@@ -438,7 +450,9 @@ def main(argv):
 
     for name, blob in icons.items():
         if args.style == "glow":
-            artwork = "Document" if name == "Guide.info" else name[:-5]
+            artwork = {"Guide.info": "Document",
+                       "Uninstall-AmiNetXDuo.info": "Install-AmiNetXDuo",
+                       }.get(name, name[:-5])
             path = os.path.join(os.path.dirname(__file__), "..", "icons",
                                 "glow", artwork + ".glow")
             with open(path, "rb") as fh:
