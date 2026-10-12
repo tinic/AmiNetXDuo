@@ -433,10 +433,6 @@ def plain_drawer_icon():
     return c
 
 
-# Classic only until their GlowIcon artwork is in icons/glow.
-GLOW_PENDING = {"NetWireless.info", "NetWirelessPrefs.info"}
-
-
 def main(argv):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("outdir")
@@ -498,10 +494,7 @@ def main(argv):
     }
 
     for name, blob in icons.items():
-        if args.style == "glow" and not (
-                name in GLOW_PENDING and not os.path.exists(os.path.join(
-                    os.path.dirname(__file__), "..", "icons", "glow",
-                    name[:-5] + ".glow"))):
+        if args.style == "glow":
             artwork = "Document" if name == "Guide.info" else name[:-5]
             path = os.path.join(os.path.dirname(__file__), "..", "icons",
                                 "glow", artwork + ".glow")

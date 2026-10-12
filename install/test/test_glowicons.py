@@ -19,9 +19,6 @@ ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location("showicon", ROOT / "install/tools/showicon.py")
 reader = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(reader)
-spec = importlib.util.spec_from_file_location("makeicon", ROOT / "install/tools/makeicon.py")
-maker = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(maker)
 
 
 class GlowIcons(unittest.TestCase):
@@ -98,9 +95,6 @@ class GlowIcons(unittest.TestCase):
                     with contextlib.redirect_stdout(io.StringIO()):
                         self.assertTrue(reader.show(path))
                         self.assertTrue(reader.show(classic / path.name))
-                    if path.name in maker.GLOW_PENDING and shipping == fallback:
-                        self.assertEqual(shipping, (ROOT / "install" / path.name).read_bytes())
-                        continue
                     states = reader.read_glow(shipping[len(fallback):])
                     self.assertEqual(len(states), 2)
                     for state in states:
