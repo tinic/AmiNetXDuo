@@ -653,7 +653,9 @@ static LONG current_options;
  * works -- a long (run), a wait -- the page has no button, and that is not
  * the run having ended: taking it for the end started the next run, or the
  * check after the last, beside an Installer that was still writing.  The
- * window's title names the script, for an install and an uninstall alike.
+ * window's title names the script: "Install-AmiNetXDuo (n% done)" for an
+ * install, "SYS:AmiNetXDuo/Uninstall-AmiNetXDuo" for an uninstall, so the
+ * match leaves out the first letter.
  */
 static BOOL installer_window_open(void)
 {
@@ -669,7 +671,7 @@ static BOOL installer_window_open(void)
         for (window = screen->FirstWindow; window != NULL && !open;
              window = window->NextWindow)
             if (window->Title != NULL &&
-                strstr((const char *)window->Title, "Install-AmiNetXDuo") != NULL)
+                strstr((const char *)window->Title, "nstall-AmiNetXDuo") != NULL)
                 open = TRUE;
     }
     UnlockIBase(ilock);
@@ -1513,7 +1515,13 @@ static BOOL drive_once(LONG run_number, BPTR nil_in, BPTR nil_out)
         else if (seen > 0)
         {
             if (installer_window_open())
+            {
+                /* Working: a trace every ten seconds, so a hang shows. */
+                if (gone != 0 || (polls % 10) == 9)
+                    say("installdrive: poll %ld: the Installer is working\n",
+                        polls);
                 gone = 0;
+            }
             else if (++gone >= GONE_LIMIT)
                 break;
         }
