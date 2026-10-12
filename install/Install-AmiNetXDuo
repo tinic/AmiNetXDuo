@@ -2411,9 +2411,11 @@
         (optional "nofail"))
       ; Echo appends, so a later install keeps the lines of the files an
       ; earlier one copied: Uninstall-AmiNetXDuo removes those and no others.
-      (if (exists (tackon D_FIRMWARE FW_NAME) (noreq))
-          (run ("Echo >>S:AmiNetXDuo-Firmware \"Delete *\"%s*\" QUIET\""
-                (tackon D_FIRMWARE FW_NAME))
+      ; System layout only: a drawer install's firmware goes with its drawer,
+      ; and DEVS:Firmware has no space in it to quote.
+      (if (AND (= DRAWER_LAYOUT 0) (exists (tackon D_FIRMWARE FW_NAME) (noreq)))
+          (run ("Echo >>S:AmiNetXDuo-Firmware \"Delete DEVS:Firmware/%s QUIET\""
+                FW_NAME)
                (prompt "Recording the firmware file for Uninstall-AmiNetXDuo")
                (help   H_BACKUP))))
 )
