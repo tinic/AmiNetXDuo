@@ -2451,8 +2451,11 @@ if [ -n "$EXPECTED_SECOND_IF" ]; then
 fi
 # THE WI-FI FIRMWARE: every archive file in DEVS:Firmware when the Pi Wi-Fi
 # is selected, byte for byte, except one the user already had; none without.
+# The user's files are in the system's DEVS:Firmware; the copies go to the
+# layout's (a drawer install's own Devs/Firmware, which DEVS: reaches last).
 _fw_src="$UNPACK/AmiNetXDuo/Devs/Firmware"
-_fw_dir=$(amiga_path Devs/Firmware 2>/dev/null || true)
+_fw_sys=$(amiga_path Devs/Firmware 2>/dev/null || true)
+_fw_dir=$(amiga_path "${INST}Devs/Firmware" 2>/dev/null || true)
 case "$EMU68_FIXTURE" in
     wifi|both)
         _fw_bad=0
@@ -2464,14 +2467,14 @@ case "$EMU68_FIXTURE" in
                 [ ! -e "$_fw_dir/$_b" ] || {
                     echo "!! DEVS:Firmware/$_b was added beside the user's .bin"
                     _fw_bad=1; }
+            elif [ "$EMU68_FIXTURE" = wifi ] &&
+                 case " $FW_KEPT " in *" $_b "*) true ;; *) false ;; esac; then
+                grep -q '^user firmware' "$_fw_sys/$_b" 2>/dev/null || {
+                    echo "!! DEVS:Firmware/$_b, the user's own, was replaced"
+                    _fw_bad=1; }
             elif [ -z "$_fw_dir" ] || [ ! -f "$_fw_dir/$_b" ]; then
                 echo "!! DEVS:Firmware/$_b was not installed"
                 _fw_bad=1
-            elif [ "$EMU68_FIXTURE" = wifi ] &&
-                 case " $FW_KEPT " in *" $_b "*) true ;; *) false ;; esac; then
-                grep -q '^user firmware' "$_fw_dir/$_b" || {
-                    echo "!! DEVS:Firmware/$_b, the user's own, was replaced"
-                    _fw_bad=1; }
             elif ! cmp -s "$_f" "$_fw_dir/$_b"; then
                 echo "!! DEVS:Firmware/$_b is not the archive's"
                 _fw_bad=1
@@ -2484,7 +2487,7 @@ case "$EMU68_FIXTURE" in
             fail=1
         fi ;;
     *)
-        if [ -n "$_fw_dir" ]; then
+        if [ -n "$_fw_dir" ] || [ -n "$_fw_sys" ]; then
             echo "!! DEVS:Firmware was created without the Pi Wi-Fi"
             fail=1
         fi ;;
