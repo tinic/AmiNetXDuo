@@ -2345,6 +2345,20 @@ fi
 boot install "$INSTALL_TIMEOUT" "$INSTALL_CARD"
 INSTALL_STATUS=$BOOT_STATUS
 
+# Every Installer run reaches its last page: the window title says 100%.
+# A run that stops part way -- an Installer that dies -- closes earlier.
+INSTALL_RUNS_DONE=$(awk '
+    /^installdrive: run [0-9]+: starting/ { last = "" }
+    /^installdrive:   window "/ { last = $0 }
+    /^installdrive: run [0-9]+ finished/ { if (last ~ /\(100% done\)"$/) ok++; else bad++ }
+    END { printf "%d %d\n", ok, bad }' "$HD/installdrive.txt" 2>/dev/null)
+echo "installer_runs_completed=${INSTALL_RUNS_DONE% *} installer_runs_stopped=${INSTALL_RUNS_DONE#* }"
+if [ "$REFUSAL" != 1 ] &&
+   { [ "${INSTALL_RUNS_DONE#* }" != 0 ] || [ "${INSTALL_RUNS_DONE% *}" = 0 ]; }; then
+    echo "!! an Installer run stopped before its last page"
+    [ "$INSTALL_STATUS" = 0 ] && INSTALL_STATUS=21
+fi
+
 echo
 echo "---- installdrive report ----"
 cat "$HD/installdrive.txt" 2>/dev/null || echo "(none)"
