@@ -27,6 +27,7 @@
 #include <dos/dos.h>
 #include <dos/dosextens.h>
 #include <dos/dostags.h>
+#include <dos/var.h>
 #include <utility/tagitem.h>
 
 #include <proto/exec.h>
@@ -195,7 +196,8 @@ static VOID ws_begin_io(register struct Device *dev __asm("a6"),
 {
     (VOID)dev;
     io->ios2_Req.io_Error = 0;
-    io->ios2_WireError = 0;
+    if (io->ios2_Req.io_Command != S2_ONEVENT)
+        io->ios2_WireError = 0;         /* S2_ONEVENT's mask is in it */
 
     switch (io->ios2_Req.io_Command)
     {
@@ -567,6 +569,56 @@ static BOOL put_file(const char *path, const char *text)
     return TRUE;
 }
 
+/* Ctrl-C to every Shell command whose name ends in tail. */
+static VOID stop_named(const char *tail)
+{
+    ULONG n, t, k = 0;
+
+    while (tail[k] != 0) k++;
+    for (t = 0; t < 50; t++)
+    {
+        BOOL seen = FALSE;
+
+        Forbid();
+        for (n = 1; n <= MaxCli(); n++)
+        {
+            struct Process *p = FindCliProc(n);
+            struct CommandLineInterface *cli;
+            const UBYTE *b;
+            ULONG i;
+
+            if (p == NULL) continue;
+            cli = (struct CommandLineInterface *)BADDR(p->pr_CLI);
+            if (cli == NULL || cli->cli_Module == (BPTR)0) continue;
+            b = (const UBYTE *)BADDR(cli->cli_CommandName);
+            if (b == NULL || b[0] < k) continue;
+            for (i = 0; i < k && b[b[0] - k + 1 + i] == (UBYTE)tail[i]; i++)
+                ;
+            if (i == k)
+            {
+                Signal(&p->pr_Task, SIGBREAKF_CTRL_C);
+                seen = TRUE;
+            }
+        }
+        Permit();
+        if (!seen) return;
+        Delay(10);
+    }
+}
+
+static BOOL env_is(const char *want)
+{
+    char  v[48];
+    LONG  n = GetVar((CONST_STRPTR)"WiFi", (STRPTR)v, sizeof(v), GVF_GLOBAL_ONLY);
+    ULONG i;
+
+    if (n < 0) v[0] = 0;
+    Printf((CONST_STRPTR)"ENV:WiFi=\"%s\"\n", (LONG)v);
+    for (i = 0; want[i] != 0 && v[i] == want[i]; i++)
+        ;
+    return want[i] == 0 && v[i] == 0;
+}
+
 /* Ctrl-C to C:WirelessManager, the stub, as a shutdown would send it. */
 static VOID stop_wm(VOID)
 {
@@ -723,6 +775,60 @@ int main(void)
     rc = run(PREFS " JOIN=Bad PASSPHRASE=short");
     check(rc == RETURN_ERROR, "a seven-character passphrase is refused");
     stop_wm();
+
+    /* The commodity, with no Workbench and no commodities.library on this
+       drive: the variable alone.  It polls the signal only while
+       associated. */
+    {
+        BPTR  in = Open((CONST_STRPTR)"NIL:", MODE_OLDFILE);
+        BPTR  o = Open((CONST_STRPTR)"NIL:", MODE_NEWFILE);
+        ULONG before = AvailMem(MEMF_ANY), used, polls;
+
+        CopyMem("Home", ws->ssid, 5);
+        ws->online = ws->connected = TRUE;
+        ws->signal = -61;
+        SystemTags((CONST_STRPTR)"DH0:NetWireless DEVICE=wifistub.device INTERVAL=1",
+                   SYS_Input, (ULONG)in, SYS_Output, (ULONG)o, SYS_Asynch, TRUE,
+                   TAG_DONE);
+        Delay(100);
+        used = before - AvailMem(MEMF_ANY);
+        Printf((CONST_STRPTR)"commodity_ram=%lu (with its Shell and stack)\n", used);
+        check(env_is("Home 3/4"), "ENV:WiFi says the network and its bars");
+        check(ws->events.lh_Head->ln_Succ != NULL, "an event request waits");
+        polls = ws->n_signal;
+        Delay(160);
+        check(ws->n_signal >= polls + 2, "polled once a second while associated");
+        ws->signal = -50;
+        Delay(80);
+        check(env_is("Home 4/4"), "a new bar count is written");
+
+        ws->connected = FALSE;
+        ws_report(S2EVENT_DISCONNECT);
+        Delay(50);
+        check(env_is("Not connected"), "DISCONNECT seen at once");
+        polls = ws->n_signal;
+        Delay(200);
+        Printf((CONST_STRPTR)"polls_while_not_connected=%lu\n", ws->n_signal - polls);
+        check(ws->n_signal == polls, "nothing polled while not associated");
+
+        ws->connected = TRUE;
+        ws_report(S2EVENT_CONNECT);
+        Delay(50);
+        check(env_is("Home 4/4"), "CONNECT seen at once");
+
+        ws->online = FALSE;
+        ws->connected = FALSE;
+        ws_report(S2EVENT_OFFLINE);
+        Delay(50);
+        check(env_is("Off"), "OFFLINE seen at once");
+        ws->online = TRUE;
+        ws_report(S2EVENT_ONLINE);
+        Delay(50);
+        check(env_is("Not connected"), "ONLINE seen at once");
+
+        stop_named("NetWireless");
+        Delay(25);
+    }
 
     check(ws->n_scan_abort == 0, "no running scan was aborted");
     check(ws->dd.dd_Library.lib_OpenCnt == 0, "every opener closed");

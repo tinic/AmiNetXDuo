@@ -288,6 +288,13 @@ aminetxduo_add_tool(tool_netwirelessprefs NetWirelessPrefs
             netwireless_prefs.c netwireless_key.c netwireless_layout.c
             netwireless_wm.c
             "${AMINETXDUO_NETXDUO}/crypto_libraries/src/nx_crypto_sha1.c")
+# The Wi-Fi commodity: AppIcon, Tools menu item, ENV:WiFi and the hotkey.
+# Status only, so it stays small while resident; the window is
+# NetWirelessPrefs, run on demand.
+aminetxduo_add_tool(tool_netwireless NetWireless
+    SOURCES netwireless.c netwireless_dev.c netwireless_sig.c
+            netwireless_prefs.c)
+
 # The vendored SHA-1 in the mode that needs no nx_api.h, as httpd has it.
 target_compile_definitions(tool_netwirelessprefs PRIVATE
     NX_CRYPTO_STANDALONE_ENABLE)

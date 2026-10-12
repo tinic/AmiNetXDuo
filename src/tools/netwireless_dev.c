@@ -85,11 +85,7 @@ static struct IOSana2Req *nw_req_copy(const struct IOSana2Req *from,
 
 LONG nw_dev_open(NwDev *d, const char *device, ULONG unit)
 {
-    static const char prefix[] = "Networks/";
-    char  path[128];
     LONG  err;
-    ULONG i, n;
-    BOOL  resident;
 
     d->port  = CreateMsgPort();
     d->async = CreateMsgPort();
@@ -105,31 +101,9 @@ LONG nw_dev_open(NwDev *d, const char *device, ULONG unit)
     d->req->ios2_Req.io_Message.mn_ReplyPort = d->port;
     d->req->ios2_BufferManagement = nw_buffer_tags;
 
+    /* As given: OpenDevice() looks for a relative name in DEVS:. */
     err = (LONG)(BYTE)OpenDevice((CONST_STRPTR)device, unit,
                                  (struct IORequest *)d->req, 0);
-    Forbid();
-    resident = FindName(&SysBase->DeviceList, (CONST_STRPTR)device) != NULL;
-    Permit();
-    /* A resident driver that refused was not a file that was missing. */
-    if (err != 0 && !resident)
-    {
-        LONG first = err;
-
-        /* A bare name is also looked for where the installer puts it. */
-        for (n = 0; device[n] != '\0'; n++)
-            if (device[n] == ':' || device[n] == '/') break;
-        if (device[n] == '\0' && n + sizeof(prefix) <= sizeof(path))
-        {
-            for (i = 0; prefix[i] != '\0'; i++) path[i] = prefix[i];
-            for (n = 0; device[n] != '\0'; n++) path[i++] = device[n];
-            path[i] = '\0';
-            d->req->ios2_Req.io_Device = NULL;
-            d->req->ios2_Req.io_Unit = NULL;
-            err = (LONG)(BYTE)OpenDevice((CONST_STRPTR)path, unit,
-                                         (struct IORequest *)d->req, 0);
-            if (err != 0) err = first;
-        }
-    }
     if (err != 0)
     {
         d->req->ios2_Req.io_Device = NULL;

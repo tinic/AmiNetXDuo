@@ -68,7 +68,7 @@ typedef struct NwDev
 } NwDev;
 
 #define NW_IFACE_MAX            8192
-#define NW_DEFAULT_DEVICE       "anxwifipi.device"
+#define NW_DEFAULT_DEVICE       "Networks/anxwifipi.device"
 #define NW_DEFAULT_INTERFACE    "wifipi"
 
 /* DEVICE and UNIT of DEVS:NetInterfaces/<name>.  FALSE when the file is
@@ -76,8 +76,8 @@ typedef struct NwDev
 BOOL nw_dev_from_interface(const char *name, char *device, ULONG cap,
                            ULONG *unit);
 
-/* DEVICE as given, then DEVS:Networks/ for a bare name.  Returns the
-   OpenDevice() error, 0 on success; d is closed either way on failure. */
+/* DEVICE as given, a relative name in DEVS:.  Returns the OpenDevice()
+   error, 0 on success; d is closed either way on failure. */
 LONG nw_dev_open(NwDev *d, const char *device, ULONG unit);
 VOID nw_dev_close(NwDev *d);
 
