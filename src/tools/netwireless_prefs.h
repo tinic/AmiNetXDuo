@@ -71,6 +71,14 @@ int nw_prefs_write(const char *old, size_t oldlen,
    as wpa_supplicant reads them.  out needs 2 * NW_SSID_MAX + 3 bytes. */
 void nw_prefs_ssid_value(const unsigned char *ssid, int len, char *out);
 
+/* A DEVICE, path aside and case aside, that is a Wi-Fi driver these tools
+   know: NW_DRIVER_PI for anxwifipi.device or wifipi.device, whose signal
+   answer says whether it is associated; NW_DRIVER_PRISM2 for prism2.device
+   (Neil Cafferkey's, PC Card and PCI), which answers the signal whenever
+   it is online; 0 for any other. */
+enum { NW_DRIVER_PI = 1, NW_DRIVER_PRISM2 = 2 };
+int nw_wireless_driver(const char *device);
+
 /* The DEVICE and UNIT of a Roadshow interface file: keyword=value or
    keyword value, case aside, ';' and '#' comments, quotes around a value.
    Returns 1 when DEVICE is there; unit stays as given when UNIT is not. */
