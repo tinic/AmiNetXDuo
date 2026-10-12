@@ -19,9 +19,10 @@
  * as it should be, RETURN_ERROR when it could not be read or replaced, and
  * then it is unchanged.
  *
- * HOSTLINE: FIRST is a name_resolution file; its first active hostname line
- * is written to SECOND, so the Installer can carry a name set by hand over
- * into the file it writes.  RETURN_OK with a line written, RETURN_WARN when
+ * HOSTLINE: FIRST is a name_resolution file; the name the stack takes from it
+ * (ami_cfg_resolver_hostname_file, the stack's own parser) is written to
+ * SECOND as a hostname line, so the Installer can carry a name set by hand
+ * over into the file it writes.  RETURN_OK with a line written, RETURN_WARN when
  * there is none, RETURN_ERROR when either file fails.
  *
  * SPDX-License-Identifier: MIT
@@ -36,6 +37,7 @@
 #include <proto/exec.h>
 
 #include "aminetxduo/version.h"
+#include "aminetxduo/config.h"
 #include "devicehome.h"
 
 const char *const tool_name = "InstallSameFile";
@@ -207,29 +209,25 @@ static LONG rehome_devices(const char *path, STRPTR *drawers)
 
 static LONG copy_hostline(const char *from, const char *to)
 {
-    char  buf[4096];
-    char  line[256];
+    char  name[AMI_CFG_NAME_LEN];
+    char  line[AMI_CFG_NAME_LEN + 16];
     BPTR  fh;
-    LONG  got;
-    size_t n;
+    LONG  n = 0, got;
+    const char *p;
 
-    fh = Open((CONST_STRPTR)from, MODE_OLDFILE);
-    if (fh == 0)
-        return RETURN_ERROR;
-    got = Read(fh, buf, sizeof(buf));
-    Close(fh);
-    if (got < 0)
-        return RETURN_ERROR;
-    n = dh_hostline(buf, (size_t)got, line, sizeof(line) - 1);
-    if (n == 0)
+    if (!ami_cfg_resolver_hostname_file(from, name, sizeof(name)))
         return RETURN_WARN;
+    for (p = "hostname "; *p != '\0'; p++)
+        line[n++] = *p;
+    for (p = name; *p != '\0' && n < (LONG)sizeof(line) - 1; p++)
+        line[n++] = *p;
     line[n++] = '\n';
     fh = Open((CONST_STRPTR)to, MODE_NEWFILE);
     if (fh == 0)
         return RETURN_ERROR;
-    got = Write(fh, line, (LONG)n);
+    got = Write(fh, line, n);
     Close(fh);
-    return (got == (LONG)n) ? RETURN_OK : RETURN_ERROR;
+    return (got == n) ? RETURN_OK : RETURN_ERROR;
 }
 
 int main(int argc, char **argv)

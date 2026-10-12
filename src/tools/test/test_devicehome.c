@@ -109,26 +109,6 @@ int main(void)
                         (void *)drawer) == -1, "overflow is reported");
     }
 
-    {
-        static const char nr[] =
-            "; hostname   <name>      what this machine calls itself.\n"
-            ";hostname amiga\n"
-            "# hostname nope\n"
-            "hostnamex y\n"
-            "hostname\n"
-            "  hostname   handset  \r\n"
-            "hostname second\n";
-        char   line[64];
-        size_t n = dh_hostline(nr, sizeof(nr) - 1, line, sizeof(line));
-
-        check(n > 0 && strcmp(line, "  hostname   handset  ") == 0,
-              "the first active hostname line, comments skipped");
-        check(dh_hostline(";hostname amiga\n", 16, line, sizeof(line)) == 0,
-              "a commented hostname is none");
-        check(dh_hostline(nr, sizeof(nr) - 1, line, 8) == 0,
-              "a line that does not fit is none");
-    }
-
     if (failures == 0) printf("devicehome: all passed\n");
     return failures != 0;
 }
