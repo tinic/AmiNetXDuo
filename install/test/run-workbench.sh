@@ -14,7 +14,7 @@
 #                                 [-m core|driver|probe|minimal]
 #                                 [-C] [-M] [-V] [-I] [-z] [-W]
 #                                 [-s yes|invalid]
-#                                 [-w join|keep|keepit|userstart|userwm]
+#                                 [-w join|keep|keepit|keepitlive|userstart|userwm]
 #                                 [-f roadshow-leave|roadshow-replace|
 #                                     amitcpng-leave|amitcpng-replace]
 #
@@ -46,6 +46,8 @@
 #             VERBOSE against the written prefs.
 #   keep      plants a user's Wireless.prefs and C:WirelessManager: both
 #             untouched, and the lines that start WirelessManager commented.
+#   keepitlive  keepit with -e both, the kept genet file ending in a live
+#             "UNIT=0 PRIORITY=3": nothing may be appended to it.
 #   keepit    with -R: run 1 answers, its S:Network-Startup is deleted, run 2
 #             takes "Keep it" and must write the Wi-Fi block from the kept
 #             definition.
@@ -372,7 +374,7 @@ fi
 
 if [ -n "$WIFI_MODE" ]; then
     case "$WIFI_MODE" in
-        join|keep|keepit|userstart|userwm) ;;
+        join|keep|keepit|keepitlive|userstart|userwm) ;;
         *) echo "unknown Wi-Fi mode: $WIFI_MODE" >&2; exit 2 ;;
     esac
     case "$EMU68_FIXTURE" in
@@ -380,7 +382,7 @@ if [ -n "$WIFI_MODE" ]; then
         *) echo "-w needs -e wifi or -e both: only then is the Pi Wi-Fi selected" >&2
            exit 2 ;;
     esac
-    if [ "$WIFI_MODE" = keepit ] && [ "$RERUN" != 1 ]; then
+    if { [ "$WIFI_MODE" = keepit ] || [ "$WIFI_MODE" = keepitlive ]; } && [ "$RERUN" != 1 ]; then
         echo "-w keepit needs -R: it is the Keep it reinstall" >&2
         exit 2
     fi
@@ -967,7 +969,7 @@ WIFI_ANSWERED=0
 WM_EXPECT_LIVE=1
 WM_USER_FIXTURE=0
 case "$WIFI_MODE" in
-    join|keepit|userwm) WIFI_ANSWERED=1 ;;
+    join|keepit|keepitlive|userwm) WIFI_ANSWERED=1 ;;
 esac
 case "$WIFI_MODE" in
     keep|userstart|userwm) WM_EXPECT_LIVE=0 ;;
@@ -978,12 +980,18 @@ esac
 if [ "$WIFI_ANSWERED" = 1 ]; then
     ANSWER_LINES+=("1|WIFI|$WIFI_TEST_SSID|$WIFI_TEST_PASS")
 fi
-[ "$WIFI_MODE" = keepit ] && ANSWER_LINES+=("1|DROPSTARTUP|-")
+case "$WIFI_MODE" in
+    keepit|keepitlive) ANSWER_LINES+=("1|DROPSTARTUP|-") ;;
+esac
 # With the Ethernet as well, the kept genet file is left with PRIORITY only
 # in comments, as the example files have it, and no final newline: run 2
-# must still add a PRIORITY=10 line of its own.
+# must add exactly one PRIORITY=10 line of its own.  keepitlive ends it in
+# a live "UNIT=0 PRIORITY=3" instead, and nothing may be appended.
 if [ "$WIFI_MODE" = keepit ] && [ "$EMU68_FIXTURE" = both ]; then
     ANSWER_LINES+=("1|UNPRIORITY|DEVS:NetInterfaces/genet")
+fi
+if [ "$WIFI_MODE" = keepitlive ]; then
+    ANSWER_LINES+=("1|LIVEPRIORITY|DEVS:NetInterfaces/genet")
 fi
 # The Wi-Fi interface started at boot is worth booting: the startup lines
 # are run, with a stand-in supplicant and the card under it.
@@ -1064,7 +1072,7 @@ for ((answer_run = 1; answer_run <= DRIVE_RUNS; answer_run++)); do
     # -w keepit deletes run 1's file between the runs, so run 2 writes one
     # and asks, as a first install would.
     if [ "$answer_run" -gt 1 ] && [ "$RECONFIGURE" = "0" ] &&
-       [ "$WIFI_MODE" != keepit ]; then
+       [ "$WIFI_MODE" != keepit ] && [ "$WIFI_MODE" != keepitlive ]; then
         ANSWER_LINES+=("$answer_run|ABSENT|Yes, set the clock")
     elif [ -n "$SNTP_MODE" ]; then
         ANSWER_LINES+=("$answer_run|BOOL|Yes, set the clock")
@@ -2455,7 +2463,7 @@ if [ "$DRIVE_RUNS" != "1" ]; then
         else
             echo "  ok      reconfigure replaced startup and preserved its .old"
         fi
-    elif [ "$WIFI_MODE" = keepit ]; then
+    elif [ "$WIFI_MODE" = keepit ] || [ "$WIFI_MODE" = keepitlive ]; then
         # installdrive deleted run 1's file; Keep it with no S:Network-Startup
         # writes a new one, and the Wi-Fi block below must be in it.
         if [ -z "$NS_FILE" ]; then
@@ -2703,11 +2711,20 @@ else
         fi
         if [ "$WIFI_PRIMARY" = 0 ]; then
             _pif=$(amiga_path "${INST}Devs/NetInterfaces/$EXPECTED_IF" 2>/dev/null || true)
-            if [ -n "$_pif" ] && grep -qx 'PRIORITY=10' "$_pif" &&
+            _p10=0
+            [ -n "$_pif" ] && { _p10=$(grep -cx 'PRIORITY=10' "$_pif") || _p10=0; }
+            echo "wifi_priority10_lines=$_p10"
+            if [ "$WIFI_MODE" = keepitlive ]; then
+                if [ "$_p10" = 0 ] && [ "$(tail -c 17 "$_pif")" = "UNIT=0 PRIORITY=3" ]; then
+                    echo "  ok      $EXPECTED_IF keeps its own live PRIORITY=3, nothing appended"
+                else
+                    wifi_bad "$EXPECTED_IF had a live PRIORITY and got PRIORITY=10 lines: $_p10"
+                fi
+            elif [ "$_p10" = 1 ] &&
                { [ "$WIFI_MODE" != keepit ] || grep -qx ';PRIORITY=0' "$_pif"; }; then
-                echo "  ok      $EXPECTED_IF carries PRIORITY=10, ahead of the Wi-Fi"
+                echo "  ok      $EXPECTED_IF carries one PRIORITY=10, ahead of the Wi-Fi"
             else
-                wifi_bad "$EXPECTED_IF has no PRIORITY=10 while the Wi-Fi starts too"
+                wifi_bad "$EXPECTED_IF has $_p10 PRIORITY=10 lines while the Wi-Fi starts too"
             fi
         fi
     elif [ -n "$NS_FILE" ]; then

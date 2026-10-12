@@ -16,9 +16,10 @@
  * not be written.
  *
  * PRIORITY: the kept Ethernet definition of a reinstall where the Wi-Fi now
- * starts beside it.  A line PRIORITY=10 is appended unless an uncommented
- * PRIORITY or PRI line already sets one; the Installer cannot tell a
- * commented line from a live one (Search matches anywhere in a line).
+ * starts beside it.  A line PRIORITY=10 is appended unless the file has a
+ * live PRIORITY or PRI pair, found as the interface parser finds it
+ * (ami_cfg_key_count); the Installer cannot tell a commented line from a
+ * live one (Search matches anywhere in a line).
  * RETURN_OK when set or already set, RETURN_FAIL when the file could not be
  * read or written.
  *
@@ -47,6 +48,7 @@
 
 #include "aminetxduo/version.h"
 #include "netwireless_prefs.h"
+#include "aminetxduo/config.h"
 
 const char *const tool_name = "InstallWiFi";
 
@@ -437,56 +439,29 @@ out:
     return result;
 }
 
-/* Whether the line sets PRIORITY: keyword PRIORITY or PRI, any case, after
-   leading blanks, followed by '=' or a blank.  Comment lines (';' or '#')
-   do not. */
-static BOOL sets_priority(const char *p, const char *end)
-{
-    static const char *const keys[] = { "PRIORITY", "PRI" };
-    ULONG k;
-
-    while (p < end && (*p == ' ' || *p == '\t'))
-        p++;
-    for (k = 0; k < 2; k++)
-    {
-        LONG n = (LONG)strlen(keys[k]), i;
-
-        if (end - p <= n)
-            continue;
-        for (i = 0; i < n; i++)
-            if ((p[i] & ~0x20) != keys[k][i])
-                break;
-        if (i == n && (p[n] == '=' || p[n] == ' ' || p[n] == '\t'))
-            return TRUE;
-    }
-    return FALSE;
-}
-
+/* Appended only when the interface parser would find no PRIORITY or PRI
+   pair at all: ami_cfg_key_count() lexes the file as it does, comments and
+   several pairs to a line included.  With any, valid or not, the file says
+   what it wants and is left alone. */
 static LONG set_priority(const char *path)
 {
     static char text[16384];
+    static char scan[16384];
     static const char line[] = "PRIORITY=10\n";
     BPTR        fh = Open((CONST_STRPTR)path, MODE_OLDFILE);
-    LONG        len, at = 0;
+    LONG        len;
     BOOL        ok;
 
     if (fh == 0)
         return RETURN_FAIL;
-    len = Read(fh, text, sizeof(text));
+    len = Read(fh, text, sizeof(text) - 1);
     Close(fh);
-    if (len < 0 || len == (LONG)sizeof(text))
+    if (len < 0 || len == (LONG)sizeof(text) - 1)
         return RETURN_FAIL;
-
-    while (at < len)
-    {
-        LONG eol = at;
-
-        while (eol < len && text[eol] != '\n')
-            eol++;
-        if (sets_priority(text + at, text + eol))
-            return RETURN_OK;
-        at = eol + 1;
-    }
+    memcpy(scan, text, (size_t)len);
+    scan[len] = '\0';
+    if (ami_cfg_key_count(scan, "PRIORITY", "PRI") != 0)
+        return RETURN_OK;
 
     fh = Open((CONST_STRPTR)path, MODE_READWRITE);
     if (fh == 0)

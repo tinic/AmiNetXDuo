@@ -146,6 +146,8 @@
  *   1|UNPRIORITY|<file> between runs, comment out every PRIORITY line of
  *                     that interface file and end it with the example
  *                     files' commented lines and no final newline
+ *   1|LIVEPRIORITY|<file> the same, then a last line "UNIT=0 PRIORITY=3"
+ *                     (two pairs, no final newline): a live PRIORITY
  *
  * Unlike the historical DRIVE_YES_LABEL/DRIVE_PICK_* switches, this can
  * answer more than one non-default question in one installation and can give
@@ -175,7 +177,8 @@ enum ActionType
     ACTION_WIFI,
     ACTION_NOWIFI,
     ACTION_DROPSTARTUP,
-    ACTION_UNPRIORITY
+    ACTION_UNPRIORITY,
+    ACTION_LIVEPRIORITY
 };
 
 struct DriveAction
@@ -466,10 +469,12 @@ static BOOL load_actions(VOID)
             action->type = ACTION_NOWIFI;
             action->used = TRUE;
         }
-        else if (strcmp(kind, "UNPRIORITY") == 0)
+        else if (strcmp(kind, "UNPRIORITY") == 0 ||
+                 strcmp(kind, "LIVEPRIORITY") == 0)
         {
             /* Applied between runs, like DROPSTARTUP. */
-            action->type = ACTION_UNPRIORITY;
+            action->type = (kind[0] == 'U') ? ACTION_UNPRIORITY
+                                            : ACTION_LIVEPRIORITY;
             action->used = TRUE;
             copy_text(action->match, at, sizeof(action->match));
         }
@@ -1157,11 +1162,14 @@ static VOID post_message(struct Window *window, ULONG cls, struct Gadget *gad)
  * UNPRIORITY: the kept interface file as somebody who copied the example
  * would have it -- PRIORITY only in comments, and no newline at the end.
  */
-static BOOL unpriority(const char *path)
+static BOOL unpriority(const char *path, BOOL live)
 {
     static char       in[8192];
     static char       out[8400];
-    static const char tail[] = "; PRIORITY -- a note, not a setting\n;PRIORITY=0";
+    static const char note[] = "; PRIORITY -- a note, not a setting\n;PRIORITY=0";
+    static const char lived[] = "; PRIORITY -- a note, not a setting\n;PRIORITY=0\nUNIT=0 PRIORITY=3";
+    const char       *tail = live ? lived : note;
+    LONG              tlen = live ? (LONG)sizeof(lived) - 1 : (LONG)sizeof(note) - 1;
     BPTR              fh = Open((STRPTR)path, MODE_OLDFILE);
     LONG              len, i, n = 0;
     BOOL              bol = TRUE;
@@ -1172,7 +1180,7 @@ static BOOL unpriority(const char *path)
     Close(fh);
     if (len < 0)
         return FALSE;
-    for (i = 0; i < len && n < (LONG)sizeof(out) - (LONG)sizeof(tail) - 2; i++)
+    for (i = 0; i < len && n < (LONG)sizeof(out) - tlen - 2; i++)
     {
         if (bol && strncmp(in + i, "PRIORITY", 8) == 0)
             out[n++] = ';';
@@ -1181,8 +1189,8 @@ static BOOL unpriority(const char *path)
     }
     if (n > 0 && out[n - 1] != '\n')
         out[n++] = '\n';
-    memcpy(out + n, tail, sizeof(tail) - 1);
-    n += sizeof(tail) - 1;
+    memcpy(out + n, tail, (size_t)tlen);
+    n += tlen;
     fh = Open((STRPTR)path, MODE_NEWFILE);
     if (fh == 0)
         return FALSE;
@@ -1551,8 +1559,10 @@ int main(void)
                 break;
             }
             for (d = 0; d < action_count; d++)
-                if (actions[d].type == ACTION_UNPRIORITY &&
-                    !unpriority(actions[d].match))
+                if ((actions[d].type == ACTION_UNPRIORITY ||
+                     actions[d].type == ACTION_LIVEPRIORITY) &&
+                    !unpriority(actions[d].match,
+                                actions[d].type == ACTION_LIVEPRIORITY))
                 {
                     say("installdrive: could not rewrite %s\n",
                         (LONG)actions[d].match);

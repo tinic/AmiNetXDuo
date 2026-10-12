@@ -59,6 +59,33 @@ ULONG ami_cfg_keyword_line(char *buf, const char *keyword)
     return 0;
 }
 
+ULONG ami_cfg_key_count(char *buf, const char *key, const char *alias)
+{
+    char  *cursor = buf;
+    char  *line;
+    ULONG  count = 0;
+
+    while ((line = ami_cfg_next_line(&cursor)) != NULL)
+    {
+        char *pos;
+        char *k;
+        char *value;
+
+        ami_cfg_strip_comment(line, "#;");
+        line = ami_cfg_trim(line);
+        if (*line == '\0')
+            continue;
+
+        pos = line;
+        while (ami_cfg_next_pair(&pos, &k, &value))
+            if (ami_cfg_stricmp(k, key) == 0 ||
+                (alias != NULL && ami_cfg_stricmp(k, alias) == 0))
+                count++;
+    }
+
+    return count;
+}
+
 ULONG ami_cfg_keyword_line_file(const char *path, const char *keyword)
 {
     char  *buf = (char *)ami_cfg_read_file(path, NULL);
