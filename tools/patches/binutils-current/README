@@ -1,1 +1,1 @@
-Exact pin ffe2ad82 includes the upstream archive/LTO, objcopy relocation and one-only handling. Do not apply the old a50544 patch set. Native and full-project validation required.
+Exact pin a3afdefb includes the upstream archive/LTO, objcopy relocation and one-only handling. Do not apply the old a50544 patch set. Native and full-project validation required.
