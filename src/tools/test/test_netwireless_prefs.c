@@ -401,6 +401,27 @@ static void test_order(void)
     }
 }
 
+/* Known networks' places for the scan list: priority order, disabled
+   blocks skipped, an SSID not there -1. */
+static void test_rank(void)
+{
+    static const char text[] =
+        "network={\n\tssid=\"Low\"\n\tpriority=1\n}\n"
+        "network={\n\tssid=\"Off\"\n\tpriority=9\n\tdisabled=1\n}\n"
+        "network={\n\tssid=\"Top\"\n\tpriority=5\n}\n";
+    NwNetwork     nets[4];
+    unsigned char order[4];
+    int           n = nw_prefs_parse(text, sizeof(text) - 1, nets, 4);
+
+    nw_prefs_order(nets, n, order);
+    check(n == 3 &&
+          nw_prefs_rank(nets, order, n, (const unsigned char *)"Top", 3) == 0 &&
+          nw_prefs_rank(nets, order, n, (const unsigned char *)"Low", 3) == 1 &&
+          nw_prefs_rank(nets, order, n, (const unsigned char *)"Off", 3) == -1 &&
+          nw_prefs_rank(nets, order, n, (const unsigned char *)"Gone", 4) == -1,
+          "known rank: priority order, disabled and missing not known");
+}
+
 int main(void)
 {
     test_parse();
@@ -409,6 +430,7 @@ int main(void)
     test_ssid_value();
     test_iface();
     test_order();
+    test_rank();
     check(nw_wireless_driver("DEVS:Networks/anxwifipi.device") == NW_DRIVER_PI &&
           nw_wireless_driver("wifipi.device") == NW_DRIVER_PI &&
           nw_wireless_driver("prism2.device") == NW_DRIVER_PRISM2 &&

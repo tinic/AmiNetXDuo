@@ -3310,32 +3310,46 @@
   again in the same place once Workbench is back. Without it, close
   NetMeter before changing the screen mode.
 
-  NetWirelessPrefs is the Wi-Fi window. It lists the networks in range,
-  strongest first, with signal bars and a padlock for a network that asks
-  for a key (on Kickstart 3.0 and later; 2.04 shows the same as text), and
-  shows the network the unit is connected to. Join writes the network to
-  ENVARC:Sys/Wireless.prefs and ENV:Sys/Wireless.prefs, above every other
-  network there, and restarts WirelessManager with the DEVICE and UNIT of
-  DEVS:NetInterfaces/wifipi; the window then waits up to 30 seconds for
-  the connection. Disconnect stops WirelessManager. WirelessManager joins
+  NetWirelessPrefs is the Wi-Fi window. It lists the networks in range
+  with signal bars and a padlock for a network that asks for a key (on
+  Kickstart 3.0 and later; 2.04 shows the same as text), and shows the
+  network the unit is connected to. The network in use comes first, marked
+  "(connected)"; the networks in Wireless.prefs follow in their priority
+  order, marked "(known)"; the others follow, strongest first. Join, or a
+  double-click, on a known network connects to it at once with its saved
+  key: the network moves above every other and WirelessManager is
+  restarted. On any other network Join opens a form; its Join writes the
+  network to ENVARC:Sys/Wireless.prefs and ENV:Sys/Wireless.prefs, above
+  every other network there, and restarts WirelessManager with the DEVICE
+  and UNIT of DEVS:NetInterfaces/wifipi. Either way the window then waits
+  up to 30 seconds for the connection; when a saved key does not connect
+  in that time, the form opens to type a new passphrase. For a known
+  network the form's passphrase field reads "(saved)": the saved key is
+  used unless a new passphrase is typed, which then replaces it.
+  Disconnect stops WirelessManager and ends a wait. WirelessManager joins
   the network and holds the keys; NetWirelessPrefs only writes its file.
   The file is edited from the copy in ENV:, or ENVARC: when ENV: has none;
   comments, other networks and keys not shown in the window are kept as
   they are, and a file that cannot be read is not written.
 
   Known... (Project > Known networks..., Right-Amiga K) lists the networks
-  in Wireless.prefs, highest priority first. Up and Down change the order
-  and Remove takes a network out; Save writes ENVARC: and ENV:, Use writes
-  ENV: only, and Cancel (or Esc) changes nothing. The list order becomes
-  priority=, the top network highest, which is the order WirelessManager
-  tries them in when more than one is in range; Save or Use with nothing
-  moved or removed writes nothing. "(hidden)" marks a network joined by
-  name (scan_ssid=1), "(off)" one marked disabled=1. A running
-  WirelessManager is restarted on the new file. If Wireless.prefs changed
-  while the window was open, Save and Use write nothing and say so. While
-  a join waits for its connection, Save and Use are not available. A Join
-  after a Use writes the network list of ENV: to ENVARC: as well. The
-  window is not available in SETUP.
+  in Wireless.prefs, highest priority first. Connect, or a double-click,
+  moves the network selected to the top, writes ENVARC: and ENV:, restarts
+  WirelessManager and waits for the connection; the window stays open and
+  marks the network "(connecting...)", then "(connected)". Up and Down
+  change the order and Remove takes a network out; Save writes ENVARC: and
+  ENV:, Use writes ENV: only, and Cancel (or Esc) changes nothing. Use
+  with a network selected that is not the one in use, and nothing moved or
+  removed since it was selected, also connects to it; Save only stores the
+  list. The list order becomes priority=, the top network highest, which
+  is the order WirelessManager tries them in when more than one is in
+  range; Save or Use with nothing moved or removed writes nothing.
+  "(hidden)" marks a network joined by name (scan_ssid=1), "(off)" one
+  marked disabled=1. A running WirelessManager is restarted on the new
+  file. If Wireless.prefs changed while the window was open, Save and Use
+  write nothing and say so. While a join waits for its connection, Save,
+  Use and Connect are not available. A Join after a Use writes the network
+  list of ENV: to ENVARC: as well. The window is not available in SETUP.
 
   The passphrase is not stored. Join derives the WPA key from passphrase
   and network name and stores it as psk=<64 hex digits>, which also
@@ -3366,11 +3380,13 @@
 
   From a Shell:
 
-      NetWirelessPrefs LIST           networks in range
+      NetWirelessPrefs LIST           networks in range, as the
+                                      window orders and marks them
       NetWirelessPrefs STATUS         connected network and signal
       NetWirelessPrefs JOIN=<name> PASSPHRASE=<text> [HIDDEN]
                                       join as the window does; without
-                                      PASSPHRASE, an open network
+                                      PASSPHRASE, a known network with
+                                      its saved key, or an open one
 
   STATUS returns 0 when connected and 5 when not. JOIN returns 0 when
   connected, 5 when not connected after 30 seconds, and 10 when the file
