@@ -180,9 +180,13 @@ than deleted, after a page that asks first, at every level; an earlier
 AmiNetXDuo's is replaced without one.  When a network device was found,
 another stack's network configuration is set up again by default.  The
 other stack's libraries, interface files, routes, name_resolution and
-S:Network-Startup are copied first, with Copy CLONE, into a drawer of that
-installation's own under the AmiNetXDuo drawer's Backup: Backup/1, then
-Backup/2.  Nothing there is replaced later.  Every library is copied in
+S:Network-Startup are copied, with Copy CLONE, before anything is replaced,
+into a drawer of that installation's own under the AmiNetXDuo drawer's
+Backup, numbered one above the highest there.  Backup with the lowest
+number holds the other stack as it was first found; later ones are its
+files from later installations.  A file NetSetup or this installer wrote is
+not copied, and neither is one already kept unchanged.  A copy that fails
+stops the installation before anything is replaced.  Every library is copied in
 under a .new name first and swapped after, so a copy that fails leaves the
 installed file in place.
 
@@ -382,7 +386,7 @@ UNINSTALLING
      Delete C:NetCapture C:NetTrace
      Delete DEVS:NetInterfaces/eth0
      Delete DEVS:Internet/routes DEVS:Internet/name_resolution
-     Delete DEVS:Internet/hosts DEVS:Internet/certificates
+     Delete DEVS:Internet/certificates
      Delete DEVS:Networks/anxnet.device DEVS:Networks/anxnet.device.old
      Delete DEVS:Networks/anxgenet.device DEVS:Networks/anxgenet.device.old
      Delete DEVS:Networks/anxwifipi.device DEVS:Networks/anxwifipi.device.old
@@ -392,12 +396,14 @@ UNINSTALLING
 
 and take the ";BEGIN AmiNetXDuo" .. ";END AmiNetXDuo" block out of
 S:User-Startup.  If another stack was installed before, its files are in
-the AmiNetXDuo drawer's Backup, in the numbered drawer of the installation
-that replaced them; copy that drawer's Libs, Devs and S back over LIBS:,
-DEVS: and S:, with Copy ALL CLONE.  Then delete the AmiNetXDuo drawer,
-Backup last.  Add QUIET to
-a Delete line whose file was never installed, such as tls.library on a
-minimal or micro installation.  S:AmiNetXDuo-WiFi exists only where the
+the AmiNetXDuo drawer's Backup: the drawer with the lowest number holds it
+as it was first found.  Copy that drawer's Libs, Devs and S back over
+LIBS:, DEVS: and S:, with Copy ALL CLONE; then delete the AmiNetXDuo
+drawer, Backup last.  After an update, LIBS:bsdsocket.library.old is an
+earlier AmiNetXDuo, not the other stack.  DEVS:Internet/hosts and the
+netdb files stay: the installer writes them only where there were none.
+Add QUIET to a Delete line whose file was never installed, such as
+tls.library on a minimal or micro installation.  S:AmiNetXDuo-WiFi exists only where the
 Pi Wi-Fi was selected, and it deletes only the WirelessManager and
 Wireless.prefs the installer created, never ones that were there before.
 
