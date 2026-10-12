@@ -180,12 +180,11 @@ than deleted, after a page that asks first, at every level; an earlier
 AmiNetXDuo's is replaced without one.  When a network device was found,
 another stack's network configuration is set up again by default.  The
 other stack's libraries, interface files, routes, name_resolution and
-S:Network-Startup are copied, with Copy CLONE, before anything is replaced,
-into a drawer of that installation's own under the AmiNetXDuo drawer's
-Backup, numbered one above the highest there.  Backup with the lowest
-number holds the other stack as it was first found; later ones are its
-files from later installations.  A file NetSetup or this installer wrote is
-not copied, and neither is one already kept unchanged.  A copy that fails
+S:Network-Startup, and their .old files, are copied, with Copy CLONE, before
+anything is replaced, into a drawer of that installation's own under the
+AmiNetXDuo drawer's Backup, numbered one above the highest there; each
+holds only what was new or changed since the earlier ones.  A file NetSetup
+or this installer wrote is not copied, and neither is one already kept unchanged.  A copy that fails
 stops the installation before anything is replaced.  Every library is copied in
 under a .new name first and swapped after, so a copy that fails leaves the
 installed file in place.
@@ -396,9 +395,11 @@ UNINSTALLING
 
 and take the ";BEGIN AmiNetXDuo" .. ";END AmiNetXDuo" block out of
 S:User-Startup.  If another stack was installed before, its files are in
-the AmiNetXDuo drawer's Backup: the drawer with the lowest number holds it
-as it was first found.  Copy that drawer's Libs, Devs and S back over
-LIBS:, DEVS: and S:, with Copy ALL CLONE; then delete the AmiNetXDuo
+the AmiNetXDuo drawer's Backup, one numbered drawer per installation that
+kept anything, each holding only what was new or changed then.  Copy every
+numbered drawer's Libs, Devs and S back over LIBS:, DEVS: and S:, with
+Copy ALL CLONE, the highest number first and Backup/1 last, so that each
+file ends as the other stack had it first; then delete the AmiNetXDuo
 drawer, Backup last.  After an update, LIBS:bsdsocket.library.old is an
 earlier AmiNetXDuo, not the other stack.  DEVS:Internet/hosts and the
 netdb files stay: the installer writes them only where there were none.

@@ -1534,6 +1534,15 @@
 (set WIFI_DEV W_ANXWIFIPI)
 (set WIFI_UNIT 0)
 (set WIFI_TMP "T:AmiNetXDuo-Wireless.prefs")
+; It holds the Wi-Fi passphrase: an installation that stops, for any reason,
+; takes it away.
+(onerror
+  (if (exists WIFI_TMP (noreq))
+      (delete WIFI_TMP
+              (prompt "Removing T:AmiNetXDuo-Wireless.prefs")
+              (help   "It holds the Wi-Fi passphrase.")
+              (optional "force" "nofail")
+              (safe))))
 (set WIFI_NEW_PREFS 0)
 (set WIFI_HAVE_PREFS
   (if (OR (exists "ENVARC:Sys/Wireless.prefs" (noreq))
@@ -2203,18 +2212,28 @@
           (set IS_OURS 1)))
 )
 
-; KEPT: an earlier Backup drawer holds BK_SRC, byte for byte.
+; KEPT: an earlier Backup drawer holds BK_SRC, byte for byte, under its own
+; name or, for a .old file, the name it had before it was renamed so.
 (procedure P_kept_before
   (set KEPT 0)
+  (set KB_NAME (fileonly BK_SRC))
+  (set KB_BASE KB_NAME)
+  (if (patmatch "#?.old" KB_NAME)
+      (set KB_BASE (substr KB_NAME 0 (- (strlen KB_NAME) 4))))
   (set KB_N 1)
   (while (AND (= KEPT 0) (<= KB_N BK_MAX))
     (
-      (set KB_F (tackon (tackon (tackon D_BACKUP_TOP ("%ld" KB_N)) BK_SUB)
-                        (fileonly BK_SRC)))
-      (if (exists KB_F (noreq))
-          (if (= 0 (run ("\"%s\" \"%s\" \"%s\" BYTES" S_SAMEFILE BK_SRC KB_F)
-                        (quiet) (safe)))
-              (set KEPT 1)))
+      (set KB_DIR (tackon (tackon D_BACKUP_TOP ("%ld" KB_N)) BK_SUB))
+      (set KB_I 0)
+      (while (AND (= KEPT 0) (< KB_I 2))
+        (
+          (set KB_F (tackon KB_DIR (select KB_I KB_NAME KB_BASE)))
+          (if (exists KB_F (noreq))
+              (if (= 0 (run ("\"%s\" \"%s\" \"%s\" BYTES" S_SAMEFILE BK_SRC KB_F)
+                            (quiet) (safe)))
+                  (set KEPT 1)))
+          (set KB_I (+ KB_I 1))
+        ))
       (set KB_N (+ KB_N 1))
     ))
 )
@@ -2256,23 +2275,30 @@
     ))
 )
 
-(if FOREIGN_STACK
+; The libraries, and their .old copies, which the swap deletes: those may
+; be another stack's own backups.
+(if (= DRAWER_LAYOUT 0)
   (
     (set BK_SUB "Libs")
     (set BK_SRC D_BSD) (P_backup)
     (set BK_SRC D_UG)  (P_backup)
     (set BK_SRC D_TLS) (P_backup)
+    (set BK_SRC D_BSD_OLD) (P_backup)
+    (set BK_SRC D_UG_OLD)  (P_backup)
+    (set BK_SRC D_TLS_OLD) (P_backup)
   ))
+; Every interface file, kept or not: a kept one can still be edited (the
+; PRIORITY line InstallWiFi adds for a Wi-Fi beside it).
+(set BK_SUB "Devs/NetInterfaces")
+(if (= (exists D_IFDIR (noreq)) 2)
+    (foreach D_IFDIR "~(#?.info)"
+      (if (< @each-type 0)
+        (
+          (set BK_SRC (tackon D_IFDIR @each-name))
+          (P_backup)
+        ))))
 (if (= KEEP_OLD 0)
   (
-    (set BK_SUB "Devs/NetInterfaces")
-    (if (= (exists D_IFDIR (noreq)) 2)
-        (foreach D_IFDIR "~(#?.info)"
-          (if (< @each-type 0)
-            (
-              (set BK_SRC (tackon D_IFDIR @each-name))
-              (P_backup)
-            ))))
     (set BK_SUB "Devs/Internet")
     (set BK_SRC (tackon D_DEVS "Internet/routes")) (P_backup)
     (set BK_SRC (tackon D_DEVS "Internet/name_resolution")) (P_backup)
@@ -2281,6 +2307,8 @@
   (
     (set BK_SUB "S")
     (set BK_SRC "S:Network-Startup")
+    (P_backup)
+    (set BK_SRC "S:Network-Startup.old")
     (P_backup)
   ))
 
