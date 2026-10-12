@@ -19,6 +19,9 @@ ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location("showicon", ROOT / "install/tools/showicon.py")
 reader = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(reader)
+spec = importlib.util.spec_from_file_location("makeicon", ROOT / "install/tools/makeicon.py")
+maker = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(maker)
 
 
 class GlowIcons(unittest.TestCase):
@@ -34,7 +37,11 @@ class GlowIcons(unittest.TestCase):
                     "Examples.info": "Drawer", "Terminal.info": "Drawer",
                     "Developer.info": "Drawer", "AmiNetXDuo.info": "AmiNetXDuo",
                     "C/NetMeter.info": "NetMeter", "C/NetPrefs.info": "NetPrefs",
-                    "C/fat/NetMeter.info": "NetMeter", "C/fat/NetPrefs.info": "NetPrefs"}.items():
+                    "C/fat/NetMeter.info": "NetMeter", "C/fat/NetPrefs.info": "NetPrefs",
+                    "C/NetWireless.info": "NetWireless",
+                    "C/NetWirelessPrefs.info": "NetWirelessPrefs",
+                    "C/fat/NetWireless.info": "NetWireless",
+                    "C/fat/NetWirelessPrefs.info": "NetWirelessPrefs"}.items():
                 shutil.copyfile(ROOT / "install" / (source + ".info"), tree / target)
             original = {p: p.read_bytes() for p in tree.rglob("*.info")}
             subprocess.run([sys.executable, str(ROOT / "install/tools/layout-icons.py"),
@@ -91,6 +98,9 @@ class GlowIcons(unittest.TestCase):
                     with contextlib.redirect_stdout(io.StringIO()):
                         self.assertTrue(reader.show(path))
                         self.assertTrue(reader.show(classic / path.name))
+                    if path.name in maker.GLOW_PENDING and shipping == fallback:
+                        self.assertEqual(shipping, (ROOT / "install" / path.name).read_bytes())
+                        continue
                     states = reader.read_glow(shipping[len(fallback):])
                     self.assertEqual(len(states), 2)
                     for state in states:
