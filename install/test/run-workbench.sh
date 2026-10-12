@@ -2770,6 +2770,16 @@ else
          "wifi_record=$([ -n "$WREC_REAL" ] && echo present || echo absent)" \
          "wifi_startup_live_lines=$WM_NS_LIVE"
 fi
+# -w prism2: the Pi Wi-Fi firmware belongs to the Pi only.
+if [ "$WIFI_MODE" = prism2 ]; then
+    _fw=$(find "$HD" -ipath '*/devs/firmware/*' -iname 'brcmfmac*' 2>/dev/null | head -3)
+    echo "wifi_pi_firmware=$([ -n "$_fw" ] && echo installed || echo absent)"
+    if [ -n "$_fw" ]; then
+        wifi_bad "a Prism2 card installed the Pi Wi-Fi firmware: $_fw"
+    else
+        echo "  ok      no Pi Wi-Fi firmware (brcmfmac) for a Prism2 card"
+    fi
+fi
 [ "$WIFI_OK" = 1 ] || fail=1
 echo "wifi_install=$([ "$WIFI_OK" = 1 ] && echo PASS || echo FAIL)"
 
