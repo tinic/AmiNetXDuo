@@ -432,52 +432,40 @@ static int nw_keyword(const char *word, size_t n, const char *keyword)
 int nw_iface_device(const char *text, size_t len, char *device, size_t cap,
                     unsigned long *unit)
 {
-    size_t pos = 0;
-    int    found = 0;
+    const char *p = text, *end = text + len;
+    int         found = 0;
 
-    while (pos < len)
+    while (p < end)
     {
-        size_t e = pos, i, k, v, ve;
-        int    is_device, is_unit;
+        const char *e = p, *k, *v, *ve;
+        int         is_device, is_unit;
 
-        while (e < len && text[e] != '\n' && text[e] != '\r') e++;
-        i = pos;
-        pos = (e < len) ? e + 1 : e;
-        while (i < e && (text[i] == ' ' || text[i] == '\t')) i++;
-        if (i >= e || text[i] == ';' || text[i] == '#') continue;
-
-        k = i;
-        while (k < e && text[k] != '=' && text[k] != ' ' && text[k] != '\t') k++;
-        is_device = nw_keyword(text + i, k - i, "DEVICE");
-        is_unit = nw_keyword(text + i, k - i, "UNIT");
-        if (!is_device && !is_unit) continue;
-
-        v = k;
-        while (v < e && (text[v] == ' ' || text[v] == '\t')) v++;
-        if (v < e && text[v] == '=') v++;
-        while (v < e && (text[v] == ' ' || text[v] == '\t')) v++;
-        if (v < e && text[v] == '"')
-        {
-            v++;
-            ve = v;
-            while (ve < e && text[ve] != '"') ve++;
-        }
+        while (e < end && *e != '\n' && *e != '\r') e++;
+        while (p < e && (*p == ' ' || *p == '\t')) p++;
+        /* A ';' or '#' line has no keyword that matches. */
+        for (k = p; k < e && *k != '=' && *k != ' ' && *k != '\t'; k++)
+            ;
+        is_device = nw_keyword(p, (size_t)(k - p), "DEVICE");
+        is_unit = nw_keyword(p, (size_t)(k - p), "UNIT");
+        for (v = k; v < e && (*v == ' ' || *v == '\t' || *v == '='); v++)
+            ;
+        if (v < e && *v == '"')
+            for (ve = ++v; ve < e && *ve != '"'; ve++)
+                ;
         else
+            for (ve = v; ve < e && *ve != ' ' && *ve != '\t' && *ve != ';' &&
+                         *ve != '#'; ve++)
+                ;
+        if (ve > v && is_device && (size_t)(ve - v) < cap)
         {
-            ve = v;
-            while (ve < e && text[ve] != ' ' && text[ve] != '\t' &&
-                   text[ve] != ';' && text[ve] != '#') ve++;
-        }
-        if (ve == v) continue;
-
-        if (is_device && ve - v < cap)
-        {
-            for (k = 0; k < ve - v; k++) device[k] = text[v + k];
-            device[ve - v] = '\0';
+            for (k = v; k < ve; k++) *device++ = *k;
+            *device = '\0';
             found = 1;
         }
-        else if (is_unit && text[v] >= '0' && text[v] <= '9')
-            *unit = (unsigned long)nw_number(text, v, ve);
+        else if (ve > v && is_unit && *v >= '0' && *v <= '9')
+            *unit = (unsigned long)nw_number(text, (size_t)(v - text),
+                                             (size_t)(ve - text));
+        p = e + 1;
     }
     return found;
 }
