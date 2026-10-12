@@ -60,9 +60,29 @@ finds the Pi's Ethernet and Wi-Fi itself. On an Emu68 older than 1.1 alpha.1
 it uses Emu68's own `genet.device` when one is installed; with no other network
 device found, it stops.
 
-The Wi-Fi driver needs the firmware Emu68 installs in `DEVS:Firmware`, and
-WirelessManager (Aminet [`driver/net/prism2v2`](https://aminet.net/package/driver/net/prism2v2))
-to join a network. Use it or `wifipi.device`, not both in one boot.
+The Wi-Fi driver needs its firmware in `DEVS:Firmware`. With the Pi Wi-Fi
+selected, at every installer level:
+
+- The firmware files `DEVS:Firmware` lacks are copied there from the
+  archive's `Devs/Firmware`, with their licences and `WHENCE`.
+- WirelessManager 1.5 goes into `C:` (or the installation's own drawer),
+  unless a WirelessManager the installer did not put there already exists.
+- A window asks for the network name and passphrase and writes
+  `ENVARC:Sys/Wireless.prefs`, unless a `Wireless.prefs` exists. The
+  passphrase appears as asterisks and is not written to the installation log.
+- `S:Network-Startup` starts the Wi-Fi only when `ENV:Sys/Wireless.prefs`
+  exists: WirelessManager first, then the interface, which waits at most 30
+  seconds for an address. With the Pi's Ethernet as well, both start, and
+  the Ethernet's `PRIORITY=10` keeps the default route on the cable; the
+  micro stack starts only the Ethernet.
+- Where WirelessManager is already set up on the machine (a copy or a
+  `Wireless.prefs` the installer did not write, or a mention in
+  `S:User-Startup`, `S:Startup-Sequence` or `SYS:WBStartup`), the lines that
+  would start a second copy are written commented out.
+- `S:AmiNetXDuo-WiFi` lists the Wi-Fi files the installer created; executing
+  it removes them.
+
+Use the driver or `wifipi.device`, not both in one boot.
 
 Fast cards get faster TCP receive with every driver: the stack merges
 consecutive segments before TCP sees them. Driver authors can opt into a few
@@ -158,6 +178,8 @@ the NDK does not declare and the CPU profiler.
 | `NetSetup` | ask the questions for one interface, and write the configuration files |
 | `NetPrefs` | Workbench editor for interface, address, device and tuning settings; preserves comments and unknown keywords |
 | `NetMeter` | small Workbench window: each interface's addresses (click one to copy it) and its receive and send rates |
+| `NetWireless` | Wi-Fi commodity: the link's state and signal as an AppIcon, a Tools menu item and `ENV:WiFi`; reads the signal only while connected |
+| `NetWirelessPrefs` | Wi-Fi networks in range and joining one; writes WirelessManager's `Wireless.prefs` with the derived key, not the passphrase |
 | `AddNetInterface`, `RemoveNetInterface` | start an interface from its file, and take one out of the running network |
 | `Online`, `Offline` | put a started interface on the wire and take it off |
 | `ConfigureNetInterface` | change the address or MTU of a running interface, renew or release its DHCP lease, turn `.local` answering on |
@@ -335,4 +357,5 @@ MIT, with these exceptions, each confined to the files it names:
 | `ssh` and `scp` | Dropbear's MIT-style licence | `third_party/dropbear`, `clients/dropbear` |
 | The `/files` text editor | CodeMirror 6 and its support packages, MIT | bundled into `src/tools/web/files.html`; notice in `src/tools/web/vendor/codemirror` |
 | The CA root set | MPL 2.0, Mozilla's, file-scoped | `DEVS:Internet/certificates`, from `third_party/cacert` |
+| `WirelessManager` | wpa_supplicant's three-clause BSD licence, Copyright (c) 2003-2010 Jouni Malinen and contributors, (c) 2011-2025 Neil Cafferkey. The unmodified binary from Aminet [`driver/net/prism2v2`](https://aminet.net/package/driver/net/prism2v2); its notice ships beside it and is installed as `WirelessManager-LICENSE` | `third_party/wirelessmanager` |
 | `anxwifipi.device` | MPL 2.0 (Michal Schulz's WiFiPi.device, forked; ISC Broadcom/OpenBSD headers and an Apache-2.0 register header inside it, listed in its NOTICE). File-scoped: its sources are the submodule's and are published there | `third_party/wifipi`, built by `src/wifipi/CMakeLists.txt` |

@@ -148,6 +148,13 @@ static void test_bars(void)
     check(nw_bars(-56) == 3 && nw_bars(-66) == 3, "3 bars");
     check(nw_bars(-67) == 2 && nw_bars(-77) == 2, "2 bars");
     check(nw_bars(-78) == 1 && nw_bars(-88) == 1 && nw_bars(-100) == 1, "1 bar");
+    check(nw_bars_held(-60, 0) == 3, "nothing shown: the plain bars");
+    check(nw_bars_held(-54, 3) == 3 && nw_bars_held(-52, 3) == 4,
+          "up only 3 dB past the threshold");
+    check(nw_bars_held(-58, 4) == 4 && nw_bars_held(-59, 4) == 3,
+          "down only 3 dB below it");
+    check(nw_bars_held(-90, 4) == 1 && nw_bars_held(-40, 1) == 4,
+          "a large change moves at once");
 }
 
 #define W 26

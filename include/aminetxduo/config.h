@@ -810,6 +810,12 @@ ULONG ami_cfg_keyword_line(char *buf, const char *keyword);
    be read. */
 ULONG ami_cfg_keyword_line_file(const char *path, const char *keyword);
 
+/* How many KEY=VALUE pairs of an interface file name `key` or `alias` (NULL
+   for none), lexed exactly as ami_cfg_parse_interface() lexes them: comments
+   stripped, several pairs to a line.  Any value counts, as written; of the
+   ones that parse, the parser keeps the last.  `buf` is split in place. */
+ULONG ami_cfg_key_count(char *buf, const char *key, const char *alias);
+
 /* The 1-based line of the `occur`-th ADDRESS6 line (0-based) the parser
    keeps, counted as the parser counts lines, or 0.  "Kept" means exactly what
    ami_cfg_parse_interface() takes: the keyword ADDRESS6 or its IPADDRESS6

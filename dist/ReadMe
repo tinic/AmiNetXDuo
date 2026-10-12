@@ -125,7 +125,8 @@ It puts
 
      bsdsocket.library, usergroup.library,
      tls.library                               into LIBS:
-     NetSetup, NetPrefs, NetMeter, AddNetInterface, RemoveNetInterface,
+     NetSetup, NetPrefs, NetMeter, NetWireless, NetWirelessPrefs,
+     AddNetInterface, RemoveNetInterface,
      ConfigureNetInterface, Online, Offline,
      ShowNetStatus, ShowNetServices, GetNetStatus,
      CheckNetConfig, CheckNetDevice, NetDevStats, NetShutdown,
@@ -139,6 +140,9 @@ It puts
      NetMeter and its icon (system layout)     into SYS:Utilities
      anxnet.device, anxgenet.device,
        anxwifipi.device                        into DEVS:Networks
+     WirelessManager (Pi Wi-Fi, none yet)      into C:
+     the Wi-Fi network (Pi Wi-Fi, no file yet) into ENVARC:Sys/Wireless.prefs
+     the list of those two, where installed    into S:AmiNetXDuo-WiFi
      the interface definition                  into DEVS:NetInterfaces
      the routing and name server files         into DEVS:Internet
      this file, the manual, the examples       into the selected drawer
@@ -260,8 +264,27 @@ twelve classic card definitions.  anxgenet.device supports the Raspberry Pi
 4/CM4 Ethernet behind a PiStorm32 running Emu68 1.1 alpha.1 or newer.  On an
 older Emu68 the installer uses Emu68's own genet.device when one is installed.
 With no other network device found, it stops before it changes anything.
-anxwifipi.device supports the same machine's Wi-Fi and needs the Emu68
-firmware plus a supplicant such as WirelessManager before it can associate.
+anxwifipi.device supports the same machine's Wi-Fi and needs its firmware
+in DEVS:Firmware plus a supplicant before it can associate.  With the Pi
+Wi-Fi selected, at every installer level, the installer copies the firmware
+files DEVS:Firmware lacks from the archive's Devs/Firmware, with their
+licences (WHENCE says which file is under which), and puts WirelessManager 1.5
+into C: (or its own drawer) unless a WirelessManager it did not install is
+already there.  A window of its own asks for the network name and
+passphrase and writes ENVARC:Sys/Wireless.prefs, unless a Wireless.prefs
+exists; the passphrase appears as asterisks and does not reach the
+installation log.
+
+S:Network-Startup starts the Wi-Fi only when ENV:Sys/Wireless.prefs exists:
+WirelessManager first, then the interface, which waits at most 30 seconds
+for an address; DHCP continues after that.  With the Pi Ethernet as well,
+both start, the Ethernet first and with PRIORITY=10, so the default route
+stays on the cable; the micro stack starts the Ethernet only.  Where
+WirelessManager is set up on the machine already -- a copy or a
+Wireless.prefs the installer did not write, or a mention in S:User-Startup,
+S:Startup-Sequence or SYS:WBStartup -- the lines that would start a second
+copy are commented out.  S:AmiNetXDuo-WiFi lists the Wi-Fi files the
+installer created.
 
 The installer asks whether to put all three in DEVS:Networks and offers yes.
 Copying them changes nothing on its own: an interface file selects one with
@@ -340,6 +363,7 @@ UNINSTALLING
      Delete C:NetSetup C:NetPrefs C:AddNetInterface C:RemoveNetInterface
      Delete SYS:Prefs/NetPrefs SYS:Prefs/NetPrefs.info
      Delete C:NetMeter SYS:Utilities/NetMeter SYS:Utilities/NetMeter.info
+     Delete C:NetWireless C:NetWirelessPrefs
      Delete C:ConfigureNetInterface C:Online C:Offline
      Delete C:ShowNetStatus C:ShowNetServices C:GetNetStatus
      Delete C:CheckNetConfig C:CheckNetDevice C:NetDevStats C:NetShutdown
@@ -355,6 +379,8 @@ UNINSTALLING
      Delete DEVS:Networks/anxnet.device DEVS:Networks/anxnet.device.old
      Delete DEVS:Networks/anxgenet.device DEVS:Networks/anxgenet.device.old
      Delete DEVS:Networks/anxwifipi.device DEVS:Networks/anxwifipi.device.old
+     Execute S:AmiNetXDuo-WiFi
+     Delete S:AmiNetXDuo-WiFi
      Delete S:Network-Startup S:Network-Startup.old
      Delete <the AmiNetXDuo drawer> ALL
 
@@ -362,7 +388,9 @@ and take the ";BEGIN AmiNetXDuo" .. ";END AmiNetXDuo" block out of
 S:User-Startup.  If another stack was installed before, rename
 LIBS:bsdsocket.library.old back over LIBS:bsdsocket.library.  Add QUIET to
 a Delete line whose file was never installed, such as tls.library on a
-minimal or micro installation.
+minimal or micro installation.  S:AmiNetXDuo-WiFi exists only where the
+Pi Wi-Fi was selected, and it deletes only the WirelessManager and
+Wireless.prefs the installer created, never ones that were there before.
 
 A drawer installation is the AmiNetXDuo drawer, the startup block, and
 nothing else: delete the drawer and take the block out.
@@ -400,6 +428,12 @@ MIT, with these exceptions, each confined to the files it names:
      cacert.pem.  MPL 2.0 is file-scoped, so nothing else here is affected.
   *  anxwifipi.device is MPL 2.0, with ISC Broadcom/OpenBSD headers and an
      Apache-2.0 register header identified in its NOTICE.
+  *  WirelessManager is Neil Cafferkey's, based on wpa_supplicant, under
+     wpa_supplicant's three-clause BSD licence: Copyright (c) 2003-2010
+     Jouni Malinen and contributors, (c) 2011-2025 Neil Cafferkey.  It is
+     the unmodified binary from Aminet's driver/net/prism2v2.  Its notice is
+     Wireless/WirelessManager-LICENSE, installed as WirelessManager-LICENSE
+     in the AmiNetXDuo drawer.
 
 No AmiTCP, AROSTCP, Miami or Roadshow code is used, copied or disassembled.
 Olaf Barthel's freely distributable Roadshow SDK headers and autodocs were

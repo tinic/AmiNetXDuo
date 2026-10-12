@@ -346,6 +346,50 @@ int nw_prefs_write(const char *old, size_t oldlen,
     return 1;
 }
 
+void nw_prefs_order(const NwNetwork *nets, int count, unsigned char *order)
+{
+    int i, k;
+
+    for (i = 0; i < count; i++)
+    {
+        for (k = i; k > 0 && nets[order[k - 1]].priority < nets[i].priority; k--)
+            order[k] = order[k - 1];
+        order[k] = (unsigned char)i;
+    }
+}
+
+int nw_prefs_order_edits(const NwNetwork *nets, int count,
+                         const unsigned char *order, int shown,
+                         NwBlockEdit *edits, NwField *fields, char (*prio)[12])
+{
+    int i, k, n = 0;
+
+    for (i = 0; i < count; i++)
+    {
+        for (k = 0; k < shown && order[k] != i; k++)
+            ;
+        edits[n].index = i;
+        edits[n].remove = k == shown;
+        edits[n].fields = &fields[n];
+        edits[n].nfields = 0;
+        if (k < shown && nets[i].priority != shown - k)
+        {
+            long v = shown - k;
+            char rev[12];
+            int  d = 0, j = 0;
+
+            do rev[d++] = (char)('0' + v % 10); while ((v /= 10) != 0);
+            while (d > 0) prio[n][j++] = rev[--d];
+            prio[n][j] = '\0';
+            fields[n].key = "priority";
+            fields[n].value = prio[n];
+            edits[n].nfields = 1;
+        }
+        if (edits[n].remove || edits[n].nfields != 0) n++;
+    }
+    return n;
+}
+
 void nw_prefs_ssid_value(const unsigned char *ssid, int len, char *out)
 {
     static const char hex[] = "0123456789abcdef";
@@ -370,65 +414,83 @@ void nw_prefs_ssid_value(const unsigned char *ssid, int len, char *out)
     *out = '\0';
 }
 
-static int nw_upper(int c)
+/* word, n bytes, is keyword, case aside. */
+static int nw_keyword(const char *word, size_t n, const char *keyword)
 {
-    return (c >= 'a' && c <= 'z') ? c - 'a' + 'A' : c;
+    size_t i;
+
+    for (i = 0; i < n; i++)
+    {
+        char c = word[i];
+
+        if (c >= 'a' && c <= 'z') c = (char)(c - 'a' + 'A');
+        if (c != keyword[i]) return 0;
+    }
+    return keyword[n] == '\0';
+}
+
+int nw_wireless_driver(const char *device)
+{
+    static const char *const known[] =
+        { "anxwifipi.device", "wifipi.device", "prism2.device", 0 };
+    const char *base = device;
+    int         i;
+
+    for (; *device != '\0'; device++)
+        if (*device == ':' || *device == '/') base = device + 1;
+    for (i = 0; known[i] != 0; i++)
+    {
+        const char *a = base, *b = known[i];
+
+        while (*a != '\0' && (*a == *b || (*a >= 'A' && *a <= 'Z' && *a + 32 == *b)))
+        {
+            a++;
+            b++;
+        }
+        if (*a == '\0' && *b == '\0') return i < 2 ? NW_DRIVER_PI : NW_DRIVER_PRISM2;
+    }
+    return 0;
 }
 
 int nw_iface_device(const char *text, size_t len, char *device, size_t cap,
                     unsigned long *unit)
 {
-    size_t pos = 0;
-    int    found = 0;
+    const char *p = text, *end = text + len;
+    int         found = 0;
 
-    while (pos < len)
+    while (p < end)
     {
-        size_t e = pos, i, k, v, ve;
-        int    is_device, is_unit;
+        const char *e = p, *k, *v, *ve;
+        int         is_device, is_unit;
 
-        while (e < len && text[e] != '\n' && text[e] != '\r') e++;
-        i = pos;
-        pos = (e < len) ? e + 1 : e;
-        while (i < e && (text[i] == ' ' || text[i] == '\t')) i++;
-        if (i >= e || text[i] == ';' || text[i] == '#') continue;
-
-        k = i;
-        while (k < e && text[k] != '=' && text[k] != ' ' && text[k] != '\t') k++;
-        is_device = (k - i == 6 && nw_upper(text[i]) == 'D' &&
-                     nw_upper(text[i + 1]) == 'E' && nw_upper(text[i + 2]) == 'V' &&
-                     nw_upper(text[i + 3]) == 'I' && nw_upper(text[i + 4]) == 'C' &&
-                     nw_upper(text[i + 5]) == 'E');
-        is_unit = (k - i == 4 && nw_upper(text[i]) == 'U' &&
-                   nw_upper(text[i + 1]) == 'N' && nw_upper(text[i + 2]) == 'I' &&
-                   nw_upper(text[i + 3]) == 'T');
-        if (!is_device && !is_unit) continue;
-
-        v = k;
-        while (v < e && (text[v] == ' ' || text[v] == '\t')) v++;
-        if (v < e && text[v] == '=') v++;
-        while (v < e && (text[v] == ' ' || text[v] == '\t')) v++;
-        if (v < e && text[v] == '"')
-        {
-            v++;
-            ve = v;
-            while (ve < e && text[ve] != '"') ve++;
-        }
+        while (e < end && *e != '\n' && *e != '\r') e++;
+        while (p < e && (*p == ' ' || *p == '\t')) p++;
+        /* A ';' or '#' line has no keyword that matches. */
+        for (k = p; k < e && *k != '=' && *k != ' ' && *k != '\t'; k++)
+            ;
+        is_device = nw_keyword(p, (size_t)(k - p), "DEVICE");
+        is_unit = nw_keyword(p, (size_t)(k - p), "UNIT");
+        for (v = k; v < e && (*v == ' ' || *v == '\t' || *v == '='); v++)
+            ;
+        if (v < e && *v == '"')
+            for (ve = ++v; ve < e && *ve != '"'; ve++)
+                ;
         else
+            for (ve = v; ve < e && *ve != ' ' && *ve != '\t' && *ve != ';' &&
+                         *ve != '#'; ve++)
+                ;
+        if (ve > v && is_device && (size_t)(ve - v) < cap)
         {
-            ve = v;
-            while (ve < e && text[ve] != ' ' && text[ve] != '\t' &&
-                   text[ve] != ';' && text[ve] != '#') ve++;
-        }
-        if (ve == v) continue;
+            char *d = device;   /* from the start: the last DEVICE wins */
 
-        if (is_device && ve - v < cap)
-        {
-            for (k = 0; k < ve - v; k++) device[k] = text[v + k];
-            device[ve - v] = '\0';
+            for (k = v; k < ve; k++) *d++ = *k;
+            *d = '\0';
             found = 1;
         }
-        else if (is_unit && text[v] >= '0' && text[v] <= '9')
-            *unit = (unsigned long)nw_number(text, v, ve);
+        else if (ve > v && is_unit && *v >= '0' && *v <= '9')
+            *unit = (unsigned long)nw_number(text, (size_t)(v - text),
+                                             (size_t)(ve - text));
+        p = e + 1;
     }
     return found;
 }
