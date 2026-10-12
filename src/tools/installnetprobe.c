@@ -194,6 +194,25 @@ static uint8_t attr_read(void *ctx, uint32_t n)
     return *(volatile UBYTE *)(PC_ATTR_BASE + n * 2UL);
 }
 
+/* The owner's handle name, read under Forbid while the handle is live. */
+static BOOL owner_is(struct CardHandle *owner, const char *name)
+{
+    BOOL  is = FALSE;
+    char *n;
+
+    if (owner == (struct CardHandle *)-1)
+        return FALSE;
+    Forbid();
+    if (TypeOfMem(owner) != 0)
+    {
+        n = owner->cah_CardNode.ln_Name;
+        if (n != NULL && TypeOfMem(n) != 0)
+            is = same(n, name);
+    }
+    Permit();
+    return is;
+}
+
 static ULONG ignore_card_event(VOID)
 {
     return 0;
@@ -245,6 +264,11 @@ static BOOL pcmcia_identity(NetprobeCis *cis)
            release or remove from card.resource's owner list. */
         handle.cah_CardNode.ln_Name = NULL;
         if ((probe_card_status() & CARD_STATUSF_CCDET) == 0)
+            return FALSE;
+        /* prism2.device's card: a wireless card whose CIS need not say so,
+           so never an NE2000 here.  The driver file's Prism2 default stands
+           and the PCMCIA type page is drawn. */
+        if (owner_is(owner, "prism2.device"))
             return FALSE;
         return (BOOL)netprobe_cis_walk(attr_read, NULL, PC_ATTR_CIS_BYTES,
                                        cis);
@@ -362,8 +386,13 @@ int main(int argc, char **argv)
     else if (args[ARG_GENETOK] != 0)
         present = genet_usable();
     else if (args[ARG_WIFIPI] != 0)
+        /* The alias is what anxwifipi.device reads its base through; the
+           live brcmfmac node under an enabled mmcnr is the radio itself.
+           A CM4S, a CM4 without wireless or dtoverlay=disable-wifi has
+           mmcnr disabled. */
         present = (BOOL)(supported_wifi_model() &&
-                         netdev_dtree_alias_present("mmc"));
+                         netdev_dtree_alias_present("mmc") &&
+                         netdev_dtree_live("brcm,bcm4329-fmac"));
     else
     {
         const char *card = (const char *)args[ARG_CARD];

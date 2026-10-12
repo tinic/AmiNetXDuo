@@ -300,10 +300,10 @@ for an address; DHCP continues after that.  With the Pi Ethernet as well,
 both start, the Ethernet first and with PRIORITY=10, so the default route
 stays on the cable, and the Wi-Fi in the background, so the boot does not
 wait for it; the micro stack starts the Ethernet only.  A WirelessManager
-the installer did not install is started from C:.  Where S:User-Startup,
-S:Startup-Sequence or SYS:WBStartup already names WirelessManager, the lines
-that would start a second copy are commented out.  S:AmiNetXDuo-WiFi lists the Wi-Fi files the
-installer created.
+the installer did not install is started from where it is installed.
+Where S:User-Startup, S:Startup-Sequence or SYS:WBStartup already names
+WirelessManager, the lines that would start a second copy are commented
+out.  S:AmiNetXDuo-WiFi lists the Wi-Fi files the installer created.
 
 The installer puts all three in DEVS:Networks.  Copying them changes nothing
 on its own: an interface file selects one with DEVICE=.  anxnet.device may also need a CARD= line when the probe has to be

@@ -404,12 +404,12 @@
        "network named in ENV:Sys/Wireless.prefs and keeps the connection.  "
        "S:Network-Startup starts it before the Wi-Fi interface.\n\n"
        "A WirelessManager that this installer did not put on the machine, in "
-       "C:, SYS:C or this installation's own drawer, is kept as it is.  "
-       "S:Network-Startup then leaves the lines that start WirelessManager "
-       "commented out, so that two copies do not share one radio.  The same "
-       "applies when a Wireless.prefs that this installer did not write "
-       "exists, or when S:User-Startup, S:Startup-Sequence or SYS:WBStartup "
-       "names WirelessManager.\n\n"
+       "C:, SYS:C or this installation's own drawer, is kept as it is, and "
+       "S:Network-Startup starts that copy.  A Wireless.prefs that this "
+       "installer did not write is kept and used.  Only when S:User-Startup, "
+       "S:Startup-Sequence or SYS:WBStartup names WirelessManager are the "
+       "lines that start it commented out, so that two copies do not share "
+       "one radio.\n\n"
        "It is based on wpa_supplicant and is distributed under wpa_supplicant's "
        "three-clause BSD licence, Copyright (c) 2003-2010 Jouni Malinen and "
        "contributors, (c) 2011-2025 Neil Cafferkey.  The licence is installed "
@@ -1237,6 +1237,20 @@
     (set HAVE_DRAWER 1)
   ))
 
+; A system installation has no assign, but its record names its drawer:
+; a reinstall goes back there, where Backup and Installed already are,
+; not into a second SYS:AmiNetXDuo.  InstallSameFile reads the name into
+; ENV:AmiNetXDuoDrawer, as the Installer cannot read a file.
+(if (AND (= HAVE_DRAWER 0) (exists "S:AmiNetXDuo-Files" (noreq)))
+  (if (= 0 (run ("\"%s\" S:AmiNetXDuo-Files AmiNetXDuoDrawer DRAWER" S_SAMEFILE)
+                (quiet) (safe)))
+    (
+      (set REC_DRAWER (getenv "AmiNetXDuoDrawer"))
+      (run "Delete >NIL: ENV:AmiNetXDuoDrawer QUIET" (quiet) (safe))
+      (if (AND (> (strlen REC_DRAWER) 0) (= (exists REC_DRAWER (noreq)) 2))
+          (set @default-dest (pathonly REC_DRAWER)))
+    )))
+
 ; --- system directories, or a drawer of its own --------------------------
 ;
 ; Issue #9 asked for a layout that keeps every file of this stack in one
@@ -1301,8 +1315,9 @@
     (set DRAWER_LAYOUT 1)))
 
 ; Asked at Expert, and of a new drawer install, which is the one layout where
-; the drawer holds the stack itself.  Otherwise SYS:, or the drawer the
-; AmiNetXDuo: assign already names (the default above).
+; the drawer holds the stack itself.  Otherwise the existing installation's
+; drawer (the assign, or the one its record names), and SYS: only for a
+; first installation.
 (set DOCPARENT @default-dest)
 (if (OR (= @user-level 2) (AND DRAWER_LAYOUT (= HAVE_DRAWER 0)))
   (set DOCPARENT
@@ -1708,7 +1723,9 @@
           (set PI_DEFAULT (bitor PI_DEFAULT 2)))
         (if (= PI_DEFAULT 0) (set PI_DEFAULT 1))
         (set PI_MASK 0)
-        (if (AND (< @user-level 2) (> (bitand PROBE_DEFAULT 2049) 0))
+        ; Only a probed Pi Wi-Fi settles the page: GENET alone leaves open
+        ; whether a radio is there to tick.
+        (if (AND (< @user-level 2) (> (bitand PROBE_DEFAULT 2048) 0))
           (set PI_MASK PI_DEFAULT))
         (until (> PI_MASK 0)
           (set PI_MASK
