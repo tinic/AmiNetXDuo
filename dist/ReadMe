@@ -121,6 +121,13 @@ The installer asks, in this order:
 
 At Novice level every question takes its default without being shown.
 
+On a system installation where LIBS: held no bsdsocket.library and no
+other stack is running, the installer runs the S:Network-Startup it writes,
+in the background, and waits at most 40 seconds (60 with the Wi-Fi as the
+primary interface) for an interface and a default route.  The last page
+states whether the network came up.  With another stack or an earlier
+AmiNetXDuo running, AmiNetXDuo starts at the next reboot.
+
 If the answer to the DHCP question is not known, answer yes.  Nearly every
 home network hands out addresses, and the change afterwards is one line in
 one file.
@@ -184,10 +191,10 @@ S:Network-Startup, and their .old files, are copied, with Copy CLONE, before
 anything is replaced, into a drawer of that installation's own under the
 AmiNetXDuo drawer's Backup, numbered one above the highest there; each
 holds only what was new or changed since the earlier ones.  A file NetSetup
-or this installer wrote is not copied, and neither is one already kept unchanged.  A copy that fails
-stops the installation before anything is replaced.  Every library is copied in
-under a .new name first and swapped after, so a copy that fails leaves the
-installed file in place.
+or this installer wrote is not copied, and neither is one already kept
+unchanged.  A copy that fails stops the installation before anything is
+replaced.  Every library is copied in under a .new name first and swapped
+after, so a copy that fails leaves the installed file in place.
 
 The Developer drawer is not installed, deliberately: it holds headers, and
 where headers belong is a property of the compiler rather than of this
@@ -369,48 +376,27 @@ way it always was.
 UNINSTALLING
 ------------
 
-     Delete LIBS:bsdsocket.library LIBS:usergroup.library
-     Delete LIBS:tls.library
-     Delete C:NetSetup C:NetPrefs C:AddNetInterface C:RemoveNetInterface
-     Delete SYS:Prefs/NetPrefs SYS:Prefs/NetPrefs.info
-     Delete C:NetMeter SYS:Utilities/NetMeter SYS:Utilities/NetMeter.info
-     Delete C:NetWireless C:NetWirelessPrefs
-     Delete C:ConfigureNetInterface C:Online C:Offline
-     Delete C:ShowNetStatus C:ShowNetServices C:GetNetStatus
-     Delete C:CheckNetConfig C:CheckNetDevice C:NetDevStats C:NetShutdown
-     Delete C:CreateAmiNetXDuoStatusReport
-     Delete C:AddNetRoute C:DeleteNetRoute C:hostname
-     Delete C:ping C:netstat C:host C:nslookup C:arp
-     Delete C:fetch C:nc C:telnet C:tftp C:sntp C:traceroute
-     Delete C:whois C:ssh C:scp C:scp-runner C:httpd C:iperf
-     Delete C:NetCapture C:NetTrace
-     Delete DEVS:NetInterfaces/eth0
-     Delete DEVS:Internet/routes DEVS:Internet/name_resolution
-     Delete DEVS:Internet/certificates
-     Delete DEVS:Networks/anxnet.device DEVS:Networks/anxnet.device.old
-     Delete DEVS:Networks/anxgenet.device DEVS:Networks/anxgenet.device.old
-     Delete DEVS:Networks/anxwifipi.device DEVS:Networks/anxwifipi.device.old
-     Execute S:AmiNetXDuo-WiFi
-     Delete S:AmiNetXDuo-WiFi
-     Delete S:Network-Startup S:Network-Startup.old
+Uninstall-AmiNetXDuo, in the AmiNetXDuo drawer, removes AmiNetXDuo.  It
+takes the ";BEGIN AmiNetXDuo" .. ";END AmiNetXDuo" block out of
+S:User-Startup, deletes the configuration files the installer wrote (each
+names the installer on its first lines), and runs S:AmiNetXDuo-Files, the
+record the installer leaves.  That record deletes the libraries, commands,
+drivers and the NetPrefs and NetMeter copies the installer put in place,
+puts back the files of another stack that the installer replaced, each
+from the lowest-numbered Backup drawer that holds it (that stack as first
+found), and deletes the drawer.  S:AmiNetXDuo-WiFi, where the
+Pi Wi-Fi was selected, deletes the WirelessManager and Wireless.prefs the
+installer created and no others.  Files ending in .old stay,
+the drivers' included.  A drawer whose window is open stays, empty, until
+it is deleted.
 
-and take the ";BEGIN AmiNetXDuo" .. ";END AmiNetXDuo" block out of
-S:User-Startup.  If another stack was installed before, its files are in
-the AmiNetXDuo drawer's Backup, one numbered drawer per installation that
-kept anything, each holding only what was new or changed then.  Copy every
-numbered drawer's Libs, Devs and S back over LIBS:, DEVS: and S:, with
-Copy ALL CLONE, the highest number first and Backup/1 last, so that each
-file ends as the other stack had it first; then delete the AmiNetXDuo
-drawer, Backup last.  After an update, LIBS:bsdsocket.library.old is an
-earlier AmiNetXDuo, not the other stack.  DEVS:Internet/hosts and the
-netdb files stay: the installer writes them only where there were none.
-Add QUIET to a Delete line whose file was never installed, such as
-tls.library on a minimal or micro installation.  S:AmiNetXDuo-WiFi exists only where the
-Pi Wi-Fi was selected, and it deletes only the WirelessManager and
-Wireless.prefs the installer created, never ones that were there before.
+Backup holds another stack's libraries, its commands with the same names as
+AmiNetXDuo's, its NetPrefs and NetMeter, its certificate store, and its
+interface, routes, name_resolution and S:Network-Startup files, and their
+.old files, each run in a drawer numbered one above the highest there.
 
-A drawer installation is the AmiNetXDuo drawer, the startup block, and
-nothing else: delete the drawer and take the block out.
+A drawer installation is the AmiNetXDuo drawer, the startup block,
+S:Network-Startup and S:AmiNetXDuo-Files.
 
 
 STATUS

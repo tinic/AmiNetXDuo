@@ -123,6 +123,8 @@ SCENARIOS=(
     DRAWER_FULL DRAWER_MINIMAL DRAWER_MICRO
     DRAWER_FULL_MINIMAL DRAWER_MICRO_FULL
     ROADSHOW_LEAVE ROADSHOW_REPLACE AMITCPNG_LEAVE AMITCPNG_REPLACE
+    UNINSTALL ROADSHOW_UNINSTALL RERUN_UNINSTALL DRAWER_UNINSTALL WIFI_UNINSTALL
+    KEEP_REDO_UNINSTALL
     ROADSHOW_PRETEND ROADSHOW_NOVICE ROADSHOW_REPLACE_RERUN ROADSHOW_KEEP_REDO ROADSHOW_REDO_SAME
     EMU68_GENET EMU68_WIFI EMU68_BOTH EMU68_BOTH_MICRO
     EMU68_WIFI_JOIN EMU68_WIFI_KEEP EMU68_WIFI_KEEPIT EMU68_WIFI_KEEPIT_BOTH EMU68_WIFI_KEEPIT_LIVE
@@ -228,6 +230,13 @@ for scenario in "${SCENARIOS[@]}"; do
         ROADSHOW_REPLACE)      opts=(-l AVERAGE -f roadshow-replace) ;;
         AMITCPNG_LEAVE)        opts=(-l AVERAGE -f amitcpng-leave) ;;
         AMITCPNG_REPLACE)      opts=(-l AVERAGE -f amitcpng-replace) ;;
+        UNINSTALL)             opts=(-l NOVICE -u) ;;
+        ROADSHOW_UNINSTALL)    opts=(-l AVERAGE -f roadshow-replace -u) ;;
+        RERUN_UNINSTALL)       opts=(-l AVERAGE -R -u) ;;
+        DRAWER_UNINSTALL)      opts=(-l AVERAGE -D -u) ;;
+        WIFI_UNINSTALL)        opts=(-l AVERAGE -e wifi -u) ;;
+        KEEP_REDO_UNINSTALL)   opts=(-l AVERAGE -f roadshow-keepredo -R -u) ;;
+
         ROADSHOW_PRETEND)      opts=(-l AVERAGE -f roadshow-pretend) ;;
         ROADSHOW_NOVICE)       opts=(-l NOVICE -f roadshow-replace) ;;
         ROADSHOW_REPLACE_RERUN) opts=(-l AVERAGE -f roadshow-replace -R) ;;

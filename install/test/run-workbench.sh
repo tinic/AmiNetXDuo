@@ -85,6 +85,9 @@
 # Emu68's own genet.device in DEVS:Networks: the interface must name it.
 # genet-old-bare is the same tree with no genet.device and no other driver:
 # the Installer must stop before writing anything.
+# -u runs the installed SYS:AmiNetXDuo/Uninstall-AmiNetXDuo after the
+# install, in the same boot: every product file must be as it was before the
+# install, .old and .new files aside.
 # -P replaces the throw-away archive's InstallNetProbe with one that exits
 # RETURN_FAIL for every query (fail) or with a file that is not a program
 # (broken): the Installer must fall back to the full stack and the driver
@@ -131,12 +134,13 @@ INST=
 PICK=""
 BOARD="${AMINETXDUO_AMIBERRY_BOARD:-a2065}"
 SNTP_MODE=""
+UNINSTALL=0
 MDNS_OFF=0
 HAND_HOST=0
 PROBE_FAULT=""
 WIFI_MODE=""
 
-while getopts "b:a:l:p:N:t:T:kHSDgRUEJBIMq:x:f:e:c:m:CVzWs:P:Ow:n" opt; do
+while getopts "b:a:l:p:N:t:T:kHSDgRUEJBIMq:x:f:e:c:m:CVzWs:P:Ow:nu" opt; do
     case "$opt" in
         b) BUILD="$OPTARG" ;;
         a) ARCHIVE="$OPTARG" ;;
@@ -169,6 +173,7 @@ while getopts "b:a:l:p:N:t:T:kHSDgRUEJBIMq:x:f:e:c:m:CVzWs:P:Ow:n" opt; do
         z) STALE_PI_DRIVERS=1; NO_CARD=1; CONFIG_ONLY=1 ;;
         W) SPACES=1 ;;
         s) SNTP_MODE="$OPTARG" ;;
+        u) UNINSTALL=1; CONFIG_ONLY=1 ;;
         O) MDNS_OFF=1 ;;
         n) HAND_HOST=1 ;;
         w) WIFI_MODE="$OPTARG"
@@ -388,7 +393,7 @@ fi
 if [ "$MANUAL_CARD" = 1 ]; then
     [ -z "$CANCEL_MODE" ] && [ -z "$MISSING_MODE" ] &&
     [ -z "$FOREIGN_MODE" ] && [ -z "$EMU68_FIXTURE" ] &&
-    [ "$DRAWER" = 0 ] && [ "$RERUN" = 0 ] && [ "$RECONFIGURE" = 0 ] &&
+    [ "$RERUN" = 0 ] && [ "$RECONFIGURE" = 0 ] &&
     [ "$NO_CARD" = 0 ] || {
         echo "-M cannot be combined with another installer fixture" >&2
         exit 2
@@ -907,6 +912,7 @@ build_driver() {
            -DDRIVE_PICK_SKIP="$skip" -DDRIVE_PAGE_PAUSE="$page_pause" \
            -DDRIVE_PAUSE_OPTIONS="$pause_options" \
            -DDRIVE_ARCHIVE_DRAWER="\"$UNPACK_AMIGA/AmiNetXDuo\"" -I"$NDK" \
+           ${UNINSTALL_DEF:+"$UNINSTALL_DEF"} ${NETCHECK_DEF:+"$NETCHECK_DEF"} \
            -o "$out" "$ROOT/install/test/installdrive.c" || exit 2
 }
 
@@ -1209,7 +1215,30 @@ fi
 
 echo "==> building installdrive ($LEVEL, $DRIVE_RUNS run(s)${YES_LABEL:+, \"$YES_LABEL\"}${PICK:+, picking \"$PICK\"})"
 DRIVER="$ROOT/build/installdrive-$TAG-$LEVEL"
+UNINSTALL_DEF=""
+[ "$UNINSTALL" = 0 ] ||
+    UNINSTALL_DEF='-DDRIVE_UNINSTALL="SYS:AmiNetXDuo/Uninstall-AmiNetXDuo"'
+# A first installation with a board on the network starts the network: the
+# hardware-discovery runs, whose install boot has the board.  A drawer
+# installation does not start it (NETCHECK_WANT=down).
+NETCHECK=0
+NETCHECK_DEF=""
+NETCHECK_WANT=up
+# The drawer arm installs twice; neither run starts the network.
+if [ "$MANUAL_CARD" = 1 ] && { [ "$DRIVE_RUNS" = 1 ] || [ "$DRAWER" = 1 ]; } &&
+   [ "$UNINSTALL" = 0 ] &&
+   [ "$NO_BOOT" = 0 ] && [ "$STATIC" = 0 ]; then
+    NETCHECK=1
+    # GetNetStatus where this layout puts it.
+    NETCHECK_DEF='-DDRIVE_NETCHECK="C:GetNetStatus"'
+    if [ "$DRAWER" = 1 ]; then
+        NETCHECK_WANT=down
+        NETCHECK_DEF='-DDRIVE_NETCHECK="SYS:AmiNetXDuo/C/GetNetStatus"'
+    fi
+fi
 build_driver "$DRIVER" "$DRIVE_RUNS" "$YES_LABEL" "$PICK_SPEC"
+UNINSTALL_DEF=""
+NETCHECK_DEF=""
 
 rm -rf "$HD"
 rm -rf "$WORK"
@@ -1448,7 +1477,7 @@ file_mode() {
 product_manifest() {
     local root file rel mode sum
     {
-    for root in Libs C Devs Prefs AmiNetXDuo AmiNetXDuo.info ForeignAmiTCP \
+    for root in Libs C Devs Prefs Utilities AmiNetXDuo AmiNetXDuo.info ForeignAmiTCP \
                 S/Startup-Sequence S/User-Startup \
                 S/Network-Startup S/Network-Startup.old \
                 S/AmiNetXDuo-drawer; do
@@ -1802,6 +1831,10 @@ if [ -n "$FOREIGN_MODE" ]; then
     # 2's; its S:Network-Startup carries run 1's marker by then.
     _bk_cfg=1
     [ "$FOREIGN_MODE" = roadshow-keepredo ] && _bk_cfg=2
+    # The user's own S:Network-Startup by the end, which uninstalling restores.
+    MARKED_NS_SHA=$({ cat "$HD/S/Network-Startup"
+        printf '; user startup policy -- installer must preserve this\n'
+      } | shasum | cut -d' ' -f1)
     FOREIGN_OLD_EXPECTED=$(
         for f in Libs/bsdsocket.library Libs/usergroup.library Libs/tls.library; do
             printf 'AmiNetXDuo/Backup/1/%s %s\n' "$f" "$(shasum < "$HD/$f" | cut -d' ' -f1)"
@@ -2287,7 +2320,7 @@ if [ -n "$CANCEL_MODE" ] || [ -n "$MISSING_MODE" ] || [ "$NO_CARD" = 1 ] ||
     REFUSAL=1
 fi
 ZERO_DIFF_BEFORE=""
-if [ "$REFUSAL" = 1 ]; then
+if [ "$REFUSAL" = 1 ] || [ "$UNINSTALL" = 1 ]; then
     ZERO_DIFF_BEFORE=$(product_manifest)
 fi
 
@@ -2318,6 +2351,58 @@ cat "$HD/installdrive.txt" 2>/dev/null || echo "(none)"
 echo
 echo "---- Installer log ----"
 cat "$HD/install-log.txt" 2>/dev/null || echo "(none written)"
+
+# UNINSTALLED: what was there before the install is there again, and
+# nothing else, apart from the .old and .new files a replacement leaves.
+if [ "$UNINSTALL" = 1 ]; then
+    echo "---- Uninstall log ----"
+    cat "$HD/uninstall-log.txt" 2>/dev/null || echo "(none written)"
+    # Protection bits aside: Copy CLONE back through UAE's host files does not
+    # reproduce the host mode the fixture was written with.
+    _strip() { grep -v -E '\.(old|old\.info|new)$' | grep -v -E $'^D\t' |
+               grep -v -E '\.uaem$' | cut -f3- | sort; }
+    _before=$(printf '%s\n' "$ZERO_DIFF_BEFORE" | _strip)
+    if [ "$FOREIGN_MODE" = roadshow-keepredo ]; then
+        # installdrive edited S:Network-Startup between the runs.
+        _before=$(printf '%s\n' "$_before" |
+            sed -E "s|^[0-9a-f]+(\tS/Network-Startup)\$|$MARKED_NS_SHA\1|" | sort)
+    fi
+    # A driver staged from the archive before the install is AmiNetXDuo's,
+    # and goes with it.
+    for _d in "$UNPACK"/AmiNetXDuo/Devs/Networks/anx*.device; do
+        [ -f "$_d" ] || continue
+        _before=$(printf '%s\n' "$_before" |
+            grep -v -F -x "$(shasum < "$_d" | cut -d' ' -f1)	Devs/Networks/${_d##*/}" || true)
+    done
+    _after=$(product_manifest | _strip)
+    _u_ok=1
+    if [ "$_before" != "$_after" ]; then
+        echo "!! uninstalling did not restore the tree"
+        diff -u <(printf '%s\n' "$_before") <(printf '%s\n' "$_after") || true
+        _u_ok=0
+    fi
+    if [ "$INSTALL_STATUS" != 0 ]; then
+        echo "!! the driver returned $INSTALL_STATUS"
+        _u_ok=0
+    fi
+    if amiga_path S/AmiNetXDuo-Files >/dev/null 2>&1; then
+        echo "!! S:AmiNetXDuo-Files is still there"
+        _u_ok=0
+    fi
+    if amiga_path AmiNetXDuo >/dev/null 2>&1; then
+        echo "!! the AmiNetXDuo drawer is still there"
+        _u_ok=0
+    fi
+    if [ "$_u_ok" = 1 ]; then
+        echo "  ok      install then Uninstall-AmiNetXDuo left the tree as it was"
+        echo "workbench_e2e=PASS board=$BOARD model=$MODEL driver=$SANA2_DRIVER" \
+             "card_config=uninstalled stack=removed boot_status=not-run"
+        exit 0
+    fi
+    echo "workbench_e2e=FAIL board=$BOARD model=$MODEL driver=$SANA2_DRIVER" \
+         "card_config=uninstalled stack=unknown boot_status=install-$INSTALL_STATUS"
+    exit 1
+fi
 
 if [ "$REFUSAL" = 1 ]; then
     ZERO_DIFF_AFTER=$(product_manifest)
@@ -2406,6 +2491,19 @@ echo "  what the installer put on a real Workbench"
 echo "============================================================"
 
 fail=0
+if [ "$NETCHECK" = 1 ]; then
+    _net=$(sed -n 's/^installdrive: netcheck //p' "$HD/installdrive.txt" 2>/dev/null)
+    echo "install_netcheck=${_net:-none} want=$NETCHECK_WANT"
+    if [ "$NETCHECK_WANT" = up ] && [ "$_net" = 0 ]; then
+        echo "  ok      the first installation left the network running"
+    elif [ "$NETCHECK_WANT" = down ] && [ "$_net" = 5 ]; then
+        echo "  ok      a drawer installation did not start the network"
+    else
+        echo "!! network after the installation: netcheck=${_net:-none}, want $NETCHECK_WANT"
+        fail=1
+    fi
+fi
+
 
 # A populated second volume is present in every scenario because Installer's
 # own default otherwise preferred Work:.  AmiNetXDuo must still land under

@@ -105,6 +105,11 @@
                     (tackon SRCDIR "Terminal.info") "Terminal.info"))
 (set S_CICON (if (> (strlen SRCDIR) 0)
                  (tackon SRCDIR "C.info") "C.info"))
+(set S_UNINSTALL (if (> (strlen SRCDIR) 0)
+                     (tackon SRCDIR "Uninstall-AmiNetXDuo") "Uninstall-AmiNetXDuo"))
+(set S_UNINSTALLICON (cat S_UNINSTALL ".info"))
+(set S_INSTALLER (if (> (strlen SRCDIR) 0)
+                     (tackon SRCDIR "Installer") "Installer"))
 
 ; WirelessManager and its licence, in a drawer of their own: C/ is copied
 ; wholesale, and these are copied only when the Wi-Fi is selected.
@@ -414,7 +419,8 @@
   (cat "Files of another stack that AmiNetXDuo replaces are kept in a drawer "
        "of their own under the Backup drawer of the AmiNetXDuo drawer: "
        "Backup/1 for the first installation that replaced any, Backup/2 for "
-       "the next.  Nothing there is replaced later."))
+       "the next.  Nothing there is replaced later.  Uninstall-AmiNetXDuo "
+       "puts them back."))
 
 (set H_REPLACELIB
   (cat "There is already a bsdsocket.library on this machine.  It belongs to "
@@ -485,6 +491,11 @@
   (cat "It starts by itself at the next reboot.  To start it now:\n\n"
        "    %sAddNetInterface DEVS:NetInterfaces/%s\n"))
 
+; The drawer layout: its assigns, and so its library, exist only from the
+; next boot.
+(set F_START_REBOOT
+  "It starts by itself at the next reboot.\n")
+
 (set F_START_NO
   (cat "It does not start by itself.  To start it:\n\n"
        "    %sAddNetInterface DEVS:NetInterfaces/%s\n"))
@@ -494,12 +505,29 @@
        "To start this interface now:\n\n"
        "    %sAddNetInterface DEVS:NetInterfaces/%s\n"))
 
+; Started at the end of this run, or not because a stack was running: %ld
+; in F_START_TRIED is the wait in seconds.
+(set F_START_NOW
+  "It is running now, and starts by itself at every boot.\n")
+
+(set F_START_TRIED
+  (cat "S:Network-Startup was run, and the network did not come up within "
+       "%ld seconds.  It starts by itself at every boot.\n"))
+
+(set F_START_OTHER
+  (cat "Another network stack is running, so AmiNetXDuo was not started.  "
+       "Reboot to start it; it starts by itself at every boot.\n"))
+
+(set F_START_EARLIER
+  (cat "An earlier AmiNetXDuo is running.  Reboot to start this one; it "
+       "starts by itself at every boot.\n"))
+
 (set F_HTTPD
   (cat "\nFrom the next reboot, httpd serves every mounted volume on port %ld, with a file "
        "manager and text editor at /files and a Shell at /shell.  Neither asks for a password.\n"))
 
 (set F_SNTP
-  "\nFrom the next reboot, sntp sets the clock from %s.\n")
+  "\nsntp sets the clock from %s when the network starts.\n")
 
 (set F_BADHOST
   (cat "\"%s\" is not a server name.\n\n"
@@ -2372,6 +2400,25 @@
     (set BK_SRC "S:Network-Startup.old")
     (P_backup)
   ))
+; With the libraries, before anything is replaced: a command of the same
+; name in C:, NetPrefs, NetMeter and the certificate store that do not name
+; AmiNetXDuo are another stack's, or the user's.  Over our own library C:
+; holds our own commands, some of which (scp-runner) do not name it.
+(if (AND (= DRAWER_LAYOUT 0) (= LIB_OURS 0))
+  (
+    (set BK_SUB "Prefs")
+    (set BK_SRC "SYS:Prefs/NetPrefs") (P_backup)
+    (set BK_SUB "Utilities")
+    (set BK_SRC "SYS:Utilities/NetMeter") (P_backup)
+    (set BK_SUB "Devs/Internet")
+    (set BK_SRC (tackon (tackon D_DEVS "Internet") "certificates")) (P_backup)
+    (set BK_SUB "C")
+    (foreach S_C "~(fat|#?.info)"
+      (
+        (set BK_SRC (tackon D_C @each-name))
+        (P_backup)
+      ))
+  ))
 
 (working "Installing the libraries")
 
@@ -2582,6 +2629,7 @@
 (procedure P_install_firmware
   (if (NOT (OR (exists (tackon "DEVS:Firmware" FW_NAME) (noreq))
                (exists (tackon D_FIRMWARE FW_NAME) (noreq))))
+    (
       (copyfiles
         (prompt ("Installing DEVS:Firmware/%s" FW_NAME))
         (help   (cat "The Cypress and Synaptics Wi-Fi firmware that "
@@ -2591,7 +2639,17 @@
                      "are copied."))
         (source (tackon S_FIRMWARE FW_NAME))
         (dest   D_FIRMWARE)
-        (optional "nofail")))
+        (optional "nofail"))
+      ; Echo appends, so a later install keeps the lines of the files an
+      ; earlier one copied: Uninstall-AmiNetXDuo removes those and no others.
+      ; System layout only: a drawer install's firmware goes with its drawer,
+      ; and DEVS:Firmware has no space in it to quote.
+      (if (AND (= DRAWER_LAYOUT 0) (exists (tackon D_FIRMWARE FW_NAME) (noreq)))
+          (run ("Echo >>S:AmiNetXDuo-Firmware \"Delete DEVS:Firmware/%s QUIET\""
+                FW_NAME)
+               (prompt "Recording the firmware file for Uninstall-AmiNetXDuo")
+               (help   H_BACKUP)))
+    ))
 )
 
 ; --- the Pi Wi-Fi firmware ------------------------------------------------
@@ -2726,6 +2784,10 @@
 ; --- the commands --------------------------------------------------------
 
 (working "Installing the network commands")
+
+; The C drawer's own icon, which the copy below brings along when C: had none.
+(set HAD_C_INFO (if (exists (tackon D_C ".info") (noreq)) 1 0))
+
 
 (copyfiles
   (prompt "Installing the network commands into C:")
@@ -3266,6 +3328,32 @@
       (newname "AmiNetXDuo.info")
       (optional "nofail")))
 
+; The uninstaller, where the archive no longer has to be.
+(if (exists S_UNINSTALL (noreq))
+    (copyfiles
+      (prompt "Installing Uninstall-AmiNetXDuo")
+      (help   "It removes AmiNetXDuo again and puts back what it replaced of "
+              "another stack.")
+      (source S_UNINSTALL)
+      (dest   DOCDIR)
+      (optional "force" "nofail")))
+(if (exists S_UNINSTALLICON (noreq))
+    (copyfiles
+      (prompt "Giving Uninstall-AmiNetXDuo its icon")
+      (help   @copyfiles-help)
+      (source S_UNINSTALLICON)
+      (dest   DOCDIR)
+      (optional "force" "nofail")))
+; Its icon's default tool, beside it, as in the archive: Workbench finds it
+; there whatever the system has.
+(if (exists S_INSTALLER (noreq))
+    (copyfiles
+      (prompt "Installing the Installer beside Uninstall-AmiNetXDuo")
+      (help   "Commodore's Installer runs Uninstall-AmiNetXDuo.")
+      (source S_INSTALLER)
+      (dest   DOCDIR)
+      (optional "force" "nofail")))
+
 (if (exists S_README (noreq))
     (copyfiles
       (prompt "Installing the ReadMe")
@@ -3643,16 +3731,176 @@
               "network does not start by itself.")
       (help   H_STARTUP)))
 
+; --- the record Uninstall-AmiNetXDuo runs --------------------------------
+;
+; An AmigaDOS script: delete what this installation put on the disk, put
+; back the other stack's files kept in Backup, and remove the drawer.  The
+; drawer layout keeps everything in the drawer.  The configuration files
+; are Uninstall-AmiNetXDuo's to find: they name this installer.
+(set REC_FILES "")
+(if (exists (tackon (tackon S_DEVS "Internet") "certificates") (noreq))
+    (set REC_FILES
+      (cat "Delete \"" (tackon (tackon D_DEVS "Internet") "certificates")
+           "\" QUIET\n")))
+(if (= DRAWER_LAYOUT 0)
+  (
+    (set REC_FILES
+      (cat REC_FILES
+           "Delete \"" D_BSD "\" QUIET\n"
+           "Delete \"" D_UG "\" QUIET\n"
+           (if (exists (tackon S_LIBS "tls.library") (noreq))
+               (cat "Delete \"" D_TLS "\" QUIET\n") "")
+           "Delete SYS:Prefs/NetPrefs QUIET\n"
+           "Delete SYS:Prefs/NetPrefs.info QUIET\n"
+           "Delete SYS:Utilities/NetMeter QUIET\n"
+           "Delete SYS:Utilities/NetMeter.info QUIET\n"))
+    (if DO_ANXNET
+      (
+        (set REC_N 0)
+        (while (set REC_SUB (select REC_N "anxnet.device" "anxgenet.device"
+                                          "anxwifipi.device" "anxzz9000.device"
+                                          ""))
+          (
+            (set REC_FILES
+              (cat REC_FILES "Delete \""
+                   (tackon (tackon D_DEVS "Networks") REC_SUB) "\" QUIET\n"))
+            (set REC_N (+ REC_N 1))
+          ))
+      ))
+    (foreach S_C "~(fat)"
+      (set REC_FILES
+        (cat REC_FILES "Delete \"" (tackon D_C @each-name) "\" QUIET\n")))
+    (if (OR (= HAD_C_INFO 0) LIB_OURS)
+        (set REC_FILES
+          (cat REC_FILES "Delete \"" (tackon D_C ".info") "\" QUIET\n")))
+  ))
+
+; Back from Backup, in either layout, and the drawer's assigns away so
+; nothing holds the drawer.  A drawer whose Workbench window is open stays,
+; empty, until it is closed.
+; Every numbered Backup drawer, highest first, so for each file the copy in
+; the lowest-numbered drawer that has it -- the other stack as first found
+; -- is the one left in place.
+(set REC_BK BK_MAX)
+(if (> (strlen D_BACKUP) 0) (set REC_BK (+ BK_MAX 1)))
+(while (> REC_BK 0)
+  (
+    (set REC_DIR (tackon D_BACKUP_TOP ("%ld" REC_BK)))
+    (set REC_N 0)
+    (while (set REC_SUB (select REC_N "Libs" "C" "Devs" "S" "Prefs" "Utilities" ""))
+      (
+        (set REC_FILES
+          (cat REC_FILES
+               "If EXISTS \"" (tackon REC_DIR REC_SUB) "\"\n"
+               "  Copy \"" (tackon REC_DIR REC_SUB) "\" "
+               (select REC_N "LIBS:" "C:" "DEVS:" "S:" "SYS:Prefs" "SYS:Utilities")
+               " ALL CLONE QUIET\n"
+               "EndIf\n"))
+        (set REC_N (+ REC_N 1))
+      ))
+    (set REC_BK (- REC_BK 1))
+  ))
+; Assign EXISTS first: naming an assign that is not there asks for a volume.
+(set REC_FILES
+  (cat REC_FILES
+       "Assign >NIL: AmiNetXDuo: EXISTS\n"
+       "If WARN\n"
+       "Else\n"
+       (if DRAWER_LAYOUT
+           (cat "  Assign LIBS: AmiNetXDuo:Libs REMOVE\n"
+                "  Assign C: AmiNetXDuo:C REMOVE\n"
+                "  Assign DEVS: AmiNetXDuo:Devs REMOVE\n")
+           "")
+       "  Assign AmiNetXDuo:\n"
+       "EndIf\n"))
+
+(textfile
+  (prompt "Writing S:AmiNetXDuo-Files")
+  (help   "The record of this installation that Uninstall-AmiNetXDuo, in the "
+          "AmiNetXDuo drawer, runs to remove it again.")
+  (dest   "S:AmiNetXDuo-Files")
+  (append "; S:AmiNetXDuo-Files -- written by the AmiNetXDuo installer.\n")
+  (append ";\n")
+  (append "; Uninstall-AmiNetXDuo executes this after it has removed the\n")
+  (append "; S:User-Startup block and the configuration files the\n")
+  (append "; installer wrote.\n")
+  (append "FailAt 21\n")
+  (append REC_FILES)
+  (append ("Delete \"%s\" ALL QUIET FORCE\n" DOCDIR))
+  (append ("Delete \"%s.info\" QUIET\n" DOCDIR)))
+
 (complete 100)
 
 ; ==========================================================================
 ;  9.  Done
 ; ==========================================================================
 
+; START IT NOW on a first installation: with no bsdsocket.library in LIBS:
+; before this run, the startup file this run wrote starts the network, so
+; the Wi-Fi and sntp come up as they will at boot.  In the background: the
+; Installer waits for no driver, and polls GetNetStatus every 2 seconds for
+; an interface and a default route, for at most 40 seconds, or 60 when the
+; Wi-Fi is the primary (WirelessManager joins first).
+;
+; GetNetStatus by the path this run copied it to: AmiNetXDuo: is assigned
+; only from the next boot, and naming it now asks for a volume.
+(set NET_GNS (cat "\"" (tackon D_C "GetNetStatus") "\""))
+(set NET_WAIT (if (AND WIFI_START WIFI_PRIMARY) 60 40))
+(set NET_TRIED 0)
+(set NET_UP 0)
+(set NET_OTHER 0)
+(set NET_EARLIER 0)
+(if (AND DO_STARTUP (= KEEP_NETSTART 0) (= @pretend 0))
+  (
+    ; 5 is "not running".  10 is a stack in memory it cannot ask: another
+    ; stack (AmiTCP or Miami from their own drawers, with or without its
+    ; port), or an earlier AmiNetXDuo, whose library names it (VERSION).
+    ; Either way the last page says to reboot.
+    ; An update over a running earlier AmiNetXDuo that GetNetStatus can
+    ; ask answers 0 or 5: OLD_BSD sends that one to VERSION as well.
+    (set NET_RC (run ("%s QUIET" NET_GNS) (quiet) (safe)))
+    (if (OR (= NET_RC 10) OLD_BSD)
+      (
+        (if (= NET_RC 10) (set NET_OTHER 1))
+        (if (= 0 (run ("%s VERSION >T:AmiNetXDuo-Stack" NET_GNS) (quiet) (safe)))
+            (if (= 0 (run "Search >NIL: FROM T:AmiNetXDuo-Stack SEARCH AmiNetXDuo QUIET"
+                          (quiet) (safe)))
+                (set NET_EARLIER 1)))
+        (delete "T:AmiNetXDuo-Stack" (optional "force" "nofail"))
+      ))
+    (if (AND (= NET_RC 5) (= OLD_BSD 0) (= DRAWER_LAYOUT 0))
+      (
+        (working "Starting the network")
+        (run "Run >NIL: <NIL: Execute S:Network-Startup"
+             (prompt "Starting the network")
+             (help   "S:Network-Startup, the file that starts it at every boot."))
+        (set NET_TRIED 1)
+        (set NET_N 0)
+        (while (AND (= NET_UP 0) (< NET_N (/ NET_WAIT 2)))
+          (
+            (run "C:Wait 2" (quiet))
+            (if (= 0 (run ("%s CHECK=INTERFACES,DEFAULTROUTE QUIET" NET_GNS)
+                          (quiet)))
+                (set NET_UP 1))
+            (set NET_N (+ NET_N 1))
+          ))
+      ))
+  ))
+
 (if DO_STARTUP
     (if KEEP_NETSTART
         (set FINAL_START (F_START_KEPT C_PREFIX START_IF))
-        (set FINAL_START (F_START_YES C_PREFIX START_IF)))
+        (if NET_UP
+            (set FINAL_START F_START_NOW)
+            (if NET_TRIED
+                (set FINAL_START (F_START_TRIED NET_WAIT))
+                (if NET_EARLIER
+                    (set FINAL_START F_START_EARLIER)
+                    (if NET_OTHER
+                        (set FINAL_START F_START_OTHER)
+                        (if DRAWER_LAYOUT
+                            (set FINAL_START F_START_REBOOT)
+                            (set FINAL_START (F_START_YES C_PREFIX START_IF))))))))
     (set FINAL_START (F_START_NO  C_PREFIX START_IF)))
 
 ; Said again on the last page, and deliberately.  The question that turned it

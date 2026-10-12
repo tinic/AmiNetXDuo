@@ -80,6 +80,16 @@
 #endif
 
 /*
+ * An installed Uninstall-AmiNetXDuo to run once more after the installs, as
+ * run DRIVE_RUNS + 1.  Undefined: no such run.
+ */
+#ifdef DRIVE_UNINSTALL
+#define DRIVE_TOTAL_RUNS (DRIVE_RUNS + 1)
+#else
+#define DRIVE_TOTAL_RUNS DRIVE_RUNS
+#endif
+
+/*
  * How a yes/no page is answered with its SECOND choice: name the BUTTON.
  *
  * A yes/no page whose SECOND button's text contains this string is answered
@@ -1327,13 +1337,22 @@ static BOOL drive_once(LONG run_number, BPTR nil_in, BPTR nil_out)
     tags[3].ti_Tag = NP_StackSize;  tags[3].ti_Data = 40000UL;
     tags[4].ti_Tag = TAG_DONE;      tags[4].ti_Data = 0;
 
-    if (SystemTagList((STRPTR)
+    if (SystemTagList((STRPTR)(run_number <= DRIVE_RUNS ?
             "Installer "
             "SCRIPT Install-AmiNetXDuo "
             "APPNAME AmiNetXDuo "
             "MINUSER " DRIVE_LEVEL " DEFUSER " DRIVE_LEVEL " "
-            "LOGFILE DH0:install-log.txt",
-            tags) != 0)
+            "LOGFILE DH0:install-log.txt" :
+#ifdef DRIVE_UNINSTALL
+            "Installer "
+            "SCRIPT " DRIVE_UNINSTALL " "
+            "APPNAME AmiNetXDuo "
+            "MINUSER " DRIVE_LEVEL " DEFUSER " DRIVE_LEVEL " "
+            "LOGFILE DH0:uninstall-log.txt"
+#else
+            "Installer"
+#endif
+            ), tags) != 0)
     {
         say("installdrive: could not start the Installer (IoErr %ld)\n",
             IoErr());
@@ -1543,7 +1562,7 @@ int main(void)
     }
 
     rc = RETURN_OK;
-    for (run_number = 1; run_number <= DRIVE_RUNS; run_number++)
+    for (run_number = 1; run_number <= DRIVE_TOTAL_RUNS; run_number++)
     {
         nil_in  = Open((STRPTR)"NIL:", MODE_OLDFILE);
         nil_out = Open((STRPTR)"DH0:installer-out.txt", MODE_NEWFILE);
@@ -1671,6 +1690,18 @@ int main(void)
                 rc = RETURN_FAIL;
             }
     }
+
+#ifdef DRIVE_NETCHECK
+    /* Whether the installation left the network running: an interface and a
+       default route, which only an AddNetInterface run this boot gives. */
+    {
+        LONG net = SystemTagList((STRPTR)
+                       DRIVE_NETCHECK " CHECK=INTERFACES,DEFAULTROUTE QUIET",
+                       NULL);
+
+        say("installdrive: netcheck %ld\n", net);
+    }
+#endif
 
     say("installdrive: %ld pages driven in total\n", clicks);
     /*

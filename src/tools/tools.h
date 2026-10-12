@@ -269,6 +269,8 @@ VOID tool_stack_release(struct Library *base);
  * stack hands out somebody else's.
  */
 BOOL tool_stack_is_ours(struct Library *base);
+/* TRUE when a bsdsocket.library that is not ours is loaded, port or not. */
+BOOL tool_stack_foreign_loaded(VOID);
 BOOL tool_stack_version(char *buf, ULONG len);
 VOID tool_explain_foreign_stack(struct Library *base);
 

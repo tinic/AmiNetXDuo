@@ -34,6 +34,7 @@ def layout(outdir):
     edit(tree / "C.info", (62, 146), (280, 12, 340, 176))
     positions = {
         "Install-AmiNetXDuo.info": (358, 10),
+        "Uninstall-AmiNetXDuo.info": (210, 146),
         "ReadMe.info": (506, 10),
         "Docs.info": (62, 78),
         "Examples.info": (210, 78),
