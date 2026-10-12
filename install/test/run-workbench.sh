@@ -325,11 +325,15 @@ if [ -n "$FOREIGN_MODE" ]; then
     # Any level: the replace and keep pages for another stack are drawn at
     # Novice too.
     case "$FOREIGN_MODE" in
-        roadshow-leave|roadshow-replace|roadshow-pretend|amitcpng-leave|amitcpng-replace) ;;
+        roadshow-leave|roadshow-replace|roadshow-pretend|roadshow-keepredo|amitcpng-leave|amitcpng-replace) ;;
         *) echo "unknown existing-stack mode: $FOREIGN_MODE" >&2; exit 2 ;;
     esac
     [ "$DRAWER" = "0" ] && [ -z "$TRANSITION" ] || {
         echo "-f is a system-layout fixture and cannot be combined with -D or -x" >&2
+        exit 2
+    }
+    [ "$FOREIGN_MODE" != roadshow-keepredo ] || [ "$RERUN" = 1 ] || {
+        echo "-f roadshow-keepredo needs -R: it is two runs" >&2
         exit 2
     }
 fi
@@ -1067,6 +1071,9 @@ case "$FOREIGN_MODE" in
     # The Installer's own pretend/log page: its five option gadgets, and
     # gadget 2 is "Pretend to Install".
     *-pretend) ANSWER_LINES+=("1|CHOICE|5|2|0") ;;
+    # Keep the other stack's configuration under our library, then set it up
+    # again on the second run: that run must back it up all the same.
+    *-keepredo) ANSWER_LINES+=("1|BOOL|Keep it" "2|BOOL|Set them up again") ;;
 esac
 case "$CANCEL_MODE" in
     drivers) ANSWER_LINES+=("1|ABORT|Yes, install them") ;;
@@ -1110,6 +1117,7 @@ for ((answer_run = 1; answer_run <= DRIVE_RUNS; answer_run++)); do
     # -w keepit deletes run 1's file between the runs, so run 2 writes one
     # and asks, as a first install would.
     if [ "$answer_run" -gt 1 ] && [ "$RECONFIGURE" = "0" ] &&
+       [ "$FOREIGN_MODE" != roadshow-keepredo ] &&
        [ "$WIFI_MODE" != keepit ] && [ "$WIFI_MODE" != keepitlive ] && [ "$WIFI_MODE" != keepitfw ]; then
         ANSWER_LINES+=("$answer_run|ABSENT|Yes, set the clock")
     elif [ -n "$SNTP_MODE" ]; then
@@ -1673,6 +1681,8 @@ if [ -n "$FOREIGN_MODE" ]; then
         > "$HD/Devs/Internet/routes"
     printf '; existing stack resolver policy -- preserve byte for byte\nhostname foreign-amiga\n' \
         > "$HD/Devs/Internet/name_resolution"
+    # A pretend run is also the one without them: nothing may write them.
+    [ "$FOREIGN_MODE" = roadshow-pretend ] ||
     for db in hosts protocols services networks; do
         printf '# existing stack %s -- preserve byte for byte\n' "$db" \
             > "$HD/Devs/Internet/$db"
@@ -1692,9 +1702,10 @@ if [ -n "$FOREIGN_MODE" ]; then
     )
     FOREIGN_CONFIG_FILES=(
         "${FOREIGN_REPLACED_FILES[@]}" Devs/NetInterfaces/A2065
-        Devs/Internet/hosts
-        Devs/Internet/protocols Devs/Internet/services Devs/Internet/networks
     )
+    [ "$FOREIGN_MODE" = roadshow-pretend ] ||
+        FOREIGN_CONFIG_FILES+=(Devs/Internet/hosts Devs/Internet/protocols
+                               Devs/Internet/services Devs/Internet/networks)
     case "$FOREIGN_MODE" in
         amitcpng-*)
             mkdir -p "$HD/ForeignAmiTCP/db"
@@ -1712,10 +1723,17 @@ if [ -n "$FOREIGN_MODE" ]; then
     # What each replaced file must be as .old, and what the kept ones stay.
     # Each replaced file, the libraries and the second interface in the
     # AmiNetXDuo drawer's Backup, byte for byte; the rest where they were.
+    # keepredo: the libraries in run 1's drawer, the configuration in run
+    # 2's; its S:Network-Startup carries run 1's marker by then.
+    _bk_cfg=1
+    [ "$FOREIGN_MODE" = roadshow-keepredo ] && _bk_cfg=2
     FOREIGN_OLD_EXPECTED=$(
-        for f in "${FOREIGN_REPLACED_FILES[@]}" Devs/NetInterfaces/A2065 \
-                 Libs/bsdsocket.library Libs/usergroup.library Libs/tls.library; do
-            printf 'AmiNetXDuo/Backup/%s %s\n' "$f" "$(shasum < "$HD/$f" | cut -d' ' -f1)"
+        for f in Libs/bsdsocket.library Libs/usergroup.library Libs/tls.library; do
+            printf 'AmiNetXDuo/Backup/1/%s %s\n' "$f" "$(shasum < "$HD/$f" | cut -d' ' -f1)"
+        done
+        for f in "${FOREIGN_REPLACED_FILES[@]}" Devs/NetInterfaces/A2065; do
+            [ "$_bk_cfg" = 2 ] && [ "$f" = S/Network-Startup ] && continue
+            printf 'AmiNetXDuo/Backup/%s/%s %s\n' "$_bk_cfg" "$f" "$(shasum < "$HD/$f" | cut -d' ' -f1)"
         done
         for f in "${FOREIGN_CONFIG_FILES[@]}"; do
             case " ${FOREIGN_REPLACED_FILES[*]} " in *" $f "*) continue ;; esac
@@ -2566,7 +2584,7 @@ check_file S/User-Startup
 if [ "$DRIVE_RUNS" != "1" ]; then
     NS_FILE=$(amiga_path S/Network-Startup 2>/dev/null || true)
     NS_OLD=$(amiga_path S/Network-Startup.old 2>/dev/null || true)
-    if [ "$RECONFIGURE" = "1" ]; then
+    if [ "$RECONFIGURE" = "1" ] || [ "$FOREIGN_MODE" = roadshow-keepredo ]; then
         if [ -z "$NS_FILE" ] ||
            grep -q '^; user startup policy -- installer must preserve this' \
                "$NS_FILE" 2>/dev/null ||
@@ -2705,7 +2723,7 @@ _hand_name=""
 [ "$HAND_HOST" = 1 ] && _hand_name=handset
 # Another stack's name_resolution named the machine: setting it up again
 # carries that name over.
-case "$FOREIGN_MODE" in *-replace) _hand_name=foreign-amiga ;; esac
+case "$FOREIGN_MODE" in *-replace|*-keepredo) _hand_name=foreign-amiga ;; esac
 if [ -n "$_hand_name" ]; then
     if [ "$(grep -c '^hostname' "$_res" 2>/dev/null)" = 1 ] &&
        grep -q "^hostname $_hand_name\$" "$_res"; then
@@ -2948,7 +2966,7 @@ if [ "$DRAWER" = "1" ]; then
 fi
 
 case "$FOREIGN_MODE" in
-*-replace)
+*-replace|*-keepredo)
     # Set up again by default: the replaced files as .old, byte for byte,
     # the netdb files untouched, and new files of ours in their place.
     FOREIGN_CONFIG_AFTER=$(

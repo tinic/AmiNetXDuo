@@ -249,8 +249,8 @@
        "\"Set them up again\" answers the network questions again.  That "
        "rewrites the interface files, DEVS:Internet/routes and "
        "DEVS:Internet/name_resolution, and writes a new S:Network-Startup.  "
-       "Another stack's files are copied first into the Backup drawer of the "
-       "AmiNetXDuo drawer, once, and stay there.  That is the default when "
+       "Another stack's files are copied first into a numbered drawer under "
+       "the Backup drawer of the AmiNetXDuo drawer.  That is the default when "
        "the configuration belongs to another stack and a network device was "
        "found."))
 
@@ -404,8 +404,10 @@
        "in the AmiNetXDuo drawer as WirelessManager-LICENSE."))
 
 (set H_BACKUP
-  (cat "Files of the stack AmiNetXDuo replaces are kept in the Backup drawer "
-       "of the AmiNetXDuo drawer, the first time only, and stay there."))
+  (cat "Files of another stack that AmiNetXDuo replaces are kept in a drawer "
+       "of their own under the Backup drawer of the AmiNetXDuo drawer: "
+       "Backup/1 for the first installation that replaced any, Backup/2 for "
+       "the next.  Nothing there is replaced later."))
 
 (set H_REPLACELIB
   (cat "There is already a bsdsocket.library on this machine.  It belongs to "
@@ -1496,12 +1498,17 @@
 ; took the drivers away, installed again and was told nothing.
 ; Drawn for another stack's configuration, and at Expert; a routine update
 ; over AmiNetXDuo's own does not need it.
+; (user) for Novice, which draws no (message) of its own.
 (if (AND HAVE_OLD KEEP_OLD (OR (= @user-level 2) (= CONFIG_OURS 0)))
+  (
+    (if (= LEVEL_WAS 0) (user 1))
     (message
       "The existing configuration for \"" OLD_IF "\" is kept as it is.\n\n"
       "It is not checked.  If the card or its driver changed since the file "
       "was written, the network does not come up.  Install again and choose "
-      "\"Set them up again\" to answer the questions again."))
+      "\"Set them up again\" to answer the questions again.")
+    (if (= LEVEL_WAS 0) (user 0))
+  ))
 
 ; --- the card ------------------------------------------------------------
 
@@ -2161,35 +2168,54 @@
 
 ; --- another stack's files, kept --------------------------------------
 ;
-; Replacing another stack's bsdsocket.library is the point where its files
-; start to go: its libraries now, its configuration below.  Each goes to the
-; AmiNetXDuo drawer's Backup the first time, and a later install never
-; replaces a copy there, so the other stack can be put back as it was.  Not
-; in a pretend run: these are real copies.
-(set D_BACKUP (tackon DOCDIR "Backup"))
+; Replacing another stack's files is the point where they start to go: its
+; libraries now, its configuration below.  Each goes first into a drawer of
+; this run's own under the AmiNetXDuo drawer's Backup -- Backup/1, Backup/2
+; and so on, the first number that does not exist yet, made only when there
+; is something to keep -- so no run writes into what an earlier one kept.
+; Whether a file is another stack's is decided file by file: it does not
+; name AmiNetXDuo.  AmigaDOS Copy CLONE keeps its protection bits, date and
+; comment.  A copy that fails stops the installation before the file it was
+; for is touched.  Nothing of this in a pretend run.
+(set D_BACKUP_TOP (tackon DOCDIR "Backup"))
+(set D_BACKUP "")
 (set FOREIGN_STACK (if (AND OLD_BSD (= LIB_OURS 0) (= DRAWER_LAYOUT 0)) 1 0))
 
-; BK_SRC into D_BACKUP/BK_SUB, unless a copy is there already.
+; BK_SRC into this run's Backup drawer/BK_SUB when it is not ours.
 (procedure P_backup
-  (set BK_DIR (tackon D_BACKUP BK_SUB))
-  (if (AND (= @pretend 0)
-           (exists BK_SRC (noreq))
-           (NOT (exists (tackon BK_DIR (fileonly BK_SRC)) (noreq))))
-    (
-      (makedir DOCDIR (prompt ("Creating %s" DOCDIR)) (help H_DOCDIR))
-      (makedir D_BACKUP (prompt ("Creating %s" D_BACKUP)) (help H_BACKUP))
-      (if (patmatch "#?/#?" BK_SUB)
-          (makedir (pathonly BK_DIR)
-                   (prompt ("Creating %s" (pathonly BK_DIR)))
-                   (help H_BACKUP)))
-      (makedir BK_DIR (prompt ("Creating %s" BK_DIR)) (help H_BACKUP))
-      (copyfiles
-        (prompt ("Keeping %s in %s" BK_SRC BK_DIR))
-        (help   H_BACKUP)
-        (source BK_SRC)
-        (dest   BK_DIR)
-        (optional "nofail"))
-    ))
+  (if (AND (= @pretend 0) (exists BK_SRC (noreq)))
+    (if (<> 0 (run ("Search >NIL: FROM \"%s\" SEARCH AmiNetXDuo QUIET" BK_SRC)
+                   (quiet) (safe)))
+      (
+        (if (= (strlen D_BACKUP) 0)
+          (
+            (set BK_N 1)
+            (while (exists (tackon D_BACKUP_TOP ("%ld" BK_N)) (noreq))
+              (set BK_N (+ BK_N 1)))
+            (set D_BACKUP (tackon D_BACKUP_TOP ("%ld" BK_N)))
+            (makedir DOCDIR (prompt ("Creating %s" DOCDIR)) (help H_DOCDIR))
+            (makedir D_BACKUP_TOP (prompt ("Creating %s" D_BACKUP_TOP))
+                     (help H_BACKUP))
+            (makedir D_BACKUP (prompt ("Creating %s" D_BACKUP)) (help H_BACKUP))
+          ))
+        (set BK_DIR (tackon D_BACKUP BK_SUB))
+        (if (NOT (exists (tackon BK_DIR (fileonly BK_SRC)) (noreq)))
+          (
+            (if (patmatch "#?/#?" BK_SUB)
+                (makedir (pathonly BK_DIR)
+                         (prompt ("Creating %s" (pathonly BK_DIR)))
+                         (help H_BACKUP)))
+            (makedir BK_DIR (prompt ("Creating %s" BK_DIR)) (help H_BACKUP))
+            (run ("Copy \"%s\" TO \"%s\" CLONE QUIET" BK_SRC BK_DIR)
+                 (prompt ("Keeping %s in %s" BK_SRC BK_DIR))
+                 (help   H_BACKUP))
+            (if (NOT (exists (tackon BK_DIR (fileonly BK_SRC)) (noreq)))
+                (abort (cat "The copy of " BK_SRC " into " BK_DIR " failed, so "
+                            BK_SRC " is not written over.\n\n"
+                            "The installation stops here.  Free space on "
+                            "that volume and run the installer again.")))
+          ))
+      )))
 )
 
 (if FOREIGN_STACK
@@ -2729,14 +2755,11 @@
 
 ; --- the interface file --------------------------------------------------
 
-; Another stack's file about to be written over goes to the Backup drawer
-; first, under BK_SUB, once (P_backup).  AmiNetXDuo's own is written over.
+; A file about to be written over goes to Backup first unless it names
+; AmiNetXDuo (P_backup decides, file by file).
 (procedure P_keep_old
-  (if (= CONFIG_OURS 0)
-    (
-      (set BK_SRC FILE_OLD_SRC)
-      (P_backup)
-    ))
+  (set BK_SRC FILE_OLD_SRC)
+  (P_backup)
 )
 
 (procedure P_write_interface
@@ -2820,16 +2843,13 @@
     (working "Writing the network configuration")
 
     ; Another stack's interface files under other names: kept in Backup too.
-    (if (= CONFIG_OURS 0)
-      (
-        (set BK_SUB "Devs/NetInterfaces")
-        (foreach D_IFDIR "~(#?.info)"
-          (if (< @each-type 0)
-            (
-              (set BK_SRC (tackon D_IFDIR @each-name))
-              (P_backup)
-            )))
-      ))
+    (set BK_SUB "Devs/NetInterfaces")
+    (foreach D_IFDIR "~(#?.info)"
+      (if (< @each-type 0)
+        (
+          (set BK_SRC (tackon D_IFDIR @each-name))
+          (P_backup)
+        )))
 
     (set PRIMARY_IF IFNAME)
     (set PRIMARY_DHCP USEDHCP)
@@ -3048,7 +3068,7 @@
 ; likely edited.  The stack has sane built-in defaults for all four, so
 ; overwriting somebody's services file to gain nothing would be rude.
 
-(if (exists (tackon D_DEVS "Internet/hosts") (noreq))
+(if (OR @pretend (exists (tackon D_DEVS "Internet/hosts") (noreq)))
     ""
     (textfile
       (prompt "Writing DEVS:Internet/hosts")
@@ -3065,7 +3085,7 @@
 (set NDB_N 0)
 (while (set NDB_F (select NDB_N "protocols" "services" "networks" ""))
   (
-    (if (exists (tackon (tackon D_DEVS "Internet") NDB_F) (noreq))
+    (if (OR @pretend (exists (tackon (tackon D_DEVS "Internet") NDB_F) (noreq)))
         ""
         (copyfiles
           (prompt ("Installing DEVS:Internet/%s" NDB_F))
@@ -3409,12 +3429,9 @@
   (
     (if (exists "S:Network-Startup" (noreq))
       (
-        (if (= CONFIG_OURS 0)
-          (
-            (set BK_SUB "S")
-            (set BK_SRC "S:Network-Startup")
-            (P_backup)
-          ))
+        (set BK_SUB "S")
+        (set BK_SRC "S:Network-Startup")
+        (P_backup)
         (if (exists "S:Network-Startup.old" (noreq))
             (delete "S:Network-Startup.old"
                     (prompt "Removing the previous S:Network-Startup.old")

@@ -180,8 +180,9 @@ than deleted, after a page that asks first, at every level; an earlier
 AmiNetXDuo's is replaced without one.  When a network device was found,
 another stack's network configuration is set up again by default.  The
 other stack's libraries, interface files, routes, name_resolution and
-S:Network-Startup are copied first into the Backup drawer of the
-AmiNetXDuo drawer, once, and stay there.  Every library is copied in
+S:Network-Startup are copied first, with Copy CLONE, into a drawer of that
+installation's own under the AmiNetXDuo drawer's Backup: Backup/1, then
+Backup/2.  Nothing there is replaced later.  Every library is copied in
 under a .new name first and swapped after, so a copy that fails leaves the
 installed file in place.
 
@@ -388,11 +389,13 @@ UNINSTALLING
      Execute S:AmiNetXDuo-WiFi
      Delete S:AmiNetXDuo-WiFi
      Delete S:Network-Startup S:Network-Startup.old
-     Delete <the AmiNetXDuo drawer> ALL
 
 and take the ";BEGIN AmiNetXDuo" .. ";END AmiNetXDuo" block out of
-S:User-Startup.  If another stack was installed before, rename
-LIBS:bsdsocket.library.old back over LIBS:bsdsocket.library.  Add QUIET to
+S:User-Startup.  If another stack was installed before, its files are in
+the AmiNetXDuo drawer's Backup, in the numbered drawer of the installation
+that replaced them; copy that drawer's Libs, Devs and S back over LIBS:,
+DEVS: and S:, with Copy ALL CLONE.  Then delete the AmiNetXDuo drawer,
+Backup last.  Add QUIET to
 a Delete line whose file was never installed, such as tls.library on a
 minimal or micro installation.  S:AmiNetXDuo-WiFi exists only where the
 Pi Wi-Fi was selected, and it deletes only the WirelessManager and
