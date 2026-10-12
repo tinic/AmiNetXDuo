@@ -771,7 +771,8 @@ static struct Gadget *nw_gadget(ULONG kind, struct Gadget *prev, int id,
 static struct Window *nw_open(int which, struct Gadget *glist, const char *title,
                               ULONG idcmp, WORD left, WORD top)
 {
-    struct TagItem t[12];
+    static WORD    zoom[4];
+    struct TagItem t[13];
     WORD w = (WORD)(nw.lay.inner_w[which] + nw.screen->WBorLeft + nw.screen->WBorRight);
     WORD h = (WORD)(nw.lay.inner_h[which] + nw.screen->WBorTop +
                     nw.screen->Font->ta_YSize + 1 + nw.screen->WBorBottom);
@@ -792,6 +793,16 @@ static struct Window *nw_open(int which, struct Gadget *glist, const char *title
     T(WA_PubScreen, nw.screen);
     T(WA_NewLookMenus, TRUE);
     T(WA_AutoAdjust, TRUE);
+    if (which == NW_WIN_MAIN)
+    {
+        /* The zoom gadget folds the window to its title bar. */
+        zoom[0] = left;
+        zoom[1] = top;
+        zoom[2] = w;
+        zoom[3] = (WORD)(nw.screen->WBorTop + nw.screen->Font->ta_YSize + 1 +
+                         nw.screen->WBorBottom + 1);
+        T(WA_Zoom, zoom);
+    }
     T(TAG_DONE, 0);
 #undef T
     return OpenWindowTagList(NULL, t);
@@ -832,6 +843,12 @@ static BOOL nw_open_main(VOID)
                           nw.setup ? "Wi-Fi Setup" : "Wi-Fi",
                           NW_IDCMP, nw.want_left, nw.want_top);
     if (nw.main.win == NULL) return FALSE;
+    /* Without a sizing gadget the limits are the opening size until set,
+       and the zoom gadget could not fold the window to its title bar. */
+    (VOID)WindowLimits(nw.main.win, nw.main.win->Width,
+                       (WORD)(nw.screen->WBorTop + nw.screen->Font->ta_YSize + 1 +
+                              nw.screen->WBorBottom + 1),
+                       nw.main.win->Width, nw.main.win->Height);
     GT_RefreshWindow(nw.main.win, NULL);
     if (!nw.setup && (nw.menu = CreateMenusA(nw_menu, NULL)) != NULL)
     {

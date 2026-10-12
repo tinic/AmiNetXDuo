@@ -61,7 +61,7 @@ NETWIRELESSCX="$BUILD/src/tools/NetWireless"
 WIFISTUB="$BUILD/tests/tools/WifiStub"
 WINCLICK="$BUILD/tests/tools/WinClick"
 for seq in "${SEQUENCES[@]}"; do
-    [ "$seq" = netwireless ] || continue
+    [ "$seq" = netwireless ] || [ "$seq" = screens ] || continue
     [ -x "$NETWIRELESS" ] && [ -x "$NETWIRELESSCX" ] && [ -x "$WIFISTUB" ] &&
         [ -x "$WINCLICK" ] || {
         say error "no NetWirelessPrefs, NetWireless, WifiStub or WinClick under $BUILD"
@@ -293,6 +293,29 @@ C:wbgrab TO DH0:netprefs-3.pfs >NIL:
 C:WinClick "AmiNetXDuo Network" 2 >NIL:
 C:Wait 1
 C:wbgrab TO DH0:netprefs-4.pfs >NIL:
+Echo >DH0:.done "$RC"
+EOF
+        ;;
+    screens)
+        # The Wi-Fi window open beside the AppIcon, folded to its title bar
+        # by the zoom gadget, and the AppIcon alone once it has quit.
+        cat <<'EOF'
+FailAt 9999
+C:Wait 6
+Run >NIL: C:WifiStub SERVE
+C:Wait 2
+Run >NIL: C:NetWireless DEVICE=wifistub.device
+C:Wait 2
+Run >NIL: C:NetWirelessPrefs DEVICE=wifistub.device
+C:Wait 8
+C:wbgrab TO DH0:screens.pfs >DH0:screens.txt
+C:WinClick "Wi-Fi" ZIP >DH0:zip.txt
+C:Wait 2
+C:WinClick "Wi-Fi" 4 TIMES 0 >>DH0:zip.txt
+C:wbgrab TO DH0:screens-1.pfs >NIL:
+C:Break `C:Status COMMAND=C:NetWirelessPrefs` C >NIL:
+C:Wait 3
+C:wbgrab TO DH0:screens-2.pfs >NIL:
 Echo >DH0:.done "$RC"
 EOF
         ;;

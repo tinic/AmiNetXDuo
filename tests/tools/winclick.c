@@ -1,7 +1,9 @@
 /*
  * WinClick: click one gadget of a window on the default public screen.
  *
- *     WinClick TITLE/A,GADGET/N/A,TIMES/N
+ *     WinClick TITLE/A,GADGET/N,TIMES/N,ZIP/S
+ *
+ * ZIP clicks the window's zoom gadget rather than GADGET.
  *
  * TITLE is a prefix of the window title, GADGET the GadgetID.  The pointer is
  * placed with injected IECLASS_POINTERPOS events and corrected against
@@ -108,7 +110,7 @@ static struct Window *find_window(struct Screen *sc, const char *prefix)
 int main(int argc, char **argv)
 {
     struct RDArgs *rda;
-    LONG           args[3] = { 0, 0, 0 };
+    LONG           args[4] = { 0, 0, 0, 0 };
     struct Screen *sc = NULL;
     struct Window *w;
     struct Gadget *g;
@@ -122,13 +124,13 @@ int main(int argc, char **argv)
         (CONST_STRPTR)"intuition.library", 37);
     if (IntuitionBase == NULL) return RETURN_FAIL;
 
-    rda = ReadArgs((CONST_STRPTR)"TITLE/A,GADGET/N/A,TIMES/N", args, NULL);
-    if (rda == NULL)
+    rda = ReadArgs((CONST_STRPTR)"TITLE/A,GADGET/N,TIMES/N,ZIP/S", args, NULL);
+    if (rda == NULL || (args[1] == 0 && args[3] == 0))
     {
         Printf((CONST_STRPTR)"error=bad arguments\n");
         goto out;
     }
-    id = *(LONG *)args[1];
+    id = args[1] != 0 ? *(LONG *)args[1] : -1;
     times = args[2] != 0 ? *(LONG *)args[2] : 1;
 
     sc = LockPubScreen(NULL);
@@ -143,18 +145,24 @@ int main(int argc, char **argv)
         Printf((CONST_STRPTR)"error=no window\n");
         goto out;
     }
+    /* ZIP: the window's zoom gadget instead of one of its own. */
     for (g = w->FirstGadget; g != NULL; g = g->NextGadget)
-        if (g->GadgetID == id && !(g->GadgetType & GTYP_SYSGADGET)) break;
+        if (args[3] != 0
+            ? (g->GadgetType & GTYP_SYSTYPEMASK) == GTYP_WZOOM
+            : (g->GadgetID == id && !(g->GadgetType & GTYP_SYSGADGET)))
+            break;
     if (g == NULL)
     {
         Printf((CONST_STRPTR)"error=no gadget\n");
         goto out;
     }
 
-    /* GZZ gadgets are relative to the inner window. */
+    /* GZZ gadgets are relative to the inner window; the zoom gadget sits in
+       the border, placed from the right edge. */
     x = (WORD)(w->LeftEdge + g->LeftEdge + g->Width / 2);
     y = (WORD)(w->TopEdge + g->TopEdge + g->Height / 2);
-    if (w->Flags & WFLG_GIMMEZEROZERO)
+    if (g->Flags & GFLG_RELRIGHT) x = (WORD)(x + w->Width - 1);
+    if ((w->Flags & WFLG_GIMMEZEROZERO) && !(g->GadgetType & GTYP_SYSGADGET))
     {
         x += w->BorderLeft;
         y += w->BorderTop;
