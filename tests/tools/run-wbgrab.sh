@@ -9,7 +9,9 @@
 # -f sets the Workbench screen font through ENVARC:Sys/font.prefs, e.g.
 # helvetica.font/13.  -s netprefs grabs NetPrefs on each of its pages as
 # netprefs.pfs, netprefs-1.pfs ... netprefs-4.pfs; netprefs_window is the
-# window's box for cropping.
+# window's box for cropping.  -s netwireless grabs NetWirelessPrefs against
+# tests/tools/wifistub.c's unit, then its join form, as netwireless.pfs and
+# netwireless-1.pfs; netwireless_window and join_window are the boxes.
 #
 # SPDX-License-Identifier: MIT
 
@@ -51,7 +53,17 @@ WBGRAB="$BUILD/src/tools/wbgrab"
 }
 
 NETPREFS="$BUILD/src/tools/NetPrefs"
+NETWIRELESS="$BUILD/src/tools/NetWirelessPrefs"
+WIFISTUB="$BUILD/tests/tools/WifiStub"
 WINCLICK="$BUILD/tests/tools/WinClick"
+for seq in "${SEQUENCES[@]}"; do
+    [ "$seq" = netwireless ] || continue
+    [ -x "$NETWIRELESS" ] && [ -x "$WIFISTUB" ] && [ -x "$WINCLICK" ] || {
+        say error "no NetWirelessPrefs, WifiStub or WinClick under $BUILD"
+        say hint "cmake --build $BUILD --parallel --target tool_netwirelessprefs test_wifistub test_winclick"
+        exit 2
+    }
+done
 for seq in "${SEQUENCES[@]}"; do
     [ "$seq" = netprefs ] || continue
     [ -x "$NETPREFS" ] && [ -x "$WINCLICK" ] || {
@@ -147,6 +159,13 @@ EOF
             "CONFIGURE=DHCP" "MTU=1500" > "$HD/Devs/NetInterfaces/ETH0"
     fi
 
+    if [ -x "$NETWIRELESS" ] && [ -x "$WIFISTUB" ] && [ -x "$WINCLICK" ]; then
+        cp "$NETWIRELESS" "$HD/C/NetWirelessPrefs"
+        cp "$WIFISTUB" "$HD/C/WifiStub"
+        cp "$WINCLICK" "$HD/C/WinClick"
+        chmod 755 "$HD/C/NetWirelessPrefs" "$HD/C/WifiStub" "$HD/C/WinClick"
+    fi
+
     [ -n "$DEPTH" ] && wb31_screenmode_prefs "$HD" "$DEPTH"
     [ -n "$FONT" ] && font_prefs "$HD" "${FONT%/*}" "${FONT##*/}"
     return 0
@@ -236,6 +255,25 @@ C:wbgrab TO DH0:netprefs-3.pfs >NIL:
 C:WinClick "AmiNetXDuo Network" 2 >NIL:
 C:Wait 1
 C:wbgrab TO DH0:netprefs-4.pfs >NIL:
+Echo >DH0:.done "$RC"
+EOF
+        ;;
+    netwireless)
+        # The window once its first scan is in, then Join... (gadget 4)
+        # with nothing selected: the form for a hidden network.
+        cat <<'EOF'
+FailAt 9999
+C:Wait 6
+Run >NIL: C:WifiStub SERVE
+C:Wait 2
+Run >NIL: C:NetWirelessPrefs DEVICE=wifistub.device
+C:Wait 6
+C:WinClick "Wi-Fi" 4 TIMES 0 >DH0:netwireless.txt
+C:wbgrab TO DH0:netwireless.pfs >>DH0:netwireless.txt
+C:WinClick "Wi-Fi" 4 >NIL:
+C:Wait 2
+C:WinClick "Join a" 7 TIMES 0 >DH0:netwireless-join.txt
+C:wbgrab TO DH0:netwireless-1.pfs >NIL:
 Echo >DH0:.done "$RC"
 EOF
         ;;

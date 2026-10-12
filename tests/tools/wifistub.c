@@ -25,6 +25,7 @@
 #include <exec/io.h>
 #include <exec/memory.h>
 #include <dos/dos.h>
+#include <dos/dosextens.h>
 #include <dos/dostags.h>
 #include <utility/tagitem.h>
 
@@ -44,6 +45,7 @@
 #define S2INFO_Band          (TAG_USER + 13)
 #define S2_GETSIGNALQUALITY  0xc010
 #define S2_GETNETWORKS       0xc011
+#define S2_SETOPTIONS        0xc012
 #define S2_GETNETWORKINFO    0xc014
 #define S2EVENT_CONNECT      (1L << 9)
 #define S2EVENT_DISCONNECT   (1L << 10)
@@ -62,6 +64,9 @@ typedef struct WsDevice
     ULONG         n_config, n_online, n_scan, n_signal, n_info, n_event;
     ULONG         n_scan_abort;
     BOOL          break_next;           /* Ctrl-C the next scanner         */
+    char          ssid[33];             /* what S2_SETOPTIONS joined       */
+    APTR          assoc;                /* the request that joined it      */
+    ULONG         n_setoptions;
     ULONG         scan_stamp;           /* ticks when the first scan queued */
 } WsDevice;
 
@@ -140,6 +145,13 @@ static struct Device *ws_open(register struct Device *dev __asm("a6"),
 static BPTR ws_close(register struct Device *dev __asm("a6"),
                      register struct IOSana2Req *io __asm("a1"))
 {
+    /* The supplicant going takes the association with it. */
+    if ((APTR)io == ws->assoc)
+    {
+        ws->assoc = NULL;
+        ws->connected = FALSE;
+        ws_report(S2EVENT_DISCONNECT);
+    }
     io->ios2_Req.io_Device = (struct Device *)-1;
     io->ios2_Req.io_Unit = (struct Unit *)-1;
     if (dev->dd_Library.lib_OpenCnt != 0) dev->dd_Library.lib_OpenCnt--;
@@ -161,7 +173,7 @@ static VOID ws_network_info(struct IOSana2Req *io)
 {
     APTR            pool = io->ios2_Data;
     struct TagItem *t = AllocPooled(pool, sizeof(struct TagItem) * 3);
-    UBYTE          *ssid = AllocPooled(pool, 5);
+    UBYTE          *ssid = AllocPooled(pool, 33);
     UBYTE          *bssid = AllocPooled(pool, 6);
 
     if (t == NULL || ssid == NULL || bssid == NULL)
@@ -169,7 +181,7 @@ static VOID ws_network_info(struct IOSana2Req *io)
         ws_reply(io, S2ERR_NO_RESOURCES, S2WERR_BUFF_ERROR);
         return;
     }
-    CopyMem("Home", ssid, 5);
+    CopyMem(ws->ssid, ssid, 33);
     CopyMem((APTR)ws_mac, bssid, 6);
     t[0].ti_Tag = S2INFO_SSID;  t[0].ti_Data = (ULONG)ssid;
     t[1].ti_Tag = S2INFO_BSSID; t[1].ti_Data = (ULONG)bssid;
@@ -248,6 +260,28 @@ static VOID ws_begin_io(register struct Device *dev __asm("a6"),
             else
                 ws_network_info(io);
             break;
+        case S2_SETOPTIONS:
+        {
+            /* WirelessManager's join, the SSID tag alone. */
+            struct TagItem *t = (struct TagItem *)io->ios2_Data;
+            ULONG           k;
+
+            ws->n_setoptions++;
+            for (; t != NULL && t->ti_Tag != TAG_DONE; t++)
+                if (t->ti_Tag == S2INFO_SSID)
+                {
+                    const char *s = (const char *)t->ti_Data;
+
+                    for (k = 0; k < 32 && s[k] != 0; k++) ws->ssid[k] = s[k];
+                    ws->ssid[k] = 0;
+                    ws->assoc = io;
+                    ws->connected = TRUE;
+                    ws->signal = -61;
+                }
+            ws_reply(io, 0, 0);
+            if (ws->connected) ws_report(S2EVENT_CONNECT);
+            break;
+        }
         case S2_GETNETWORKS:
             ws->n_scan++;
             if (!ws->configured)
@@ -506,15 +540,91 @@ static LONG run(const char *command)
 
 #define PREFS "DH0:NetWirelessPrefs DEVICE=" WS_NAME
 
+/* A file into out, for has(). */
+static VOID slurp(const char *path)
+{
+    BPTR fh = Open((CONST_STRPTR)path, MODE_OLDFILE);
+    LONG got = 0;
+
+    if (fh != (BPTR)0)
+    {
+        got = Read(fh, out, sizeof(out) - 1);
+        Close(fh);
+    }
+    out[got > 0 ? got : 0] = 0;
+    Printf((CONST_STRPTR)"--- %s\n%s---\n", (LONG)path, (LONG)out);
+}
+
+static BOOL put_file(const char *path, const char *text)
+{
+    BPTR fh = Open((CONST_STRPTR)path, MODE_NEWFILE);
+    LONG n = 0;
+
+    if (fh == (BPTR)0) return FALSE;
+    while (text[n] != 0) n++;
+    Write(fh, (APTR)text, n);
+    Close(fh);
+    return TRUE;
+}
+
+/* Ctrl-C to C:WirelessManager, the stub, as a shutdown would send it. */
+static VOID stop_wm(VOID)
+{
+    ULONG n, t;
+
+    for (t = 0; t < 50; t++)
+    {
+        BOOL seen = FALSE;
+
+        Forbid();
+        for (n = 1; n <= MaxCli(); n++)
+        {
+            struct Process *p = FindCliProc(n);
+            struct CommandLineInterface *cli;
+            const UBYTE *b;
+
+            if (p == NULL) continue;
+            cli = (struct CommandLineInterface *)BADDR(p->pr_CLI);
+            if (cli == NULL || cli->cli_Module == (BPTR)0) continue;
+            b = (const UBYTE *)BADDR(cli->cli_CommandName);
+            if (b != NULL && b[0] >= 15 && b[b[0]] == 'r' && b[b[0] - 6] == 'M')
+            {
+                Signal(&p->pr_Task, SIGBREAKF_CTRL_C);
+                seen = TRUE;
+            }
+        }
+        Permit();
+        if (!seen) return;
+        Delay(10);
+    }
+}
+
+/* "WifiStub SERVE": the unit alone, associated with Home, for a person or
+   a screenshot to look at; Ctrl-C removes it. */
+static int ws_serve(VOID)
+{
+    CopyMem("Home", ws->ssid, 5);
+    ws->configured = ws->online = ws->connected = TRUE;
+    ws->signal = -52;
+    Wait(SIGBREAKF_CTRL_C);
+    while (ws->dd.dd_Library.lib_OpenCnt != 0) Delay(10);
+    ws_remove();
+    return RETURN_OK;
+}
+
 int main(void)
 {
-    LONG rc;
+    LONG        rc;
+    const char *a = (const char *)GetArgStr();
 
     if (!ws_install())
     {
         Printf((CONST_STRPTR)"could not make %s\n0 checks, 1 failures\n", (LONG)WS_NAME);
         return RETURN_FAIL;
     }
+    while (a != NULL && *a == ' ') a++;
+    if (a != NULL && a[0] == 'S' && a[1] == 'E' && a[2] == 'R' && a[3] == 'V')
+        return ws_serve();
 
     /* Before anything configured the unit: off. */
     rc = run(PREFS " STATUS");
@@ -532,6 +642,7 @@ int main(void)
     check(!has("-40 dBm"), "hidden network left out");
 
     /* Associated. */
+    CopyMem("Home", ws->ssid, 5);
     ws->connected = TRUE;
     ws->signal = -61;
     rc = run(PREFS " STATUS");
@@ -566,6 +677,52 @@ int main(void)
     /* The refusal goes to the error stream, so the code is the check. */
     rc = run("DH0:NetWirelessPrefs DEVICE=" WS_NAME " UNIT=3 STATUS");
     check(rc == RETURN_ERROR, "a unit that is not there");
+
+    /* JOIN: the file written with comments and other blocks kept,
+       WirelessManager started with a 32 KB stack and the interface's
+       device, and the association waited for. */
+    CreateDir((CONST_STRPTR)"ENV:Sys");
+    CreateDir((CONST_STRPTR)"ENVARC:Sys");
+    put_file("ENV:Sys/Wireless.prefs",
+             "# keep this comment\n"
+             "network={\n\tssid=\"Other\"\n\tkey_mgmt=NONE\n\tpriority=4\n}\n");
+    ws->connected = FALSE;
+    rc = run(PREFS " JOIN=Cafe");
+    check(rc == 0 && has("Connected."), "JOIN of an open network connects");
+    slurp("ENVARC:Sys/Wireless.prefs");
+    check(has("# keep this comment") && has("ssid=\"Other\"") &&
+          has("ssid=\"Cafe\"\n\tkey_mgmt=NONE\n\tpriority=5\n}"),
+          "Cafe added above Other, the rest kept");
+    slurp("T:wmstub.log");
+    check(has("start device=wifistub.device unit=0 stack=32768 ssid=Cafe"),
+          "WirelessManager started with the unit and 32 KB");
+
+    /* The key derived on this CPU: the host tests cannot see big-endian. */
+    {
+        struct DateStamp t0, t1;
+
+        DateStamp(&t0);
+        rc = run(PREFS " JOIN=Home PASSPHRASE=password");
+        DateStamp(&t1);
+        Printf((CONST_STRPTR)"join_ticks=%ld\n",
+               (LONG)((t1.ds_Minute - t0.ds_Minute) * 3000 + t1.ds_Tick - t0.ds_Tick));
+    }
+    check(rc == 0 && ws->connected && ws->ssid[0] == 'H', "JOIN with a passphrase");
+    slurp("ENV:Sys/Wireless.prefs");
+    check(has("psk=e73550102e12a3328959f66713ca8d1e393643502666bdf6d416db71750f6f6a"),
+          "the key is PBKDF2(passphrase, SSID), not the passphrase");
+    check(!has("password"), "the passphrase is not stored");
+    check(has("ssid=\"Home\"\n\tpsk=") && has("priority=6"), "Home on top");
+    slurp("T:wmstub.log");
+    check(count("start ") == 2 && count("stop") == 1,
+          "WirelessManager stopped by Ctrl-C and started again");
+
+    rc = run(PREFS " STATUS");
+    check(has("WirelessManager running") && has("Network       Home"),
+          "status names the joined network");
+    rc = run(PREFS " JOIN=Bad PASSPHRASE=short");
+    check(rc == RETURN_ERROR, "a five-character passphrase is refused");
+    stop_wm();
 
     check(ws->n_scan_abort == 0, "no running scan was aborted");
     check(ws->dd.dd_Library.lib_OpenCnt == 0, "every opener closed");
