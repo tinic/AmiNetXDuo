@@ -31,9 +31,10 @@
 # Options which answer an Installer page need -l AVERAGE or EXPERT.  -H also
 # needs AMINETXDUO_PEER, a THIRD machine (this host's frames do not come back
 # round to its own pcap), or it exits 3.
-# -s answers the SNTP-at-boot question yes and types 0.pool.ntp.org as the
-# server; `-s invalid' types a refused name first.  Without -s the question
-# takes its default, no, and S:Network-Startup must carry no sntp line.
+# -s types 0.pool.ntp.org as the SNTP server, a page only Expert draws;
+# `-s invalid' types a refused name first.  Without -s the question takes its
+# default, yes with pool.ntp.org, and an S:Network-Startup this installer
+# writes must carry exactly that sntp line.
 # -a takes an archive as given; without it a release-only defect cannot show.
 # -e replaces the throw-away archive's InstallNetProbe with a fixture naming
 # the Emu68 devices.  genet-old is a GENET Emu68 1.0.x leaves unmapped, with
@@ -190,8 +191,8 @@ case "$SNTP_MODE" in
     invalid) CONFIG_ONLY=1 ;;
     *) echo "unknown SNTP mode: $SNTP_MODE" >&2; exit 2 ;;
 esac
-if [ -n "$SNTP_MODE" ] && [ "$LEVEL" = "NOVICE" ]; then
-    echo "-s needs -l AVERAGE or -l EXPERT: Novice draws no questions" >&2
+if [ -n "$SNTP_MODE" ] && [ "$LEVEL" != "EXPERT" ]; then
+    echo "-s needs -l EXPERT: only Expert draws the SNTP server page" >&2
     exit 2
 fi
 if [ -n "$SNTP_MODE" ] && [ "$NO_BOOT" = "1" ]; then
@@ -906,11 +907,11 @@ if [ "$EXPERT_CUSTOM" = "1" ]; then
         # deliberately invalid first value has been refused.
         ANSWER_LINES+=("1|STRING|eth0|-bad")
         ANSWER_LINES+=("1|STRING|eth0|$EXPECTED_IF")
-        ANSWER_LINES+=("1|STRING|amiga|bad name")
-        ANSWER_LINES+=("1|STRING|amiga|$EXPECTED_HOST")
+        ANSWER_LINES+=("1|STRING||bad name")
+        ANSWER_LINES+=("1|STRING||$EXPECTED_HOST")
     else
         ANSWER_LINES+=("1|STRING|eth0|$EXPECTED_IF")
-        ANSWER_LINES+=("1|STRING|amiga|$EXPECTED_HOST")
+        ANSWER_LINES+=("1|STRING||$EXPECTED_HOST")
     fi
 fi
 if [ "$RECONFIGURE" = "1" ]; then
@@ -955,7 +956,7 @@ fi
 # does (with the boot start on); a later run does only on -U.  Every other
 # later run keeps the file, so there the page must not be drawn at all, and
 # ABSENT fails the driver if it is -- whether or not -s was given.
-EXPECTED_NTP=""
+EXPECTED_NTP=pool.ntp.org
 [ -z "$SNTP_MODE" ] || EXPECTED_NTP=0.pool.ntp.org
 for ((answer_run = 1; answer_run <= DRIVE_RUNS; answer_run++)); do
     if [ "$answer_run" -gt 1 ] && [ "$RECONFIGURE" = "0" ]; then
@@ -2377,10 +2378,11 @@ if [ -n "$EXPECTED_SECOND_IF" ] && [ -n "$NS_FILE" ]; then
     fi
 fi
 
-# SNTP at boot.  With -s, exactly one sntp line, the exact command, and it is
-# the line straight after the AddNetInterface line.  Without -s, none.  On a
-# kept reinstall the file is run 1's, verbatim, so the same holds there; that
-# run 2 did not ask is the driver's ABSENT action, i.e. INSTALL_STATUS.
+# SNTP at boot.  In every S:Network-Startup this installer writes, exactly
+# one sntp line, the exact command, straight after the AddNetInterface line:
+# pool.ntp.org by default, 0.pool.ntp.org with -s.  A kept foreign file has
+# none.  On a kept reinstall the file is run 1's, verbatim, so the same holds
+# there; that run 2 did not ask is the driver's ABSENT action.
 SNTP_PREFIX=C:
 [ "$DRAWER" = "1" ] && SNTP_PREFIX=AmiNetXDuo:C/
 SNTP_LINES=0
@@ -2394,7 +2396,9 @@ if [ -n "$NS_FILE" ] && [ -f "$NS_FILE" ]; then
 fi
 echo "startup_sntp_lines=$SNTP_LINES"
 echo "startup_sntp_after_addnetinterface=$SNTP_AFTER"
-if [ -n "$SNTP_MODE" ]; then
+NS_OURS=no
+grep -q 'written by the AmiNetXDuo installer' "$NS_FILE" 2>/dev/null && NS_OURS=yes
+if [ "$NS_OURS" = yes ]; then
     if [ "$SNTP_LINES" != "1" ] || [ "$SNTP_AFTER" != "yes" ]; then
         echo "!! want one 'Run >NIL: <NIL: ${SNTP_PREFIX}sntp $EXPECTED_NTP QUIET'" \
              "straight after AddNetInterface; lines=$SNTP_LINES after=$SNTP_AFTER"
@@ -2402,9 +2406,39 @@ if [ -n "$SNTP_MODE" ]; then
     else
         echo "  ok      S:Network-Startup sets the clock from $EXPECTED_NTP"
     fi
-elif [ "$SNTP_LINES" != "0" ]; then
-    echo "!! nobody asked for SNTP and S:Network-Startup has $SNTP_LINES sntp line(s)"
+elif [ -n "$SNTP_MODE" ]; then
+    echo "!! -s and the installer wrote no S:Network-Startup"
     fail=1
+fi
+
+# THE DERIVED NAME AND .local.  Unless an Expert typed one, the installer's
+# name_resolution leaves hostname commented out, so the stack names the
+# machine amiga-<last three address octets>.  MDNS=YES on the primary
+# interface for the full and fat stacks on a 68020 or newer, NO on a 68000
+# and on the reduced stacks.
+_res=$(amiga_path "${INST}Devs/Internet/name_resolution" 2>/dev/null || true)
+if [ "$EXPERT_CUSTOM" = 0 ] &&
+   grep -q 'written by the AmiNetXDuo' "$_res" 2>/dev/null; then
+    if grep -q '^hostname' "$_res" || ! grep -q '^;hostname amiga$' "$_res"; then
+        echo "!! name_resolution names the machine; the derived name was wanted"
+        fail=1
+    else
+        echo "  ok      name_resolution leaves the derived hostname"
+    fi
+fi
+_pif=$(amiga_path "${INST}Devs/NetInterfaces/$EXPECTED_IF" 2>/dev/null || true)
+if grep -q 'written by the AmiNetXDuo' "$_pif" 2>/dev/null; then
+    _want_mdns=NO
+    case "$STACK_INSTALLED:$MODEL" in
+        full:A500*|full:A600*|full:A1000*|full:A2000*) ;;
+        full:*|fat:*) _want_mdns=YES ;;
+    esac
+    if grep -q "^MDNS=$_want_mdns" "$_pif"; then
+        echo "  ok      $EXPECTED_IF has MDNS=$_want_mdns"
+    else
+        echo "!! $EXPECTED_IF wants MDNS=$_want_mdns: $(grep '^MDNS=' "$_pif" | tr -d '\r')"
+        fail=1
+    fi
 fi
 
 # The self-contained contract, in one comparison: none of the system stack's

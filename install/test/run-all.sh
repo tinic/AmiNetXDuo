@@ -212,9 +212,9 @@ for scenario in "${SCENARIOS[@]}"; do
         HARDWARE_PCMCIA)       opts=(-l AVERAGE -M -N ne2000_pcmcia) ;;
         TERMINAL)              opts=(-l AVERAGE -H) ;;
         STATIC_NO_DRIVERS)     opts=(-l AVERAGE -S -J) ;;
-        SNTP)                  opts=(-l AVERAGE -s yes) ;;
-        SNTP_INVALID)          opts=(-l AVERAGE -s invalid) ;;
-        SNTP_RERUN)            opts=(-l AVERAGE -s yes -R) ;;
+        SNTP)                  opts=(-l EXPERT -s yes) ;;
+        SNTP_INVALID)          opts=(-l EXPERT -s invalid) ;;
+        SNTP_RERUN)            opts=(-l EXPERT -s yes -R) ;;
 SPACES)                opts=(-l AVERAGE -W) ;;
 SPACES_DRAWER)         opts=(-l AVERAGE -D -W) ;;
     esac

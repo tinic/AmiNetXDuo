@@ -5,6 +5,14 @@ Add new entries under `Unreleased`; published release sections are history.
 
 ## Unreleased
 
+- Installer: the machine's name defaults to amiga- and the card's last
+  three address octets; only Expert asks for one.
+
+- Installer: setting the clock from pool.ntp.org at boot defaults to yes;
+  only Expert asks for the server.
+
+- Installer: answering .local names defaults to yes on a 68020 or newer.
+
 - Installer: a PCMCIA NE2000 card with a manufacturer ID (DFE-670TXD and
   most branded clones) is detected at Novice.
 
