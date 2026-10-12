@@ -1,0 +1,32 @@
+Wi-Fi firmware in Devs/Firmware, and the licence each file is under.
+
+The files are third_party/wifipi/firmware, unchanged.  All but one are
+byte-identical to Raspberry Pi OS firmware-nonfree (RPi-Distro, branch
+trixie, debian/added-firmware/brcm and .../cypress); the licences follow
+that package's debian/copyright:
+
+  debian/added-firmware/*/*43430*   Cypress Semiconductor   LICENCE.cypress
+  debian/added-firmware/*/*43455*   Cypress Semiconductor   LICENCE.cypress
+  debian/added-firmware/*/*43436*   Synaptics               LICENCE.synaptics
+  debian/added-firmware/*/*43456*   Synaptics               LICENCE.synaptics
+
+  File                          Licence
+  brcmfmac43430-sdio.txt        LICENCE.cypress
+  cyfmac43430-sdio.bin          LICENCE.cypress
+  cyfmac43430-sdio.clm_blob     LICENCE.cypress
+  brcmfmac43455-sdio.txt        LICENCE.cypress
+  cyfmac43455-sdio.bin          LICENCE.cypress (a Cypress 43455 build
+                                not in firmware-nonfree's trixie branch)
+  cyfmac43455-sdio.clm_blob     LICENCE.cypress
+  brcmfmac43436-sdio.bin        LICENCE.synaptics
+  brcmfmac43436-sdio.clm_blob   LICENCE.synaptics
+  brcmfmac43436-sdio.txt        LICENCE.synaptics
+  brcmfmac43436s-sdio.bin       LICENCE.synaptics
+  brcmfmac43436s-sdio.txt       LICENCE.synaptics
+  brcmfmac43456-sdio.bin        LICENCE.synaptics
+  brcmfmac43456-sdio.clm_blob   LICENCE.synaptics
+  brcmfmac43456-sdio.txt        LICENCE.synaptics
+
+LICENCE.cypress is linux-firmware's LICENSES/LICENCE.cypress (commit
+1221848f23764faab10ff63bc5d9ea5d5b39a506).  LICENCE.synaptics is the
+"License: Synaptics" text of firmware-nonfree's debian/copyright.

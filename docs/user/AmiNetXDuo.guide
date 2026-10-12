@@ -3315,8 +3315,21 @@
   the network and holds the keys; NetWirelessPrefs only writes its file.
   The file is edited from the copy in ENV:, or ENVARC: when ENV: has none;
   comments, other networks and keys not shown in the window are kept as
-  they are, and a file that cannot be read is not written. The Known
-  button is for a later release.
+  they are, and a file that cannot be read is not written.
+
+  Known... (Project > Known networks..., Right-Amiga K) lists the networks
+  in Wireless.prefs, highest priority first. Up and Down change the order
+  and Remove takes a network out; Save writes ENVARC: and ENV:, Use writes
+  ENV: only, and Cancel (or Esc) changes nothing. The list order becomes
+  priority=, the top network highest, which is the order WirelessManager
+  tries them in when more than one is in range; Save or Use with nothing
+  moved or removed writes nothing. "(hidden)" marks a network joined by
+  name (scan_ssid=1), "(off)" one marked disabled=1. A running
+  WirelessManager is restarted on the new file. If Wireless.prefs changed
+  while the window was open, Save and Use write nothing and say so. While
+  a join waits for its connection, Save and Use are not available. A Join
+  after a Use writes the network list of ENV: to ENVARC: as well. The
+  window is not available in SETUP.
 
   The passphrase is not stored. Join derives the WPA key from passphrase
   and network name and stores it as psk=<64 hex digits>, which also

@@ -141,6 +141,7 @@
  *   <run>|ABSENT|<button-label substring of a page that must not appear>
  *   <run>|WIFI|<network name>|<passphrase>
  *   <run>|NOWIFI|-
+ *   1|DROPFIRMWARE|-  delete DEVS:Firmware's files between runs
  *   1|DROPSTARTUP|-   delete S:Network-Startup between runs instead of
  *                     marking it, so run 2 meets "Keep it" with none
  *   1|UNPRIORITY|<file> between runs, comment out every PRIORITY line of
@@ -177,6 +178,7 @@ enum ActionType
     ACTION_WIFI,
     ACTION_NOWIFI,
     ACTION_DROPSTARTUP,
+    ACTION_DROPFIRMWARE,
     ACTION_UNPRIORITY,
     ACTION_LIVEPRIORITY
 };
@@ -477,6 +479,12 @@ static BOOL load_actions(VOID)
                                             : ACTION_LIVEPRIORITY;
             action->used = TRUE;
             copy_text(action->match, at, sizeof(action->match));
+        }
+        else if (strcmp(kind, "DROPFIRMWARE") == 0)
+        {
+            /* Applied between runs, like DROPSTARTUP. */
+            action->type = ACTION_DROPFIRMWARE;
+            action->used = TRUE;
         }
         else if (strcmp(kind, "DROPSTARTUP") == 0)
         {
@@ -1558,6 +1566,14 @@ int main(void)
                 rc = RETURN_FAIL;
                 break;
             }
+            for (d = 0; d < action_count; d++)
+                if (actions[d].type == ACTION_DROPFIRMWARE &&
+                    SystemTagList((STRPTR)"Delete DEVS:Firmware/#? QUIET FORCE",
+                                  NULL) != 0)
+                {
+                    say("installdrive: could not empty DEVS:Firmware\n", 0);
+                    rc = RETURN_FAIL;
+                }
             for (d = 0; d < action_count; d++)
                 if ((actions[d].type == ACTION_UNPRIORITY ||
                      actions[d].type == ACTION_LIVEPRIORITY) &&

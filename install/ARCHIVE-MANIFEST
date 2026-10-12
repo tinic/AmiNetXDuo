@@ -103,6 +103,7 @@ AmiNetXDuo/Devs/Networks/fat/*      | installed     | sometimes | (source  dev_s
 AmiNetXDuo/Devs/Networks/*          | installed     | always    | (source  dev_source)
 AmiNetXDuo/Devs/Internet/certificates | installed   | sometimes | (tackon (tackon S_DEVS "Internet") "certificates")
 AmiNetXDuo/Devs/Internet/*          | installed     | always    | (tackon (tackon S_DEVS "Internet") NDB_F)
+AmiNetXDuo/Devs/Firmware/*          | installed     | always    | (source (tackon S_FIRMWARE FW_NAME))
 
 # ---------------------------------------------- the documentation drawers --
 #

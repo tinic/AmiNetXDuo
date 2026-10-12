@@ -7,6 +7,11 @@ Add new entries under `Unreleased`; published release sections are history.
 
 - Installer: NetWirelessPrefs lists the Wi-Fi networks in range to join.
 
+- Installer: the Pi Wi-Fi firmware and its licences ship in Devs/Firmware;
+  the files DEVS:Firmware lacks are copied when the Pi Wi-Fi is selected.
+
+- NetWirelessPrefs: Known networks window, to reorder and remove the networks in Wireless.prefs.
+
 - Installer: with the Pi Wi-Fi selected, installs WirelessManager 1.5, asks for the network name and passphrase, and starts the Wi-Fi at boot, beside the Ethernet.
 
 - NetWireless and NetWirelessPrefs find a prism2.device Wi-Fi card (PC Card or PCI) from its interface file when neither DEVICE nor INTERFACE is given.
