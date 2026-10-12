@@ -184,10 +184,10 @@ S:Network-Startup, and their .old files, are copied, with Copy CLONE, before
 anything is replaced, into a drawer of that installation's own under the
 AmiNetXDuo drawer's Backup, numbered one above the highest there; each
 holds only what was new or changed since the earlier ones.  A file NetSetup
-or this installer wrote is not copied, and neither is one already kept unchanged.  A copy that fails
-stops the installation before anything is replaced.  Every library is copied in
-under a .new name first and swapped after, so a copy that fails leaves the
-installed file in place.
+or this installer wrote is not copied, and neither is one already kept
+unchanged.  A copy that fails stops the installation before anything is
+replaced.  Every library is copied in under a .new name first and swapped
+after, so a copy that fails leaves the installed file in place.
 
 The Developer drawer is not installed, deliberately: it holds headers, and
 where headers belong is a property of the compiler rather than of this
