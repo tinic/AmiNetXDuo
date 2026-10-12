@@ -75,6 +75,11 @@ if(AMINETXDUO_WIFIPI_LINK AND CMAKE_CROSSCOMPILING)
         "WIFIPI_VERSION_HEADER=<aminetxduo/version.h>"
         WIFIPI_VERSION=1
         WIFIPI_REVISION=0)
+    # The driver prints to Emu68's debug port in the bug-report build only,
+    # beside the tree's own serial log (AMINETXDUO_LOG).
+    if(AMINETXDUO_LOG)
+        target_compile_definitions(anxwifipi_device PRIVATE WIFIPI_DEBUG=1)
+    endif()
     # The tree's include/ FIRST: <aminetxduo/anxs2ext.h> is the library's own
     # header, never a copy in the fork that drifts from it (the callback pin
     # of #126 reached the driver only when #128 patched the copy by hand).
