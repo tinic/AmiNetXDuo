@@ -829,11 +829,16 @@ static VOID nw_fill_list(VOID)
         if (nw_same(nw.nets[i].ssid, nw.nets[i].ssid_len, nw.sel_ssid, nw.sel_len))
             nw.selected = i;
     {
-        struct TagItem t[3];
+        struct TagItem t[4];
 
         t[0].ti_Tag = GTLV_Labels;   t[0].ti_Data = (ULONG)&nw.rows;
         t[1].ti_Tag = GTLV_Selected; t[1].ti_Data = nw.selected >= 0 ? (ULONG)nw.selected : ~0UL;
         t[2].ti_Tag = TAG_DONE;
+        if (nw.selected >= 0 && GadToolsBase->lib_Version >= 39)
+        {
+            t[2].ti_Tag = GTLV_MakeVisible; t[2].ti_Data = (ULONG)nw.selected;
+            t[3].ti_Tag = TAG_DONE;
+        }
         if (nw.g[NW_M_LIST] != NULL)
             GT_SetGadgetAttrsA(nw.g[NW_M_LIST], nw.main.win, NULL, t);
     }
@@ -1903,6 +1908,14 @@ static VOID nw_known_store(int how)
                   (how == NW_KS_CONNECT ||
                    (kn.sel_fresh &&
                     !nw_same(e->ssid, e->ssid_len, nw.conn_ssid, nw.conn_len)));
+        /* Nothing to join with: the form, for its passphrase; its Join
+           puts the network on top.  Nothing is written before that. */
+        if (connect && !e->has_psk && !e->open && !e->wep)
+        {
+            nw.join_hidden = e->scan_ssid != 0;
+            nw_open_form(e->ssid, e->ssid_len, FALSE, nw.join_hidden);
+            return;
+        }
         if (connect)
         {
             at = kn.order[kn.sel];
@@ -1953,13 +1966,6 @@ static VOID nw_known_store(int how)
 
         nw.join_hidden = e->scan_ssid != 0;
         nw.join_open = e->open != 0;
-        if (!e->has_psk && !e->open && !e->wep)
-        {
-            /* Nothing to join with: the form, for its passphrase. */
-            if (how != NW_KS_CONNECT || !nw_known_load()) nw_close_known();
-            nw_open_form(e->ssid, e->ssid_len, FALSE, nw.join_hidden);
-            return;
-        }
         why = nw_start_join(e->ssid, e->ssid_len);
         if (how == NW_KS_CONNECT && nw_known_load())
             kn.sel = 0;
