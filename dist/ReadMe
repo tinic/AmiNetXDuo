@@ -176,11 +176,12 @@ that library to bsdsocket.library.old, or remove the other stack first.
 
 In the system layout, a bsdsocket.library already in LIBS: -- from AmiTCP,
 Miami, Genesis or Roadshow -- is renamed to bsdsocket.library.old rather
-than deleted, after a page that asks first; an earlier AmiNetXDuo's is
-replaced without one.  When a network device was found, another stack's
-network configuration is set up again by default.  Each file replaced then
-stays beside the new one with .old added to its name; an interface file
-gets .old.info, which no interface scan reads.  Every library is copied in
+than deleted, after a page that asks first, at every level; an earlier
+AmiNetXDuo's is replaced without one.  When a network device was found,
+another stack's network configuration is set up again by default.  The
+other stack's libraries, interface files, routes, name_resolution and
+S:Network-Startup are copied first into the Backup drawer of the
+AmiNetXDuo drawer, once, and stay there.  Every library is copied in
 under a .new name first and swapped after, so a copy that fails leaves the
 installed file in place.
 

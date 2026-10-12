@@ -6,10 +6,11 @@ Add new entries under `Unreleased`; published release sections are history.
 ## Unreleased
 
 - Installer: an update over AmiNetXDuo no longer asks to replace its own
-  bsdsocket.library; the kept-configuration notice is Expert only.
+  bsdsocket.library or says that its kept configuration is not checked.
 
 - Installer: another stack's network configuration is set up again by
-  default when a device was found, its replaced files kept as .old.
+  default when a device was found; that stack's files are kept in the
+  AmiNetXDuo drawer's Backup, and its pages appear at Novice too.
 
 - Installer: the machine's name defaults to amiga- and the card's last
   three address octets; only Expert asks for one.

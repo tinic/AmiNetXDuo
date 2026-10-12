@@ -38,6 +38,9 @@
 #   DRAWER_MICRO    does the same with the micro profile
 #   DRAWER_FULL_MINIMAL / DRAWER_MICRO_FULL cover the same profile edges
 #                   without ever touching system libraries or configuration
+#   ROADSHOW_PRETEND / _NOVICE / _REPLACE_RERUN: a pretend run over another
+#                   stack changes nothing; Novice draws its pages; a second
+#                   install keeps its Backup intact
 #   ROADSHOW_* / AMITCPNG_* seed named existing-stack layouts, then either
 #                   decline with a zero-diff oracle or replace while keeping
 #                   editable configuration and the AmiTCP: assignment
@@ -119,6 +122,7 @@ SCENARIOS=(
     DRAWER_FULL DRAWER_MINIMAL DRAWER_MICRO
     DRAWER_FULL_MINIMAL DRAWER_MICRO_FULL
     ROADSHOW_LEAVE ROADSHOW_REPLACE AMITCPNG_LEAVE AMITCPNG_REPLACE
+    ROADSHOW_PRETEND ROADSHOW_NOVICE ROADSHOW_REPLACE_RERUN
     EMU68_GENET EMU68_WIFI EMU68_BOTH EMU68_BOTH_MICRO
     EMU68_WIFI_JOIN EMU68_WIFI_KEEP EMU68_WIFI_KEEPIT EMU68_WIFI_KEEPIT_BOTH EMU68_WIFI_KEEPIT_LIVE
     EMU68_WIFI_KEEPIT_FW
@@ -223,6 +227,9 @@ for scenario in "${SCENARIOS[@]}"; do
         ROADSHOW_REPLACE)      opts=(-l AVERAGE -f roadshow-replace) ;;
         AMITCPNG_LEAVE)        opts=(-l AVERAGE -f amitcpng-leave) ;;
         AMITCPNG_REPLACE)      opts=(-l AVERAGE -f amitcpng-replace) ;;
+        ROADSHOW_PRETEND)      opts=(-l AVERAGE -f roadshow-pretend) ;;
+        ROADSHOW_NOVICE)       opts=(-l NOVICE -f roadshow-replace) ;;
+        ROADSHOW_REPLACE_RERUN) opts=(-l AVERAGE -f roadshow-replace -R) ;;
         EMU68_GENET)           opts=(-l AVERAGE -e genet) ;;
         EMU68_WIFI)            opts=(-l AVERAGE -e wifi) ;;
         EMU68_BOTH)            opts=(-l AVERAGE -e both) ;;

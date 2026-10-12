@@ -322,12 +322,10 @@ if [ -n "$TRANSITION" ]; then
     esac
 fi
 if [ -n "$FOREIGN_MODE" ]; then
-    [ "$LEVEL" != "NOVICE" ] || {
-        echo "-f needs -l AVERAGE or -l EXPERT so replacement can be chosen" >&2
-        exit 2
-    }
+    # Any level: the replace and keep pages for another stack are drawn at
+    # Novice too.
     case "$FOREIGN_MODE" in
-        roadshow-leave|roadshow-replace|amitcpng-leave|amitcpng-replace) ;;
+        roadshow-leave|roadshow-replace|roadshow-pretend|amitcpng-leave|amitcpng-replace) ;;
         *) echo "unknown existing-stack mode: $FOREIGN_MODE" >&2; exit 2 ;;
     esac
     [ "$DRAWER" = "0" ] && [ -z "$TRANSITION" ] || {
@@ -1066,6 +1064,9 @@ if [ "$MDNS_OFF" = "1" ]; then
 fi
 case "$FOREIGN_MODE" in
     *-leave) ANSWER_LINES+=("1|BOOL|Leave it alone") ;;
+    # The Installer's own pretend/log page: its five option gadgets, and
+    # gadget 2 is "Pretend to Install".
+    *-pretend) ANSWER_LINES+=("1|CHOICE|5|2|0") ;;
 esac
 case "$CANCEL_MODE" in
     drivers) ANSWER_LINES+=("1|ABORT|Yes, install them") ;;
@@ -1678,6 +1679,10 @@ if [ -n "$FOREIGN_MODE" ]; then
     done
     printf '; existing stack boot policy -- preserve byte for byte\nC:AddNetInterface DEVS:NetInterfaces/eth0 QUIET\n' \
         > "$HD/S/Network-Startup"
+    # A second interface of that stack under a name the installer does not
+    # write: it stays live and is kept in Backup as well.
+    printf '; existing stack second interface\nDEVICE=a2065.device\nUNIT=1\n' \
+        > "$HD/Devs/NetInterfaces/A2065"
     # The four the Installer rewrites when it sets the network up again, which
     # is the default for another stack's configuration; each must survive as
     # .old.  The netdb files it never touches.
@@ -1686,7 +1691,8 @@ if [ -n "$FOREIGN_MODE" ]; then
         Devs/Internet/name_resolution S/Network-Startup
     )
     FOREIGN_CONFIG_FILES=(
-        "${FOREIGN_REPLACED_FILES[@]}" Devs/Internet/hosts
+        "${FOREIGN_REPLACED_FILES[@]}" Devs/NetInterfaces/A2065
+        Devs/Internet/hosts
         Devs/Internet/protocols Devs/Internet/services Devs/Internet/networks
     )
     case "$FOREIGN_MODE" in
@@ -1704,11 +1710,12 @@ if [ -n "$FOREIGN_MODE" ]; then
     FOREIGN_OLD_UG_SUM=$(shasum "$HD/Libs/usergroup.library" | cut -d' ' -f1)
     FOREIGN_OLD_TLS_SUM=$(shasum "$HD/Libs/tls.library" | cut -d' ' -f1)
     # What each replaced file must be as .old, and what the kept ones stay.
+    # Each replaced file, the libraries and the second interface in the
+    # AmiNetXDuo drawer's Backup, byte for byte; the rest where they were.
     FOREIGN_OLD_EXPECTED=$(
-        for f in "${FOREIGN_REPLACED_FILES[@]}"; do
-            _sfx=.old
-            case "$f" in Devs/NetInterfaces/*) _sfx=.old.info ;; esac
-            printf '%s%s %s\n' "$f" "$_sfx" "$(shasum < "$HD/$f" | cut -d' ' -f1)"
+        for f in "${FOREIGN_REPLACED_FILES[@]}" Devs/NetInterfaces/A2065 \
+                 Libs/bsdsocket.library Libs/usergroup.library Libs/tls.library; do
+            printf 'AmiNetXDuo/Backup/%s %s\n' "$f" "$(shasum < "$HD/$f" | cut -d' ' -f1)"
         done
         for f in "${FOREIGN_CONFIG_FILES[@]}"; do
             case " ${FOREIGN_REPLACED_FILES[*]} " in *" $f "*) continue ;; esac
@@ -2257,7 +2264,7 @@ if [ "$REFUSAL" = 1 ]; then
 fi
 
 case "$FOREIGN_MODE" in
-*-leave)
+*-leave|*-pretend)
     FOREIGN_TREE_AFTER=$(product_manifest)
     leave_ok=1
     if [ "$FOREIGN_TREE_AFTER" != "$FOREIGN_TREE_BEFORE" ]; then
@@ -2586,7 +2593,8 @@ if [ "$DRIVE_RUNS" != "1" ]; then
                "$NS_FILE" 2>/dev/null; then
             echo "!! repeated install did not preserve S:Network-Startup"
             fail=1
-        elif [ -n "$NS_OLD" ]; then
+        elif [ -n "$NS_OLD" ] && [ -z "$FOREIGN_MODE" ]; then
+            # (Over another stack, run 1 itself rotated that stack's file.)
             echo "!! repeated install rotated the kept S:Network-Startup to .old"
             fail=1
         else
@@ -2959,7 +2967,7 @@ case "$FOREIGN_MODE" in
                 <(printf '%s\n' "$FOREIGN_CONFIG_AFTER") || true
         fail=1
     else
-        echo "  ok      $FOREIGN_MODE configuration set up again, the old files kept as .old"
+        echo "  ok      $FOREIGN_MODE configuration set up again, the other stack's files kept in Backup"
     fi
     for _f in "${FOREIGN_REPLACED_FILES[@]}"; do
         if ! grep -q 'AmiNetXDuo' "$(amiga_path "$_f" 2>/dev/null || echo /nonexistent)" 2>/dev/null; then
@@ -2967,6 +2975,8 @@ case "$FOREIGN_MODE" in
             fail=1
         fi
     done
+    # A second run renames our own first copy to .old; Backup has theirs.
+    [ "$RERUN" = 1 ] ||
     for spec in \
         "bsdsocket.library:$FOREIGN_OLD_BSD_SUM" \
         "usergroup.library:$FOREIGN_OLD_UG_SUM" \
@@ -3207,8 +3217,9 @@ if [ "$DRAWER" = "1" ]; then
     fi
 elif [ -n "$FOREIGN_MODE" ]; then
     # This fixture contributed only stale .new files, never a live driver.
-    # Removing those and installing fresh copies must not invent .old files.
-    if [ -n "$ANXNET_OLD" ]; then
+    # Removing those and installing fresh copies must not invent .old files;
+    # a second run keeps the first run's driver as .old, as any update does.
+    if [ -n "$ANXNET_OLD" ] && [ "$RERUN" = 0 ]; then
         echo "!! interrupted-staging fixture created an anxnet.device.old"
         fail=1
     else
