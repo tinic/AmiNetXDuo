@@ -28,6 +28,7 @@
 
 #include "netdev_internal.h"
 #include "netdev_mcaf.h"
+#include "netdev_cards.h"
 
 static int failures;
 static int checks;
@@ -590,6 +591,31 @@ static void test_link_speed_open_and_close(void)
 
 int main(void)
 {
+    /* Independent LANCE vectors: reflected Ethernet CRC with no final xor,
+       as used by Linux a2065.c, not the DP8390's MSB-first CRC. */
+    {
+        static const struct NetdevCard card = { .chip = NETDEV_CHIP_LANCE };
+        static const UBYTE groups[][6] = {
+            { 0x01, 0x00, 0x5e, 0x00, 0x00, 0x01 },
+            { 0x33, 0x33, 0x00, 0x00, 0x00, 0x01 },
+            { 0x33, 0x33, 0xff, 0x12, 0x34, 0x56 }
+        };
+        static const UBYTE expected[][8] = {
+            { 0, 0, 0, 0, 0, 0, 0x40, 0 },
+            { 0, 0, 0x80, 0, 0, 0, 0, 0 },
+            { 0, 0, 0, 0, 0, 0, 0x10, 0 }
+        };
+        unsigned i;
+        for (i = 0; i < 3; i++)
+        {
+            reset();
+            unit.nu_Nic.card = &card;
+            join(groups[i], 0);
+            netdev_rebuild_filter(&unit);
+            expect(memcmp(setfilter_mar, expected[i], 8) == 0,
+                   "LANCE uses its reflected multicast CRC");
+        }
+    }
     test_link_speed_open_and_close();
     a_no_groups_is_an_empty_hash();
     b_a_joined_group_sets_its_own_bit();

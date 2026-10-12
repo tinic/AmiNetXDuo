@@ -22,6 +22,7 @@
 
 #include "netdev_internal.h"
 #include "netdev_mcaf.h"
+#include "netdev_cards.h"
 
 #include <proto/exec.h>
 
@@ -54,7 +55,13 @@ VOID netdev_rebuild_filter(NetdevUnit *unit)
         for (i = 0; i < NETDEV_MCAST_MAX; i++)
         {
             if (unit->nu_Mcast[i].refs != 0)
-                netdev_mar_set(mar, unit->nu_Mcast[i].addr);
+            {
+                if (unit->nu_Nic.card != NULL &&
+                    unit->nu_Nic.card->chip == NETDEV_CHIP_LANCE)
+                    netdev_mar_set_lance(mar, unit->nu_Mcast[i].addr);
+                else
+                    netdev_mar_set(mar, unit->nu_Mcast[i].addr);
+            }
         }
     }
 

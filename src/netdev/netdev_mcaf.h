@@ -19,6 +19,7 @@
 ULONG netdev_ether_crc32_be(const UBYTE *addr, UWORD len);
 VOID  netdev_mar_clear(UBYTE mar[8]);
 VOID  netdev_mar_set(UBYTE mar[8], const UBYTE addr[NETDEV_ADDR_LEN]);
+VOID  netdev_mar_set_lance(UBYTE mar[8], const UBYTE addr[NETDEV_ADDR_LEN]);
 VOID  netdev_mar_all(UBYTE mar[8]);
 
 #endif /* AMINETXDUO_NETDEV_MCAF_H */

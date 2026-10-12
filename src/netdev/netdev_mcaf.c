@@ -75,3 +75,21 @@ VOID netdev_mar_set(UBYTE mar[8], const UBYTE addr[NETDEV_ADDR_LEN])
 
     mar[crc >> 3] |= (UBYTE)(1u << (crc & 7u));
 }
+
+/* Am7990/Am79C960 use the top six bits of the reflected CRC register,
+   without the Ethernet FCS final inversion. DP8390 uses the other bit order. */
+VOID netdev_mar_set_lance(UBYTE mar[8], const UBYTE addr[NETDEV_ADDR_LEN])
+{
+    ULONG crc = 0xffffffffUL;
+    UWORD i;
+
+    for (i = 0; i < NETDEV_ADDR_LEN; i++)
+    {
+        UWORD j;
+        crc ^= addr[i];
+        for (j = 0; j < 8; j++)
+            crc = (crc >> 1) ^ ((crc & 1UL) ? 0xedb88320UL : 0UL);
+    }
+    crc >>= 26;
+    mar[crc >> 3] |= (UBYTE)(1u << (crc & 7u));
+}
