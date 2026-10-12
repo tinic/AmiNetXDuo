@@ -154,6 +154,7 @@ echo "#  ICONS"
 echo "############################################################"
 python3 "$ROOT/install/tools/makeicon.py" "$ROOT/install" >/dev/null
 python3 "$ROOT/install/tools/showicon.py" "$ROOT/install"/*.info >/dev/null
+python3 "$ROOT/install/test/test_glowicons.py"
 "$GCC" -O2 -m68020 -Wall -Wextra -I"$NDK" \
        -o "$ROOT/build/icontest" "$ROOT/install/test/icontest.c"
 rm -rf "$ROOT/build/icons-stage"

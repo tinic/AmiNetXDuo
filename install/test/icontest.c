@@ -26,8 +26,9 @@
 #include <proto/exec.h>
 #include <proto/dos.h>
 #include <proto/icon.h>
+#include <string.h>
 
-#define DRAWER "DH0:AmiNetXDuo"
+static const char *drawer = "DH0:AmiNetXDuo";
 
 struct Expect
 {
@@ -43,7 +44,10 @@ static const struct Expect expected[] =
     { "Install-AmiNetXDuo", WBPROJECT, "Installer",           10000,  5 },
     { "AmiNetXDuo",         WBDRAWER,  NULL,                      0, -1 },
     { "Drawer",             WBDRAWER,  NULL,                      0, -1 },
-    { "Document",           WBPROJECT, "SYS:Utilities/More",      0, -1 },
+    { "Document",           WBPROJECT, "SYS:Utilities/More",   4096,  0 },
+    { "Guide",              WBPROJECT, "SYS:Utilities/MultiView", 8192, 0 },
+    { "NetPrefs",           WBTOOL,    NULL,                   8192,  0 },
+    { "NetMeter",           WBTOOL,    NULL,                   8192,  1 },
     { NULL,                 0,         NULL,                      0, -1 }
 };
 
@@ -84,21 +88,78 @@ static LONG count_tooltypes(char **tt)
     return n;
 }
 
+static BOOL color_signature(struct DiskObject *dobj, ULONG *signature)
+{
+    LONG width = 0, height = 0, colors[2] = { 0, 0 }, transparent[2] = { -1, -1 };
+    UBYTE *pixels[2] = { NULL, NULL }, *palette[2] = { NULL, NULL };
+    struct TagItem tags[] =
+    {
+        { ICONCTRLA_GetWidth, (ULONG)&width },
+        { ICONCTRLA_GetHeight, (ULONG)&height },
+        { ICONCTRLA_GetPalette1, (ULONG)&palette[0] },
+        { ICONCTRLA_GetPalette2, (ULONG)&palette[1] },
+        { ICONCTRLA_GetPaletteSize1, (ULONG)&colors[0] },
+        { ICONCTRLA_GetPaletteSize2, (ULONG)&colors[1] },
+        { ICONCTRLA_GetImageData1, (ULONG)&pixels[0] },
+        { ICONCTRLA_GetImageData2, (ULONG)&pixels[1] },
+        { ICONCTRLA_GetTransparentColor1, (ULONG)&transparent[0] },
+        { ICONCTRLA_GetTransparentColor2, (ULONG)&transparent[1] },
+        { TAG_DONE, 0 }
+    };
+    ULONG hash = 2166136261UL;
+    LONG state, i;
+
+    *signature = 0;
+    /* Stock 2.x/3.1 must load the fallback without calling V44 functions. */
+    if (IconBase->lib_Version < 44)
+        return TRUE;
+    if (IconControlA(dobj, tags) != 10 || width != 48 || height != 48)
+    {
+        say("  ** color dimensions/API invalid: %ldx%ld\n", width, height);
+        return FALSE;
+    }
+    for (state = 0; state < 2; state++)
+    {
+        if (pixels[state] == NULL || palette[state] == NULL ||
+            colors[state] != 128 || transparent[state] != 0)
+        {
+            say("  ** color state %ld has invalid palette/transparency (%ld colors)\n",
+                state, colors[state]);
+            return FALSE;
+        }
+        for (i = 0; i < width * height; i++)
+        {
+            if (pixels[state][i] >= colors[state])
+                return FALSE;
+            hash = (hash ^ pixels[state][i]) * 16777619UL;
+        }
+        for (i = 0; i < colors[state] * 3; i++)
+            hash = (hash ^ palette[state][i]) * 16777619UL;
+    }
+    say("  color      %ldx%ld, both states, 128 colors, transparent pen 0\n", width, height);
+    *signature = hash;
+    return TRUE;
+}
+
 static BOOL check(const struct Expect *e)
 {
     char               path[128];
     struct DiskObject *dobj;
     struct DiskObject *again;
     LONG               tt;
+    ULONG              color_before, color_after;
     BOOL               ok = TRUE;
 
     /* path = DRAWER/name, no dos.library string helpers needed */
     {
-        const char *p = DRAWER "/";
+        const char *p = drawer;
         char       *d = path;
 
+        if (strlen(drawer) + strlen(e->name) + 2 > sizeof(path))
+            return FALSE;
         while (*p != '\0')
             *d++ = *p++;
+        *d++ = '/';
         p = e->name;
         while (*p != '\0')
             *d++ = *p++;
@@ -145,6 +206,13 @@ static BOOL check(const struct Expect *e)
         say("  ** %ld tooltypes, should be %ld\n", tt, e->tooltypes);
         ok = FALSE;
     }
+    if (same(e->name, "NetMeter") &&
+        FindToolType((CONST_STRPTR *)dobj->do_ToolTypes,
+                     (CONST_STRPTR)"DONOTWAIT") == NULL)
+    {
+        say("  ** NetMeter lost DONOTWAIT\n", 0, 0);
+        ok = FALSE;
+    }
     if (dobj->do_Gadget.GadgetRender == NULL)
     {
         say("  ** no image\n", 0, 0);
@@ -156,6 +224,8 @@ static BOOL check(const struct Expect *e)
         say("  ** a drawer icon with no DrawerData\n", 0, 0);
         ok = FALSE;
     }
+    if (!color_signature(dobj, &color_before))
+        ok = FALSE;
 
     /* Round trip: icon.library has to be able to write it back out. */
     if (!PutDiskObject((STRPTR)"RAM:icontest", dobj))
@@ -175,10 +245,31 @@ static BOOL check(const struct Expect *e)
         {
             if (again->do_Type != dobj->do_Type ||
                 again->do_Gadget.Width != dobj->do_Gadget.Width ||
-                again->do_Gadget.Height != dobj->do_Gadget.Height)
+                again->do_Gadget.Height != dobj->do_Gadget.Height ||
+                again->do_StackSize != dobj->do_StackSize ||
+                !same((const char *)again->do_DefaultTool,
+                      (const char *)dobj->do_DefaultTool) ||
+                count_tooltypes((char **)again->do_ToolTypes) != tt)
             {
                 say("  ** the round trip changed it\n", 0, 0);
                 ok = FALSE;
+            }
+            if (!color_signature(again, &color_after) || color_after != color_before)
+            {
+                say("  ** the round trip changed color artwork\n", 0, 0);
+                ok = FALSE;
+            }
+            {
+                LONG i;
+                for (i = 0; i < tt; i++)
+                    if (again->do_ToolTypes == NULL || again->do_ToolTypes[i] == NULL ||
+                        !same((const char *)again->do_ToolTypes[i],
+                              (const char *)dobj->do_ToolTypes[i]))
+                    {
+                        say("  ** the round trip changed a tooltype\n", 0, 0);
+                        ok = FALSE;
+                        break;
+                    }
             }
             FreeDiskObject(again);
         }
@@ -189,14 +280,17 @@ static BOOL check(const struct Expect *e)
     return ok;
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
     const struct Expect *e;
     LONG                 bad = 0;
 
-    out = Open((STRPTR)"DH0:icontest.txt", MODE_NEWFILE);
+    if (argc > 1)
+        drawer = argv[1];
+    out = Open((STRPTR)(argc > 2 ? argv[2] : "DH0:icontest.txt"), MODE_NEWFILE);
     if (out == 0)
         return RETURN_FAIL;
+    say("icon.library %ld.%ld\n", IconBase->lib_Version, IconBase->lib_Revision);
 
     for (e = expected; e->name != NULL; e++)
     {
