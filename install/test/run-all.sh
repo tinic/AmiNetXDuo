@@ -44,6 +44,28 @@
 #   EMU68_* inject deterministic device-tree results and prove the Installer
 #                   creates genet/wifipi definitions and starts only Ethernet;
 #                   on a 68020+ they also prove fat is the default under Emu68
+#   EMU68_WIFI_JOIN answers InstallWiFi's window with a name and passphrase
+#                   full of quotes, #, = and backslashes, reinstalls with "Set
+#                   them up again" and requires the Wireless.prefs kept, then
+#                   boots the written S:Network-Startup: WirelessManager (a
+#                   stand-in) starts once ahead of the bounded Wi-Fi
+#                   AddNetInterface and is reused, and the real WirelessManager
+#                   1.5 reads the written file without a parse error
+#   EMU68_WIFI_KEEP plants a Wireless.prefs and a C:WirelessManager beside
+#                   Ethernet: both untouched, both interfaces started, the
+#                   lines that start WirelessManager commented out
+#   EMU68_WIFI_KEEPIT "Keep it" with run 1's S:Network-Startup gone: the
+#                   Wi-Fi is found by DEVICE= and its block written
+#   EMU68_WIFI_KEEPIT_BOTH the same beside the Ethernet, whose kept file has
+#                   PRIORITY only in comments and no final newline: it
+#                   gets a PRIORITY=10 line of its own
+#   EMU68_WIFI_KEEPIT_LIVE the same, the kept genet file ending in a live
+#                   "UNIT=0 PRIORITY=3": nothing is appended
+#   EMU68_WIFI_USERSTART S:User-Startup starts WirelessManager already
+#   EMU68_WIFI_DRAWER a drawer install beside the user's C:WirelessManager
+#   EMU68_BOTH_NOVICE NOVICE still asks for the Wi-Fi network, a Latin-1 name
+#                   is written as UTF-8 hex, and Ethernet and Wi-Fi both
+#                   start, Ethernet at PRIORITY=10
 #   EMU68_GENET_OLD / _BARE  a GENET Emu68 1.0.x leaves unmapped: Emu68's
 #                   genet.device is used, or with none the Installer stops
 #                   before writing anything
@@ -96,6 +118,8 @@ SCENARIOS=(
     DRAWER_FULL_MINIMAL DRAWER_MICRO_FULL
     ROADSHOW_LEAVE ROADSHOW_REPLACE AMITCPNG_LEAVE AMITCPNG_REPLACE
     EMU68_GENET EMU68_WIFI EMU68_BOTH EMU68_BOTH_MICRO
+    EMU68_WIFI_JOIN EMU68_WIFI_KEEP EMU68_WIFI_KEEPIT EMU68_WIFI_KEEPIT_BOTH EMU68_WIFI_KEEPIT_LIVE
+    EMU68_WIFI_USERSTART EMU68_WIFI_DRAWER EMU68_BOTH_NOVICE
     EMU68_GENET_OLD EMU68_GENET_OLD_BARE
     CANCEL_DRIVERS MISSING_CORE MISSING_DRIVER MISSING_PROBE MISSING_MINIMAL
     NO_CARD STALE_PI_DRIVERS HARDWARE_XSURF100 HARDWARE_PCMCIA
@@ -200,6 +224,14 @@ for scenario in "${SCENARIOS[@]}"; do
         EMU68_WIFI)            opts=(-l AVERAGE -e wifi) ;;
         EMU68_BOTH)            opts=(-l AVERAGE -e both) ;;
         EMU68_BOTH_MICRO)      opts=(-l AVERAGE -e both -p micro) ;;
+        EMU68_WIFI_JOIN)       opts=(-l AVERAGE -e wifi -w join -U) ;;
+        EMU68_WIFI_KEEP)       opts=(-l AVERAGE -e both -w keep) ;;
+        EMU68_WIFI_KEEPIT)     opts=(-l AVERAGE -e wifi -w keepit -R) ;;
+        EMU68_WIFI_KEEPIT_BOTH) opts=(-l AVERAGE -e both -w keepit -R) ;;
+        EMU68_WIFI_KEEPIT_LIVE) opts=(-l AVERAGE -e both -w keepitlive -R) ;;
+        EMU68_WIFI_USERSTART)  opts=(-l AVERAGE -e wifi -w userstart) ;;
+        EMU68_WIFI_DRAWER)     opts=(-l AVERAGE -e wifi -D -w userwm) ;;
+        EMU68_BOTH_NOVICE)     opts=(-l NOVICE -e both -w join) ;;
         EMU68_GENET_OLD)       opts=(-l NOVICE -e genet-old) ;;
         EMU68_GENET_OLD_BARE)  opts=(-l NOVICE -e genet-old-bare) ;;
         CANCEL_DRIVERS)        opts=(-l AVERAGE -c drivers) ;;

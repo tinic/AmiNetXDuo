@@ -25,7 +25,9 @@
 #include <exec/io.h>
 #include <exec/memory.h>
 #include <dos/dos.h>
+#include <dos/dosextens.h>
 #include <dos/dostags.h>
+#include <dos/var.h>
 #include <utility/tagitem.h>
 
 #include <proto/exec.h>
@@ -44,6 +46,7 @@
 #define S2INFO_Band          (TAG_USER + 13)
 #define S2_GETSIGNALQUALITY  0xc010
 #define S2_GETNETWORKS       0xc011
+#define S2_SETOPTIONS        0xc012
 #define S2_GETNETWORKINFO    0xc014
 #define S2EVENT_CONNECT      (1L << 9)
 #define S2EVENT_DISCONNECT   (1L << 10)
@@ -62,6 +65,15 @@ typedef struct WsDevice
     ULONG         n_config, n_online, n_scan, n_signal, n_info, n_event;
     ULONG         n_scan_abort;
     BOOL          break_next;           /* Ctrl-C the next scanner         */
+    BOOL          level;                /* prism2.device: events and signal
+                                           answered from the state         */
+    UBYTE         ap;                   /* the access point's last byte    */
+    BOOL          prism;                /* prism2.device: signal and network
+                                           info answered whenever online   */
+    BOOL          bad_key;              /* associates, never comes up       */
+    char          ssid[33];             /* what S2_SETOPTIONS joined       */
+    APTR          assoc;                /* the request that joined it      */
+    ULONG         n_setoptions;
     ULONG         scan_stamp;           /* ticks when the first scan queued */
 } WsDevice;
 
@@ -140,6 +152,13 @@ static struct Device *ws_open(register struct Device *dev __asm("a6"),
 static BPTR ws_close(register struct Device *dev __asm("a6"),
                      register struct IOSana2Req *io __asm("a1"))
 {
+    /* The supplicant going takes the association with it. */
+    if ((APTR)io == ws->assoc)
+    {
+        ws->assoc = NULL;
+        ws->connected = FALSE;
+        ws_report(S2EVENT_DISCONNECT);
+    }
     io->ios2_Req.io_Device = (struct Device *)-1;
     io->ios2_Req.io_Unit = (struct Unit *)-1;
     if (dev->dd_Library.lib_OpenCnt != 0) dev->dd_Library.lib_OpenCnt--;
@@ -160,8 +179,8 @@ static ULONG ws_null(VOID)
 static VOID ws_network_info(struct IOSana2Req *io)
 {
     APTR            pool = io->ios2_Data;
-    struct TagItem *t = AllocPooled(pool, sizeof(struct TagItem) * 3);
-    UBYTE          *ssid = AllocPooled(pool, 5);
+    struct TagItem *t = AllocPooled(pool, sizeof(struct TagItem) * 5);
+    UBYTE          *ssid = AllocPooled(pool, 33);
     UBYTE          *bssid = AllocPooled(pool, 6);
 
     if (t == NULL || ssid == NULL || bssid == NULL)
@@ -169,11 +188,26 @@ static VOID ws_network_info(struct IOSana2Req *io)
         ws_reply(io, S2ERR_NO_RESOURCES, S2WERR_BUFF_ERROR);
         return;
     }
-    CopyMem("Home", ssid, 5);
+    CopyMem(ws->ssid, ssid, 33);
     CopyMem((APTR)ws_mac, bssid, 6);
+    bssid[5] = (UBYTE)(bssid[5] + ws->ap);
+    if (ws->prism)
+    {
+        /* prism2.device names no network: the BSSID, an ignored slot and
+           the WPA element, as its GetNetworkInfo() lays them out. */
+        t[0].ti_Tag = S2INFO_BSSID; t[0].ti_Data = (ULONG)bssid;
+        t[1].ti_Tag = TAG_IGNORE;   t[1].ti_Data = 0;
+        t[2].ti_Tag = TAG_DONE;
+        io->ios2_StatData = t;
+        ws_reply(io, 0, 0);
+        return;
+    }
     t[0].ti_Tag = S2INFO_SSID;  t[0].ti_Data = (ULONG)ssid;
     t[1].ti_Tag = S2INFO_BSSID; t[1].ti_Data = (ULONG)bssid;
-    t[2].ti_Tag = TAG_DONE;     t[2].ti_Data = 0;
+    /* As anxwifipi.device reports them from WiFiPi 70eae25 on. */
+    t[2].ti_Tag = S2INFO_Channel; t[2].ti_Data = 6;
+    t[3].ti_Tag = S2INFO_Band;    t[3].ti_Data = 1;
+    t[4].ti_Tag = TAG_DONE;     t[4].ti_Data = 0;
     io->ios2_StatData = t;
     ws_reply(io, 0, 0);
 }
@@ -183,7 +217,8 @@ static VOID ws_begin_io(register struct Device *dev __asm("a6"),
 {
     (VOID)dev;
     io->ios2_Req.io_Error = 0;
-    io->ios2_WireError = 0;
+    if (io->ios2_Req.io_Command != S2_ONEVENT)
+        io->ios2_WireError = 0;         /* S2_ONEVENT's mask is in it */
 
     switch (io->ios2_Req.io_Command)
     {
@@ -213,8 +248,15 @@ static VOID ws_begin_io(register struct Device *dev __asm("a6"),
         {
             ULONG preset = ws->online ? S2EVENT_ONLINE : S2EVENT_OFFLINE;
 
+            /* prism2.device 2.9 answers its whole state at once, with
+               LINKUP (1 << 16) once keyed; an older one only the online
+               bit, and takes no LINKUP or LINKDOWN. */
+            if (ws->level)
+                preset |= (ws->connected ? S2EVENT_CONNECT : S2EVENT_DISCONNECT) |
+                          (ws->connected && !ws->bad_key ? 0x10000UL : 0x20000UL);
+
             ws->n_event++;
-            if (io->ios2_WireError & ~WS_EVENTS)
+            if (io->ios2_WireError & ~(WS_EVENTS | (ws->level ? 0x30000UL : 0)))
                 ws_reply(io, S2ERR_NOT_SUPPORTED, S2WERR_BAD_EVENT);
             else if (io->ios2_WireError & preset)
             {
@@ -229,7 +271,7 @@ static VOID ws_begin_io(register struct Device *dev __asm("a6"),
             ws->n_signal++;
             if (!ws->online)
                 ws_reply(io, S2ERR_OUTOFSERVICE, S2WERR_UNIT_OFFLINE);
-            else if (!ws->connected)
+            else if (!ws->connected && !ws->prism)
                 ws_reply(io, S2ERR_OUTOFSERVICE, S2WERR_NOT_CONFIGURED);
             else
             {
@@ -243,11 +285,34 @@ static VOID ws_begin_io(register struct Device *dev __asm("a6"),
             ws->n_info++;
             if (!ws->online)
                 ws_reply(io, S2ERR_OUTOFSERVICE, S2WERR_UNIT_OFFLINE);
-            else if (!ws->connected)
+            else if (!ws->connected && !ws->prism)
                 ws_reply(io, S2ERR_OUTOFSERVICE, S2WERR_NOT_CONFIGURED);
             else
                 ws_network_info(io);
             break;
+        case S2_SETOPTIONS:
+        {
+            /* WirelessManager's join, the SSID tag alone. */
+            struct TagItem *t = (struct TagItem *)io->ios2_Data;
+            ULONG           k;
+
+            ws->n_setoptions++;
+            for (; t != NULL && t->ti_Tag != TAG_DONE; t++)
+                if (t->ti_Tag == S2INFO_SSID)
+                {
+                    const char *s = (const char *)t->ti_Data;
+
+                    for (k = 0; k < 32 && s[k] != 0; k++) ws->ssid[k] = s[k];
+                    ws->ssid[k] = 0;
+                    ws->assoc = io;
+                    ws->connected = TRUE;
+                    ws->signal = -61;
+                    ws->ap++;            /* associated anew */
+                }
+            ws_reply(io, 0, 0);
+            if (ws->connected) ws_report(S2EVENT_CONNECT);
+            break;
+        }
         case S2_GETNETWORKS:
             ws->n_scan++;
             if (!ws->configured)
@@ -410,7 +475,7 @@ static VOID ws_replier(VOID)
     ws_alive = FALSE;
 }
 
-static BOOL ws_install(VOID)
+static BOOL ws_install(const char *name, BOOL prism, BOOL level)
 {
     WsDevice *d = (WsDevice *)MakeLibrary((APTR)ws_vectors, NULL, NULL,
                                           sizeof(WsDevice), (BPTR)0);
@@ -418,7 +483,10 @@ static BOOL ws_install(VOID)
     ws_new_list(&d->scans);
     ws_new_list(&d->events);
     d->dd.dd_Library.lib_Node.ln_Type = NT_DEVICE;
-    d->dd.dd_Library.lib_Node.ln_Name = (char *)ws_name;
+    d->dd.dd_Library.lib_Node.ln_Name = (char *)name;
+    d->prism = prism;
+    d->level = level;
+    ws_stop = FALSE;
     d->dd.dd_Library.lib_Flags = LIBF_SUMUSED | LIBF_CHANGED;
     d->dd.dd_Library.lib_Version = 1;
     d->dd.dd_Library.lib_IdString = (char *)ws_id;
@@ -505,16 +573,148 @@ static LONG run(const char *command)
 }
 
 #define PREFS "DH0:NetWirelessPrefs DEVICE=" WS_NAME
+#define PREFS_P2 "DH0:NetWirelessPrefs"
+
+/* A file into out, for has(). */
+static VOID slurp(const char *path)
+{
+    BPTR fh = Open((CONST_STRPTR)path, MODE_OLDFILE);
+    LONG got = 0;
+
+    if (fh != (BPTR)0)
+    {
+        got = Read(fh, out, sizeof(out) - 1);
+        Close(fh);
+    }
+    out[got > 0 ? got : 0] = 0;
+    Printf((CONST_STRPTR)"--- %s\n%s---\n", (LONG)path, (LONG)out);
+}
+
+static BOOL put_file(const char *path, const char *text)
+{
+    BPTR fh = Open((CONST_STRPTR)path, MODE_NEWFILE);
+    LONG n = 0;
+
+    if (fh == (BPTR)0) return FALSE;
+    while (text[n] != 0) n++;
+    Write(fh, (APTR)text, n);
+    Close(fh);
+    return TRUE;
+}
+
+/* Ctrl-C to every Shell command whose name ends in tail. */
+static VOID stop_named(const char *tail)
+{
+    ULONG n, t, k = 0;
+
+    while (tail[k] != 0) k++;
+    for (t = 0; t < 50; t++)
+    {
+        BOOL seen = FALSE;
+
+        Forbid();
+        for (n = 1; n <= MaxCli(); n++)
+        {
+            struct Process *p = FindCliProc(n);
+            struct CommandLineInterface *cli;
+            const UBYTE *b;
+            ULONG i;
+
+            if (p == NULL) continue;
+            cli = (struct CommandLineInterface *)BADDR(p->pr_CLI);
+            if (cli == NULL || cli->cli_Module == (BPTR)0) continue;
+            b = (const UBYTE *)BADDR(cli->cli_CommandName);
+            if (b == NULL || b[0] < k) continue;
+            for (i = 0; i < k && b[b[0] - k + 1 + i] == (UBYTE)tail[i]; i++)
+                ;
+            if (i == k)
+            {
+                Signal(&p->pr_Task, SIGBREAKF_CTRL_C);
+                seen = TRUE;
+            }
+        }
+        Permit();
+        if (!seen) return;
+        Delay(10);
+    }
+}
+
+static BOOL env_is(const char *want)
+{
+    char  v[48];
+    LONG  n = GetVar((CONST_STRPTR)"WiFi", (STRPTR)v, sizeof(v), GVF_GLOBAL_ONLY);
+    ULONG i;
+
+    if (n < 0) v[0] = 0;
+    Printf((CONST_STRPTR)"ENV:WiFi=\"%s\"\n", (LONG)v);
+    for (i = 0; want[i] != 0 && v[i] == want[i]; i++)
+        ;
+    return want[i] == 0 && v[i] == 0;
+}
+
+/* Ctrl-C to C:WirelessManager, the stub, as a shutdown would send it. */
+static VOID stop_wm(VOID)
+{
+    ULONG n, t;
+
+    for (t = 0; t < 50; t++)
+    {
+        BOOL seen = FALSE;
+
+        Forbid();
+        for (n = 1; n <= MaxCli(); n++)
+        {
+            struct Process *p = FindCliProc(n);
+            struct CommandLineInterface *cli;
+            const UBYTE *b;
+
+            if (p == NULL) continue;
+            cli = (struct CommandLineInterface *)BADDR(p->pr_CLI);
+            if (cli == NULL || cli->cli_Module == (BPTR)0) continue;
+            b = (const UBYTE *)BADDR(cli->cli_CommandName);
+            if (b != NULL && b[0] >= 15 && b[b[0]] == 'r' && b[b[0] - 6] == 'M')
+            {
+                Signal(&p->pr_Task, SIGBREAKF_CTRL_C);
+                seen = TRUE;
+            }
+        }
+        Permit();
+        if (!seen) return;
+        Delay(10);
+    }
+}
+
+/* "WifiStub SERVE": the unit alone, associated with Home, for a person or
+   a screenshot to look at; Ctrl-C removes it. */
+static int ws_serve(VOID)
+{
+    CopyMem("Home", ws->ssid, 5);
+    ws->configured = ws->online = ws->connected = TRUE;
+    ws->signal = -52;
+    /* Four bars, then two after ten seconds: a picture that changes.  Run
+       can leave a Ctrl-C pending, so the wait starts clear. */
+    Delay(500);
+    ws->signal = -70;
+    SetSignal(0, SIGBREAKF_CTRL_C);
+    Wait(SIGBREAKF_CTRL_C);
+    while (ws->dd.dd_Library.lib_OpenCnt != 0) Delay(10);
+    ws_remove();
+    return RETURN_OK;
+}
 
 int main(void)
 {
-    LONG rc;
+    LONG        rc;
+    const char *a = (const char *)GetArgStr();
 
-    if (!ws_install())
+    if (!ws_install(ws_name, FALSE, FALSE))
     {
         Printf((CONST_STRPTR)"could not make %s\n0 checks, 1 failures\n", (LONG)WS_NAME);
         return RETURN_FAIL;
     }
+    while (a != NULL && *a == ' ') a++;
+    if (a != NULL && a[0] == 'S' && a[1] == 'E' && a[2] == 'R' && a[3] == 'V')
+        return ws_serve();
 
     /* Before anything configured the unit: off. */
     rc = run(PREFS " STATUS");
@@ -532,11 +732,13 @@ int main(void)
     check(!has("-40 dBm"), "hidden network left out");
 
     /* Associated. */
+    CopyMem("Home", ws->ssid, 5);
     ws->connected = TRUE;
     ws->signal = -61;
     rc = run(PREFS " STATUS");
     check(rc == 0 && has("connected") && has("Network       Home") &&
           has("-61 dBm, 3 of 4 bars"), "status of an associated unit");
+    check(has("Channel       6, 2.4 GHz"), "channel and band where the driver gives them");
 
     /* Configured and online: no second configure, and no S2_ONLINE, which
        zeroes anxwifipi.device's statistics. */
@@ -566,6 +768,262 @@ int main(void)
     /* The refusal goes to the error stream, so the code is the check. */
     rc = run("DH0:NetWirelessPrefs DEVICE=" WS_NAME " UNIT=3 STATUS");
     check(rc == RETURN_ERROR, "a unit that is not there");
+
+    /* JOIN: the file written with comments and other blocks kept,
+       WirelessManager started with a 32 KB stack and the interface's
+       device, and the association waited for. */
+    CreateDir((CONST_STRPTR)"ENV:Sys");
+    CreateDir((CONST_STRPTR)"ENVARC:Sys");
+    put_file("ENV:Sys/Wireless.prefs",
+             "# keep this comment\n"
+             "network={\n\tssid=\"Other\"\n\tkey_mgmt=NONE\n\tpriority=4\n}\n");
+    ws->connected = FALSE;
+    rc = run(PREFS " JOIN=Cafe");
+    check(rc == 0 && has("Connected."), "JOIN of an open network connects");
+    slurp("ENVARC:Sys/Wireless.prefs");
+    check(has("# keep this comment") && has("ssid=\"Other\"") &&
+          has("ssid=\"Cafe\"\n\tkey_mgmt=NONE\n\tpriority=5\n}"),
+          "Cafe added above Other, the rest kept");
+    slurp("T:wmstub.log");
+    check(has("start device=wifistub.device unit=0 stack=32768 ssid=Cafe"),
+          "WirelessManager started with the unit and 32 KB");
+
+    /* The key derived on this CPU: the host tests cannot see big-endian. */
+    {
+        struct DateStamp t0, t1;
+
+        DateStamp(&t0);
+        rc = run(PREFS " JOIN=Home PASSPHRASE=password");
+        DateStamp(&t1);
+        Printf((CONST_STRPTR)"join_ticks=%ld\n",
+               (LONG)((t1.ds_Minute - t0.ds_Minute) * 3000 + t1.ds_Tick - t0.ds_Tick));
+    }
+    check(rc == 0 && ws->connected && ws->ssid[0] == 'H', "JOIN with a passphrase");
+    slurp("ENV:Sys/Wireless.prefs");
+    check(has("psk=e73550102e12a3328959f66713ca8d1e393643502666bdf6d416db71750f6f6a"),
+          "the key is PBKDF2(passphrase, SSID), not the passphrase");
+    check(!has("password"), "the passphrase is not stored");
+    check(has("ssid=\"Home\"\n\tpsk=") && has("priority=6"), "Home on top");
+    slurp("T:wmstub.log");
+    check(count("start ") == 2 && count("stop") == 1,
+          "WirelessManager stopped by Ctrl-C and started again");
+
+    rc = run(PREFS " STATUS");
+    check(has("WirelessManager running") && has("Network       Home"),
+          "status names the joined network");
+    rc = run(PREFS " JOIN=Bad PASSPHRASE=short");
+    check(rc == RETURN_ERROR, "a five-character passphrase is refused");
+    stop_wm();
+
+    /* The commodity, with no Workbench and no commodities.library on this
+       drive: the variable alone.  It polls the signal only while
+       associated. */
+    {
+        BPTR  in = Open((CONST_STRPTR)"NIL:", MODE_OLDFILE);
+        BPTR  o = Open((CONST_STRPTR)"NIL:", MODE_NEWFILE);
+        ULONG before = AvailMem(MEMF_ANY), used, polls;
+
+        CopyMem("Home", ws->ssid, 5);
+        ws->online = ws->connected = TRUE;
+        ws->signal = -61;
+        SystemTags((CONST_STRPTR)"DH0:NetWireless DEVICE=wifistub.device INTERVAL=1",
+                   SYS_Input, (ULONG)in, SYS_Output, (ULONG)o, SYS_Asynch, TRUE,
+                   TAG_DONE);
+        Delay(100);
+        used = before - AvailMem(MEMF_ANY);
+        Printf((CONST_STRPTR)"commodity_ram=%lu (with its Shell and stack)\n", used);
+        check(env_is("Home 3/4"), "ENV:WiFi says the network and its bars");
+        check(ws->events.lh_Head->ln_Succ != NULL, "an event request waits");
+        polls = ws->n_signal;
+        Delay(160);
+        check(ws->n_signal >= polls + 2, "polled once a second while associated");
+        ws->signal = -50;
+        Delay(80);
+        check(env_is("Home 4/4"), "a new bar count is written");
+
+        ws->connected = FALSE;
+        ws_report(S2EVENT_DISCONNECT);
+        Delay(50);
+        check(env_is("Not connected"), "DISCONNECT seen at once");
+        polls = ws->n_signal;
+        Delay(200);
+        Printf((CONST_STRPTR)"polls_while_not_connected=%lu\n", ws->n_signal - polls);
+        check(ws->n_signal == polls, "nothing polled while not associated");
+
+        ws->connected = TRUE;
+        ws_report(S2EVENT_CONNECT);
+        Delay(50);
+        check(env_is("Home 4/4"), "CONNECT seen at once");
+
+        ws->online = FALSE;
+        ws->connected = FALSE;
+        ws_report(S2EVENT_OFFLINE);
+        Delay(50);
+        check(env_is("Off"), "OFFLINE seen at once");
+        ws->online = TRUE;
+        ws_report(S2EVENT_ONLINE);
+        Delay(50);
+        check(env_is("Not connected"), "ONLINE seen at once");
+
+        stop_named("NetWireless");
+        Delay(25);
+
+        /* The same start around a program that only waits: what the
+           commodity's figure has beyond this one is the commodity. */
+        in = Open((CONST_STRPTR)"NIL:", MODE_OLDFILE);
+        o = Open((CONST_STRPTR)"NIL:", MODE_NEWFILE);
+        polls = AvailMem(MEMF_ANY);
+        SystemTags((CONST_STRPTR)"DH0:WaitBreak", SYS_Input, (ULONG)in,
+                   SYS_Output, (ULONG)o, SYS_Asynch, TRUE, TAG_DONE);
+        Delay(100);
+        polls -= AvailMem(MEMF_ANY);
+        Printf((CONST_STRPTR)"commodity_own_ram=%lu (control %lu)\n",
+               used - polls, polls);
+        check(used - polls <= 16384, "the commodity holds at most 16 KB");
+        stop_named("WaitBreak");
+        Delay(25);
+    }
+
+    /* prism2.device: found by its interface file with nothing named; its
+       signal answered while merely online, its events from its state. */
+    check(ws->n_scan_abort == 0, "no running scan was aborted (wifistub)");
+    check(ws->dd.dd_Library.lib_OpenCnt == 0, "every opener closed (wifistub)");
+    ws_remove();
+    if (!ws_install("prism2.device", TRUE, TRUE))
+    {
+        Printf((CONST_STRPTR)"could not make prism2.device\n");
+        failures++;
+    }
+    else
+    {
+        BPTR  in, o;
+        ULONG events, polls;
+
+        ws->configured = ws->online = TRUE;
+        ws->connected = FALSE;
+        ws->signal = -61;
+        rc = run("DH0:NetWirelessPrefs STATUS");
+        check(rc == RETURN_WARN && has("prism2.device, unit 0") &&
+              has("Link          not connected"),
+              "prism2: found from wifi0 with nothing named, online is not connected");
+        ws->connected = TRUE;
+        rc = run("DH0:NetWirelessPrefs STATUS");
+        check(rc == 0 && has("Link          connected") && has("Access point"),
+              "prism2: associated, the BSSID without a name");
+        rc = run("DH0:NetWirelessPrefs INTERFACE=wifitest STATUS");
+        check(rc == RETURN_ERROR && has("cannot open wifistub.device"),
+              "a named INTERFACE wins over the search");
+        rc = run("DH0:NetWirelessPrefs DEVICE=prism2.device UNIT=0 STATUS");
+        check(rc == 0, "a named DEVICE and UNIT win over the search");
+
+        /* A JOIN on a card already on an access point counts only once it
+           has moved to the one WirelessManager joins. */
+        rc = run(PREFS_P2 " JOIN=Home");
+        check(rc == 0 && has("Connected."), "prism2: JOIN waits for the new association");
+        stop_wm();
+        ws->bad_key = TRUE;
+        rc = run(PREFS_P2 " JOIN=Home");
+        check(rc == RETURN_WARN && has("Not connected"),
+              "prism2: associated with a wrong key is not joined");
+        stop_wm();
+        ws->bad_key = FALSE;
+
+        /* The commodity started on an unassociated card shows that from the
+           first picture, and its requests do not spin. */
+        ws->connected = FALSE;
+        ws->assoc = NULL;
+        in = Open((CONST_STRPTR)"NIL:", MODE_OLDFILE);
+        o = Open((CONST_STRPTR)"NIL:", MODE_NEWFILE);
+        SystemTags((CONST_STRPTR)"DH0:NetWireless INTERVAL=1", SYS_Input, (ULONG)in,
+                   SYS_Output, (ULONG)o, SYS_Asynch, TRUE, TAG_DONE);
+        Delay(100);
+        check(env_is("Not connected"), "prism2: the commodity starts not connected");
+        polls = ws->n_signal;
+        events = ws->n_event;
+        Delay(150);
+        Printf((CONST_STRPTR)"prism2_event_requests_3s=%lu\n", ws->n_event - events);
+        check(ws->n_event == events, "prism2: events do not spin");
+        check(ws->n_signal == polls, "prism2: nothing polled while not associated");
+        ws->connected = TRUE;
+        ws_report(S2EVENT_CONNECT);
+        Delay(50);
+        check(env_is("Wi-Fi 3/4"), "prism2: CONNECT seen");
+        ws->connected = FALSE;
+        ws_report(S2EVENT_DISCONNECT);
+        Delay(50);
+        check(env_is("Not connected"), "prism2: DISCONNECT seen");
+        stop_named("NetWireless");
+        Delay(25);
+    }
+
+    /* prism2.device before 2.9: only the online bit at once, CONNECT and
+       DISCONNECT on a change. */
+    ws_remove();
+    if (!ws_install("prism2.device", TRUE, FALSE))
+    {
+        Printf((CONST_STRPTR)"could not make prism2.device\n");
+        failures++;
+    }
+    else
+    {
+        BPTR  in, o;
+        ULONG polls, events;
+
+        ws->configured = ws->online = TRUE;
+        ws->connected = FALSE;
+        ws->signal = -61;
+        rc = run("DH0:NetWirelessPrefs STATUS");
+        check(rc == RETURN_WARN && has("does not say whether it is associated"),
+              "old prism2: online, never connected from the signal alone");
+        in = Open((CONST_STRPTR)"NIL:", MODE_OLDFILE);
+        o = Open((CONST_STRPTR)"NIL:", MODE_NEWFILE);
+        SystemTags((CONST_STRPTR)"DH0:NetWireless INTERVAL=1", SYS_Input, (ULONG)in,
+                   SYS_Output, (ULONG)o, SYS_Asynch, TRUE, TAG_DONE);
+        Delay(100);
+        check(env_is("Online"), "old prism2: the commodity says online");
+        polls = ws->n_signal;
+        events = ws->n_event;
+        Delay(150);
+        check(ws->n_signal == polls && ws->n_event == events,
+              "old prism2: nothing polled, no event spin");
+        ws->connected = TRUE;
+        ws_report(S2EVENT_CONNECT);
+        Delay(50);
+        check(env_is("Wi-Fi 3/4"), "old prism2: CONNECT seen");
+        ws->connected = FALSE;
+        ws_report(S2EVENT_DISCONNECT);
+        Delay(50);
+        check(env_is("Not connected"), "old prism2: DISCONNECT seen");
+        stop_named("NetWireless");
+        Delay(25);
+    }
+
+    /* A self-contained installation: AmiNetXDuo:Devs/NetInterfaces is the
+       drawer the stack reads, and it is the one searched. */
+    DeleteFile((CONST_STRPTR)"DEVS:NetInterfaces/wifi0");
+    {
+        BPTR lock = Lock((CONST_STRPTR)"DH0:anxd", ACCESS_READ);
+
+        if (lock != (BPTR)0 && AssignLock((CONST_STRPTR)"AmiNetXDuo", lock))
+        {
+            ws->connected = TRUE;
+            rc = run("DH0:NetWirelessPrefs STATUS");
+            check(rc != RETURN_ERROR && has("prism2.device, unit 0"),
+                  "drawer layout: the interface in AmiNetXDuo:Devs is found");
+            AssignLock((CONST_STRPTR)"AmiNetXDuo", (BPTR)0);
+        }
+        else
+        {
+            if (lock != (BPTR)0) UnLock(lock);
+            check(FALSE, "drawer layout: AmiNetXDuo: assigned");
+        }
+    }
+
+    /* No interface file names a Wi-Fi driver: the Pi driver is tried, and
+       its absence is said plainly. */
+    rc = run("DH0:NetWirelessPrefs STATUS");
+    check(rc == RETURN_ERROR && has("anxwifipi.device"),
+          "nothing found: anxwifipi.device, refused with its name");
 
     check(ws->n_scan_abort == 0, "no running scan was aborted");
     check(ws->dd.dd_Library.lib_OpenCnt == 0, "every opener closed");

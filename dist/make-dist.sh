@@ -76,7 +76,7 @@ DEVICES=(netdev/anxnet netdev/anxgenet wifipi/anxwifipi)
 if grep -q '^AMINETXDUO_ZZ9000:BOOL=ON$' "$BUILD/CMakeCache.txt" 2>/dev/null; then
     DEVICES+=(netdev/anxzz9000)
 fi
-CMDS=(AddNetInterface NetSetup NetPrefs NetMeter Online Offline ShowNetStatus ShowNetServices
+CMDS=(AddNetInterface NetSetup NetPrefs NetMeter NetWireless NetWirelessPrefs Online Offline ShowNetStatus ShowNetServices
       ping netstat host hostname
       nslookup arp fetch nc telnet NetTrace NetCapture sntp traceroute tftp
       whois httpd
@@ -298,10 +298,7 @@ fi
 # InstallSameFile and InstallNetProbe do ship, but beside the Installer rather
 # than in C:; they are installer primitives, not user commands.  The other
 # names do not ship.
-# NetWirelessPrefs is packed once its window lands; until then it is
-# LIST and STATUS for the emulator harness alone.
-NOT_SHIPPED=(InstallSameFile InstallNetProbe ToolsSmoke CensusProbe UafProbe HangProbe wbgrab El3Diag paysum
-             NetWirelessPrefs)
+NOT_SHIPPED=(InstallSameFile InstallNetProbe InstallWiFi ToolsSmoke CensusProbe UafProbe HangProbe wbgrab El3Diag paysum)
 missing_from_cmds=()
 # What the build system says it builds (src/tools/CMakeLists.txt writes the
 # manifest), not what happens to lie in the directory: a reused build tree
@@ -581,6 +578,12 @@ need "$CMD_BUILD/src/tools/InstallNetProbe"
 cp "$CMD_BUILD/src/tools/InstallNetProbe" "$TREE/InstallNetProbe"
 chmod 755 "$TREE/InstallNetProbe"
 
+# The Installer's Wi-Fi page: Installer logs every askstring answer, so the
+# passphrase is asked for in this window and written straight to a file.
+need "$CMD_BUILD/src/tools/InstallWiFi"
+cp "$CMD_BUILD/src/tools/InstallWiFi" "$TREE/InstallWiFi"
+chmod 755 "$TREE/InstallWiFi"
+
 cp -R "$INSTALL/devs/Internet/." "$TREE/Devs/Internet/"
 cp -R "$INSTALL/examples/."      "$TREE/Examples/"
 
@@ -621,6 +624,30 @@ cp "$ROOT/src/tools/web/files.html.gz" "$TREE/Terminal/files.html.gz"
 need "$ROOT/src/tools/web/vendor/codemirror/LICENSE"
 cp "$ROOT/src/tools/web/vendor/codemirror/LICENSE" \
    "$TREE/Terminal/CodeMirror-LICENSE"
+
+# WirelessManager, the supplicant anxwifipi.device needs to join a network.
+# Vendored unmodified (third_party/wirelessmanager/PROVENANCE); packed only
+# when its bytes and its licence are the pinned ones, the licence beside the
+# binary because the notice requires it with every binary copy.  The
+# Installer copies it to C: when the Pi Wi-Fi is selected.
+WM_SRC="$ROOT/third_party/wirelessmanager"
+need "$WM_SRC/WirelessManager"
+need "$WM_SRC/LICENSE"
+for f in WirelessManager LICENSE; do
+    want=$(awk -v f="$f" '!/^#/ && $2 == f { print $1 }' "$WM_SRC/PROVENANCE")
+    got=$( (sha256sum "$WM_SRC/$f" 2>/dev/null || shasum -a 256 "$WM_SRC/$f") | cut -d" " -f1)
+    if [ -z "$want" ] || [ "$want" != "$got" ]; then
+        echo "!! third_party/wirelessmanager/$f is not the pinned file." >&2
+        echo "!!   expected ${want:-nothing in PROVENANCE}" >&2
+        echo "!!   got      $got" >&2
+        exit 2
+    fi
+done
+mkdir -p "$TREE/Wireless"
+cp "$WM_SRC/WirelessManager" "$TREE/Wireless/WirelessManager"
+cp "$WM_SRC/LICENSE"         "$TREE/Wireless/WirelessManager-LICENSE"
+chmod 755 "$TREE/Wireless/WirelessManager"
+chmod 644 "$TREE/Wireless/WirelessManager-LICENSE"
 
 cp "$ROOT/dist/ReadMe" "$TREE/ReadMe"
 cp "$INSTALL/Document.info" "$TREE/ReadMe.info"
