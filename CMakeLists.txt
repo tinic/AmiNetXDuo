@@ -143,9 +143,6 @@ if(CMAKE_CROSSCOMPILING AND AMINETXDUO_LTO)
     # 3,268 bytes off the minimal library, measured in the shipped image, and
     # nothing given up for it -- a partition boundary is where the same
     # inlining and constant it would have done across a whole program stops.
-    # It also cuts against the hazard the sibling-call note below describes,
-    # since a boundary is what creates a cross-section branch and there is one
-    # partition here to have a boundary in.
     #
     # -fno-ident: the GCC version string per object. Worth 408 bytes on its own
     # and nothing on top of the single partition, which merges them anyway;
@@ -167,15 +164,6 @@ if(CMAKE_CROSSCOMPILING AND AMINETXDUO_LTO)
     # the ledger about a size win paid out of speed not being a win was
     # written before both were taken anyway.
     string(APPEND CMAKE_C_FLAGS_RELEASE " -flto -fno-ident")
-
-    # A 68020+ LTO link partitions one translation unit into several output
-    # sections and can therefore create the same cross-section 32-bit sibling
-    # branch as -ffunction-sections.  The pinned linker resolves that relocation
-    # twelve bytes short.  The all-CPU/68000 build cannot encode bra.l and does
-    # not pay for disabling otherwise useful tail calls.
-    if(AMIGA_ARCH_FLAGS_STR MATCHES "(^| )(-m68020|-m68020-60|-m68040|-m68060|-mcpu=68060)( |$)")
-        string(APPEND CMAKE_C_FLAGS_RELEASE " -fno-optimize-sibling-calls")
-    endif()
 
     set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE}"
         CACHE STRING "C flags for Release builds" FORCE)
@@ -952,8 +940,7 @@ if(AMINETXDUO_PROFILER_NOINLINE)
     endif()
     add_compile_options(
         -fno-inline-functions-called-once
-        -fno-inline-small-functions
-        -fno-optimize-sibling-calls)
+        -fno-inline-small-functions)
 endif()
 
 option(AMINETXDUO_NXCENSUS "Count and time the ThreadX bracket" OFF)
@@ -1672,9 +1659,9 @@ target_link_libraries(netxduo_addons PUBLIC netxduo)
 # bytes, nxd_mdns 1,960, nxd_dns 1,484, nx_utility 1,056.
 #
 # NOT on src/, measured: our own objects are all reachable, so the flag buys
-# padding, and -fno-optimize-sibling-calls gives up the tail calls that pay for
-# themselves.  Adding src/netstack, src/sana2 and src/bpf to this list puts
-# 1,316 bytes BACK on bsdsocket.library; the tree-wide version costs 3,348.
+# padding.  Adding src/netstack, src/sana2 and src/bpf to this list put 1,316
+# bytes BACK on bsdsocket.library and the tree-wide version 3,348, measured
+# when -fno-optimize-sibling-calls still travelled with the flag.
 # 68000-minimal, the drawer with the least room, gains the most: 249,488 to
 # 239,540, 9,948 bytes and 3.99%, against 2.81% for the default build.
 #
@@ -1682,12 +1669,8 @@ target_link_libraries(netxduo_addons PUBLIC netxduo)
 # the collector takes it, which is what cmake/check-version-tag.cmake exists to
 # catch.  The vendored code carries no version tags and would be safe, but 168
 # bytes is not worth a flag that means something different two directories away.
-#
-# -fno-optimize-sibling-calls TRAVELS WITH -ffunction-sections, ALWAYS -- see
-# src/config/CMakeLists.txt for the reboot that rule was written from.
 foreach(_vendored threadx netxduo netxduo_addons)
-    target_compile_options(${_vendored} PRIVATE
-                           -ffunction-sections -fno-optimize-sibling-calls)
+    target_compile_options(${_vendored} PRIVATE -ffunction-sections)
 endforeach()
 
 if(AMINETXDUO_MDNS)

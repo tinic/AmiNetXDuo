@@ -175,7 +175,7 @@ if(bad)
         "${_name}: a 32-bit PC-relative branch does not land on a function.\n"
         "This is the mis-resolved relocation described in "
         "cmake/check-pcrel-branches.cmake and docs/RESEARCH.md §25; the usual "
-        "cause is -ffunction-sections without -fno-optimize-sibling-calls. "
+        "cause is a binutils older than the one in toolchain 16.2.8. "
         "Running this binary jumps into the middle of another function.\n"
         "(${_ground}.)")
 endif()

@@ -431,16 +431,14 @@ set(AMINETXDUO_REGPARM "3" CACHE STRING
     "Integer arguments passed in registers d0-d2 (0 disables, as before)")
 set_property(CACHE AMINETXDUO_REGPARM PROPERTY STRINGS 0 1 2 3)
 
-# -fno-optimize-sibling-calls travels with -mregparm.  GCC 16.2.0b emits an
-# indirect tail call under -mregparm as `move.l <target>,a0 / jmp (a0)': the
-# target lands in a0, the register the callee reads its first pointer argument
-# from, and that argument is never loaded.  bsd_wait_sliced()'s
-# `return call(arg, wait)' entered bsd_send_once() with its own address as
-# `arg', and every NX_NO_WAIT send() hung (cmake/check-regparm-sibcall.cmake).
+# Sibling calls are on under -mregparm since toolchain 16.2.4, which loads an
+# indirect tail call's target somewhere other than a0, the register the callee
+# reads its first pointer argument from; cmake/check-regparm-sibcall.cmake
+# refuses a compiler that does not.
 if(AMINETXDUO_REGPARM GREATER 0)
     get_filename_component(_amiga_top "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
     set(_amiga_regparm_flags
-        "-mregparm=${AMINETXDUO_REGPARM} -fno-optimize-sibling-calls -include ${_amiga_top}/include/aminetxduo/asm_main.h")
+        "-mregparm=${AMINETXDUO_REGPARM} -include ${_amiga_top}/include/aminetxduo/asm_main.h")
 else()
     set(_amiga_regparm_flags "")
 endif()
@@ -458,6 +456,8 @@ set(CMAKE_C_FLAGS_INIT
 # configure has no cache entry and is left to CMAKE_C_FLAGS_INIT, which is
 # already right.  Stripping the pin matters as much as stripping -mregparm:
 # removing one and leaving the other is the same lie with the halves swapped.
+# -fno-optimize-sibling-calls is stripped and not put back: caches made before
+# toolchain 16.2.8 carry it.
 if(DEFINED CACHE{CMAKE_C_FLAGS})
     set(_amiga_cf "${CMAKE_C_FLAGS}")
     string(REGEX REPLACE " ?-mregparm=[0-9]+" "" _amiga_cf "${_amiga_cf}")

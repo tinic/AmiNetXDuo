@@ -374,13 +374,9 @@ endif()
 # exactly that -- 12 hunks, 0 relocations, an image LoadSeg would not relocate
 # (tools/check-hunk-relocs.sh).  IfNames and V6Only are clean today only
 # because they pull fewer objects, which is not a property to rely on.
-#
-# -fno-optimize-sibling-calls TRAVELS WITH -ffunction-sections, ALWAYS; see
-# src/tools/CMakeLists.txt and docs/RESEARCH.md 25.
 foreach(_ex test_ifnames test_v6only test_tlsinfo)
     if(TARGET ${_ex})
-        target_compile_options(${_ex} PRIVATE
-            -ffunction-sections -fno-optimize-sibling-calls)
+        target_compile_options(${_ex} PRIVATE -ffunction-sections)
         target_link_options(${_ex} PRIVATE -Wl,--gc-sections)
     endif()
 endforeach()

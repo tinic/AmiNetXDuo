@@ -24,8 +24,5 @@ target_include_directories(aminetxduo_ipv6 PUBLIC ${AMINETXDUO_CORE_INCLUDES})
 # NetX Duo.
 
 # Every Shell command and every library that links the stack pulls this in, and
-# --gc-sections can only drop what has a section to drop.  Same pairing as
-# src/common: -fno-optimize-sibling-calls travels with -ffunction-sections
-# always, see the note there for the relocation this toolchain gets wrong.
-target_compile_options(aminetxduo_ipv6 PRIVATE
-    -ffunction-sections -fno-optimize-sibling-calls)
+# --gc-sections can only drop what has a section to drop.
+target_compile_options(aminetxduo_ipv6 PRIVATE -ffunction-sections)
