@@ -38,12 +38,40 @@
 #   DRAWER_MICRO    does the same with the micro profile
 #   DRAWER_FULL_MINIMAL / DRAWER_MICRO_FULL cover the same profile edges
 #                   without ever touching system libraries or configuration
+#   ROADSHOW_PRETEND / _NOVICE / _REPLACE_RERUN: a pretend run over another
+#                   stack changes nothing; Novice draws its pages; a second
+#                   install keeps its Backup intact; KEEP_REDO keeps it once, then sets it up
+#                   again and still backs it up
 #   ROADSHOW_* / AMITCPNG_* seed named existing-stack layouts, then either
 #                   decline with a zero-diff oracle or replace while keeping
 #                   editable configuration and the AmiTCP: assignment
 #   EMU68_* inject deterministic device-tree results and prove the Installer
 #                   creates genet/wifipi definitions and starts only Ethernet;
 #                   on a 68020+ they also prove fat is the default under Emu68
+#   EMU68_WIFI_JOIN answers InstallWiFi's window with a name and passphrase
+#                   full of quotes, #, = and backslashes, reinstalls with "Set
+#                   them up again" and requires the Wireless.prefs kept, then
+#                   boots the written S:Network-Startup: WirelessManager (a
+#                   stand-in) starts once ahead of the bounded Wi-Fi
+#                   AddNetInterface and is reused, and the real WirelessManager
+#                   1.5 reads the written file without a parse error
+#   EMU68_WIFI_KEEP plants a Wireless.prefs and a C:WirelessManager beside
+#                   Ethernet: both untouched, both interfaces started, the
+#                   lines that start WirelessManager commented out
+#   EMU68_WIFI_KEEPIT "Keep it" with run 1's S:Network-Startup gone: the
+#                   Wi-Fi is found by DEVICE= and its block written
+#   EMU68_WIFI_KEEPIT_BOTH the same beside the Ethernet, whose kept file has
+#                   PRIORITY only in comments and no final newline: it
+#                   gets a PRIORITY=10 line of its own
+#   EMU68_WIFI_KEEPIT_LIVE the same, the kept genet file ending in a live
+#                   "UNIT=0 PRIORITY=3": nothing is appended
+#   EMU68_WIFI_KEEPIT_FW  keepit that empties DEVS:Firmware between the runs:
+#                   the kept anxwifipi definition alone brings the firmware back
+#   EMU68_WIFI_USERSTART S:User-Startup starts WirelessManager already
+#   EMU68_WIFI_DRAWER a drawer install beside the user's C:WirelessManager
+#   EMU68_BOTH_NOVICE NOVICE still asks for the Wi-Fi network, a Latin-1 name
+#                   is written as UTF-8 hex, and Ethernet and Wi-Fi both
+#                   start, Ethernet at PRIORITY=10
 #   EMU68_GENET_OLD / _BARE  a GENET Emu68 1.0.x leaves unmapped: Emu68's
 #                   genet.device is used, or with none the Installer stops
 #                   before writing anything
@@ -95,13 +123,18 @@ SCENARIOS=(
     DRAWER_FULL DRAWER_MINIMAL DRAWER_MICRO
     DRAWER_FULL_MINIMAL DRAWER_MICRO_FULL
     ROADSHOW_LEAVE ROADSHOW_REPLACE AMITCPNG_LEAVE AMITCPNG_REPLACE
-    UNINSTALL ROADSHOW_UNINSTALL RERUN_UNINSTALL DRAWER_UNINSTALL
+    UNINSTALL ROADSHOW_UNINSTALL RERUN_UNINSTALL DRAWER_UNINSTALL WIFI_UNINSTALL
+    KEEP_REDO_UNINSTALL
+    ROADSHOW_PRETEND ROADSHOW_NOVICE ROADSHOW_REPLACE_RERUN ROADSHOW_KEEP_REDO ROADSHOW_REDO_SAME
     EMU68_GENET EMU68_WIFI EMU68_BOTH EMU68_BOTH_MICRO
+    EMU68_WIFI_JOIN EMU68_WIFI_KEEP EMU68_WIFI_KEEPIT EMU68_WIFI_KEEPIT_BOTH EMU68_WIFI_KEEPIT_LIVE
+    EMU68_WIFI_KEEPIT_FW
+    EMU68_WIFI_USERSTART EMU68_WIFI_DRAWER EMU68_BOTH_NOVICE
     EMU68_GENET_OLD EMU68_GENET_OLD_BARE
     CANCEL_DRIVERS MISSING_CORE MISSING_DRIVER MISSING_PROBE MISSING_MINIMAL
     NO_CARD STALE_PI_DRIVERS HARDWARE_XSURF100 HARDWARE_PCMCIA
     TERMINAL STATIC_NO_DRIVERS
-    SNTP SNTP_INVALID SNTP_RERUN
+    SNTP SNTP_INVALID SNTP_RERUN MDNS_OFF HAND_HOSTNAME
     SPACES SPACES_DRAWER
 )
 declare -a RESULTS
@@ -201,10 +234,27 @@ for scenario in "${SCENARIOS[@]}"; do
         ROADSHOW_UNINSTALL)    opts=(-l AVERAGE -f roadshow-replace -u) ;;
         RERUN_UNINSTALL)       opts=(-l AVERAGE -R -u) ;;
         DRAWER_UNINSTALL)      opts=(-l AVERAGE -D -u) ;;
+        WIFI_UNINSTALL)        opts=(-l AVERAGE -e wifi -u) ;;
+        KEEP_REDO_UNINSTALL)   opts=(-l AVERAGE -f roadshow-keepredo -R -u) ;;
+
+        ROADSHOW_PRETEND)      opts=(-l AVERAGE -f roadshow-pretend) ;;
+        ROADSHOW_NOVICE)       opts=(-l NOVICE -f roadshow-replace) ;;
+        ROADSHOW_REPLACE_RERUN) opts=(-l AVERAGE -f roadshow-replace -R) ;;
+        ROADSHOW_KEEP_REDO)    opts=(-l AVERAGE -f roadshow-keepredo -R) ;;
+        ROADSHOW_REDO_SAME)    opts=(-l AVERAGE -f roadshow-replace -U) ;;
         EMU68_GENET)           opts=(-l AVERAGE -e genet) ;;
         EMU68_WIFI)            opts=(-l AVERAGE -e wifi) ;;
         EMU68_BOTH)            opts=(-l AVERAGE -e both) ;;
         EMU68_BOTH_MICRO)      opts=(-l AVERAGE -e both -p micro) ;;
+        EMU68_WIFI_JOIN)       opts=(-l AVERAGE -e wifi -w join -U) ;;
+        EMU68_WIFI_KEEP)       opts=(-l AVERAGE -e both -w keep) ;;
+        EMU68_WIFI_KEEPIT)     opts=(-l AVERAGE -e wifi -w keepit -R) ;;
+        EMU68_WIFI_KEEPIT_BOTH) opts=(-l AVERAGE -e both -w keepit -R) ;;
+        EMU68_WIFI_KEEPIT_LIVE) opts=(-l AVERAGE -e both -w keepitlive -R) ;;
+        EMU68_WIFI_KEEPIT_FW)  opts=(-l AVERAGE -e wifi -w keepitfw -R) ;;
+        EMU68_WIFI_USERSTART)  opts=(-l AVERAGE -e wifi -w userstart) ;;
+        EMU68_WIFI_DRAWER)     opts=(-l AVERAGE -e wifi -D -w userwm) ;;
+        EMU68_BOTH_NOVICE)     opts=(-l NOVICE -e both -w join) ;;
         EMU68_GENET_OLD)       opts=(-l NOVICE -e genet-old) ;;
         EMU68_GENET_OLD_BARE)  opts=(-l NOVICE -e genet-old-bare) ;;
         CANCEL_DRIVERS)        opts=(-l AVERAGE -c drivers) ;;
@@ -218,9 +268,11 @@ for scenario in "${SCENARIOS[@]}"; do
         HARDWARE_PCMCIA)       opts=(-l AVERAGE -M -N ne2000_pcmcia) ;;
         TERMINAL)              opts=(-l AVERAGE -H) ;;
         STATIC_NO_DRIVERS)     opts=(-l AVERAGE -S -J) ;;
-        SNTP)                  opts=(-l AVERAGE -s yes) ;;
-        SNTP_INVALID)          opts=(-l AVERAGE -s invalid) ;;
-        SNTP_RERUN)            opts=(-l AVERAGE -s yes -R) ;;
+        SNTP)                  opts=(-l EXPERT -s yes) ;;
+        SNTP_INVALID)          opts=(-l EXPERT -s invalid) ;;
+        SNTP_RERUN)            opts=(-l EXPERT -s yes -R) ;;
+        MDNS_OFF)              opts=(-l AVERAGE -O) ;;
+        HAND_HOSTNAME)         opts=(-l AVERAGE -U -n) ;;
 SPACES)                opts=(-l AVERAGE -W) ;;
 SPACES_DRAWER)         opts=(-l AVERAGE -D -W) ;;
     esac

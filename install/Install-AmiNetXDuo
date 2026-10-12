@@ -83,6 +83,7 @@
 (set S_README (if (> (strlen SRCDIR) 0) (tackon SRCDIR "ReadMe")   "ReadMe"))
 (set S_SAMEFILE (if (> (strlen SRCDIR) 0)
                     (tackon SRCDIR "InstallSameFile") "InstallSameFile"))
+(set S_FIRMWARE (tackon S_DEVS "Firmware"))
 (set S_NETPROBE (if (> (strlen SRCDIR) 0)
                     (tackon SRCDIR "InstallNetProbe") "InstallNetProbe"))
 
@@ -109,6 +110,15 @@
 (set S_UNINSTALLICON (cat S_UNINSTALL ".info"))
 (set S_INSTALLER (if (> (strlen SRCDIR) 0)
                      (tackon SRCDIR "Installer") "Installer"))
+
+; WirelessManager and its licence, in a drawer of their own: C/ is copied
+; wholesale, and these are copied only when the Wi-Fi is selected.
+(set S_WIRELESS (if (> (strlen SRCDIR) 0) (tackon SRCDIR "Wireless") "Wireless"))
+(set S_WM    (tackon S_WIRELESS "WirelessManager"))
+(set S_WMLIC (tackon S_WIRELESS "WirelessManager-LICENSE"))
+(set S_INSTWIFI (if (> (strlen SRCDIR) 0)
+                    (tackon SRCDIR "InstallWiFi") "InstallWiFi"))
+(set S_NWPREFS (tackon S_C "NetWirelessPrefs"))
 
 ; --------------------------------------------------------------------------
 ; Help texts.  Every ask.../copy... statement is required by the Installer to
@@ -176,11 +186,12 @@
   (cat "mDNS makes this Amiga reachable by a .local name.  It also lets "
        "ShowNetServices list the other machines on the network.  No name "
        "server is necessary.\n\n"
-       "mDNS is off by default.  The responder joins a multicast group on "
-       "this interface.  Every .local query on the network then becomes "
-       "work for this Amiga, even when the query is about another machine.  "
-       "On a 68000 that cost is enough to slow down everything else.  On a "
-       "fast accelerator it is not.\n\n"
+       "mDNS is on by default on a 68020 or newer and off on a 68000 or "
+       "68010.  The "
+       "responder joins a multicast group on this interface.  Every .local "
+       "query on the network then becomes work for this Amiga, even when the "
+       "query is about another machine.  On a 68000 that cost is enough to "
+       "slow down everything else.  On a faster processor it is not.\n\n"
        "MDNS= is one line in the file that this installer writes in "
        "DEVS:NetInterfaces, so it is easy to change later."))
 
@@ -228,9 +239,11 @@
 
 (set H_HOSTNAME
   (cat "The name that this Amiga calls itself.  Programs report it as the "
-       "local host name, and it appears in some log messages.\n\n"
-       "Use letters, digits and hyphens.  Do not use spaces.  \"amiga\" is "
-       "an acceptable name."))
+       "local host name, and mDNS answers to it with .local.\n\n"
+       "Left empty, the stack names the machine amiga- followed by the last "
+       "three octets of the card's address, for example amiga-490007, so two "
+       "Amigas on one network do not share a name.\n\n"
+       "Use letters, digits and hyphens.  Do not use spaces."))
 
 (set H_KEEPOLD
   (cat "This machine already has an AmiNetXDuo or Roadshow style network "
@@ -238,14 +251,14 @@
        "\"Keep it\" updates the software and leaves the existing "
        "configuration alone.  If S:Network-Startup already exists, it is kept "
        "too, so the same interfaces continue to start at boot.  That is the "
-       "default when the existing configuration is AmiNetXDuo's.\n\n"
+       "default when AmiNetXDuo is already installed.\n\n"
        "\"Set them up again\" answers the network questions again.  That "
        "rewrites the interface files, DEVS:Internet/routes and "
        "DEVS:Internet/name_resolution, and writes a new S:Network-Startup.  "
-       "Each file it replaces is kept beside it, renamed with .old added "
-       "(an interface file with .old.info, which no interface scan reads).  "
-       "That is the default when the configuration belongs to another stack "
-       "and a network device was found."))
+       "Another stack's files are copied first into a numbered drawer under "
+       "the Backup drawer of the AmiNetXDuo drawer.  That is the default when "
+       "the configuration belongs to another stack and a network device was "
+       "found."))
 
 (set H_STARTUP
   (cat "S:User-Startup is the file that the Amiga runs at every boot.  "
@@ -321,7 +334,7 @@
        "This question appears only when S:Network-Startup is written.  To "
        "stop setting the clock at boot, comment the line out with a leading "
        "semicolon.\n\n"
-       "The installer asks for the server next."))
+       "At Expert level the installer asks for the server next."))
 
 (set H_SNTPSERVER
   (cat "The name or address of an SNTP server.  pool.ntp.org selects a "
@@ -340,8 +353,10 @@
        "Ethernet in it, for a PiStorm32 running Emu68 1.1 alpha.1 or newer "
        "(DEVICE=anxgenet.device, UNIT=0).  anxwifipi.device is the third: the "
        "Pi 4's own Wi-Fi, for the same machines (DEVICE=anxwifipi.device, "
-       "UNIT=0; it needs the Wi-Fi firmware Emu68 puts in DEVS:Firmware and "
-       "a supplicant such as Aminet's WirelessManager to join a network).  "
+       "UNIT=0; it needs the Wi-Fi firmware in DEVS:Firmware, which the "
+       "installer adds when it is missing, and "
+       "WirelessManager to join a network, which the installer puts in C: "
+       "when the Pi Wi-Fi is selected).  "
        "anxzz9000.device is the fourth: the MNT ZZ9000's Ethernet, used when "
        "MNT's ZZ9000Net.device is not on the disk (DEVICE=anxzz9000.device, "
        "UNIT=0).\n\n"
@@ -362,9 +377,49 @@
        "An existing driver is renamed to .old rather than being deleted, so "
        "the previous copy can be put back by hand."))
 
+(set H_WIFI
+  (cat "WirelessManager joins the Wi-Fi network for anxwifipi.device, or "
+       "for prism2.device when a Prism2 PCMCIA card is selected instead.  It "
+       "reads the network from ENV:Sys/Wireless.prefs, which AmigaOS copies "
+       "from ENVARC:Sys/Wireless.prefs at every boot.\n\n"
+       "NetWirelessPrefs opens first: it lists the networks in range, and "
+       "Join writes the chosen "
+       "one.  If it cannot open the device, or is closed without a join, "
+       "InstallWiFi asks instead.\n\n"
+       "InstallWiFi asks for the network name (SSID) and the WPA or WPA2 "
+       "passphrase in a window of its own and writes them in "
+       "wpa_supplicant's format.  The passphrase appears as asterisks and "
+       "is not written to the installation log.  An empty passphrase "
+       "selects an open network.  Skip writes no file, and the Wi-Fi "
+       "interface does not start until ENVARC:Sys/Wireless.prefs exists.\n\n"
+       "The window appears only when the Pi Wi-Fi or a Prism2 PCMCIA card is "
+       "selected and there is "
+       "no Wireless.prefs.  An existing one is never replaced.  The Manual "
+       "in Aminet's driver/net/prism2v2 describes the file, including hidden "
+       "networks, WEP and several networks in one file."))
+
+(set H_WM
+  (cat "WirelessManager is Neil Cafferkey's supplicant for SANA-II wireless "
+       "drivers, from Aminet's driver/net/prism2v2, unmodified.  It joins the "
+       "network named in ENV:Sys/Wireless.prefs and keeps the connection.  "
+       "S:Network-Startup starts it before the Wi-Fi interface.\n\n"
+       "A WirelessManager that this installer did not put on the machine, in "
+       "C:, SYS:C or this installation's own drawer, is kept as it is.  "
+       "S:Network-Startup then leaves the lines that start WirelessManager "
+       "commented out, so that two copies do not share one radio.  The same "
+       "applies when a Wireless.prefs that this installer did not write "
+       "exists, or when S:User-Startup, S:Startup-Sequence or SYS:WBStartup "
+       "names WirelessManager.\n\n"
+       "It is based on wpa_supplicant and is distributed under wpa_supplicant's "
+       "three-clause BSD licence, Copyright (c) 2003-2010 Jouni Malinen and "
+       "contributors, (c) 2011-2025 Neil Cafferkey.  The licence is installed "
+       "in the AmiNetXDuo drawer as WirelessManager-LICENSE."))
+
 (set H_BACKUP
-  (cat "Files of the stack AmiNetXDuo replaces are kept in the Backup drawer "
-       "of the AmiNetXDuo drawer, the first time only.  Uninstall-AmiNetXDuo "
+  (cat "Files of another stack that AmiNetXDuo replaces are kept in a drawer "
+       "of their own under the Backup drawer of the AmiNetXDuo drawer: "
+       "Backup/1 for the first installation that replaced any, Backup/2 for "
+       "the next.  Nothing there is replaced later.  Uninstall-AmiNetXDuo "
        "puts them back."))
 
 (set H_REPLACELIB
@@ -729,6 +784,12 @@
             )
             (if WARN_DRIVER
               (message (F_NODEV DEV_NAME) (help H_CARD))))))))
+
+  ; WirelessManager opens the driver the Wi-Fi interface file names: the
+  ; Pi Wi-Fi's, or a Prism2 PCMCIA card's when the Pi Wi-Fi is not selected.
+  (if (OR (= CARD_INDEX 11)
+          (AND (= CARD_INDEX 10) (= PCM 4) (= (bitand CARD_MASK 2048) 0)))
+      (set WIFI_DEV DEV_WRITE))
 )
 
 ; ==========================================================================
@@ -806,6 +867,13 @@
            "The download is incomplete, or was unpacked with a tool that "
            "dropped the subdrawers.\n\n"
            "Nothing was changed."))
+(if (NOT (AND (AND (exists S_WM (noreq)) (exists S_WMLIC (noreq)))
+              (exists S_INSTWIFI (noreq))))
+    (abort "This archive has no Wireless/WirelessManager, its licence or "
+           "InstallWiFi.\n\n"
+           "The download is incomplete, or was unpacked with a tool that "
+           "dropped the subdrawers.\n\n"
+           "Nothing was changed."))
 ; anxzz9000.device is optional: an archive built without
 ; -DAMINETXDUO_ZZ9000=ON does not carry it (CMakeLists.txt), and a ZZ9000
 ; is then driven only by MNT's own ZZ9000Net.device.
@@ -864,8 +932,11 @@
 (if (OR (exists "DEVS:etherlink3.device" (noreq))
         (exists "DEVS:Networks/etherlink3.device" (noreq)))
     (set PCM_DEFAULT 1))
-(if (OR (exists "DEVS:prism2.device" (noreq))
-        (exists "DEVS:Networks/prism2.device" (noreq)))
+; prism2.device beside etherlink3.device says nothing about the card: the
+; EtherLink default stays, and the card's own ID below decides.
+(if (AND (= PCM_DEFAULT 0)
+         (OR (exists "DEVS:prism2.device" (noreq))
+             (exists "DEVS:Networks/prism2.device" (noreq))))
     (set PCM_DEFAULT 4))
 
 
@@ -953,13 +1024,14 @@
 (set PROBE_CMD ("\"%s\" CARD pcmcia" S_NETPROBE))
 (if (= 0 (run PROBE_CMD (quiet) (safe)))
   (set CARD_DEFAULT (bitor CARD_DEFAULT 1024)))
+; An NE2000 card's ID selects it too, over a driver-based default.
 (set PROBE_N 0)
 (while (set PROBE_CARD
-         (select PROBE_N "3c589" "3ccfem556" "3cxem556" ""))
+         (select PROBE_N "cnet" "3c589" "3ccfem556" "3cxem556" ""))
   (
     (set PROBE_CMD ("\"%s\" CARD %s" S_NETPROBE PROBE_CARD))
     (if (= 0 (run PROBE_CMD (quiet) (safe)))
-      (set PCM_DEFAULT (+ PROBE_N 1)))
+      (set PCM_DEFAULT PROBE_N))
     (set PROBE_N (+ PROBE_N 1))
   ))
 (set PROBE_CMD ("\"%s\" CARD uae" S_NETPROBE))
@@ -1357,13 +1429,20 @@
                   (quiet) (safe)))
         (set LIB_OURS 1)))
 
+; Another stack is somebody's working network, so this page is drawn at
+; every level: (user) lifts Novice to Intermediate for it and back.
+(set LEVEL_WAS @user-level)
 (if (AND OLD_BSD (= DRAWER_LAYOUT 0) (= LIB_OURS 0))
+  (
+    (if (= LEVEL_WAS 0) (user 1))
     (set REPLACE_LIB
       (askbool
         (prompt (F_OLDLIB OLD_BSD_VER OLD_BSD_REV))
         (help    H_REPLACELIB)
         (choices "Replace it" "Leave it alone")
-        (default 1))))
+        (default 1)))
+    (if (= LEVEL_WAS 0) (user 0))
+  ))
 
 (if (= REPLACE_LIB 0)
     (abort "LIBS:bsdsocket.library is unchanged, so AmiNetXDuo is not "
@@ -1415,11 +1494,15 @@
 (set KEEP_OLD 0)
 
 ; Keep is the default for our own configuration.  Another stack's is set up
-; again, its files kept as .old, when there is a device to set it up for: with
-; none detected a Novice run has no card to write, so it keeps that one.  The
-; default is the page's first button either way.
+; again, its files kept in the AmiNetXDuo drawer's Backup, when there is a
+; device to set it up for: with none detected a Novice run has no card to
+; write, so it keeps that one.  The default is the page's first button either
+; way.  Another stack's configuration is drawn at Novice too, as the
+; replace page is.
 (set KEEP_DEF (if (OR CONFIG_OURS (= CARD_DEFAULT 0)) 1 0))
 (if HAVE_OLD
+  (
+    (if (AND (= LEVEL_WAS 0) (= CONFIG_OURS 0)) (user 1))
     (set KEEP_OLD
       (if (askbool
             (prompt (F_KEEPOLD OLD_IF))
@@ -1427,7 +1510,9 @@
             (choices (if KEEP_DEF "Keep it" "Set them up again")
                      (if KEEP_DEF "Set them up again" "Keep it"))
             (default 1))
-          KEEP_DEF (- 1 KEEP_DEF))))
+          KEEP_DEF (- 1 KEEP_DEF)))
+    (if (AND (= LEVEL_WAS 0) (= CONFIG_OURS 0)) (user 0))
+  ))
 
 ; Kept settings are not checked, and saying so is the only honest option.
 ;
@@ -1439,12 +1524,19 @@
 ; It cannot be examined: the Installer language cannot read the DEVICE= line
 ; back out of the file, so there is no name to look for. Reported by a user who
 ; took the drivers away, installed again and was told nothing.
-(if (AND HAVE_OLD KEEP_OLD (= @user-level 2))
+; Drawn for another stack's configuration, and at Expert; a routine update
+; over AmiNetXDuo's own does not need it.
+; (user) for Novice, which draws no (message) of its own.
+(if (AND HAVE_OLD KEEP_OLD (OR (= @user-level 2) (= CONFIG_OURS 0)))
+  (
+    (if (= LEVEL_WAS 0) (user 1))
     (message
       "The existing configuration for \"" OLD_IF "\" is kept as it is.\n\n"
       "It is not checked.  If the card or its driver changed since the file "
       "was written, the network does not come up.  Install again and choose "
-      "\"Set them up again\" to answer the questions again."))
+      "\"Set them up again\" to answer the questions again.")
+    (if (= LEVEL_WAS 0) (user 0))
+  ))
 
 ; --- the card ------------------------------------------------------------
 
@@ -1457,6 +1549,86 @@
 (set CUSTOM_DEV "mycard.device")
 (set PCM_OTHER_DEV "mycard.device")
 (set PCM 0)
+
+; The Wi-Fi: the Pi Wi-Fi, or a Prism2 PCMCIA card without it (WIFI_PRISM).
+; WIFI_SEL: it is selected, or a kept definition names anxwifipi.device or
+; prism2.device.  WIFI_PRIMARY: it is the interface S:Network-Startup
+; starts first.  WIFI_START: S:Network-Startup starts it too, after the
+; primary -- every profile but micro, which brings up one interface.
+; WIFI_DEV is what its interface file names.
+(set WIFI_SEL 0)
+(set WIFI_PRISM 0)
+(set WIFI_PRIMARY 0)
+(set WIFI_START 0)
+(set WIFI_IF "wifipi")
+(set WIFI_DEV W_ANXWIFIPI)
+(set WIFI_UNIT 0)
+(set WIFI_TMP "T:AmiNetXDuo-Wireless.prefs")
+; It holds the Wi-Fi passphrase: an installation that stops, for any reason,
+; takes it away.
+(onerror
+  (if (exists WIFI_TMP (noreq))
+      (delete WIFI_TMP
+              (prompt "Removing T:AmiNetXDuo-Wireless.prefs")
+              (help   "It holds the Wi-Fi passphrase.")
+              (optional "force" "nofail")
+              (safe))))
+(set WIFI_NEW_PREFS 0)
+(set WIFI_HAVE_PREFS
+  (if (OR (exists "ENVARC:Sys/Wireless.prefs" (noreq))
+          (exists "ENV:Sys/Wireless.prefs" (noreq))) 1 0))
+
+; WHOSE WirelessManager AND WHOSE Wireless.prefs.  S:AmiNetXDuo-WiFi is the
+; record of the Wi-Fi files this installer created -- a script of Delete
+; lines, which is also how they are removed again -- so a reinstall can tell
+; its own copy from one the user had.  A WirelessManager that is not ours is
+; looked for in C:, SYS:C and this layout's own C; it is never replaced, and
+; with it, or with a Wireless.prefs that is not ours, or with WirelessManager
+; named in the startup files or WBStartup, S:Network-Startup does not start
+; another one: Status recognises a running copy only by its exact command
+; name, and two supplicants on one radio fight over it.
+(set D_WM (tackon D_C "WirelessManager"))
+(set WM_REC (if DRAWER_LAYOUT "AmiNetXDuo:C/WirelessManager" "C:WirelessManager"))
+; What finds WM_REC's line in the record.  No volume name the drawer layout
+; may not have assigned yet: Search given one never returned.
+(set WM_REC_KEY (if DRAWER_LAYOUT "C/WirelessManager QUIET"
+                    "Delete C:WirelessManager QUIET"))
+(set WIFI_REC "S:AmiNetXDuo-WiFi")
+(set WM_OURS 0)
+(set PREFS_OURS 0)
+(if (exists WIFI_REC (noreq))
+  (
+    (if (= 0 (run ("Search >NIL: FROM %s SEARCH \"%s\" QUIET"
+                   WIFI_REC WM_REC_KEY)
+                  (quiet) (safe)))
+        (set WM_OURS 1))
+    (if (= 0 (run ("Search >NIL: FROM %s SEARCH ENVARC:Sys/Wireless.prefs QUIET"
+                   WIFI_REC)
+                  (quiet) (safe)))
+        (set PREFS_OURS 1))
+  ))
+(set HAVE_C_WM    (if (exists "C:WirelessManager" (noreq)) 1 0))
+(set HAVE_SYSC_WM (if (exists "SYS:C/WirelessManager" (noreq)) 1 0))
+(set HAVE_D_WM    (if (exists D_WM (noreq)) 1 0))
+(if DRAWER_LAYOUT
+    (set WM_USER (if (OR HAVE_SYSC_WM
+                         (OR (AND HAVE_C_WM (= HAVE_D_WM 0))
+                             (AND HAVE_D_WM (= WM_OURS 0)))) 1 0))
+    (set WM_USER (if (AND (OR HAVE_C_WM HAVE_SYSC_WM) (= WM_OURS 0)) 1 0)))
+(set PREFS_USER (if (AND WIFI_HAVE_PREFS (= PREFS_OURS 0)) 1 0))
+(set WM_ELSEWHERE 0)
+(set WM_SCAN_N 0)
+(while (set WM_SCAN (select WM_SCAN_N "S:User-Startup" "S:Startup-Sequence"
+                                      "SYS:WBStartup" ""))
+  (
+    (if (exists WM_SCAN (noreq))
+        (if (= 0 (run ("Search >NIL: FROM %s SEARCH WirelessManager QUIET"
+                       WM_SCAN)
+                      (quiet) (safe)))
+            (set WM_ELSEWHERE 1)))
+    (set WM_SCAN_N (+ WM_SCAN_N 1))
+  ))
+(set WM_LIVE (if (OR WM_USER (OR PREFS_USER WM_ELSEWHERE)) 0 1))
 
 (if (= KEEP_OLD 0)
   (
@@ -1636,6 +1808,16 @@
     (until (> (bitand CARD_MASK (shiftleft 1 PRIMARY_INDEX)) 0)
       (set PRIMARY_INDEX (+ PRIMARY_INDEX 1)))
 
+    ; One Wi-Fi at a time: a Prism2 card that is the primary interface is
+    ; the Wi-Fi, and the Pi Wi-Fi is not set up beside it.
+    (if (AND (= PRIMARY_INDEX 10) (= PCM 4) (> (bitand CARD_MASK 2048) 0))
+      (
+        (message "The Prism2 card is the Wi-Fi, so the Pi Wi-Fi is not set "
+                 "up as well: WirelessManager serves one Wi-Fi device."
+                 (help H_WM))
+        (set CARD_MASK (bitand CARD_MASK (bitnot 2048)))
+      ))
+
     (set WARN_DRIVER 1)
     (set CARD_INDEX 0)
     (while (< CARD_INDEX 14)
@@ -1703,15 +1885,20 @@
     ; who clicked "Yes"; only a NOVICE run, which takes the (default) and never
     ; draws the page, came out right.
     ; Only the full profile carries mDNS.  Asking this on minimal or micro
-    ; offered a setting those stacks could never honor.
+    ; offered a setting those stacks could never honor.  The default is the
+    ; first button: yes on a 68020 or newer, Emu68 included, no on a 68000.
     (if FULLSET
-      (set WANTMDNS
-        (if (askbool
-              (prompt "Answer .local names on the network?")
-              (help    H_MDNS)
-              (choices "No" "Yes")
-              (default 1))
-            0 1)))
+      (
+        (set MDNS_DEF (if CPU020 1 0))
+        (set WANTMDNS
+          (if (askbool
+                (prompt "Answer .local names on the network?")
+                (help    H_MDNS)
+                (choices (if MDNS_DEF "Yes, answer them" "No .local names")
+                         (if MDNS_DEF "No .local names" "Yes, answer them"))
+                (default 1))
+              MDNS_DEF (- 1 MDNS_DEF)))
+      ))
 
     (set USEDHCP
       (askbool
@@ -1720,6 +1907,120 @@
         (help    H_DHCP)
         (choices "Yes, use DHCP" "No, I will type them")
         (default 1)))
+
+    ; --- the Wi-Fi ---------------------------------------------------
+    (set WIFI_SEL (if (> (bitand CARD_MASK 2048) 0) 1 0))
+    (set WIFI_PRIMARY (if (= PRIMARY_INDEX 11) 1 0))
+    ; A Prism2 PCMCIA card is the Wi-Fi when the Pi Wi-Fi is not selected.
+    (if (AND (= WIFI_SEL 0) (> (bitand CARD_MASK 1024) 0) (= PCM 4))
+      (
+        (set WIFI_SEL 1)
+        (set WIFI_PRISM 1)
+        (set WIFI_IF "pcmcia")
+        (set WIFI_PRIMARY (if (= PRIMARY_INDEX 10) 1 0))
+      ))
+    (if WIFI_PRIMARY
+      (
+        (set WIFI_IF IFNAME)
+        (set WIFI_UNIT DEVUNIT)
+      ))
+  ))
+
+; A kept configuration is recognised by what its definitions open: the
+; definition the startup names (OLD_IF), or the one this installer calls
+; wifipi, when its DEVICE= names anxwifipi.device.  WirelessManager is given
+; this layout's path for it, or the bare name the file uses.  The search
+; strings carry no volume name: on a drawer reinstall before a reboot the
+; AmiNetXDuo: assign does not exist yet, and Search given "AmiNetXDuo:..."
+; never returned (Amiberry, Workbench 3.1).
+(if KEEP_OLD
+  (
+    (set WIFI_NAME_N 0)
+    (while (AND (= WIFI_SEL 0)
+                (<> (set WIFI_NAME (select WIFI_NAME_N OLD_IF "wifipi" "pcmcia" "")) ""))
+      (
+        (set KEPT_IF (tackon D_IFDIR WIFI_NAME))
+        (if (exists KEPT_IF (noreq))
+          (
+            (if (= 0 (run ("Search >NIL: FROM \"%s\" SEARCH Networks/anxwifipi.device QUIET"
+                           KEPT_IF)
+                          (quiet) (safe)))
+              (
+                (set WIFI_SEL 1)
+                (set WIFI_DEV W_ANXWIFIPI)
+              )
+              (if (= 0 (run ("Search >NIL: FROM \"%s\" SEARCH DEVICE=anxwifipi.device QUIET"
+                             KEPT_IF)
+                            (quiet) (safe)))
+                (
+                  (set WIFI_SEL 1)
+                  (set WIFI_DEV "anxwifipi.device")
+                )
+                ; A kept Prism2 card, from the file's live DEVICE as the
+                ; interface parser reads it (a comment never matches):
+                ; 0 in DEVS:Networks, 2 in DEVS: or named bare.
+                (
+                  (set WIFI_KEPT_RC (run ("\"%s\" PRISM2 \"%s\"" S_INSTWIFI KEPT_IF)
+                                         (quiet) (safe)))
+                  (if (OR (= WIFI_KEPT_RC 0) (= WIFI_KEPT_RC 2))
+                    (
+                      (set WIFI_SEL 1)
+                      (set WIFI_PRISM 1)
+                      (set WIFI_DEV (if (= WIFI_KEPT_RC 0)
+                                        "DEVS:Networks/prism2.device" "prism2.device"))
+                    ))
+                )))
+            (if WIFI_SEL (set WIFI_IF WIFI_NAME))
+          ))
+        (set WIFI_NAME_N (+ WIFI_NAME_N 1))
+      ))
+  ))
+(if (AND KEEP_OLD WIFI_SEL)
+    (set WIFI_PRIMARY (if (= OLD_IF WIFI_IF) 1 0)))
+(set WIFI_START (if (AND WIFI_SEL (OR WIFI_PRIMARY (<> MINPICK 2))) 1 0))
+
+; --- the Wi-Fi network ---------------------------------------------------
+;
+; At every user level: a Pi on Emu68 is found without a question, and Wi-Fi
+; with no network named cannot join.  A window of InstallWiFi's own, because
+; Installer logs every askstring answer and the passphrase must not reach the
+; log.  It writes to T: here, before anything on the disk is changed; the
+; file goes to ENVARC:Sys with the rest of the configuration.
+(if (AND WIFI_SEL (= WIFI_HAVE_PREFS 0))
+  (
+    (if (exists WIFI_TMP (noreq))
+        (delete WIFI_TMP
+                (prompt "Removing a leftover T:AmiNetXDuo-Wireless.prefs")
+                (help   H_WIFI)
+                (optional "force" "nofail")))
+    ; Not in a pretend run: the passphrase would sit in T: for nothing.
+    ; The networks in range first, from the driver the interface will name
+    ; (the archive's anxwifipi.device, not yet installed): 0 is a network
+    ; written, 5 and above (closed, no device) the window below.
+    (set WIFI_RC 5)
+    (if (AND (= @pretend 0) (exists S_NWPREFS (noreq)))
+        (set WIFI_RC (run ("\"%s\" SETUP DEVICE=\"%s\" UNIT=%ld TO %s"
+                           (expandpath S_NWPREFS)
+                           (if (= WIFI_DEV W_ANXWIFIPI)
+                               (expandpath S_ANXWIFIPI) WIFI_DEV)
+                           WIFI_UNIT WIFI_TMP)
+                          (prompt "Looking for Wi-Fi networks")
+                          (help   H_WIFI)
+                          (safe))))
+    (if (AND (= @pretend 0) (OR (<> WIFI_RC 0) (NOT (exists WIFI_TMP (noreq)))))
+      (
+        (set WIFI_RC (run ("\"%s\" TO %s" S_INSTWIFI WIFI_TMP)
+                          (prompt "Asking for the Wi-Fi network")
+                          (help   H_WIFI)
+                          (safe)))
+        (if (>= WIFI_RC 20)
+            (message "The Wi-Fi window could not be opened, so no Wi-Fi "
+                     "network is set.  ENVARC:Sys/Wireless.prefs can be "
+                     "written later with a text editor; the Manual in "
+                     "Aminet's driver/net/prism2v2 describes it."
+                     (help H_WIFI)))
+      ))
+    (set WIFI_NEW_PREFS (if (exists WIFI_TMP (noreq)) 1 0))
   ))
 
 ; --- the manual addresses ------------------------------------------------
@@ -1763,21 +2064,25 @@
 
 ; --- the host name -------------------------------------------------------
 
-(set HOSTNAME "amiga")
+; Empty: name_resolution gets the line commented out, and the stack derives
+; amiga-<last three address octets> (src/config/config_hostname.c), so two
+; machines on one network do not both claim amiga.local.  Expert only.
+(set HOSTNAME "")
 
-(if (= KEEP_OLD 0)
+(if (AND (= KEEP_OLD 0) (= @user-level 2))
   (
     (set HOST_OK 0)
     (until HOST_OK
       (set HOSTNAME
         (askstring
-          (prompt "Type the name of this Amiga on the network.")
+          (prompt "Type the name of this Amiga on the network, or leave it "
+                  "empty for amiga- and the card's address.")
           (help   H_HOSTNAME)
-          (default "amiga")))
+          (default "")))
       (set name_in HOSTNAME)
       (set name_interface 0)
       (P_name_validate)
-      (set HOST_OK (if (= @user-level 0) 1 name_ok))
+      (set HOST_OK (if (= (strlen HOSTNAME) 0) 1 name_ok))
       (if (= HOST_OK 0)
           (message "A host name must be 1 to 63 characters and contain only "
                    "letters, digits or hyphens.  It cannot begin or end with "
@@ -1859,9 +2164,9 @@
 
 ; --- set the clock at boot? ----------------------------------------------
 ;
-; DEFAULTS TO NO, so a run that takes every default -- NOVICE included --
-; writes the same S:Network-Startup as before this question existed.  Inverted
-; the way DO_HTTPD is: "No" first, (default 1), 0 for the first button.
+; DEFAULTS TO YES: most Amigas, a PiStorm's included, have no battery clock
+; and boot in 1978.  sntp runs in the background, so a boot without a network
+; is not held up.  pool.ntp.org unless an Expert names another server.
 ;
 ; Asked only when S:Network-Startup is generated on this run.  A kept file is
 ; not touched, so a setting asked for there would never be applied.
@@ -1872,15 +2177,14 @@
 (if (AND DO_STARTUP (= KEEP_NETSTART 0))
   (
     (set DO_SNTP
-      (if (askbool
-            (prompt "Set the clock from an Internet time server when this "
-                    "Amiga boots?")
-            (help    H_SNTP)
-            (choices "No" "Yes, set the clock")
-            (default 1))
-          0 1))
+      (askbool
+        (prompt "Set the clock from an Internet time server when this "
+                "Amiga boots?")
+        (help    H_SNTP)
+        (choices "Yes, set the clock" "No")
+        (default 1)))
 
-    (if DO_SNTP
+    (if (AND DO_SNTP (= @user-level 2))
       (
         (set ask_prompt "Type the name of the time server.")
         (set ask_help   H_SNTPSERVER)
@@ -1946,44 +2250,160 @@
 ; already doing nothing here: the old file had been renamed away before it
 ; ran, so there was never a destination to compare against.
 
-; --- another stack's files, kept for Uninstall-AmiNetXDuo -------------
+; --- another stack's files, kept --------------------------------------
 ;
-; Replacing another stack's bsdsocket.library is the point where its files
-; start to go: its libraries now, its same-named commands in C: and its
-; configuration below.  Each goes to the AmiNetXDuo drawer's Backup the
-; first time, and a later install never replaces a copy there, so
-; Uninstall-AmiNetXDuo puts back that stack as it was.
-(set D_BACKUP (tackon DOCDIR "Backup"))
+; Everything of another stack that this run will write over is copied first,
+; before the first file is replaced: its libraries, and when the network is
+; set up again its interface files (every one), routes, name_resolution and
+; S:Network-Startup.  A copy that fails stops the installation here, with
+; nothing on the disk changed.
+;
+; Into a drawer of this run's own under the AmiNetXDuo drawer's Backup,
+; numbered one above the highest there, made only when there is something to
+; keep, so no run writes into what an earlier one kept and the lowest number
+; is the other stack as it was first found.  A file is another stack's when
+; it names neither AmiNetXDuo nor NetSetup (which writes "Written by
+; NetSetup.").  One already kept, byte for byte, in an earlier drawer is not
+; kept again.  AmigaDOS Copy CLONE keeps protection bits, date and comment.
+; Nothing of this in a pretend run.
+(set D_BACKUP_TOP (tackon DOCDIR "Backup"))
+(set D_BACKUP "")
+(set BK_MAX 0)
+(if (= (exists D_BACKUP_TOP (noreq)) 2)
+    (foreach D_BACKUP_TOP "#?"
+      (if (AND (> @each-type 0) (patmatch (cat "#" P_DIGIT) @each-name))
+          (if (> (+ @each-name 0) BK_MAX) (set BK_MAX (+ @each-name 0))))))
 (set FOREIGN_STACK (if (AND OLD_BSD (= LIB_OURS 0) (= DRAWER_LAYOUT 0)) 1 0))
 
-; BK_SRC into D_BACKUP/BK_SUB, unless a copy is there already.
-(procedure P_backup
-  (set BK_DIR (tackon D_BACKUP BK_SUB))
-  (if (AND (exists BK_SRC (noreq))
-           (NOT (exists (tackon BK_DIR (fileonly BK_SRC)) (noreq))))
+; IS_OURS: BK_SRC names AmiNetXDuo, or NetSetup wrote it.
+(procedure P_is_ours
+  (set IS_OURS 0)
+  (if (= 0 (run ("Search >NIL: FROM \"%s\" SEARCH AmiNetXDuo QUIET" BK_SRC)
+                (quiet) (safe)))
+      (set IS_OURS 1)
+      (if (= 0 (run ("Search >NIL: FROM \"%s\" SEARCH \"Written by NetSetup\" QUIET"
+                     BK_SRC)
+                    (quiet) (safe)))
+          (set IS_OURS 1)))
+)
+
+; KEPT: an earlier Backup drawer holds BK_SRC, byte for byte, under its own
+; name or, for a .old file, the name it had before it was renamed so.
+(procedure P_kept_before
+  (set KEPT 0)
+  (set KB_NAME (fileonly BK_SRC))
+  (set KB_BASE KB_NAME)
+  (if (patmatch "#?.old" KB_NAME)
+      (set KB_BASE (substr KB_NAME 0 (- (strlen KB_NAME) 4))))
+  (set KB_N 1)
+  (while (AND (= KEPT 0) (<= KB_N BK_MAX))
     (
-      (makedir DOCDIR (prompt ("Creating %s" DOCDIR)) (help H_DOCDIR))
-      (makedir D_BACKUP (prompt ("Creating %s" D_BACKUP)) (help H_BACKUP))
-      (if (patmatch "#?/#?" BK_SUB)
-          (makedir (pathonly BK_DIR)
-                   (prompt ("Creating %s" (pathonly BK_DIR)))
-                   (help H_BACKUP)))
-      (makedir BK_DIR (prompt ("Creating %s" BK_DIR)) (help H_BACKUP))
-      (copyfiles
-        (prompt ("Keeping %s in %s" BK_SRC BK_DIR))
-        (help   H_BACKUP)
-        (source BK_SRC)
-        (dest   BK_DIR)
-        (optional "nofail"))
+      (set KB_DIR (tackon (tackon D_BACKUP_TOP ("%ld" KB_N)) BK_SUB))
+      (set KB_I 0)
+      (while (AND (= KEPT 0) (< KB_I 2))
+        (
+          (set KB_F (tackon KB_DIR (select KB_I KB_NAME KB_BASE)))
+          (if (exists KB_F (noreq))
+              (if (= 0 (run ("\"%s\" \"%s\" \"%s\" BYTES" S_SAMEFILE BK_SRC KB_F)
+                            (quiet) (safe)))
+                  (set KEPT 1)))
+          (set KB_I (+ KB_I 1))
+        ))
+      (set KB_N (+ KB_N 1))
     ))
 )
 
-(if FOREIGN_STACK
+; BK_SRC into this run's Backup drawer/BK_SUB when it is another stack's.
+(procedure P_backup
+  (if (AND (= @pretend 0) (exists BK_SRC (noreq)))
+    (
+      (P_is_ours)
+      (if (= IS_OURS 0) (P_kept_before))
+      (if (AND (= IS_OURS 0) (= KEPT 0))
+        (
+          (if (= (strlen D_BACKUP) 0)
+            (
+              (set D_BACKUP (tackon D_BACKUP_TOP ("%ld" (+ BK_MAX 1))))
+              (makedir DOCDIR (prompt ("Creating %s" DOCDIR)) (help H_DOCDIR))
+              (makedir D_BACKUP_TOP (prompt ("Creating %s" D_BACKUP_TOP))
+                       (help H_BACKUP))
+              (makedir D_BACKUP (prompt ("Creating %s" D_BACKUP)) (help H_BACKUP))
+            ))
+          (set BK_DIR (tackon D_BACKUP BK_SUB))
+          (if (NOT (exists (tackon BK_DIR (fileonly BK_SRC)) (noreq)))
+            (
+              (if (patmatch "#?/#?" BK_SUB)
+                  (makedir (pathonly BK_DIR)
+                           (prompt ("Creating %s" (pathonly BK_DIR)))
+                           (help H_BACKUP)))
+              (makedir BK_DIR (prompt ("Creating %s" BK_DIR)) (help H_BACKUP))
+              (if (OR (<> 0 (run ("Copy \"%s\" TO \"%s\" CLONE QUIET" BK_SRC BK_DIR)
+                                 (prompt ("Keeping %s in %s" BK_SRC BK_DIR))
+                                 (help   H_BACKUP)))
+                      (NOT (exists (tackon BK_DIR (fileonly BK_SRC)) (noreq))))
+                  (abort (cat "The copy of " BK_SRC " into " BK_DIR " failed.  "
+                              "Nothing on the disk has been replaced.\n\n"
+                              "Free space on that volume and run the installer "
+                              "again.")))
+            ))
+        ))
+    ))
+)
+
+; The libraries, and their .old copies, which the swap deletes: those may
+; be another stack's own backups.
+(if (= DRAWER_LAYOUT 0)
   (
     (set BK_SUB "Libs")
     (set BK_SRC D_BSD) (P_backup)
     (set BK_SRC D_UG)  (P_backup)
     (set BK_SRC D_TLS) (P_backup)
+    (set BK_SRC D_BSD_OLD) (P_backup)
+    (set BK_SRC D_UG_OLD)  (P_backup)
+    (set BK_SRC D_TLS_OLD) (P_backup)
+  ))
+; Every interface file, kept or not: a kept one can still be edited (the
+; PRIORITY line InstallWiFi adds for a Wi-Fi beside it).
+(set BK_SUB "Devs/NetInterfaces")
+(if (= (exists D_IFDIR (noreq)) 2)
+    (foreach D_IFDIR "~(#?.info)"
+      (if (< @each-type 0)
+        (
+          (set BK_SRC (tackon D_IFDIR @each-name))
+          (P_backup)
+        ))))
+(if (= KEEP_OLD 0)
+  (
+    (set BK_SUB "Devs/Internet")
+    (set BK_SRC (tackon D_DEVS "Internet/routes")) (P_backup)
+    (set BK_SRC (tackon D_DEVS "Internet/name_resolution")) (P_backup)
+  ))
+(if (AND DO_STARTUP (= KEEP_NETSTART 0))
+  (
+    (set BK_SUB "S")
+    (set BK_SRC "S:Network-Startup")
+    (P_backup)
+    (set BK_SRC "S:Network-Startup.old")
+    (P_backup)
+  ))
+; With the libraries, before anything is replaced: a command of the same
+; name in C:, NetPrefs, NetMeter and the certificate store that do not name
+; AmiNetXDuo are another stack's, or the user's.  Over our own library C:
+; holds our own commands, some of which (scp-runner) do not name it.
+(if (AND (= DRAWER_LAYOUT 0) (= LIB_OURS 0))
+  (
+    (set BK_SUB "Prefs")
+    (set BK_SRC "SYS:Prefs/NetPrefs") (P_backup)
+    (set BK_SUB "Utilities")
+    (set BK_SRC "SYS:Utilities/NetMeter") (P_backup)
+    (set BK_SUB "Devs/Internet")
+    (set BK_SRC (tackon (tackon D_DEVS "Internet") "certificates")) (P_backup)
+    (set BK_SUB "C")
+    (foreach S_C "~(fat|#?.info)"
+      (
+        (set BK_SRC (tackon D_C @each-name))
+        (P_backup)
+      ))
   ))
 
 (working "Installing the libraries")
@@ -2182,12 +2602,62 @@
     (set dev_source S_ANXWIFIPI)
     (set dev_prompt (cat "Installing anxwifipi.device into DEVS:Networks\n\n"
                          "The Raspberry Pi 4's own Wi-Fi, for a PiStorm32 "
-                         "running Emu68.  It needs the Wi-Fi firmware Emu68 "
-                         "installs in DEVS:Firmware, and a supplicant such as "
-                         "WirelessManager (Aminet driver/net/prism2v2) to join "
-                         "a network.  Nothing uses it until an interface file "
-                         "names it."))
+                         "running Emu68.  It needs the Wi-Fi firmware in "
+                         "DEVS:Firmware, and WirelessManager, "
+                         "installed in C: when the Pi Wi-Fi is selected, to "
+                         "join a network.  Nothing uses it until an interface "
+                         "file names it."))
     (P_install_device)
+  ))
+
+; One file of the archive's Devs/Firmware, FW_NAME, unless DEVS:Firmware
+; already has it.
+(procedure P_install_firmware
+  (if (NOT (OR (exists (tackon "DEVS:Firmware" FW_NAME) (noreq))
+               (exists (tackon D_FIRMWARE FW_NAME) (noreq))))
+    (
+      (copyfiles
+        (prompt ("Installing DEVS:Firmware/%s" FW_NAME))
+        (help   (cat "The Cypress and Synaptics Wi-Fi firmware that "
+                     "anxwifipi.device loads into the Raspberry Pi's Wi-Fi "
+                     "chip, with its licences; WHENCE says which file is "
+                     "under which.  Only files DEVS:Firmware does not have "
+                     "are copied."))
+        (source (tackon S_FIRMWARE FW_NAME))
+        (dest   D_FIRMWARE)
+        (optional "nofail"))
+      ; Echo appends, so a later install keeps the lines of the files an
+      ; earlier one copied: Uninstall-AmiNetXDuo removes those and no others.
+      ; System layout only: a drawer install's firmware goes with its drawer,
+      ; and DEVS:Firmware has no space in it to quote.
+      (if (AND (= DRAWER_LAYOUT 0) (exists (tackon D_FIRMWARE FW_NAME) (noreq)))
+          (run ("Echo >>S:AmiNetXDuo-Firmware \"Delete DEVS:Firmware/%s QUIET\""
+                FW_NAME)
+               (prompt "Recording the firmware file for Uninstall-AmiNetXDuo")
+               (help   H_BACKUP)))
+    ))
+)
+
+; --- the Pi Wi-Fi firmware ------------------------------------------------
+;
+; anxwifipi.device loads its chip's firmware from DEVS:Firmware, where the
+; Emu68 Imager puts it.  For the Pi Wi-Fi (WIFI_SEL: selected, or a kept
+; definition names anxwifipi.device), every file of the archive's
+; Devs/Firmware that DEVS:Firmware does not have goes there, the licences
+; and WHENCE included.  A file already there is kept: it may be a newer
+; firmware the user put in.
+; The Pi's own Wi-Fi only: WIFI_DEV is the driver its definition names.
+(if (AND WIFI_SEL (patmatch "#?anxwifipi.device" WIFI_DEV))
+  (
+    (set D_FIRMWARE (tackon D_DEVS "Firmware"))
+    (makedir D_FIRMWARE
+      (prompt "Creating DEVS:Firmware")
+      (help   @makedir-help))
+    (foreach S_FIRMWARE "#?"
+      (
+        (set FW_NAME @each-name)
+        (P_install_firmware)
+      ))
   ))
 
 ; --- tls.library, if this archive has one --------------------------------
@@ -2304,34 +2774,6 @@
 ; The C drawer's own icon, which the copy below brings along when C: had none.
 (set HAD_C_INFO (if (exists (tackon D_C ".info") (noreq)) 1 0))
 
-; A command of the same name that does not name AmiNetXDuo inside is
-; another stack's, or the user's.  Over our own library C: holds our own
-; commands, some of which (scp-runner) do not name it.
-(if (AND (= DRAWER_LAYOUT 0) (= LIB_OURS 0))
-  (
-    (set BK_SUB "Prefs")
-    (set BK_SRC "SYS:Prefs/NetPrefs")
-    (if (exists BK_SRC (noreq))
-        (if (<> 0 (run ("Search >NIL: FROM %s SEARCH AmiNetXDuo QUIET" BK_SRC)
-                       (quiet) (safe)))
-            (P_backup)))
-    (set BK_SUB "Utilities")
-    (set BK_SRC "SYS:Utilities/NetMeter")
-    (if (exists BK_SRC (noreq))
-        (if (<> 0 (run ("Search >NIL: FROM %s SEARCH AmiNetXDuo QUIET" BK_SRC)
-                       (quiet) (safe)))
-            (P_backup)))
-    (set BK_SUB "C")
-    (foreach S_C "~(fat|#?.info)"
-      (
-        (set BK_SRC (tackon D_C @each-name))
-        (if (exists BK_SRC (noreq))
-            (if (<> 0 (run ("Search >NIL: FROM \"%s\" SEARCH AmiNetXDuo QUIET"
-                            BK_SRC)
-                           (quiet) (safe)))
-                (P_backup)))
-      ))
-  ))
 
 (copyfiles
   (prompt "Installing the network commands into C:")
@@ -2468,6 +2910,20 @@
       (noposition)
       (optional "force")))
 
+; WirelessManager, for the Wi-Fi only, and never over one the user had
+; (WM_USER): that one may be the version another Wi-Fi driver on this machine
+; was set up with.  Over our own copy, a plain copy: nothing of anybody
+; else's is replaced, so nothing is staged.
+(if (AND WIFI_SEL (= WM_USER 0))
+        (copyfiles
+          (prompt "Installing WirelessManager into C:\n\n"
+                  "It joins the Wi-Fi network for the Wi-Fi device.")
+          (help   H_WM)
+          (source S_WM)
+          (dest   D_C)
+          (optional "force")))
+(set WM_OURS (if (OR WM_OURS (AND WIFI_SEL (= WM_USER 0))) 1 0))
+
 ; ssh and scp went into C: with the copies above.  ssh used to need its own step and a
 ; pattern that kept ssh.000, ssh.020 and ssh.060 out of the wholesale copy,
 ; because Dropbear comes from clients/ rather than the CMake tree and was built
@@ -2494,37 +2950,7 @@
 
 ; --- the interface file --------------------------------------------------
 
-; Rename FILE_OLD_SRC to <it>FILE_OLD_SUFFIX when it exists, replacing an
-; older one.  An interface file's suffix is .old.info, NetPrefs' rollback
-; name (src/tools/netprefs.c): every scanner of DEVS:NetInterfaces, and
-; Roadshow's ~(#?.info) pattern, skips it.
-(procedure P_keep_old
-  (set FILE_OLD_DST (cat FILE_OLD_SRC FILE_OLD_SUFFIX))
-  (if (exists FILE_OLD_SRC (noreq))
-    (
-      (if (= CONFIG_OURS 0)
-        (
-          (set BK_SRC FILE_OLD_SRC)
-          (P_backup)
-        ))
-      (if (exists FILE_OLD_DST (noreq))
-          (delete FILE_OLD_DST
-                  (prompt ("Removing the previous %s" FILE_OLD_DST))
-                  (help @copyfiles-help)
-                  (optional "force" "nofail")
-                  (safe)))
-      (rename FILE_OLD_SRC FILE_OLD_DST
-              (prompt ("Keeping the old file as %s" FILE_OLD_DST))
-              (help @copyfiles-help)
-              (safe))
-    ))
-)
-
 (procedure P_write_interface
-  (set FILE_OLD_SRC (tackon (tackon D_DEVS "NetInterfaces") IFNAME))
-  (set FILE_OLD_SUFFIX ".old.info")
-  (set BK_SUB "Devs/NetInterfaces")
-  (P_keep_old)
   (textfile
     (prompt ("Writing DEVS:NetInterfaces/%s" IFNAME))
     (help   "This file describes one network card.  It gives the driver "
@@ -2583,6 +3009,11 @@
     (append ("UNIT=%ld\n" DEVUNIT))
     (append (if USEDHCP "CONFIGURE=DHCP\n" "CONFIGURE=STATIC\n"))
     (append (if WANTMDNS "MDNS=YES\n" "MDNS=NO\n"))
+    (append (if IF_PRIORITY
+                (cat "; PRIORITY=10 puts this interface's routes ahead of the\n"
+                     "; Wi-Fi's, which starts too.\n"
+                     "PRIORITY=10\n")
+                ""))
     (append (if USEDHCP
                 (cat ";ADDRESS=192.168.1.10\n;NETMASK=255.255.255.0\n")
                 (cat "ADDRESS=" IPADDR "\n" "NETMASK=" IPMASK "\n")))
@@ -2590,13 +3021,20 @@
     (safe))
 )
 
-(if (= KEEP_OLD 0)
+; Not in a pretend run: these textfiles are (safe), so they would write
+; anyway, over another stack's configuration among others.
+(if (AND (= KEEP_OLD 0) (= @pretend 0))
   (
     (working "Writing the network configuration")
 
+
     (set PRIMARY_IF IFNAME)
     (set PRIMARY_DHCP USEDHCP)
+    ; The cable over the air when both start: the primary's default route
+    ; wins.  Only the primary carries it.
+    (set IF_PRIORITY (if (AND WIFI_START (= WIFI_PRIMARY 0)) 1 0))
     (P_write_interface)
+    (set IF_PRIORITY 0)
 
     ; Write every other checked device as a DHCP definition, but leave IFNAME
     ; on the deterministic primary afterwards: S:Network-Startup deliberately
@@ -2616,7 +3054,8 @@
             (set WANTMDNS 0)
             ; An Expert may have named the primary like this one: the file
             ; just written stays.
-            (if (<> IFNAME PRIMARY_IF) (P_write_interface))
+            ; patmatch, not =: AmigaDOS names ignore case.
+            (if (NOT (patmatch PRIMARY_IF IFNAME)) (P_write_interface))
           ))
         (set CARD_INDEX (+ CARD_INDEX 1))
       ))
@@ -2625,10 +3064,6 @@
 
     ; --- the default route ---------------------------------------------
 
-    (set FILE_OLD_SRC (tackon D_DEVS "Internet/routes"))
-    (set FILE_OLD_SUFFIX ".old")
-    (set BK_SUB "Devs/Internet")
-    (P_keep_old)
     (textfile
       (prompt "Writing DEVS:Internet/routes")
       (help   "This file holds the default route.  The default route is "
@@ -2649,11 +3084,20 @@
       (safe))
 
     ; --- name resolution ------------------------------------------------
+    ;
+    ; A name somebody set by hand in the file being replaced is theirs, at
+    ; every level: InstallSameFile HOSTLINE writes the name the stack's own
+    ; parser takes from the file as a hostname line, and it goes into the new
+    ; file.  An Expert who types a
+    ; name replaces it.
+    (set NR_FILE (tackon D_DEVS "Internet/name_resolution"))
+    (set NR_HOST "T:AmiNetXDuo-hostname")
+    (set KEEP_HOST 0)
+    (if (AND (= (strlen HOSTNAME) 0) (exists NR_FILE (noreq)))
+        (if (= 0 (run ("\"%s\" \"%s\" \"%s\" HOSTLINE" S_SAMEFILE NR_FILE NR_HOST)
+                      (quiet) (safe)))
+            (set KEEP_HOST 1)))
 
-    (set FILE_OLD_SRC (tackon D_DEVS "Internet/name_resolution"))
-    (set FILE_OLD_SUFFIX ".old")
-    (set BK_SUB "Devs/Internet")
-    (P_keep_old)
     (textfile
       (prompt "Writing DEVS:Internet/name_resolution")
       (help   "This file gives the name servers to ask when a program "
@@ -2666,6 +3110,8 @@
       (append "; domain     <name>      added to names with no dots in them.\n")
       (append "; search     <a> <b> ..  several domains to try, in order.\n")
       (append "; hostname   <name>      what this machine calls itself.\n")
+      (append ";                        Without it: amiga- and the last\n")
+      (append ";                        three octets of the card's address.\n")
       (append ";\n")
       (append "; With CONFIGURE=DHCP the name servers arrive with the lease,\n")
       (append "; so no nameserver line is needed here.\n")
@@ -2673,9 +3119,92 @@
       (append (if USEDHCP
                   ";nameserver 192.168.1.1\n"
                   (cat "nameserver " IPDNS "\n")))
-      (append "hostname " HOSTNAME "\n")
+      (append (if (> (strlen HOSTNAME) 0)
+                  (cat "hostname " HOSTNAME "\n")
+                  (if KEEP_HOST "" ";hostname amiga\n")))
       (safe))
+    (if KEEP_HOST
+        (run ("Type %s >>\"%s\"" NR_HOST NR_FILE)
+             (prompt "Keeping the name set in DEVS:Internet/name_resolution")
+             (help   H_HOSTNAME)
+             (safe)))
+    (if (exists NR_HOST (noreq))
+        (delete NR_HOST
+                (prompt ("Removing %s" NR_HOST))
+                (help   H_HOSTNAME)
+                (optional "force" "nofail")
+                (safe)))
   ))
+
+; --- the Wi-Fi network, for WirelessManager ------------------------------
+;
+; What InstallWiFi wrote to T: in section 4, into WirelessManager's place.
+; ENVARC: is what survives a reboot; ENV: gets the same file now, because
+; the startup lines read ENV:.  Then the record of what is ours.
+(if WIFI_NEW_PREFS
+  (
+    (makedir "ENVARC:Sys"
+      (prompt "Creating ENVARC:Sys")
+      (help   @makedir-help))
+    (copyfiles
+      (prompt "Installing ENVARC:Sys/Wireless.prefs")
+      (help   H_WIFI)
+      (source WIFI_TMP)
+      (dest   "ENVARC:Sys")
+      (newname "Wireless.prefs"))
+    (makedir "ENV:Sys"
+      (prompt "Creating ENV:Sys")
+      (help   @makedir-help))
+    (copyfiles
+      (prompt "Copying Wireless.prefs to ENV:Sys")
+      (help   H_WIFI)
+      (source WIFI_TMP)
+      (dest   "ENV:Sys")
+      (newname "Wireless.prefs")
+      (optional "nofail"))
+    (delete WIFI_TMP
+            (prompt "Removing T:AmiNetXDuo-Wireless.prefs")
+            (help   H_WIFI)
+            (optional "force" "nofail"))
+    (set PREFS_OURS 1)
+  ))
+
+; Not in a pretend run, which created nothing to record.
+(if (AND (= @pretend 0) (OR WM_OURS PREFS_OURS))
+    (textfile
+      (prompt "Writing S:AmiNetXDuo-WiFi")
+      (help   "The Wi-Fi files this installer created, and only those.  A "
+              "later installation reads it to tell them from files the user "
+              "had, and executing it removes them.")
+      (dest   WIFI_REC)
+      (append "; S:AmiNetXDuo-WiFi -- written by the AmiNetXDuo installer.\n")
+      (append ";\n")
+      (append "; The Wi-Fi files the installer created, and only those.\n")
+      (append "; Execute this file to remove them, then delete it.\n")
+      (append "FailAt 21\n")
+      (append (if WM_OURS (cat "Delete " WM_REC " QUIET\n") ""))
+      (append (if PREFS_OURS
+                  "Delete ENVARC:Sys/Wireless.prefs ENV:Sys/Wireless.prefs QUIET\n"
+                  ""))
+      (safe)))
+
+; A kept Ethernet definition with the Wi-Fi starting beside it, in a
+; S:Network-Startup written on this run, gets the PRIORITY=10 a new one is
+; written with, unless a live line already sets PRIORITY.  InstallWiFi does
+; it: Search cannot tell ";PRIORITY=0", as the example files carry it, from
+; a setting, and that left such a file without one.
+(if (AND (AND KEEP_OLD (= KEEP_NETSTART 0))
+         (AND DO_STARTUP (AND WIFI_START (= WIFI_PRIMARY 0))))
+  (if (= @pretend 0)
+    (
+      (set KEPT_IF (tackon D_IFDIR OLD_IF))
+      (if (<> 0 (run ("\"%s\" PRIORITY \"%s\"" S_INSTWIFI KEPT_IF)
+                     (prompt ("Adding PRIORITY=10 to %s, ahead of the Wi-Fi" KEPT_IF))
+                     (help   H_WIFI)
+                     (safe)))
+          (message ("%s could not be given PRIORITY=10.  Add the line by hand to keep the default route on the cable." KEPT_IF)
+                   (help H_WIFI)))
+    )))
 
 ; A KEPT FILE FOLLOWS THE ASSIGN TOO.  One written before the drawer named
 ; its drivers through AmiNetXDuo: says DEVICE=SYS:AmiNetXDuo/Devs/Networks/...
@@ -2710,7 +3239,7 @@
 ; likely edited.  The stack has sane built-in defaults for all four, so
 ; overwriting somebody's services file to gain nothing would be rude.
 
-(if (exists (tackon D_DEVS "Internet/hosts") (noreq))
+(if (OR @pretend (exists (tackon D_DEVS "Internet/hosts") (noreq)))
     ""
     (textfile
       (prompt "Writing DEVS:Internet/hosts")
@@ -2727,7 +3256,7 @@
 (set NDB_N 0)
 (while (set NDB_F (select NDB_N "protocols" "services" "networks" ""))
   (
-    (if (exists (tackon (tackon D_DEVS "Internet") NDB_F) (noreq))
+    (if (OR @pretend (exists (tackon (tackon D_DEVS "Internet") NDB_F) (noreq)))
         ""
         (copyfiles
           (prompt ("Installing DEVS:Internet/%s" NDB_F))
@@ -2747,9 +3276,6 @@
 ; also the whole of the update story -- the library re-reads it when its
 ; datestamp changes, so no reboot is needed.
 
-(set BK_SUB "Devs/Internet")
-(set BK_SRC (tackon (tackon D_DEVS "Internet") "certificates"))
-(if FOREIGN_STACK (P_backup))
 (if (exists (tackon (tackon S_DEVS "Internet") "certificates") (noreq))
     (copyfiles
       (prompt (cat "Installing DEVS:Internet/certificates\n\n"
@@ -2892,6 +3418,18 @@
       (newname "Terminal.info")
       (optional "nofail")))
 
+; WirelessManager's licence goes with every copy of the binary, and with
+; the binary's selection: the Wi-Fi.  Installed here even when an
+; existing C:WirelessManager was kept, because the archive's copy is what
+; this drawer documents.
+(if WIFI_SEL
+    (copyfiles
+      (prompt "Installing the WirelessManager licence")
+      (help   H_WM)
+      (source S_WMLIC)
+      (dest   DOCDIR)
+      (optional "nofail")))
+
 ; ssh (Dropbear's dbclient) and scp ride into C: with the other network commands
 ; above -- the argv/stack shim gives them a real argv[] and their own stack,
 ; so they no longer need the separate drawer and the `stack 200000`
@@ -3024,30 +3562,94 @@
     (set NS_SNTP
       ("Run >NIL: <NIL: %ssntp %s QUIET\n" C_PREFIX NTP_SERVER)))
 
+; THE WI-FI IN S:Network-Startup.  Started only when ENV:Sys/Wireless.prefs
+; exists, which is also what WirelessManager needs: WirelessManager first,
+; so it is joining before DHCP asks, then the interface with the 30 second
+; wait; without the file neither starts and nothing waits.  Status finds a
+; copy already running under the same command name, and then none is
+; started.  Run's `+' continues onto the next line in the background CLI, so
+; the larger stack is that CLI's alone.  With WM_LIVE off the lines that
+; start WirelessManager are written commented out (see WM_USER).
+;
+; When the Wi-Fi is not the primary it starts after it, the primary having
+; PRIORITY=10.  Micro brings up one interface, so there the block is written
+; commented out after the primary, for whoever wants to swap.
+(set WM_CMD (if WM_USER "C:WirelessManager" (cat C_PREFIX "WirelessManager")))
+(set WIFI_TIMEOUT 30)
+(set WM_PFX (if WM_LIVE "" ";"))
+; A Prism2 card as the primary interface starts without Wireless.prefs as
+; well (an open network needs none): only WirelessManager waits for it.
+(set WIFI_WM_LINES
+  (cat "If EXISTS ENV:Sys/Wireless.prefs\n"
+       "  " WM_PFX "Status >NIL: COMMAND=" WM_CMD "\n"
+       "  " WM_PFX "If WARN\n"
+       "  " WM_PFX "  Run >NIL: <NIL: Stack 32768 +\n"
+       "  " WM_PFX "  " WM_CMD (" DEVICE=%s UNIT=%ld\n" WIFI_DEV WIFI_UNIT)
+       "  " WM_PFX "EndIf\n"))
+(set WIFI_LINES
+  (if (AND WIFI_PRISM WIFI_PRIMARY)
+      (cat WIFI_WM_LINES
+           "EndIf\n"
+           C_PREFIX "AddNetInterface DEVS:NetInterfaces/" WIFI_IF
+           (" QUIET TIMEOUT=%ld\n" WIFI_TIMEOUT))
+      (cat WIFI_WM_LINES
+           "  " C_PREFIX "AddNetInterface DEVS:NetInterfaces/" WIFI_IF
+           (" QUIET TIMEOUT=%ld\n" WIFI_TIMEOUT)
+           "EndIf\n")))
+(set WIFI_NOTE
+  (cat ";\n"
+       "; Wi-Fi: with ENV:Sys/Wireless.prefs, WirelessManager joins that\n"
+       "; network, then the interface asks for an address and waits at most\n"
+       "; " ("%ld" WIFI_TIMEOUT) " seconds; DHCP goes on asking after the boot continues.\n"
+       (if (AND WIFI_PRISM WIFI_PRIMARY)
+           "; Without the file the card starts alone, for an open network.\n"
+           "; Without the file the Wi-Fi does not start.\n")
+       "; Status recognises a WirelessManager already running only under\n"
+       "; this exact command name.\n"
+       (if WM_LIVE ""
+           (cat ";\n"
+                "; WirelessManager is set up on this machine outside this file,\n"
+                "; so the lines that would start it are commented out: two\n"
+                "; copies must not share the radio.  Remove those semicolons if\n"
+                "; nothing else starts it.\n"))))
+(set NS_WIFI "")
+(set NS_WIFI_LATER "")
+(if WIFI_START
+    (set NS_WIFI (cat WIFI_NOTE WIFI_LINES))
+    (if WIFI_SEL
+        (set NS_WIFI_LATER
+          (cat ";\n"
+               "; The Wi-Fi is defined as " WIFI_IF " and is not started: this\n"
+               "; stack brings up one interface.  To use the Wi-Fi instead,\n"
+               "; comment out the line above and remove the first semicolon\n"
+               "; from each line below.\n"
+               ";\n"
+               ";If EXISTS ENV:Sys/Wireless.prefs\n"
+               ";  Status >NIL: COMMAND=" WM_CMD "\n"
+               ";  If WARN\n"
+               ";    Run >NIL: <NIL: Stack 32768 +\n"
+               ";    " WM_CMD (" DEVICE=%s UNIT=%ld\n" WIFI_DEV WIFI_UNIT)
+               ";  EndIf\n"
+               ";  " C_PREFIX "AddNetInterface DEVS:NetInterfaces/" WIFI_IF
+               (" QUIET TIMEOUT=%ld\n" WIFI_TIMEOUT)
+               ";EndIf\n"))))
+
 (if (AND DO_STARTUP (= KEEP_NETSTART 0))
   (
     (if (exists "S:Network-Startup" (noreq))
       (
-        (if (= CONFIG_OURS 0)
-          (
-            (set BK_SUB "S")
-            (set BK_SRC "S:Network-Startup")
-            (P_backup)
-          ))
         (if (exists "S:Network-Startup.old" (noreq))
             (delete "S:Network-Startup.old"
                     (prompt "Removing the previous S:Network-Startup.old")
                     (help @copyfiles-help)
-                    (optional "force" "nofail")
-                    (safe)))
+                    (optional "force" "nofail")))
         (rename "S:Network-Startup" "S:Network-Startup.old"
                 (prompt "Renaming the old S:Network-Startup out of the way")
                 (help "S:Network-Startup already exists -- Roadshow keeps its "
                       "own there, and so may an earlier AmiNetXDuo.  It is "
                       "renamed to S:Network-Startup.old rather than being "
                       "overwritten, so nothing in it is lost.  To go back to "
-                      "it, rename it over the new one from a Shell.")
-                (safe))
+                      "it, rename it over the new one from a Shell."))
       ))
 
     (textfile
@@ -3084,8 +3686,13 @@
       (append "; what came up.  A boot that FAILS prints why either way.\n")
       (append NS_DRAWER_NOTE)
       (append "\n")
-      (append C_PREFIX "AddNetInterface DEVS:NetInterfaces/" START_IF " QUIET\n")
-      (append NS_SNTP))
+      (append (if (AND WIFI_START WIFI_PRIMARY)
+                  ""
+                  (cat C_PREFIX "AddNetInterface DEVS:NetInterfaces/" START_IF
+                       " QUIET\n")))
+      (append NS_WIFI)
+      (append NS_SNTP)
+      (append NS_WIFI_LATER))
   ))
 
 (if DO_STARTUP
@@ -3150,17 +3757,27 @@
 ; Back from Backup, in either layout, and the drawer's assigns away so
 ; nothing holds the drawer.  A drawer whose Workbench window is open stays,
 ; empty, until it is closed.
-(set REC_N 0)
-(while (set REC_SUB (select REC_N "Libs" "C" "Devs" "S" "Prefs" "Utilities" ""))
+; Every numbered Backup drawer, highest first, so for each file the copy in
+; the lowest-numbered drawer that has it -- the other stack as first found
+; -- is the one left in place.
+(set REC_BK BK_MAX)
+(if (> (strlen D_BACKUP) 0) (set REC_BK (+ BK_MAX 1)))
+(while (> REC_BK 0)
   (
-    (set REC_FILES
-      (cat REC_FILES
-           "If EXISTS \"" (tackon D_BACKUP REC_SUB) "\"\n"
-           "  Copy \"" (tackon D_BACKUP REC_SUB) "\" "
-           (select REC_N "LIBS:" "C:" "DEVS:" "S:" "SYS:Prefs" "SYS:Utilities")
-           " ALL CLONE QUIET\n"
-           "EndIf\n"))
-    (set REC_N (+ REC_N 1))
+    (set REC_DIR (tackon D_BACKUP_TOP ("%ld" REC_BK)))
+    (set REC_N 0)
+    (while (set REC_SUB (select REC_N "Libs" "C" "Devs" "S" "Prefs" "Utilities" ""))
+      (
+        (set REC_FILES
+          (cat REC_FILES
+               "If EXISTS \"" (tackon REC_DIR REC_SUB) "\"\n"
+               "  Copy \"" (tackon REC_DIR REC_SUB) "\" "
+               (select REC_N "LIBS:" "C:" "DEVS:" "S:" "SYS:Prefs" "SYS:Utilities")
+               " ALL CLONE QUIET\n"
+               "EndIf\n"))
+        (set REC_N (+ REC_N 1))
+      ))
+    (set REC_BK (- REC_BK 1))
   ))
 ; Assign EXISTS first: naming an assign that is not there asks for a volume.
 (set REC_FILES

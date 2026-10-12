@@ -1,7 +1,12 @@
 /*
  * WinClick: click one gadget of a window on the default public screen.
  *
- *     WinClick TITLE/A,GADGET/N/A,TIMES/N
+ *     WinClick TITLE/A,GADGET/N,TIMES/N,ZIP/S,AT/K/N,X/K/N,Y/K/N
+ *
+ * ZIP clicks the window's zoom gadget rather than GADGET.  AT clicks that
+ * many pixels below the gadget's top edge instead of its middle (a list row).
+ * X and Y click that point inside the window's borders instead of a gadget:
+ * an icon in a Workbench window, TIMES 2 to open it.
  *
  * TITLE is a prefix of the window title, GADGET the GadgetID.  The pointer is
  * placed with injected IECLASS_POINTERPOS events and corrected against
@@ -108,7 +113,7 @@ static struct Window *find_window(struct Screen *sc, const char *prefix)
 int main(int argc, char **argv)
 {
     struct RDArgs *rda;
-    LONG           args[3] = { 0, 0, 0 };
+    LONG           args[7] = { 0, 0, 0, 0, 0, 0, 0 };
     struct Screen *sc = NULL;
     struct Window *w;
     struct Gadget *g;
@@ -122,13 +127,13 @@ int main(int argc, char **argv)
         (CONST_STRPTR)"intuition.library", 37);
     if (IntuitionBase == NULL) return RETURN_FAIL;
 
-    rda = ReadArgs((CONST_STRPTR)"TITLE/A,GADGET/N/A,TIMES/N", args, NULL);
-    if (rda == NULL)
+    rda = ReadArgs((CONST_STRPTR)"TITLE/A,GADGET/N,TIMES/N,ZIP/S,AT/K/N,X/K/N,Y/K/N", args, NULL);
+    if (rda == NULL || (args[1] == 0 && args[3] == 0 && (args[5] == 0 || args[6] == 0)))
     {
         Printf((CONST_STRPTR)"error=bad arguments\n");
         goto out;
     }
-    id = *(LONG *)args[1];
+    id = args[1] != 0 ? *(LONG *)args[1] : -1;
     times = args[2] != 0 ? *(LONG *)args[2] : 1;
 
     sc = LockPubScreen(NULL);
@@ -143,22 +148,37 @@ int main(int argc, char **argv)
         Printf((CONST_STRPTR)"error=no window\n");
         goto out;
     }
+    /* X and Y: a point of the window, no gadget. */
+    if (args[5] != 0 && args[6] != 0)
+    {
+        x = (WORD)(w->LeftEdge + w->BorderLeft + *(LONG *)args[5]);
+        y = (WORD)(w->TopEdge + w->BorderTop + *(LONG *)args[6]);
+        goto click;
+    }
+    /* ZIP: the window's zoom gadget instead of one of its own. */
     for (g = w->FirstGadget; g != NULL; g = g->NextGadget)
-        if (g->GadgetID == id && !(g->GadgetType & GTYP_SYSGADGET)) break;
+        if (args[3] != 0
+            ? (g->GadgetType & GTYP_SYSTYPEMASK) == GTYP_WZOOM
+            : (g->GadgetID == id && !(g->GadgetType & GTYP_SYSGADGET)))
+            break;
     if (g == NULL)
     {
         Printf((CONST_STRPTR)"error=no gadget\n");
         goto out;
     }
 
-    /* GZZ gadgets are relative to the inner window. */
+    /* GZZ gadgets are relative to the inner window; the zoom gadget sits in
+       the border, placed from the right edge. */
     x = (WORD)(w->LeftEdge + g->LeftEdge + g->Width / 2);
-    y = (WORD)(w->TopEdge + g->TopEdge + g->Height / 2);
-    if (w->Flags & WFLG_GIMMEZEROZERO)
+    y = (WORD)(w->TopEdge + g->TopEdge +
+               (args[4] != 0 ? *(LONG *)args[4] : g->Height / 2));
+    if (g->Flags & GFLG_RELRIGHT) x = (WORD)(x + w->Width - 1);
+    if ((w->Flags & WFLG_GIMMEZEROZERO) && !(g->GadgetType & GTYP_SYSGADGET))
     {
         x += w->BorderLeft;
         y += w->BorderTop;
     }
+click:
     Printf((CONST_STRPTR)"window=%ld,%ld,%ld,%ld\ntarget=%ld,%ld\n",
            (LONG)w->LeftEdge, (LONG)w->TopEdge, (LONG)w->Width,
            (LONG)w->Height, (LONG)x, (LONG)y);

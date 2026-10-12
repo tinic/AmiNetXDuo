@@ -108,6 +108,18 @@
             (optional "force" "nofail"))
   ))
 
+; The Wi-Fi firmware files the installer copied, and only those.
+(if (exists "S:AmiNetXDuo-Firmware" (noreq))
+  (
+    (run "Execute S:AmiNetXDuo-Firmware"
+         (prompt "Removing the Wi-Fi firmware the installer copied")
+         (help "The AmigaDOS script the installer wrote of what it installed."))
+    (delete "S:AmiNetXDuo-Firmware"
+            (prompt "Deleting S:AmiNetXDuo-Firmware")
+            (help "A file AmiNetXDuo put there.")
+            (optional "force" "nofail"))
+  ))
+
 (run ("Execute %s" REC)
      (prompt "Deleting AmiNetXDuo's files and putting back what it replaced")
      (help "The AmigaDOS script the installer wrote of what it installed."))

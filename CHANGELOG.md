@@ -14,11 +14,39 @@ Add new entries under `Unreleased`; published release sections are history.
 - New Uninstall-AmiNetXDuo removes AmiNetXDuo and puts back what it
   replaced.
 
+- Installer: NetWirelessPrefs lists the Wi-Fi networks in range to join.
+
+- Installer: a Prism2 PCMCIA card gets WirelessManager and its Wi-Fi network, as the Pi Wi-Fi does.
+
+- NetWireless and NetWirelessPrefs have Workbench icons.
+
 - Installer: an update over AmiNetXDuo no longer asks to replace its own
-  bsdsocket.library; the kept-configuration notice is Expert only.
+  bsdsocket.library or says that its kept configuration is not checked.
 
 - Installer: another stack's network configuration is set up again by
-  default when a device was found, its replaced files kept as .old.
+  default when a device was found; that stack's files are kept in the
+  AmiNetXDuo drawer's Backup, and its pages appear at Novice too.
+
+- Installer: the machine's name defaults to amiga- and the card's last
+  three address octets; only Expert asks for one.
+
+- Installer: setting the clock from pool.ntp.org at boot defaults to yes;
+  only Expert asks for the server.
+
+- Installer: answering .local names defaults to yes on a 68020 or newer.
+
+- Installer: the Pi Wi-Fi firmware and its licences ship in Devs/Firmware;
+  the files DEVS:Firmware lacks are copied when the Pi Wi-Fi is selected.
+
+- NetWirelessPrefs: Known networks window, to reorder and remove the networks in Wireless.prefs.
+
+- Installer: with the Pi Wi-Fi selected, installs WirelessManager 1.5, asks for the network name and passphrase, and starts the Wi-Fi at boot, beside the Ethernet.
+
+- NetWireless and NetWirelessPrefs find a prism2.device Wi-Fi card (PC Card or PCI) from its interface file when neither DEVICE nor INTERFACE is given.
+
+- New NetWireless commodity: Wi-Fi state and signal as an AppIcon, a Tools menu item and ENV:WiFi; the signal is read only while connected.
+
+- New NetWirelessPrefs: Wi-Fi networks in range, joining one through WirelessManager, and the link's state; Shell forms LIST, STATUS and JOIN.
 
 - Installer: a PCMCIA NE2000 card with a manufacturer ID (DFE-670TXD and
   most branded clones) is detected at Novice.
