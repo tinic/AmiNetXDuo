@@ -128,6 +128,11 @@ if OPTION_PLAN=build bash -euo pipefail -c "$no_build" > "$work/no-build.log" 2>
     failures=$((failures + 1))
 fi
 cases=$((cases + 1))
+if OPTION_PLAN='pr' bash -euo pipefail -c "$no_build" > "$work/no-build.log" 2>&1; then
+    echo "FAIL empty-pr-matrix accepted"
+    failures=$((failures + 1))
+fi
+cases=$((cases + 1))
 
 # Execute the workflow's actual stable gate, not a separate imitation.
 report=$(awk '
@@ -137,7 +142,7 @@ report=$(awk '
     body { sub(/^          /, ""); print }
 ' "$root/.github/workflows/ci.yml")
 [ -n "$report" ]
-export MODE=full PLAN=success GITLINKS=success ANALYZE=success OPTIONS=success
+export EVENT=push MODE=full PLAN=success GITLINKS=success ANALYZE=success OPTIONS=success
 export OPTION_PLAN=build REUSE_RUN='' STACKFRAMES=success TIER1=success
 export HOST_CLANG=success SHELLCHECK=success PACKAGE=success DOCS=skipped
 gate() {
@@ -172,6 +177,26 @@ for field in PLAN GITLINKS ANALYZE STACKFRAMES TIER1 HOST_CLANG SHELLCHECK PACKA
     done
     export "$field=success"
 done
+# Pull requests: shipping arms only, macOS/clang skipped, still fail closed.
+EVENT=pull_request MODE=full OPTION_PLAN=pr HOST_CLANG=skipped
+gate pr 0
+for field in GITLINKS ANALYZE STACKFRAMES TIER1 SHELLCHECK PACKAGE OPTIONS; do
+    for status in failure cancelled; do
+        export "$field=$status"
+        gate "pr-$field-$status" 1
+    done
+    export "$field=success"
+done
+HOST_CLANG=failure
+gate pr-host-clang-failure 1
+HOST_CLANG=skipped
+MODE=shipping OPTION_PLAN=skipped
+gate pr-shipping 0
+EVENT=push MODE=full OPTION_PLAN=pr
+gate pr-plan-on-push 1
+OPTION_PLAN=build HOST_CLANG=skipped
+gate push-without-host-clang 1
+HOST_CLANG=success MODE=shipping
 OPTION_PLAN=build
 gate unexpected-matrix 1
 OPTION_PLAN=skipped

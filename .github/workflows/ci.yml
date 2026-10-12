@@ -68,14 +68,22 @@ jobs:
             echo 'options=skipped' >> "$GITHUB_OUTPUT"
           elif [ "$GITHUB_EVENT_NAME" = push ]; then
             tools/ci-matrix-reuse.sh "$BASE_SHA" "$GITHUB_SHA" | tee -a "$GITHUB_OUTPUT"
+          elif [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            # Shipping arms only (PR_CROSS_ARMS in tools/ci.sh).  The full
+            # table runs on push to main, the schedule and dispatch.
+            echo 'options=pr' >> "$GITHUB_OUTPUT"
           else
             echo 'options=build' >> "$GITHUB_OUTPUT"
           fi
 
       - name: Derive the option matrix
         id: matrix
+        env:
+          OPTION_PLAN: ${{ steps.options.outputs.options }}
         run: |
-          matrix=$(tools/ci.sh --list-cross | jq -Rsc 'split("\n") | map(select(length > 0))')
+          subset=; [ "$OPTION_PLAN" != pr ] || subset=pr
+          # shellcheck disable=SC2086
+          matrix=$(tools/ci.sh --list-cross $subset | jq -Rsc 'split("\n") | map(select(length > 0))')
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
           echo "mode=${{ steps.changes.outputs.mode }} options=${{ steps.options.outputs.options }} reused_run=${{ steps.options.outputs.reuse_run }} matrix=$matrix" >> "$GITHUB_STEP_SUMMARY"
 
@@ -141,17 +149,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        config: ${{ fromJSON(needs.plan.outputs.mode == 'full' && needs.plan.outputs.options == 'build' && needs.plan.outputs.matrix || '["__skipped__"]') }}
+        config: ${{ fromJSON(needs.plan.outputs.mode == 'full' && (needs.plan.outputs.options == 'build' || needs.plan.outputs.options == 'pr') && needs.plan.outputs.matrix || '["__skipped__"]') }}
     steps:
       - name: No optional builds selected
         if: matrix.config == '__skipped__'
         env:
           OPTION_PLAN: ${{ needs.plan.outputs.options }}
         run: |
-          [ "$OPTION_PLAN" != build ] || {
+          case "$OPTION_PLAN" in build|pr)
             echo 'option_matrix=FAIL planned builds produced no matrix' >&2
-            exit 1
-          }
+            exit 1 ;;
+          esac
           echo 'option_matrix=skipped' >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/checkout@v4
         if: matrix.config != '__skipped__'
@@ -290,12 +298,13 @@ jobs:
   # ------------------------------------------------------------------------
   # The host tier again, on macOS/clang.  Cheap (no cross toolchain, no
   # submodule-heavy build) and it is the only thing that stops the host-side
-  # parser/VM/vector tests becoming GCC-only.
+  # parser/VM/vector tests becoming GCC-only.  Not on pull requests: push to
+  # main, the schedule and dispatch run it.
   # ------------------------------------------------------------------------
   host-clang:
     name: host tests (macOS / clang)
     needs: plan
-    if: needs.plan.outputs.mode == 'full' || needs.plan.outputs.mode == 'shipping'
+    if: (needs.plan.outputs.mode == 'full' || needs.plan.outputs.mode == 'shipping') && github.event_name != 'pull_request'
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -460,7 +469,8 @@ jobs:
           tools/check-changelog-prose.sh
           tools/ci.sh survey
 
-  # Stable required check: shipping keeps every gate except optional builds.
+  # Stable required check: shipping keeps every gate except optional builds;
+  # a pull request builds only the shipping arms and skips macOS/clang.
   # Reused matrix proof is reported explicitly, not relabelled as execution.
   gate:
     name: tier 1 report
@@ -471,6 +481,7 @@ jobs:
       - name: Report
         env:
           MODE: ${{ needs.plan.outputs.mode }}
+          EVENT: ${{ github.event_name }}
           PLAN: ${{ needs.plan.result }}
           GITLINKS: ${{ needs.gitlinks.result }}
           ANALYZE: ${{ needs.analyze.result }}
@@ -485,14 +496,18 @@ jobs:
           DOCS: ${{ needs.docs.result }}
         run: |
           echo "option_plan=$OPTION_PLAN reuse_run=$REUSE_RUN"
-          printf 'mode=%s plan=%s gitlinks=%s analyze=%s options=%s stackframes=%s tier1=%s host_clang=%s shellcheck=%s package=%s docs=%s\n' \
-            "$MODE" "$PLAN" "$GITLINKS" "$ANALYZE" "$OPTIONS" "$STACKFRAMES" \
+          printf 'event=%s mode=%s plan=%s gitlinks=%s analyze=%s options=%s stackframes=%s tier1=%s host_clang=%s shellcheck=%s package=%s docs=%s\n' \
+            "$EVENT" "$MODE" "$PLAN" "$GITLINKS" "$ANALYZE" "$OPTIONS" "$STACKFRAMES" \
             "$TIER1" "$HOST_CLANG" "$SHELLCHECK" "$PACKAGE" "$DOCS"
           [ "$PLAN" = success ] || exit 1
+          # Pull requests skip macOS/clang; everything else must run it.
+          want_clang=success
+          [ "$EVENT" != pull_request ] || want_clang=skipped
           case "$MODE" in
             full|shipping)
               case "$MODE:$OPTION_PLAN:$OPTIONS" in
                 full:build:success|shipping:skipped:success) ;;
+                full:pr:success) [ "$EVENT" = pull_request ] || exit 1 ;;
                 full:reused:success)
                   case "$REUSE_RUN" in ''|*[!0-9]*) exit 1 ;; esac
                   echo "option_matrix=reused source_run=$REUSE_RUN" ;;
@@ -500,7 +515,7 @@ jobs:
               esac
               [ "$GITLINKS" = success ] && [ "$ANALYZE" = success ] &&
               [ "$STACKFRAMES" = success ] && [ "$TIER1" = success ] &&
-              [ "$HOST_CLANG" = success ] && [ "$SHELLCHECK" = success ] &&
+              [ "$HOST_CLANG" = "$want_clang" ] && [ "$SHELLCHECK" = success ] &&
               [ "$PACKAGE" = success ] &&
               [ "$DOCS" = skipped ]
               ;;
