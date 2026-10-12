@@ -378,22 +378,33 @@ UNINSTALLING
 
 Uninstall-AmiNetXDuo, in the AmiNetXDuo drawer, removes AmiNetXDuo.  It
 takes the ";BEGIN AmiNetXDuo" .. ";END AmiNetXDuo" block out of
-S:User-Startup, deletes the configuration files the installer wrote (each
-names the installer on its first lines), and runs S:AmiNetXDuo-Files, the
-record the installer leaves.  That record deletes the libraries, commands,
-drivers and the NetPrefs and NetMeter copies the installer put in place,
-puts back the files of another stack that the installer replaced, each
-from the lowest-numbered Backup drawer that holds it (that stack as first
-found), and deletes the drawer.  S:AmiNetXDuo-WiFi, where the
-Pi Wi-Fi was selected, deletes the WirelessManager and Wireless.prefs the
-installer created and no others.  Files ending in .old stay,
-the drivers' included.  A drawer whose window is open stays, empty, until
-it is deleted.
+S:User-Startup and runs S:AmiNetXDuo-WiFi, S:AmiNetXDuo-Firmware and
+S:AmiNetXDuo-Files, the records the installer leaves.  They delete, in
+order:
+
+  - the WirelessManager, Wireless.prefs and firmware files the installer
+    created, and no others
+  - each configuration file and icon the installer wrote, where it is as
+    the installer left it (a copy is kept in the drawer's Installed); one
+    changed since stays, and T:AmiNetXDuo-Kept lists it
+  - each library, command and driver that names AmiNetXDuo
+  - each .old file that names AmiNetXDuo, and each file of another stack
+    that the installer renamed to .old, where the original's place is free
+
+Then each file of another stack that the installer replaced goes back
+where it was, from the lowest-numbered Backup drawer that holds it, and
+only where nothing is in its place.  A file that is not put back -- the
+copy failed, or a file changed since the installation is in its place --
+is listed in T:AmiNetXDuo-NotRestored with its Backup copy, to compare and
+copy back by hand; Backup and S:AmiNetXDuo-Files then stay, and
+Uninstall-AmiNetXDuo can be run again.  Otherwise the drawer's
+own files go, and the drawer with them when nothing else is in it.
 
 Backup holds another stack's libraries, its commands with the same names as
-AmiNetXDuo's, its NetPrefs and NetMeter, its certificate store, and its
-interface, routes, name_resolution and S:Network-Startup files, and their
-.old files, each run in a drawer numbered one above the highest there.
+AmiNetXDuo's, its NetPrefs and NetMeter and their icons, its certificate
+store, and its interface, routes, name_resolution and S:Network-Startup
+files, and their .old files, each run in a drawer numbered one above the
+highest there.
 
 A drawer installation is the AmiNetXDuo drawer, the startup block,
 S:Network-Startup and S:AmiNetXDuo-Files.

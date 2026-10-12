@@ -24,6 +24,11 @@
  * has no compare of its own, and a backup the same as one already kept is
  * not kept twice.
  *
+ * MARK: RETURN_OK when the file FIRST holds the bytes SECOND anywhere,
+ * RETURN_WARN when it does not, RETURN_ERROR when it cannot be read.  Exact
+ * bytes, case and all, in blocks: AmigaDOS Search ignores case and reads
+ * lines, which in a program or the certificate store mean nothing.
+ *
  * HOSTLINE: FIRST is a name_resolution file; the name the stack takes from it
  * (ami_cfg_resolver_hostname_file, the stack's own parser) is written to
  * SECOND as a hostname line, so the Installer can carry a name set by hand
@@ -41,6 +46,8 @@
 #include <proto/dos.h>
 #include <proto/exec.h>
 
+#include <string.h>
+
 #include "aminetxduo/version.h"
 #include "aminetxduo/config.h"
 #include "devicehome.h"
@@ -50,7 +57,7 @@ const char *const tool_name = "InstallSameFile";
 static const char version_tag[] __attribute__((used)) =
     TOOL_VERSTAG("InstallSameFile");
 
-#define TEMPLATE "FIRST/A,SECOND/A/M,DEVICES/S,HOSTLINE/S,BYTES/S"
+#define TEMPLATE "FIRST/A,SECOND/A/M,DEVICES/S,HOSTLINE/S,BYTES/S,MARK/S"
 
 /* An interface file is a few hundred bytes; the cap only bounds a stray. */
 #define DEVICES_FILE_MAX 65536L
@@ -63,6 +70,7 @@ enum
     ARG_DEVICES,
     ARG_HOSTLINE,
     ARG_BYTES,
+    ARG_MARK,
     ARG_COUNT
 };
 
@@ -270,6 +278,54 @@ static LONG same_bytes(const char *a, const char *b)
     return rc;
 }
 
+#define MARK_MAX 128L
+
+static LONG has_mark(const char *file, const char *mark)
+{
+    static UBYTE buf[2048 + MARK_MAX];
+    LONG         len = (LONG)strlen(mark);
+    LONG         have = 0;
+    LONG         rc = RETURN_WARN;
+    BPTR         fh;
+
+    if (len <= 0 || len > MARK_MAX)
+        return RETURN_ERROR;
+    fh = Open((CONST_STRPTR)file, MODE_OLDFILE);
+    if (fh == 0)
+        return RETURN_ERROR;
+    for (;;)
+    {
+        LONG n = Read(fh, buf + have, 2048);
+        LONG i;
+
+        if (n < 0)
+        {
+            rc = RETURN_ERROR;
+            break;
+        }
+        have += n;
+        for (i = 0; i + len <= have; i++)
+            if (buf[i] == (UBYTE)mark[0] &&
+                memcmp(buf + i, mark, (size_t)len) == 0)
+                break;
+        if (i + len <= have)
+        {
+            rc = RETURN_OK;
+            break;
+        }
+        if (n == 0)
+            break;
+        /* Keep the tail a mark could start in. */
+        if (have > len - 1)
+        {
+            memmove(buf, buf + have - (len - 1), (size_t)(len - 1));
+            have = len - 1;
+        }
+    }
+    Close(fh);
+    return rc;
+}
+
 int main(int argc, char **argv)
 {
     LONG           args[ARG_COUNT] = { 0 };
@@ -287,7 +343,11 @@ int main(int argc, char **argv)
         return RETURN_ERROR;
 
     second = (STRPTR *)args[ARG_SECOND];
-    if (args[ARG_BYTES] != 0)
+    if (args[ARG_MARK] != 0)
+        rc = (second[1] != NULL) ? RETURN_ERROR
+                                 : has_mark((const char *)args[ARG_FIRST],
+                                            (const char *)second[0]);
+    else if (args[ARG_BYTES] != 0)
         rc = (second[1] != NULL) ? RETURN_ERROR
                                  : same_bytes((const char *)args[ARG_FIRST],
                                               (const char *)second[0]);

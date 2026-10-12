@@ -1439,7 +1439,7 @@
 ; default below.
 (set LIB_OURS 0)
 (if OLD_BSD
-    (if (= 0 (run ("Search >NIL: FROM \"%s\" SEARCH AmiNetXDuo QUIET" D_BSD)
+    (if (= 0 (run ("\"%s\" \"%s\" AmiNetXDuo MARK" S_SAMEFILE D_BSD)
                   (quiet) (safe)))
         (set LIB_OURS 1)))
 
@@ -1476,8 +1476,8 @@
 ; Ours: our library, or an interface file this installer wrote.
 (set CONFIG_OURS LIB_OURS)
 (if (AND HAVE_OLD (= CONFIG_OURS 0))
-    (if (= 0 (run ("Search >NIL: FROM \"%s\" SEARCH AmiNetXDuo QUIET"
-                   (tackon D_IFDIR OLD_IF))
+    (if (= 0 (run ("\"%s\" \"%s\" AmiNetXDuo MARK"
+                   S_SAMEFILE (tackon D_IFDIR OLD_IF))
                   (quiet) (safe)))
         (set CONFIG_OURS 1)))
 
@@ -2281,6 +2281,10 @@
 ; kept again.  AmigaDOS Copy CLONE keeps protection bits, date and comment.
 ; Nothing of this in a pretend run.
 (set D_BACKUP_TOP (tackon DOCDIR "Backup"))
+; Installed: a copy of each configuration file and icon as this
+; installation left it, and the tools the record runs.
+(set D_INSTALLED (tackon DOCDIR "Installed"))
+(set BK_SUB "")
 (set D_BACKUP "")
 (set BK_MAX 0)
 (if (= (exists D_BACKUP_TOP (noreq)) 2)
@@ -2289,16 +2293,39 @@
           (if (> (+ @each-name 0) BK_MAX) (set BK_MAX (+ @each-name 0))))))
 (set FOREIGN_STACK (if (AND OLD_BSD (= LIB_OURS 0) (= DRAWER_LAYOUT 0)) 1 0))
 
-; IS_OURS: BK_SRC names AmiNetXDuo, or NetSetup wrote it.
+; IS_OURS: BK_SRC names AmiNetXDuo, NetSetup wrote it, it carries the
+; phrase BK_MARK, or it is the archive's BK_ARCH byte for byte (an icon, a
+; netdb file, the certificate store).
+(set BK_MARK "")
+(set BK_ARCH "")
 (procedure P_is_ours
   (set IS_OURS 0)
-  (if (= 0 (run ("Search >NIL: FROM \"%s\" SEARCH AmiNetXDuo QUIET" BK_SRC)
+  (if (= 0 (run ("\"%s\" \"%s\" AmiNetXDuo MARK" S_SAMEFILE BK_SRC)
                 (quiet) (safe)))
-      (set IS_OURS 1)
-      (if (= 0 (run ("Search >NIL: FROM \"%s\" SEARCH \"Written by NetSetup\" QUIET"
-                     BK_SRC)
+      (set IS_OURS 1))
+  (if (= IS_OURS 0)
+      (if (= 0 (run ("\"%s\" \"%s\" \"Written by NetSetup\" MARK"
+                     S_SAMEFILE BK_SRC)
                     (quiet) (safe)))
           (set IS_OURS 1)))
+  (if (AND (= IS_OURS 0) (> (strlen BK_MARK) 0))
+      (if (= 0 (run ("\"%s\" \"%s\" \"%s\" MARK" S_SAMEFILE BK_SRC BK_MARK)
+                    (quiet) (safe)))
+          (set IS_OURS 1)))
+  (if (AND (= IS_OURS 0) (> (strlen BK_ARCH) 0))
+      (if (exists BK_ARCH (noreq))
+          (if (= 0 (run ("\"%s\" \"%s\" \"%s\" BYTES" S_SAMEFILE BK_SRC BK_ARCH)
+                        (quiet) (safe)))
+              (set IS_OURS 1))))
+  ; What an earlier installation left there, unchanged since.
+  (if (AND (= IS_OURS 0) (> (strlen BK_SUB) 0))
+    (
+      (set BK_SNAP (tackon (tackon D_INSTALLED BK_SUB) (fileonly BK_SRC)))
+      (if (exists BK_SNAP (noreq))
+          (if (= 0 (run ("\"%s\" \"%s\" \"%s\" BYTES" S_SAMEFILE BK_SRC BK_SNAP)
+                        (quiet) (safe)))
+              (set IS_OURS 1)))
+    ))
 )
 
 ; KEPT: an earlier Backup drawer holds BK_SRC, byte for byte, under its own
@@ -2313,11 +2340,13 @@
   (while (AND (= KEPT 0) (<= KB_N BK_MAX))
     (
       (set KB_DIR (tackon (tackon D_BACKUP_TOP ("%ld" KB_N)) BK_SUB))
+      (set KB_DONE (exists (tackon (tackon D_BACKUP_TOP ("%ld" KB_N)) "Restore")
+                           (noreq)))
       (set KB_I 0)
       (while (AND (= KEPT 0) (< KB_I 2))
         (
           (set KB_F (tackon KB_DIR (select KB_I KB_NAME KB_BASE)))
-          (if (exists KB_F (noreq))
+          (if (AND KB_DONE (exists KB_F (noreq)))
               (if (= 0 (run ("\"%s\" \"%s\" \"%s\" BYTES" S_SAMEFILE BK_SRC KB_F)
                             (quiet) (safe)))
                   (set KEPT 1)))
@@ -2327,7 +2356,11 @@
     ))
 )
 
-; BK_SRC into this run's Backup drawer/BK_SUB when it is another stack's.
+; BK_SRC into this run's Backup drawer/BK_SUB when it is another stack's,
+; and into BK_RESTORE the lines that put it back where it was: only where
+; nothing is there by then, so a file the user has since changed stays.
+(set BK_RESTORE "")
+(set BK_PART 0)
 (procedure P_backup
   (if (AND (= @pretend 0) (exists BK_SRC (noreq)))
     (
@@ -2351,17 +2384,531 @@
                            (prompt ("Creating %s" (pathonly BK_DIR)))
                            (help H_BACKUP)))
               (makedir BK_DIR (prompt ("Creating %s" BK_DIR)) (help H_BACKUP))
+              (set BK_FILE (tackon BK_DIR (fileonly BK_SRC)))
               (if (OR (<> 0 (run ("Copy \"%s\" TO \"%s\" CLONE QUIET" BK_SRC BK_DIR)
                                  (prompt ("Keeping %s in %s" BK_SRC BK_DIR))
                                  (help   H_BACKUP)))
-                      (NOT (exists (tackon BK_DIR (fileonly BK_SRC)) (noreq))))
+                      (NOT (exists BK_FILE (noreq))))
+                (
+                  ; A part-copy must not stand in for the file later.
+                  (if (exists BK_FILE (noreq))
+                      (delete BK_FILE
+                              (prompt ("Removing the incomplete %s" BK_FILE))
+                              (help   H_BACKUP)
+                              (optional "force" "nofail")))
+                  ; And this run's drawer: without its Restore it would
+                  ; pass for a kept copy in the next run.
+                  (run ("Delete \"%s\" ALL QUIET FORCE" D_BACKUP)
+                       (prompt ("Removing %s" D_BACKUP))
+                       (help   H_BACKUP))
                   (abort (cat "The copy of " BK_SRC " into " BK_DIR " failed.  "
                               "Nothing on the disk has been replaced.\n\n"
                               "Free space on that volume and run the installer "
-                              "again.")))
+                              "again."))
+                ))
+              ; An earlier drawer's copy of the same name goes back first.
+              (set BK_LOW "")
+              (set BK_N 1)
+              (while (AND (= (strlen BK_LOW) 0) (<= BK_N BK_MAX))
+                (
+                  (set BK_C (tackon (tackon (tackon D_BACKUP_TOP ("%ld" BK_N)) BK_SUB)
+                                    (fileonly BK_SRC)))
+                  (if (AND (exists BK_C (noreq))
+                           (exists (tackon (tackon D_BACKUP_TOP ("%ld" BK_N)) "Restore")
+                                   (noreq)))
+                      (set BK_LOW BK_C))
+                  (set BK_N (+ BK_N 1))
+                ))
+              ; Something else in its place -- a file of ours changed since
+              ; -- is not written over, and Backup stays for it.
+              (set BK_SAME (cat "  \"" REC_SF "\" \"" BK_SRC "\" \"" BK_FILE "\" BYTES\n"
+                                "  If WARN\n"))
+              (set BK_CLASH (cat "    Echo >>T:AmiNetXDuo-NotRestored \"" BK_SRC
+                                 " is not the one in " BK_FILE "\"\n"))
+              (set BK_ADD
+                (cat "If NOT EXISTS \"" BK_SRC "\"\n"
+                     "  Copy \"" BK_FILE "\" TO \"" BK_SRC "\" CLONE QUIET\n"
+                     "  If ERROR\n"
+                     "    Delete \"" BK_SRC "\" QUIET\n"
+                     "    Echo >>T:AmiNetXDuo-NotRestored \"" BK_SRC
+                     " could not be copied from " BK_FILE "\"\n"
+                     "  EndIf\n"
+                     "Else\n"
+                     BK_SAME
+                     (if (> (strlen BK_LOW) 0)
+                         (cat "    \"" REC_SF "\" \"" BK_SRC "\" \"" BK_LOW "\" BYTES\n"
+                              "    If WARN\n"
+                              "  " BK_CLASH
+                              "    EndIf\n")
+                         BK_CLASH)
+                     "  EndIf\n"
+                     "EndIf\n"))
+              (if (> (+ (strlen BK_RESTORE) (strlen BK_ADD)) 2000)
+                (
+                  (set BK_PART (+ BK_PART 1))
+                  (textfile
+                    (prompt "Writing the Backup drawer's Restore script")
+                    (help   H_BACKUP)
+                    (dest   (tackon D_BACKUP ("RestorePart%ld" BK_PART)))
+                    (append BK_RESTORE))
+                  (set BK_RESTORE "")
+                ))
+              (set BK_RESTORE (cat BK_RESTORE BK_ADD))
             ))
         ))
     ))
+)
+
+; --- the record Uninstall-AmiNetXDuo runs --------------------------------
+;
+; S:AmiNetXDuo-Files, an AmigaDOS script, in this order:
+;  - Installed/Remove: each configuration file and icon this installation
+;    wrote, deleted where it is as it was left, kept and listed in
+;    T:AmiNetXDuo-Kept where it has been changed since;
+;  - each program that names AmiNetXDuo;
+;  - a .old that names AmiNetXDuo, or that is another stack's file a rename
+;    left there (the same bytes as its Backup copy);
+;  - every Backup drawer's Restore, lowest number first: a file goes back
+;    only where nothing is there by then, so the other stack as first found
+;    wins and nothing in place is written over;
+;  - the drawers this installation made, where they are empty;
+;  - Backup and Installed, unless T:AmiNetXDuo-NotRestored lists a file not
+;    put back; then the drawer's own files, and the drawer when nothing
+;    else is in it.
+; Written before the first file is replaced (REC_FINAL 0), so that an
+; installation stopped part way can be undone, and again at the end with
+; Installed/Remove.
+(set REC_SF (tackon D_INSTALLED "InstallSameFile"))
+
+; An Installer string has a length limit, and the record is longer: it is
+; written in parts, Installed/Part<n> and Installed/RemovePart<n>, which
+; P_rec_join puts together with Type.
+(procedure P_rec_flush
+  (if (> (strlen REC_TEXT) 0)
+    (
+      (set REC_PART (+ REC_PART 1))
+      (textfile
+        (prompt "Writing the record of this installation")
+        (help   H_BACKUP)
+        (dest   (tackon D_INSTALLED ("Part%ld" REC_PART)))
+        (append REC_TEXT))
+      (set REC_TEXT "")
+    ))
+)
+(procedure P_rec_add
+  (if (> (+ (strlen REC_TEXT) (strlen REC_ADD)) 2000) (P_rec_flush))
+  (set REC_TEXT (cat REC_TEXT REC_ADD))
+)
+(procedure P_rem_flush
+  (if (> (strlen REM_TEXT) 0)
+    (
+      (set REM_PART (+ REM_PART 1))
+      (textfile
+        (prompt "Writing the record of this installation")
+        (help   H_BACKUP)
+        (dest   (tackon D_INSTALLED ("RemovePart%ld" REM_PART)))
+        (append REM_TEXT))
+      (set REM_TEXT "")
+    ))
+)
+; JN_DEST, after its first lines (already written), gets JN_STEM1 ..
+; JN_STEM<JN_N>, each deleted after.
+(procedure P_rec_join
+  (set JN_I 1)
+  (while (<= JN_I JN_N)
+    (
+      (set JN_F (tackon D_INSTALLED ("%s%ld" JN_STEM JN_I)))
+      (if (<> 0 (run ("Type >>\"%s\" \"%s\"" JN_DEST JN_F)
+                     (prompt "Writing the record of this installation")
+                     (help   H_BACKUP)))
+          (abort (cat "Writing " JN_DEST " failed: " JN_F " could not be "
+                      "added to it.  Free space on that volume and run the "
+                      "installer again.")))
+      (delete JN_F (optional "force" "nofail"))
+      (set JN_I (+ JN_I 1))
+    ))
+)
+
+; REC_F, a program this installation put there: another stack's or the
+; user's file of that name is in Backup, and comes back after.
+(procedure P_rec_ours
+  ((set REC_ADD (cat "Delete \"" REC_F "\" QUIET\n")) (P_rec_add))
+)
+
+; REC_F a .old in REC_SUB, deleted when it is ours, or the other stack's
+; renamed by this installation: the lowest Backup copy of its name has its
+; bytes, and its Restore, after, puts that copy back.  Before the Restores,
+; because a Restore of the other stack's own .old needs the name free; a
+; Restore that fails lists the path and Backup keeps the bytes.
+(procedure P_rec_old
+  (set RO_BASE (fileonly (substr REC_F 0 (- (strlen REC_F) 4))))
+  (set RO_LB "")
+  (set RO_N 1)
+  (while (AND (= (strlen RO_LB) 0) (<= RO_N REC_TOPN))
+    (
+      (set RO_C (tackon (tackon (tackon D_BACKUP_TOP ("%ld" RO_N)) REC_SUB)
+                        RO_BASE))
+      (if (AND (exists RO_C (noreq))
+               (exists (tackon (tackon D_BACKUP_TOP ("%ld" RO_N)) "Restore") (noreq)))
+          (set RO_LB RO_C))
+      (set RO_N (+ RO_N 1))
+    ))
+  (if (exists REC_F (noreq))
+    (
+      (set BK_SRC REC_F)
+      (set RO_SUB BK_SUB)
+      (set BK_SUB "")
+      (P_is_ours)
+      (set BK_SUB RO_SUB)
+      (if IS_OURS
+          ((set REC_ADD (cat "Delete \"" REC_F "\" QUIET\n")) (P_rec_add))
+          ; The other stack's file, renamed: it goes only where the
+          ; original's place is free for its Backup copy to come back to.
+          (if (> (strlen RO_LB) 0)
+              ((set REC_ADD (cat
+                     "If NOT EXISTS \"" (substr REC_F 0 (- (strlen REC_F) 4)) "\"\n"
+                     "  If EXISTS \"" REC_F "\"\n"
+                     "    \"" REC_SF "\" \"" REC_F "\" \"" RO_LB "\" BYTES\n"
+                     "    If NOT WARN\n"
+                     "      Delete \"" REC_F "\" QUIET\n"
+                     "    EndIf\n"
+                     "  EndIf\n"
+                     "EndIf\n")) (P_rec_add))))
+    ))
+)
+
+; REC_F, a drawer this installation made (RD_MADE now, or the marker
+; RD_KEY in Installed from an earlier run): removed when empty.
+(procedure P_rec_dir
+  (set RD_MARK (tackon D_INSTALLED RD_KEY))
+  (if (OR RD_MADE (exists RD_MARK (noreq)))
+    (
+      (if (AND REC_FINAL RD_MADE)
+          (textfile
+            (prompt ("Writing %s" RD_MARK))
+            (help   H_BACKUP)
+            (dest   RD_MARK)
+            (append "; made by the AmiNetXDuo installer\n")))
+      ((set REC_ADD (cat "Delete \"" REC_F "\" QUIET\n")) (P_rec_add))
+    ))
+)
+
+; RT_SRC, an archive drawer copied to RT_DST: each file and one level of
+; drawers below, by name, then RT_DST itself when empty.
+(procedure P_rec_tree
+  (if (= (exists RT_SRC (noreq)) 2)
+    (
+      (foreach RT_SRC "#?"
+        (
+          (set RT_NAME @each-name)
+          (if (> @each-type 0)
+            (
+              (set RT_SUBSRC (tackon RT_SRC RT_NAME))
+              (set RT_SUBDST (tackon RT_DST RT_NAME))
+              (foreach RT_SUBSRC "#?"
+                (if (< @each-type 0)
+                    (
+                      ((set REC_ADD (cat "Delete \""
+                             (tackon RT_SUBDST @each-name) "\" QUIET\n")) (P_rec_add))
+                    )))
+              ((set REC_ADD (cat "Delete \"" RT_SUBDST "\" QUIET\n")) (P_rec_add))
+            )
+            ((set REC_ADD (cat "Delete \"" (tackon RT_DST RT_NAME) "\" QUIET\n")) (P_rec_add)))
+        ))
+      (if RT_SELF
+          ((set REC_ADD (cat "Delete \"" RT_DST "\" QUIET\n")) (P_rec_add)))
+    ))
+)
+
+; SN_T, a configuration file or icon in BK_SUB, into Installed/Remove when
+; it is ours (P_is_ours with BK_MARK/BK_ARCH, or SN_WROTE: this run copied
+; it) or a Backup drawer holds the other stack's copy.  Its copy in
+; Installed is taken again when SN_FRESH (this run wrote it) or there is
+; none yet, so a change made since an earlier run is still a change.
+(procedure P_snap
+  (if (= (exists SN_T (noreq)) 1)
+    (
+      (set BK_SRC SN_T)
+      (set SN_SUB BK_SUB)
+      (set BK_SUB "")
+      (set IS_OURS SN_WROTE)
+      (if (= IS_OURS 0) (P_is_ours))
+      (set BK_SUB SN_SUB)
+      (set SN_BACKED 0)
+      (set SN_N 1)
+      (while (AND (= SN_BACKED 0) (<= SN_N REC_TOPN))
+        (
+          (if (exists (tackon (tackon (tackon D_BACKUP_TOP ("%ld" SN_N)) BK_SUB)
+                              (fileonly SN_T)) (noreq))
+              (set SN_BACKED 1))
+          (set SN_N (+ SN_N 1))
+        ))
+      (if (OR IS_OURS SN_BACKED)
+        (
+          (set SN_DIR (tackon D_INSTALLED BK_SUB))
+          (set SN_COPY (tackon SN_DIR (fileonly SN_T)))
+          (if (OR SN_FRESH (NOT (exists SN_COPY (noreq))))
+            (
+              (if (patmatch "#?/#?" BK_SUB)
+                  (makedir (pathonly SN_DIR)
+                           (prompt ("Creating %s" (pathonly SN_DIR)))
+                           (help H_BACKUP)))
+              (makedir SN_DIR (prompt ("Creating %s" SN_DIR)) (help H_BACKUP))
+              (run ("Copy \"%s\" TO \"%s\" CLONE QUIET" SN_T SN_DIR)
+                   (prompt ("Keeping a copy of %s as it was installed" SN_T))
+                   (help   H_BACKUP))
+            ))
+          (if (exists SN_COPY (noreq))
+              (set REM_ADD
+                (cat
+                     "If EXISTS \"" SN_T "\"\n"
+                     "  \"" REC_SF "\" \"" SN_T "\" \"" SN_COPY "\" BYTES\n"
+                     "  If WARN\n"
+                     "    Echo >>T:AmiNetXDuo-Kept \"" SN_T "\"\n"
+                     "  Else\n"
+                     "    Delete \"" SN_T "\" QUIET\n"
+                     "  EndIf\n"
+                     "EndIf\n")))
+          (if (exists SN_COPY (noreq))
+            (
+              (if (> (+ (strlen REM_TEXT) (strlen REM_ADD)) 2000) (P_rem_flush))
+              (set REM_TEXT (cat REM_TEXT REM_ADD))
+            ))
+        ))
+    ))
+  (set BK_MARK "")
+  (set BK_ARCH "")
+  (set SN_WROTE 0)
+)
+
+(procedure P_write_record
+  (if (= @pretend 0)
+  (
+  (set REC_TOPN (+ BK_MAX (if (> (strlen D_BACKUP) 0) 1 0)))
+  (makedir DOCDIR (prompt ("Creating %s" DOCDIR)) (help H_DOCDIR))
+  (makedir D_INSTALLED (prompt ("Creating %s" D_INSTALLED)) (help H_BACKUP))
+  (copyfiles
+    (prompt "Installing InstallSameFile for Uninstall-AmiNetXDuo")
+    (help   H_BACKUP)
+    (source S_SAMEFILE)
+    (dest   D_INSTALLED)
+    (optional "force" "nofail"))
+
+  ; Installed/Remove, at the end only: the files are written by then.
+  (if REC_FINAL
+    (
+      (set REM_TEXT "")
+      (set REM_PART 0)
+      (set SN_WROTE 0)
+      (set SN_FRESH (if (= KEEP_OLD 0) 1 0))
+      (set BK_SUB "Devs/NetInterfaces")
+      (if (= (exists D_IFDIR (noreq)) 2)
+          (foreach D_IFDIR "~(#?.info)"
+            (if (< @each-type 0)
+              (
+                (set SN_T (tackon D_IFDIR @each-name))
+                (P_snap)
+              ))))
+      (set BK_SUB "Devs/Internet")
+      (set SN_T (tackon D_DEVS "Internet/routes")) (P_snap)
+      (set SN_T (tackon D_DEVS "Internet/name_resolution")) (P_snap)
+      (set SN_FRESH 0)
+      (set BK_MARK "names this machine knows by itself")
+      (set SN_T (tackon D_DEVS "Internet/hosts")) (P_snap)
+      (set RN_N 0)
+      (while (set RN_F (select RN_N "protocols" "services" "networks" ""))
+        (
+          (set BK_ARCH (tackon (tackon S_DEVS "Internet") RN_F))
+          (set SN_T (tackon (tackon D_DEVS "Internet") RN_F)) (P_snap)
+          (set RN_N (+ RN_N 1))
+        ))
+      (set SN_FRESH 1)
+      (set BK_ARCH (tackon (tackon S_DEVS "Internet") "certificates"))
+      (set SN_T (tackon (tackon D_DEVS "Internet") "certificates")) (P_snap)
+      (set BK_SUB "S")
+      (set SN_FRESH (if (AND DO_STARTUP (= KEEP_NETSTART 0)) 1 0))
+      (set SN_T "S:Network-Startup") (P_snap)
+      ; The icons this run copied, as they came out of the copy.
+      (set SN_FRESH 1)
+      (if (= DRAWER_LAYOUT 0)
+        (
+          (set BK_SUB "Prefs")
+          (set SN_WROTE 1) (set SN_T "SYS:Prefs/NetPrefs.info") (P_snap)
+          (set BK_SUB "Utilities")
+          (set SN_WROTE 1) (set SN_T "SYS:Utilities/NetMeter.info") (P_snap)
+          (set BK_SUB "C")
+          (foreach S_CSEL "#?.info"
+            (if (< @each-type 0)
+              (
+                (set SN_WROTE 1)
+                (set SN_T (tackon D_C @each-name))
+                (P_snap)
+              )))
+          (if (OR MADE_CINFO (exists (tackon D_INSTALLED "Made-Cinfo") (noreq)))
+            (
+              (if MADE_CINFO
+                  (textfile
+                    (prompt "Writing the record of C:'s icon")
+                    (help   H_BACKUP)
+                    (dest   (tackon D_INSTALLED "Made-Cinfo"))
+                    (append "; made by the AmiNetXDuo installer\n")))
+              (set SN_WROTE 1) (set SN_T (tackon D_C ".info")) (P_snap)
+            ))
+        ))
+      (set BK_SUB "")
+      (P_rem_flush)
+      (textfile
+        (prompt "Writing the record of the configuration this installation wrote")
+        (help   H_BACKUP)
+        (dest   (tackon D_INSTALLED "Remove"))
+        (append "; Remove -- written by the AmiNetXDuo installer.\n")
+        (append "FailAt 21\n"))
+      (set JN_DEST (tackon D_INSTALLED "Remove"))
+      (set JN_STEM "RemovePart")
+      (set JN_N REM_PART)
+      (P_rec_join)
+    ))
+
+  (set REC_TEXT "")
+  (set REC_PART 0)
+  (set REC_F (tackon D_INSTALLED "Remove"))
+  (set REC_TEXT
+    (cat "Delete >NIL: T:AmiNetXDuo-NotRestored QUIET\n"
+         "Echo \"record started\"\n"
+         "Delete >NIL: T:AmiNetXDuo-Kept QUIET\n"
+         "Delete >NIL: T:AmiNetXDuo-DrawerKept QUIET\n"
+         "If EXISTS \"" REC_F "\"\n"
+         "  Execute \"" REC_F "\"\n"
+         "EndIf\n"))
+  ; The programs.
+  (set REC_F D_BSD) (P_rec_ours)
+  (set REC_F D_UG)  (P_rec_ours)
+  (set REC_F D_TLS) (P_rec_ours)
+  (foreach S_C "~(fat|#?.info)"
+    (if (< @each-type 0)
+      (
+        (set REC_F (tackon D_C @each-name))
+        (P_rec_ours)
+      )))
+  (set REC_F (if DRAWER_LAYOUT (tackon D_ROOT "NetPrefs") "SYS:Prefs/NetPrefs"))
+  (P_rec_ours)
+  (set REC_F (if DRAWER_LAYOUT (tackon D_ROOT "NetMeter") "SYS:Utilities/NetMeter"))
+  (P_rec_ours)
+  (set REC_N 0)
+  (while (set REC_SUB (select REC_N "anxnet.device" "anxgenet.device"
+                                    "anxwifipi.device" "anxzz9000.device" ""))
+    (
+      (set REC_F (tackon (tackon D_DEVS "Networks") REC_SUB)) (P_rec_ours)
+      (set REC_F (cat REC_F ".old"))
+      (set REC_SUB "Devs/Networks")
+      (P_rec_old)
+      (set REC_N (+ REC_N 1))
+    ))
+  ; The .old files.
+  (set REC_SUB "Libs")
+  (set REC_F D_BSD_OLD) (P_rec_old)
+  (set REC_F D_UG_OLD)  (P_rec_old)
+  (set REC_F D_TLS_OLD) (P_rec_old)
+  (set REC_SUB "S")
+  (set REC_F "S:Network-Startup.old") (P_rec_old)
+  ; Back from Backup, lowest first.
+  (set REC_N 1)
+  (while (<= REC_N REC_TOPN)
+    (
+      (set REC_F (tackon (tackon D_BACKUP_TOP ("%ld" REC_N)) "Restore"))
+      ((set REC_ADD (cat
+             "If EXISTS \"" REC_F "\"\n"
+             "  Execute \"" REC_F "\"\n"
+             "EndIf\n")) (P_rec_add))
+      (set REC_N (+ REC_N 1))
+    ))
+  ; The drawers this installation made, empty by now unless somebody else
+  ; put something there.
+  (set REC_F (tackon D_DEVS "Networks")) (set RD_MADE MADE_NETWORKS)
+  (set RD_KEY "Made-Networks") (P_rec_dir)
+  (set REC_F (tackon D_DEVS "Firmware")) (set RD_MADE MADE_FIRMWARE)
+  (set RD_KEY "Made-Firmware") (P_rec_dir)
+  (set REC_F D_IFDIR) (set RD_MADE MADE_IFDIR)
+  (set RD_KEY "Made-NetInterfaces") (P_rec_dir)
+  (set REC_F (tackon D_DEVS "Internet")) (set RD_MADE MADE_INTERNET)
+  (set RD_KEY "Made-Internet") (P_rec_dir)
+  ((set REC_ADD (cat
+         "If NOT EXISTS T:AmiNetXDuo-NotRestored\n"
+         "  Delete \"" D_BACKUP_TOP "\" ALL QUIET\n"
+         "  Delete \"" D_INSTALLED "\" ALL QUIET\n"
+         "EndIf\n")) (P_rec_add))
+  ; The drawer's own files, by name.
+  (set RT_SELF 0)
+  (set RT_SRC S_DOCS) (set RT_DST DOCDIR) (P_rec_tree)
+  (set RT_SELF 1)
+  (set RT_SRC S_EXAM) (set RT_DST (tackon DOCDIR "Examples")) (P_rec_tree)
+  (set RT_SRC S_TERM) (set RT_DST (tackon DOCDIR "Terminal")) (P_rec_tree)
+  (set REC_N 0)
+  (while (set REC_SUB (select REC_N "Installer" "Uninstall-AmiNetXDuo"
+                                    "Uninstall-AmiNetXDuo.info" "ReadMe"
+                                    "ReadMe.info" "Examples.info"
+                                    "Terminal.info" "WirelessManager-LICENSE" ""))
+    (
+      ((set REC_ADD (cat "Delete \"" (tackon DOCDIR REC_SUB) "\" QUIET\n")) (P_rec_add))
+      (set REC_N (+ REC_N 1))
+    ))
+  (if DRAWER_LAYOUT
+    (
+      (set REC_N 0)
+      (while (set REC_SUB (select REC_N "NetPrefs.info" "NetMeter.info" "C.info" ""))
+        (
+          ((set REC_ADD (cat "Delete \"" (tackon D_ROOT REC_SUB) "\" QUIET\n")) (P_rec_add))
+          (set REC_N (+ REC_N 1))
+        ))
+      (set RT_SELF 0)
+      (set RT_SRC S_C) (set RT_DST D_C) (P_rec_tree)
+      (set RT_SRC S_FIRMWARE) (set RT_DST (tackon D_DEVS "Firmware")) (P_rec_tree)
+      ((set REC_ADD (cat
+             "Delete \"" (tackon D_C "fat") "\" QUIET\n"
+             "Delete \"" (tackon D_DEVS "Firmware") "\" QUIET\n"
+             "Delete \"" (tackon D_DEVS "Networks") "\" QUIET\n"
+             "Delete \"" D_IFDIR "\" QUIET\n"
+             "Delete \"" (tackon D_DEVS "Internet") "\" QUIET\n"
+             "Delete \"" D_DEVS "\" QUIET\n"
+             "Delete \"" D_LIBS "\" QUIET\n"
+             "Delete \"" D_C "\" QUIET\n")) (P_rec_add))
+    ))
+  ; Assign EXISTS first: naming an assign that is not there asks for a volume.
+  ((set REC_ADD (cat
+         "Assign >NIL: AmiNetXDuo: EXISTS\n"
+         "If WARN\n"
+         "Else\n"
+         (if DRAWER_LAYOUT
+             (cat "  Assign LIBS: AmiNetXDuo:Libs REMOVE\n"
+                  "  Assign C: AmiNetXDuo:C REMOVE\n"
+                  "  Assign DEVS: AmiNetXDuo:Devs REMOVE\n")
+             "")
+         "  Assign AmiNetXDuo:\n"
+         "EndIf\n"
+         "Delete \"" DOCDIR "\" QUIET\n"
+         "If EXISTS \"" DOCDIR "\"\n"
+         "  Echo >T:AmiNetXDuo-DrawerKept \"" DOCDIR "\"\n"
+         "Else\n"
+         "  Delete \"" DOCDIR ".info\" QUIET\n"
+         "EndIf\n"
+         "Echo >T:AmiNetXDuo-Done \"done\"\n")) (P_rec_add))
+
+  (P_rec_flush)
+  (textfile
+    (prompt "Writing S:AmiNetXDuo-Files")
+    (help   "The record of this installation that Uninstall-AmiNetXDuo, in the "
+            "AmiNetXDuo drawer, runs to remove it again.")
+    (dest   "S:AmiNetXDuo-Files")
+    (append "; S:AmiNetXDuo-Files -- written by the AmiNetXDuo installer.\n")
+    (append ";\n")
+    (append "; Uninstall-AmiNetXDuo executes this after it has removed the\n")
+    (append "; S:User-Startup block and the Wi-Fi and firmware files.\n")
+    (append "FailAt 21\n"))
+  (set JN_DEST "S:AmiNetXDuo-Files")
+  (set JN_STEM "Part")
+  (set JN_N REC_PART)
+  (P_rec_join)
+  ))
 )
 
 ; The libraries, and their .old copies, which the swap deletes: those may
@@ -2400,25 +2947,78 @@
     (set BK_SRC "S:Network-Startup.old")
     (P_backup)
   ))
-; With the libraries, before anything is replaced: a command of the same
-; name in C:, NetPrefs, NetMeter and the certificate store that do not name
-; AmiNetXDuo are another stack's, or the user's.  Over our own library C:
-; holds our own commands, some of which (scp-runner) do not name it.
-(if (AND (= DRAWER_LAYOUT 0) (= LIB_OURS 0))
+; With the libraries, before anything is replaced, in every run: a command
+; of the same name in C:, NetPrefs, NetMeter and their icons, and the
+; certificate store, when they are another stack's or the user's.  Every
+; command names AmiNetXDuo; an icon or the store is ours when it is the
+; archive's own, byte for byte.
+(if (= DRAWER_LAYOUT 0)
   (
     (set BK_SUB "Prefs")
     (set BK_SRC "SYS:Prefs/NetPrefs") (P_backup)
+    (set BK_ARCH (tackon S_C "NetPrefs.info"))
+    (set BK_SRC "SYS:Prefs/NetPrefs.info") (P_backup)
     (set BK_SUB "Utilities")
+    (set BK_ARCH "")
     (set BK_SRC "SYS:Utilities/NetMeter") (P_backup)
+    (set BK_ARCH (tackon S_C "NetMeter.info"))
+    (set BK_SRC "SYS:Utilities/NetMeter.info") (P_backup)
     (set BK_SUB "Devs/Internet")
+    (set BK_ARCH (tackon (tackon S_DEVS "Internet") "certificates"))
     (set BK_SRC (tackon (tackon D_DEVS "Internet") "certificates")) (P_backup)
     (set BK_SUB "C")
-    (foreach S_C "~(fat|#?.info)"
+    (foreach S_C "~(fat)"
+      (if (< @each-type 0)
+        (
+          (set BK_ARCH (if (patmatch "#?.info" @each-name)
+                           (tackon S_C @each-name) ""))
+          (set BK_SRC (tackon D_C @each-name))
+          (P_backup)
+        )))
+    (set BK_ARCH "")
+  ))
+
+; Where this run kept anything: the lines that put it back.
+(if (AND (> (strlen D_BACKUP) 0) (OR (> (strlen BK_RESTORE) 0) (> BK_PART 0)))
+  (
+    (set BK_PART (+ BK_PART 1))
+    (textfile
+      (prompt "Writing the Backup drawer's Restore script")
+      (help   H_BACKUP)
+      (dest   (tackon D_BACKUP ("RestorePart%ld" BK_PART)))
+      (append BK_RESTORE))
+    (textfile
+      (prompt "Writing the Backup drawer's Restore script")
+      (help   H_BACKUP)
+      (dest   (tackon D_BACKUP "Restore"))
+      (append "; Restore -- written by the AmiNetXDuo installer.\n")
+      (append "FailAt 21\n"))
+    (set JN_I 1)
+    (while (<= JN_I BK_PART)
       (
-        (set BK_SRC (tackon D_C @each-name))
-        (P_backup)
+        (set JN_F (tackon D_BACKUP ("RestorePart%ld" JN_I)))
+        (if (<> 0 (run ("Type >>\"%s\" \"%s\"" (tackon D_BACKUP "Restore") JN_F)
+                       (prompt "Writing the Backup drawer's Restore script")
+                       (help   H_BACKUP)))
+            (abort (cat "Writing " (tackon D_BACKUP "Restore") " failed: " JN_F
+                        " could not be added to it.  Nothing on the disk has "
+                        "been replaced.  Free space on that volume and run "
+                        "the installer again.")))
+        (delete JN_F (optional "force" "nofail"))
+        (set JN_I (+ JN_I 1))
       ))
   ))
+
+; The drawers this installation makes, so that the uninstaller removes them
+; again when they are empty, and the record, before anything is replaced:
+; an installation stopped after this point can still be undone.
+(set MADE_NETWORKS   (if (exists (tackon D_DEVS "Networks") (noreq)) 0 1))
+(set MADE_FIRMWARE   (if (exists (tackon D_DEVS "Firmware") (noreq)) 0 1))
+(set MADE_IFDIR      (if (exists D_IFDIR (noreq)) 0 1))
+(set MADE_INTERNET   (if (exists (tackon D_DEVS "Internet") (noreq)) 0 1))
+(set MADE_CINFO      (if (exists (tackon D_C ".info") (noreq)) 0 1))
+(set REC_FINAL 0)
+(P_write_record)
 
 (working "Installing the libraries")
 
@@ -2645,10 +3245,16 @@
       ; System layout only: a drawer install's firmware goes with its drawer,
       ; and DEVS:Firmware has no space in it to quote.
       (if (AND (= DRAWER_LAYOUT 0) (exists (tackon D_FIRMWARE FW_NAME) (noreq)))
+        (
+          (if (NOT (exists "S:AmiNetXDuo-Firmware" (noreq)))
+              (run "Echo >S:AmiNetXDuo-Firmware \"FailAt 21\""
+                   (prompt "Recording the firmware file for Uninstall-AmiNetXDuo")
+                   (help   H_BACKUP)))
           (run ("Echo >>S:AmiNetXDuo-Firmware \"Delete DEVS:Firmware/%s QUIET\""
                 FW_NAME)
                (prompt "Recording the firmware file for Uninstall-AmiNetXDuo")
-               (help   H_BACKUP)))
+               (help   H_BACKUP))
+        ))
     ))
 )
 
@@ -2784,9 +3390,6 @@
 ; --- the commands --------------------------------------------------------
 
 (working "Installing the network commands")
-
-; The C drawer's own icon, which the copy below brings along when C: had none.
-(set HAD_C_INFO (if (exists (tackon D_C ".info") (noreq)) 1 0))
 
 
 (copyfiles
@@ -3731,103 +4334,9 @@
               "network does not start by itself.")
       (help   H_STARTUP)))
 
-; --- the record Uninstall-AmiNetXDuo runs --------------------------------
-;
-; An AmigaDOS script: delete what this installation put on the disk, put
-; back the other stack's files kept in Backup, and remove the drawer.  The
-; drawer layout keeps everything in the drawer.  The configuration files
-; are Uninstall-AmiNetXDuo's to find: they name this installer.
-(set REC_FILES "")
-(if (exists (tackon (tackon S_DEVS "Internet") "certificates") (noreq))
-    (set REC_FILES
-      (cat "Delete \"" (tackon (tackon D_DEVS "Internet") "certificates")
-           "\" QUIET\n")))
-(if (= DRAWER_LAYOUT 0)
-  (
-    (set REC_FILES
-      (cat REC_FILES
-           "Delete \"" D_BSD "\" QUIET\n"
-           "Delete \"" D_UG "\" QUIET\n"
-           (if (exists (tackon S_LIBS "tls.library") (noreq))
-               (cat "Delete \"" D_TLS "\" QUIET\n") "")
-           "Delete SYS:Prefs/NetPrefs QUIET\n"
-           "Delete SYS:Prefs/NetPrefs.info QUIET\n"
-           "Delete SYS:Utilities/NetMeter QUIET\n"
-           "Delete SYS:Utilities/NetMeter.info QUIET\n"))
-    (if DO_ANXNET
-      (
-        (set REC_N 0)
-        (while (set REC_SUB (select REC_N "anxnet.device" "anxgenet.device"
-                                          "anxwifipi.device" "anxzz9000.device"
-                                          ""))
-          (
-            (set REC_FILES
-              (cat REC_FILES "Delete \""
-                   (tackon (tackon D_DEVS "Networks") REC_SUB) "\" QUIET\n"))
-            (set REC_N (+ REC_N 1))
-          ))
-      ))
-    (foreach S_C "~(fat)"
-      (set REC_FILES
-        (cat REC_FILES "Delete \"" (tackon D_C @each-name) "\" QUIET\n")))
-    (if (OR (= HAD_C_INFO 0) LIB_OURS)
-        (set REC_FILES
-          (cat REC_FILES "Delete \"" (tackon D_C ".info") "\" QUIET\n")))
-  ))
-
-; Back from Backup, in either layout, and the drawer's assigns away so
-; nothing holds the drawer.  A drawer whose Workbench window is open stays,
-; empty, until it is closed.
-; Every numbered Backup drawer, highest first, so for each file the copy in
-; the lowest-numbered drawer that has it -- the other stack as first found
-; -- is the one left in place.
-(set REC_BK BK_MAX)
-(if (> (strlen D_BACKUP) 0) (set REC_BK (+ BK_MAX 1)))
-(while (> REC_BK 0)
-  (
-    (set REC_DIR (tackon D_BACKUP_TOP ("%ld" REC_BK)))
-    (set REC_N 0)
-    (while (set REC_SUB (select REC_N "Libs" "C" "Devs" "S" "Prefs" "Utilities" ""))
-      (
-        (set REC_FILES
-          (cat REC_FILES
-               "If EXISTS \"" (tackon REC_DIR REC_SUB) "\"\n"
-               "  Copy \"" (tackon REC_DIR REC_SUB) "\" "
-               (select REC_N "LIBS:" "C:" "DEVS:" "S:" "SYS:Prefs" "SYS:Utilities")
-               " ALL CLONE QUIET\n"
-               "EndIf\n"))
-        (set REC_N (+ REC_N 1))
-      ))
-    (set REC_BK (- REC_BK 1))
-  ))
-; Assign EXISTS first: naming an assign that is not there asks for a volume.
-(set REC_FILES
-  (cat REC_FILES
-       "Assign >NIL: AmiNetXDuo: EXISTS\n"
-       "If WARN\n"
-       "Else\n"
-       (if DRAWER_LAYOUT
-           (cat "  Assign LIBS: AmiNetXDuo:Libs REMOVE\n"
-                "  Assign C: AmiNetXDuo:C REMOVE\n"
-                "  Assign DEVS: AmiNetXDuo:Devs REMOVE\n")
-           "")
-       "  Assign AmiNetXDuo:\n"
-       "EndIf\n"))
-
-(textfile
-  (prompt "Writing S:AmiNetXDuo-Files")
-  (help   "The record of this installation that Uninstall-AmiNetXDuo, in the "
-          "AmiNetXDuo drawer, runs to remove it again.")
-  (dest   "S:AmiNetXDuo-Files")
-  (append "; S:AmiNetXDuo-Files -- written by the AmiNetXDuo installer.\n")
-  (append ";\n")
-  (append "; Uninstall-AmiNetXDuo executes this after it has removed the\n")
-  (append "; S:User-Startup block and the configuration files the\n")
-  (append "; installer wrote.\n")
-  (append "FailAt 21\n")
-  (append REC_FILES)
-  (append ("Delete \"%s\" ALL QUIET FORCE\n" DOCDIR))
-  (append ("Delete \"%s.info\" QUIET\n" DOCDIR)))
+; --- the record Uninstall-AmiNetXDuo runs, final -------------------------
+(set REC_FINAL 1)
+(P_write_record)
 
 (complete 100)
 

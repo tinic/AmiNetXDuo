@@ -3,11 +3,11 @@
 ;  AmiNetXDuo -- Commodore Installer script that removes it again
 ;
 ;  Install-AmiNetXDuo leaves S:AmiNetXDuo-Files, an AmigaDOS script that
-;  deletes the files it installed, puts back what it replaced of another
-;  stack (from the AmiNetXDuo drawer's Backup), and removes that drawer.
-;  This script removes the S:User-Startup block, the configuration files
-;  the installer wrote (they name it on their first line), and then runs
-;  that record.
+;  deletes what it installed where that is unchanged since, puts back what
+;  it replaced of another stack (from the AmiNetXDuo drawer's Backup), and
+;  removes that drawer when nothing else is in it.  This script removes the
+;  S:User-Startup block and the Wi-Fi and firmware files, runs that record,
+;  and says what it kept.
 ;
 ;  SPDX-License-Identifier: MIT
 ;
@@ -16,26 +16,35 @@
 (set APPNAME "AmiNetXDuo")
 (set REC     "S:AmiNetXDuo-Files")
 (set WIFIREC "S:AmiNetXDuo-WiFi")
+(set FWREC   "S:AmiNetXDuo-Firmware")
 
 (if (NOT (exists REC (noreq)))
     (abort "There is no S:AmiNetXDuo-Files, the record Install-AmiNetXDuo "
            "writes of what it installed.\n\n"
            "Nothing was changed."))
 
-(welcome "Removing AmiNetXDuo.\n\n")
+(welcome "Removing AmiNetXDuo.")
 
+; Asked at every level, Novice included.
+(set USER_WAS @user-level)
+(user 1)
 (set GO
   (askbool
     (prompt "Remove AmiNetXDuo from this Amiga?\n\n"
             "Its files go, and what it replaced of another stack comes back.  "
-            "The network stops working at the next reboot.")
-    (help (cat "S:User-Startup loses AmiNetXDuo's lines.  The configuration "
-               "files the installer wrote are deleted; files of another stack "
-               "that it replaced are put back from the AmiNetXDuo drawer's "
-               "Backup, and that drawer is removed.\n\n"
-               "Files that end in .old stay where they are."))
+            "AmiNetXDuo stops at the next reboot.")
+    (help (cat "S:User-Startup loses AmiNetXDuo's lines.  The files the "
+               "installer wrote are deleted where they are as it left them; "
+               "one changed since stays.  Files of another stack that it "
+               "replaced are put back from the AmiNetXDuo drawer's Backup "
+               "where nothing is in their place, and the drawer is removed "
+               "when nothing else is in it.\n\n"
+               "Another stack's files come back as they were before "
+               "AmiNetXDuo was installed; that stack runs again after the "
+               "reboot."))
     (choices "Yes, remove it" "No")
     (default 1)))
+(user USER_WAS)
 
 (if (= GO 0)
     (abort "AmiNetXDuo is still installed.\n\nNothing was changed."))
@@ -46,55 +55,7 @@
   (prompt "Removing AmiNetXDuo's lines from S:User-Startup.")
   (help   "Only the lines between ;BEGIN AmiNetXDuo and ;END AmiNetXDuo."))
 
-; The configuration this installer wrote, and nothing else: each such file
-; says so in its first lines.  A file of another stack, or one the user
-; wrote, is left where it is.
-(set MARK "written by the AmiNetXDuo")
-
-(procedure P_drop_ours
-  (if (exists DROP_FILE (noreq))
-      (if (= 0 (run ("Search >NIL: FROM \"%s\" SEARCH \"%s\" QUIET" DROP_FILE MARK)
-                    (quiet) (safe)))
-          (delete DROP_FILE
-                  (prompt ("Deleting %s" DROP_FILE))
-                  (help "A file AmiNetXDuo put there.")
-                  (optional "force" "nofail"))))
-)
-
-(if (= (exists "DEVS:NetInterfaces" (noreq)) 2)
-    (foreach "DEVS:NetInterfaces" "~(#?.info)"
-      (
-        (set DROP_FILE (tackon "DEVS:NetInterfaces" @each-name))
-        (P_drop_ours)
-      )))
-
-(set DROP_N 0)
-(while (set DROP_FILE (select DROP_N "DEVS:Internet/routes"
-                                     "DEVS:Internet/name_resolution"
-                                     "S:Network-Startup" ""))
-  (
-    (P_drop_ours)
-    (set DROP_N (+ DROP_N 1))
-  ))
-
-; The netdb files the installer adds only where there were none, by their
-; own first lines.  The certificate store is the record's.
-(set DROP_N 0)
-(while (set DROP_FILE (select DROP_N "DEVS:Internet/hosts"
-                                     "DEVS:Internet/protocols"
-                                     "DEVS:Internet/services"
-                                     "DEVS:Internet/networks" ""))
-  (
-    (set MARK (select DROP_N "names this machine knows by itself"
-                             "-- IP protocol numbers."
-                             "-- well-known TCP and UDP port numbers."
-                             "-- names for whole networks."))
-    (P_drop_ours)
-    (set DROP_N (+ DROP_N 1))
-  ))
-
-
-(complete 40)
+(complete 20)
 
 ; WirelessManager and Wireless.prefs, when the installer put them there.
 (if (exists WIFIREC (noreq))
@@ -109,26 +70,77 @@
   ))
 
 ; The Wi-Fi firmware files the installer copied, and only those.
-(if (exists "S:AmiNetXDuo-Firmware" (noreq))
+(if (exists FWREC (noreq))
   (
-    (run "Execute S:AmiNetXDuo-Firmware"
+    (run ("Execute %s" FWREC)
          (prompt "Removing the Wi-Fi firmware the installer copied")
          (help "The AmigaDOS script the installer wrote of what it installed."))
-    (delete "S:AmiNetXDuo-Firmware"
-            (prompt "Deleting S:AmiNetXDuo-Firmware")
+    (delete FWREC
+            (prompt ("Deleting %s" FWREC))
             (help "A file AmiNetXDuo put there.")
             (optional "force" "nofail"))
   ))
 
-(run ("Execute %s" REC)
+(complete 40)
+
+(if (exists "T:AmiNetXDuo-Done" (noreq))
+    (delete "T:AmiNetXDuo-Done" (optional "force" "nofail")))
+; What the record's commands say goes to T:AmiNetXDuo-Log.
+(run ("Execute >T:AmiNetXDuo-Log %s" REC)
      (prompt "Deleting AmiNetXDuo's files and putting back what it replaced")
      (help "The AmigaDOS script the installer wrote of what it installed."))
+; The record's last line says it ran to the end; wait for it, bounded.
+; Without it the record stopped part way: it stays, with Backup, so that
+; this can run again.
+(if (= @pretend 0)
+  (
+    (set WAITED 0)
+    (while (AND (NOT (exists "T:AmiNetXDuo-Done" (noreq))) (< WAITED 120))
+      (
+        (run "Wait 1" (safe))
+        (set WAITED (+ WAITED 1))
+      ))
+    (if (> WAITED 0)
+        (run ("Echo >T:AmiNetXDuo-Waited \"%ld\"" WAITED) (safe)))
+    (if (NOT (exists "T:AmiNetXDuo-Done" (noreq)))
+        (abort "The removal did not complete: S:AmiNetXDuo-Files stopped "
+               "before its end.  T:AmiNetXDuo-Log has what its commands "
+               "said.  S:AmiNetXDuo-Files and the AmiNetXDuo drawer's "
+               "Backup stay, so Uninstall-AmiNetXDuo can be run again."))
+    (delete "T:AmiNetXDuo-Done" (optional "force" "nofail"))
+  ))
 
-(delete REC
-        (prompt ("Deleting %s" REC))
-        (help "A file AmiNetXDuo put there.")
-        (optional "force" "nofail"))
+(set NOT_BACK (exists "T:AmiNetXDuo-NotRestored" (noreq)))
+(set KEPT     (exists "T:AmiNetXDuo-Kept" (noreq)))
+(set DRAWER   (exists "T:AmiNetXDuo-DrawerKept" (noreq)))
+
+; The record goes with what it records; kept while anything is still to
+; be put back, so that running this again finishes the job.
+(if (NOT NOT_BACK)
+    (delete REC
+            (prompt ("Deleting %s" REC))
+            (help "A file AmiNetXDuo put there.")
+            (optional "force" "nofail")))
 
 (complete 100)
 
-(exit "AmiNetXDuo is removed.  Reboot to stop the stack that is running now.")
+(set DONE "")
+(if NOT_BACK
+    (set DONE (cat DONE "Some files of the other stack were not put back: "
+                   "a file in its place was changed after the installation, "
+                   "or a copy failed.  T:AmiNetXDuo-NotRestored lists "
+                   "each with its copy in the AmiNetXDuo drawer's Backup, to "
+                   "compare and copy back by hand.  Backup and "
+                   "S:AmiNetXDuo-Files stay, so Uninstall-AmiNetXDuo can be "
+                   "run again.\n\n")))
+(if KEPT
+    (set DONE (cat DONE "Files changed since the installation are kept; "
+                   "T:AmiNetXDuo-Kept lists them.\n\n")))
+(if DRAWER
+    (set DONE (cat DONE "The AmiNetXDuo drawer holds files the installer "
+                   "did not put there, and stays.\n\n")))
+
+(if @pretend
+    (exit "Nothing was removed: this was a pretend run.")
+    (exit (cat DONE "AmiNetXDuo is removed.  Reboot to stop the stack that "
+               "is running now.")))
