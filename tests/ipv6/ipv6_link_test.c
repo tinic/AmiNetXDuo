@@ -236,39 +236,21 @@ ULONG   waited =  0;
     return(TX_TRUE);
 }
 
-static VOID t_setstr(char *dst, ULONG size, const char *src)
-{
-
-ULONG   i;
-
-    for (i = 0; (i + 1UL) < size && src[i] != '\0'; i++)
-    {
-        dst[i] =  src[i];
-    }
-    dst[i] =  '\0';
-}
-
 static VOID t_readd(VOID)
 {
 
 AmiIfConfig     cfg;
-UBYTE          *raw =  (UBYTE *)&cfg;
-ULONG           i;
+const AmiIfConfig *existing = netstack_iface_config(0);
 UWORD           index =  0xFFFFU;
 LONG            rc;
 
     t_log("remove and re-add interface 0:");
 
-    for (i = 0; i < (ULONG)sizeof(cfg); i++)
-    {
-        raw[i] =  0;
-    }
-
-    /* The tag list AddInterfaceTagList() can express: a name, a device and a
-       unit. Everything else is the machine's own record of the interface. */
-    t_setstr(cfg.name,   sizeof(cfg.name),   "eth0");
-    t_setstr(cfg.device, sizeof(cfg.device), "a2065.device");
-    cfg.unit   =  0UL;
+    if (!t_check((UINT)(existing != NULL), "interface config exists for re-add", 0UL))
+        return;
+    /* Preserve the configured device/card and IPv6 policy across removal;
+       zero initialization would silently change CONFIGURE6 to OFF. */
+    cfg = *existing;
     cfg.iptype =  AMI_IPTYPE_STATIC;
     cfg.up     =  FALSE;
 

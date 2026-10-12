@@ -12,6 +12,14 @@ if(NOT CMAKE_CROSSCOMPILING)
     return()
 endif()
 
+# Exercises real SANA-II driver rings with a controlled Ethernet loopback.
+add_executable(netmulticast_test multicast.c)
+target_include_directories(netmulticast_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/src/sana2")
+if(AMIGA_NDK_INCLUDE)
+    target_include_directories(netmulticast_test PRIVATE "${AMIGA_NDK_INCLUDE}")
+endif()
+
 add_executable(netdelay_test
     netdelay.c
     "${CMAKE_SOURCE_DIR}/src/netdev/netdev_clock.c")
