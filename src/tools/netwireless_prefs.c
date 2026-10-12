@@ -358,6 +358,27 @@ void nw_prefs_order(const NwNetwork *nets, int count, unsigned char *order)
     }
 }
 
+int nw_prefs_rank(const NwNetwork *nets, const unsigned char *order, int count,
+                  const unsigned char *ssid, int len)
+{
+    int i, k, at = 0;
+
+    for (i = 0; i < count; i++)
+    {
+        const NwNetwork *n = &nets[order[i]];
+
+        if (n->disabled) continue;
+        if (n->ssid_len == len)
+        {
+            for (k = 0; k < len && n->ssid[k] == ssid[k]; k++)
+                ;
+            if (k == len) return at;
+        }
+        at++;
+    }
+    return -1;
+}
+
 int nw_prefs_order_edits(const NwNetwork *nets, int count,
                          const unsigned char *order, int shown,
                          NwBlockEdit *edits, NwField *fields, char (*prio)[12])

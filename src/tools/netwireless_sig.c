@@ -110,6 +110,20 @@ int nw_bars(long dbm)
     return 1;
 }
 
+void nw_scan_rank_sort(NwScan *list, int n)
+{
+    int    i, k;
+    NwScan e;
+
+    for (i = 1; i < n; i++)
+    {
+        e = list[i];
+        for (k = i; k > 0 && list[k - 1].rank > e.rank; k--)
+            list[k] = list[k - 1];
+        list[k] = e;
+    }
+}
+
 int nw_scan_add(NwScan *list, int n, int max, const NwScan *e)
 {
     int i, k, aps = 1, hidden = 1;

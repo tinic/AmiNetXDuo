@@ -550,6 +550,22 @@ static ULONG count(const char *needle)
     return c;
 }
 
+/* Where needle first is in out, or -1. */
+static LONG where(const char *needle)
+{
+    const char *h;
+    ULONG       n = 0, i;
+
+    while (needle[n] != 0) n++;
+    for (h = out; *h != 0; h++)
+    {
+        for (i = 0; i < n && h[i] == needle[i]; i++)
+            ;
+        if (i == n) return (LONG)(h - out);
+    }
+    return -1;
+}
+
 /* Runs a command with its output in T:wsout, prints that, and keeps it in
    out for has(). */
 static LONG run(const char *command)
@@ -811,6 +827,36 @@ int main(void)
     rc = run(PREFS " STATUS");
     check(has("WirelessManager running") && has("Network       Home"),
           "status names the joined network");
+
+    /* Known networks first in LIST, the one in use marked. */
+    rc = run(PREFS " LIST");
+    {
+        LONG h = where("Home "), c = where("Cafe "), n = where("Neighbour ");
+
+        check(rc == 0 && h >= 0 && c > h && n > c &&
+              has("WPA2  (connected)") && has("Open  (known)") &&
+              count("(known)") == 1,
+              "LIST: the network in use, the known one, the rest");
+    }
+
+    /* JOIN of a known network without PASSPHRASE: the key it has, moved to
+       the top; with PASSPHRASE: the key replaced. */
+    rc = run(PREFS " JOIN=Cafe");
+    slurp("ENV:Sys/Wireless.prefs");
+    check(rc == 0 && has("ssid=\"Cafe\"\n\tkey_mgmt=NONE\n\tpriority=3") &&
+          has("psk=e73550102e12a3328959f66713ca8d1e393643502666bdf6d416db71750f6f6a"),
+          "JOIN of a known open network: on top, Home's key kept");
+    rc = run(PREFS " JOIN=Home");
+    check(rc == 0 && has("Joining the known network.") && has("Connected.") &&
+          ws->ssid[0] == 'H', "JOIN of a known network uses the saved key");
+    slurp("ENV:Sys/Wireless.prefs");
+    check(has("psk=e73550102e12a3328959f66713ca8d1e393643502666bdf6d416db71750f6f6a\n\tkey_mgmt=WPA-PSK\n\tpriority=3"),
+          "the saved key kept, Home on top again");
+    rc = run(PREFS " JOIN=Home PASSPHRASE=different1");
+    slurp("ENV:Sys/Wireless.prefs");
+    check(rc == 0 && has("ssid=\"Home\"\n\tpsk=") && !has("e73550102e12") &&
+          !has("different1") && count("psk=") == 1,
+          "JOIN with a new passphrase replaces the saved key");
     rc = run(PREFS " JOIN=Bad PASSPHRASE=short");
     check(rc == RETURN_ERROR, "a five-character passphrase is refused");
     stop_wm();

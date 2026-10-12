@@ -235,8 +235,29 @@ static void test_picture(void)
     check(x == 0, "too small: cleared, nothing drawn");
 }
 
+/* Connected first, known by priority, the rest in scanned order. */
+static void test_rank_sort(void)
+{
+    static const int ranks[5] = { NW_RANK_OTHER, 2, NW_RANK_OTHER,
+                                  NW_RANK_CONNECTED, 1 };
+    static const int want[5] = { 3, 4, 1, 0, 2 };
+    NwScan list[5];
+    int    i, ok = 1;
+
+    for (i = 0; i < 5; i++)
+    {
+        list[i].rank = ranks[i];
+        list[i].signal = -40 - i;       /* which entry it was */
+    }
+    nw_scan_rank_sort(list, 5);
+    for (i = 0; i < 5; i++)
+        if (list[i].signal != -40 - want[i]) ok = 0;
+    check(ok, "rank sort: connected, known by priority, others as scanned");
+}
+
 int main(void)
 {
+    test_rank_sort();
     test_security();
     test_bars();
     test_scan();
