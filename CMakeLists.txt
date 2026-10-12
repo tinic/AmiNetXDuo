@@ -1764,6 +1764,13 @@ endif()
 # relocation is well formed.  `ping` rebooted the machine on one of these.
 # See cmake/check-pcrel-branches.cmake and docs/RESEARCH.md §25.
 find_program(AMINETXDUO_PYTHON3 NAMES python3 REQUIRED)
+# A build that asked for -save-temps itself (tools/check-stack-frames.sh reads
+# the ltrans .s and .su files) keeps them; otherwise they go after a pass.
+if(CMAKE_C_FLAGS MATCHES "-save-temps")
+    set(_pcrel_keep_temps ON)
+else()
+    set(_pcrel_keep_temps OFF)
+endif()
 function(aminetxduo_check_pcrel target)
     if(NOT CMAKE_CROSSCOMPILING)
         return()
@@ -1783,6 +1790,7 @@ function(aminetxduo_check_pcrel target)
                 "-DBINARY=$<TARGET_FILE:${target}>"
                 "-DMAPFILE=$<TARGET_FILE:${target}>.map"
                 "-DDIRS=${CMAKE_CURRENT_BINARY_DIR}|$<TARGET_FILE_DIR:${target}>"
+                "-DKEEP_TEMPS=${_pcrel_keep_temps}"
                 -P "${CMAKE_SOURCE_DIR}/cmake/check-pcrel-branches.cmake"
         VERBATIM)
     # And for a write to a5 inside a function framed with `link a5`: the

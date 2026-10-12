@@ -5,8 +5,8 @@
 # through the linker map; exit 2, something it could not check, also fails.
 #
 # Inputs: PYTHON3, TOOL, BINARY, MAPFILE, DIRS (where relative map paths
-# resolve, the link directory first).  The LTO temporaries next to BINARY are
-# removed after a pass and kept after a failure.
+# resolve, the link directory first), KEEP_TEMPS.  The LTO temporaries next to
+# BINARY are removed after a pass unless KEEP_TEMPS, and kept after a failure.
 #
 # SPDX-License-Identifier: MIT
 
@@ -39,6 +39,9 @@ endif()
 
 message("${_all}")
 
+if(KEEP_TEMPS)
+    return()
+endif()
 file(GLOB _temps "${BINARY}.ltrans*" "${BINARY}.wpa.*" "${BINARY}.res"
                  "${BINARY}.lto_wrapper_args")
 if(_temps)
