@@ -82,7 +82,7 @@ enum
 #define NW_LIST_MAX     32
 #define NW_NETS_MAX     16          /* network={} blocks edited          */
 #define NW_DEVICE_LEN   128
-#define NW_ROW_LEN      64
+#define NW_ROW_LEN      80
 #define NW_PASS_MAX     64
 #define NW_FILE_MAX     (32UL * 1024UL)
 #define NW_JOIN_WAIT    30          /* seconds for the association      */
@@ -141,6 +141,8 @@ static struct
     char            sig_text[56];
     char            status[80];
     LONG            selected;
+    UBYTE           sel_ssid[NW_SSID_MAX];  /* the selection, by name      */
+    LONG            sel_len;
     int             shown_bars;             /* the Signal line's, held     */
     ULONG           click_secs, click_micros;
     WORD            want_left, want_top;
@@ -189,6 +191,7 @@ static struct
     UBYTE       was[NW_NETS_MAX];      /* the order as opened */
     LONG        shown;
     LONG        sel;
+    BOOL        sel_fresh;      /* picked, and nothing edited since    */
     ULONG       click_secs, click_micros;
     struct List list;
     struct Node node[NW_NETS_MAX];
@@ -820,8 +823,20 @@ static VOID nw_fill_list(VOID)
         nw.row[i].ln_Name = t;
         AddTail(&nw.rows, &nw.row[i]);
     }
+    /* The selection follows its network into the new order. */
     nw.selected = -1;
-    nw_set(nw.main.win, NW_M_LIST, GTLV_Labels, (ULONG)&nw.rows);
+    for (i = 0; i < nw.count && nw.selected < 0; i++)
+        if (nw_same(nw.nets[i].ssid, nw.nets[i].ssid_len, nw.sel_ssid, nw.sel_len))
+            nw.selected = i;
+    {
+        struct TagItem t[3];
+
+        t[0].ti_Tag = GTLV_Labels;   t[0].ti_Data = (ULONG)&nw.rows;
+        t[1].ti_Tag = GTLV_Selected; t[1].ti_Data = nw.selected >= 0 ? (ULONG)nw.selected : ~0UL;
+        t[2].ti_Tag = TAG_DONE;
+        if (nw.g[NW_M_LIST] != NULL)
+            GT_SetGadgetAttrsA(nw.g[NW_M_LIST], nw.main.win, NULL, t);
+    }
 }
 
 /* The Network and Signal lines, from the unit. */
@@ -1094,8 +1109,13 @@ static VOID nw_close_join(VOID)
     nw.join.win = NULL;
     nw.join.glist = NULL;
     for (i = NW_J_SSID; i <= NW_J_CANCEL; i++) nw.g[i] = NULL;
-    nw.join_wait = 0;
-    nw_known_joining();
+    if (nw.join_wait != 0 && !nw.join_formless)
+    {
+        /* The wait ends with the form: no "(connecting...)" left. */
+        nw.join_wait = 0;
+        nw_known_joining();
+        nw_known_fill();
+    }
 }
 
 static VOID nw_join_status(const char *s)
@@ -1459,6 +1479,7 @@ static VOID nw_join(VOID)
     UBYTE       ssid[NW_SSID_MAX];
     LONG        len;
 
+    if (nw.join_wait != 0) return;      /* one join at a time */
     if (!nw.open_network && nw.pass_len == 0 &&
         (len = nw_form_ssid((const char *)si->Buffer, ssid)) > 0 &&
         (why = nw_known_network(ssid, len, NW_KNOWN_SAVE)) != nw_unknown)
@@ -1532,6 +1553,8 @@ static VOID nw_join_pressed(VOID)
     const NwScan *e = nw.selected >= 0 ? &nw.nets[nw.selected] : NULL;
     const char   *why;
 
+    /* One join at a time. */
+    if (nw.join_wait != 0 && nw.join.win == NULL) return;
     if (e != NULL && nw.join.win == NULL && nw.join_wait == 0)
     {
         why = nw_known_network(e->ssid, e->ssid_len, NW_KNOWN_SAVE);
@@ -1783,6 +1806,7 @@ static BOOL nw_known_load(VOID)
     for (i = 0; i < kn.count; i++) kn.was[i] = kn.order[i];
     kn.shown = kn.count;
     kn.sel = -1;
+    kn.sel_fresh = FALSE;
     return TRUE;
 }
 
@@ -1838,6 +1862,7 @@ static VOID nw_known_move(LONG to)
     kn.order[kn.sel] = kn.order[to];
     kn.order[to] = b;
     kn.sel = to;
+    kn.sel_fresh = FALSE;
     nw_known_fill();
 }
 
@@ -1848,6 +1873,7 @@ static VOID nw_known_remove(VOID)
     for (i = kn.sel; i + 1 < kn.shown; i++) kn.order[i] = kn.order[i + 1];
     kn.shown--;
     if (kn.sel >= kn.shown) kn.sel = kn.shown - 1;
+    kn.sel_fresh = FALSE;
     nw_known_fill();
 }
 
@@ -1858,9 +1884,10 @@ static VOID nw_known_remove(VOID)
 /* Save (ENVARC: and ENV:) or Use (ENV:): priorities from the order shown,
    the top one highest, removed blocks taken out, everything else kept;
    then WirelessManager, if it runs, restarted on the new file.  Connect,
-   and Use with a network selected that is not the one in use: that
-   network moved to the top and joined (Save only stores).  Connect keeps
-   the window open on the new file. */
+   and Use with a network picked that is not the one in use, nothing
+   moved or removed since the pick: that network moved to the top and
+   joined (Save only stores).  Connect writes ENVARC: too, as Join does,
+   and keeps the window open on the new file. */
 static VOID nw_known_store(int how)
 {
     const char *why = NULL;
@@ -1874,7 +1901,8 @@ static VOID nw_known_store(int how)
 
         connect = e->ssid_len > 0 && !e->disabled &&
                   (how == NW_KS_CONNECT ||
-                   !nw_same(e->ssid, e->ssid_len, nw.conn_ssid, nw.conn_len));
+                   (kn.sel_fresh &&
+                    !nw_same(e->ssid, e->ssid_len, nw.conn_ssid, nw.conn_len)));
         if (connect)
         {
             at = kn.order[kn.sel];
@@ -1913,7 +1941,7 @@ static VOID nw_known_store(int how)
     }
     if (moved)
         why = nw_store_order(kn.text, kn.len, kn.nets, kn.count, kn.order,
-                             kn.shown, how == NW_KS_SAVE);
+                             kn.shown, how != NW_KS_USE);
     if (why != NULL)
     {
         nw_requester(why);
@@ -1921,9 +1949,18 @@ static VOID nw_known_store(int how)
     }
     if (connect)
     {
-        nw.join_hidden = kn.nets[at].scan_ssid != 0;
-        nw.join_open = kn.nets[at].open != 0;
-        why = nw_start_join(kn.nets[at].ssid, kn.nets[at].ssid_len);
+        const NwNetwork *e = &kn.nets[at];
+
+        nw.join_hidden = e->scan_ssid != 0;
+        nw.join_open = e->open != 0;
+        if (!e->has_psk && !e->open && !e->wep)
+        {
+            /* Nothing to join with: the form, for its passphrase. */
+            if (how != NW_KS_CONNECT || !nw_known_load()) nw_close_known();
+            nw_open_form(e->ssid, e->ssid_len, FALSE, nw.join_hidden);
+            return;
+        }
+        why = nw_start_join(e->ssid, e->ssid_len);
         if (how == NW_KS_CONNECT && nw_known_load())
             kn.sel = 0;
         else
@@ -1967,7 +2004,13 @@ static VOID nw_gadget_up(const struct IntuiMessage *m)
             if ((LONG)code == nw.selected && nw.dev_open &&
                 DoubleClick(nw.click_secs, nw.click_micros, m->Seconds, m->Micros))
                 nw_join_pressed();
-            nw.selected = (LONG)code;
+            nw.selected = (LONG)code < nw.count ? (LONG)code : -1;
+            nw.sel_len = -1;
+            if (nw.selected >= 0)
+            {
+                nw.sel_len = nw.nets[nw.selected].ssid_len;
+                CopyMem(nw.nets[nw.selected].ssid, nw.sel_ssid, (ULONG)nw.sel_len);
+            }
             nw.click_secs = m->Seconds;
             nw.click_micros = m->Micros;
             break;
@@ -1975,6 +2018,13 @@ static VOID nw_gadget_up(const struct IntuiMessage *m)
         case NW_M_JOIN: nw_join_pressed(); break;
         case NW_M_DISCONNECT:
             (VOID)nw_wm_stop();
+            if (nw.join_formless)
+            {
+                nw.join_formless = FALSE;
+                nw.join_wait = 0;
+                nw_known_joining();
+                nw_known_fill();
+            }
             nw_refresh_status();
             break;
         case NW_J_SECURITY:
@@ -2024,6 +2074,7 @@ static VOID nw_gadget_up(const struct IntuiMessage *m)
                 break;
             }
             kn.sel = (LONG)code < kn.shown ? (LONG)code : -1;
+            kn.sel_fresh = kn.sel >= 0;
             kn.click_secs = m->Seconds;
             kn.click_micros = m->Micros;
             nw_known_fill();
@@ -2263,6 +2314,7 @@ int main(int argc, char **argv)
 
     nw.selected = -1;
     nw.conn_len = -1;
+    nw.sel_len = -1;
     IconBase = OpenLibrary("icon.library", 37);
     if (argc == 0)
         nw.wbs = (struct WBStartup *)argv;

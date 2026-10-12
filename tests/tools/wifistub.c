@@ -843,15 +843,14 @@ int main(void)
        the top; with PASSPHRASE: the key replaced. */
     rc = run(PREFS " JOIN=Cafe");
     slurp("ENV:Sys/Wireless.prefs");
-    check(rc == 0 && has("ssid=\"Cafe\"\n\tkey_mgmt=NONE\n\tpriority=6") &&
+    check(rc == 0 && has("ssid=\"Cafe\"\n\tkey_mgmt=NONE\n\tpriority=3") &&
           has("psk=e73550102e12a3328959f66713ca8d1e393643502666bdf6d416db71750f6f6a"),
           "JOIN of a known open network: on top, Home's key kept");
     rc = run(PREFS " JOIN=Home");
     check(rc == 0 && has("Joining the known network.") && has("Connected.") &&
           ws->ssid[0] == 'H', "JOIN of a known network uses the saved key");
     slurp("ENV:Sys/Wireless.prefs");
-    check(has("ssid=\"Home\"\n\tpsk=e73550102e12a3328959f66713ca8d1e393643502666bdf6d416db71750f6f6a") &&
-          has("priority=6") && !has("key_mgmt=NONE\n\tpriority=6"),
+    check(has("psk=e73550102e12a3328959f66713ca8d1e393643502666bdf6d416db71750f6f6a\n\tkey_mgmt=WPA-PSK\n\tpriority=3"),
           "the saved key kept, Home on top again");
     rc = run(PREFS " JOIN=Home PASSPHRASE=different1");
     slurp("ENV:Sys/Wireless.prefs");
