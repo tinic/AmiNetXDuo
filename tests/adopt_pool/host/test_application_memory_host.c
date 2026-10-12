@@ -27,6 +27,8 @@ APTR AllocMem(ULONG size, ULONG flags)
     if (fail_allocation)
         return NULL;
     CHECK(owned == NULL);
+    if (size == 0)
+        return NULL;
     owned = calloc(1, size);
     CHECK(owned != NULL);
     allocated_size = size;
