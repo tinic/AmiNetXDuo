@@ -1517,7 +1517,9 @@ if [ -n "$FOREIGN_MODE" ]; then
     # What each replaced file must be as .old, and what the kept ones stay.
     FOREIGN_OLD_EXPECTED=$(
         for f in "${FOREIGN_REPLACED_FILES[@]}"; do
-            printf '%s.old %s\n' "$f" "$(shasum < "$HD/$f" | cut -d' ' -f1)"
+            _sfx=.old
+            case "$f" in Devs/NetInterfaces/*) _sfx=.old.info ;; esac
+            printf '%s%s %s\n' "$f" "$_sfx" "$(shasum < "$HD/$f" | cut -d' ' -f1)"
         done
         for f in "${FOREIGN_CONFIG_FILES[@]}"; do
             case " ${FOREIGN_REPLACED_FILES[*]} " in *" $f "*) continue ;; esac

@@ -102,7 +102,8 @@ The installer asks, in this order:
      Into the system, or into its own drawer      (into the system;
                                                    Intermediate and Expert)
      Keep an existing configuration               (yes for AmiNetXDuo's;
-                                                   no for another stack's)
+                                                   no for another stack's
+                                                   when a device was found)
      Which card, and for PCMCIA which card type
      The interface name and unit                  (eth0, 0; Expert)
      Answer to <hostname>.local on the network    (no)
@@ -168,9 +169,10 @@ that library to bsdsocket.library.old, or remove the other stack first.
 In the system layout, a bsdsocket.library already in LIBS: -- from AmiTCP,
 Miami, Genesis or Roadshow -- is renamed to bsdsocket.library.old rather
 than deleted, after a page that asks first; an earlier AmiNetXDuo's is
-replaced without one.  Another stack's network configuration is set up
-again by default, and every file that replaces one of its files keeps the
-old one beside it with .old added to the name.  Every library is copied in
+replaced without one.  When a network device was found, another stack's
+network configuration is set up again by default.  Each file replaced then
+stays beside the new one with .old added to its name; an interface file
+gets .old.info, which no interface scan reads.  Every library is copied in
 under a .new name first and swapped after, so a copy that fails leaves the
 installed file in place.
 

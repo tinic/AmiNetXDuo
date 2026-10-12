@@ -237,7 +237,8 @@
        "\"Set them up again\" answers the network questions again.  That "
        "rewrites the interface files, DEVS:Internet/routes and "
        "DEVS:Internet/name_resolution, and writes a new S:Network-Startup.  "
-       "Each file it replaces is kept beside it with .old added to its name.  "
+       "Each file it replaces is kept beside it, renamed with .old added "
+       "(an interface file with .old.info, which no interface scan reads).  "
        "That is the default when the configuration belongs to another stack "
        "and a network device was found."))
 
@@ -1355,7 +1356,7 @@
 (set OLD_IF "")
 (set D_IFDIR (tackon D_DEVS "NetInterfaces"))
 (if (= (exists D_IFDIR (noreq)) 2)
-    (foreach D_IFDIR "~(#?.info|#?.old)"
+    (foreach D_IFDIR "~(#?.info)"
       (if (= (strlen OLD_IF) 0)
           (if (< @each-type 0)
               (set OLD_IF @each-name)))))
@@ -1364,7 +1365,7 @@
 ; Ours: our library, or an interface file this installer wrote.
 (set CONFIG_OURS LIB_OURS)
 (if (AND HAVE_OLD (= CONFIG_OURS 0))
-    (if (= 0 (run ("Search >NIL: FROM \"%s\" SEARCH \"AmiNetXDuo\" QUIET"
+    (if (= 0 (run ("Search >NIL: FROM \"%s\" SEARCH AmiNetXDuo QUIET"
                    (tackon D_IFDIR OLD_IF))
                   (quiet) (safe)))
         (set CONFIG_OURS 1)))
@@ -2403,23 +2404,30 @@
 
 ; --- the interface file --------------------------------------------------
 
-; Rename FILE_OLD_SRC to <it>.old when it exists, replacing an older .old.
+; Rename FILE_OLD_SRC to <it>FILE_OLD_SUFFIX when it exists, replacing an
+; older one.  An interface file's suffix is .old.info, NetPrefs' rollback
+; name (src/tools/netprefs.c): every scanner of DEVS:NetInterfaces, and
+; Roadshow's ~(#?.info) pattern, skips it.
 (procedure P_keep_old
+  (set FILE_OLD_DST (cat FILE_OLD_SRC FILE_OLD_SUFFIX))
   (if (exists FILE_OLD_SRC (noreq))
     (
-      (if (exists (cat FILE_OLD_SRC ".old") (noreq))
-          (delete (cat FILE_OLD_SRC ".old")
-                  (prompt ("Removing the previous %s.old" FILE_OLD_SRC))
+      (if (exists FILE_OLD_DST (noreq))
+          (delete FILE_OLD_DST
+                  (prompt ("Removing the previous %s" FILE_OLD_DST))
                   (help @copyfiles-help)
-                  (optional "force" "nofail")))
-      (rename FILE_OLD_SRC (cat FILE_OLD_SRC ".old")
-              (prompt ("Keeping the old %s as .old" FILE_OLD_SRC))
-              (help H_KEEPOLD))
+                  (optional "force" "nofail")
+                  (safe)))
+      (rename FILE_OLD_SRC FILE_OLD_DST
+              (prompt ("Keeping the old file as %s" FILE_OLD_DST))
+              (help @copyfiles-help)
+              (safe))
     ))
 )
 
 (procedure P_write_interface
   (set FILE_OLD_SRC (tackon (tackon D_DEVS "NetInterfaces") IFNAME))
+  (set FILE_OLD_SUFFIX ".old.info")
   (P_keep_old)
   (textfile
     (prompt ("Writing DEVS:NetInterfaces/%s" IFNAME))
@@ -2510,7 +2518,9 @@
             (set IFNAME DEFAULT_IF)
             (set USEDHCP 1)
             (set WANTMDNS 0)
-            (P_write_interface)
+            ; An Expert may have named the primary like this one: the file
+            ; just written stays.
+            (if (<> IFNAME PRIMARY_IF) (P_write_interface))
           ))
         (set CARD_INDEX (+ CARD_INDEX 1))
       ))
@@ -2520,6 +2530,7 @@
     ; --- the default route ---------------------------------------------
 
     (set FILE_OLD_SRC (tackon D_DEVS "Internet/routes"))
+    (set FILE_OLD_SUFFIX ".old")
     (P_keep_old)
     (textfile
       (prompt "Writing DEVS:Internet/routes")
@@ -2543,6 +2554,7 @@
     ; --- name resolution ------------------------------------------------
 
     (set FILE_OLD_SRC (tackon D_DEVS "Internet/name_resolution"))
+    (set FILE_OLD_SUFFIX ".old")
     (P_keep_old)
     (textfile
       (prompt "Writing DEVS:Internet/name_resolution")
@@ -2575,7 +2587,7 @@
 ; in this drawer, or the one the assign still names, and only its value.
 ; Another driver, or one of ours elsewhere, is the user's choice and stays.
 (if (AND KEEP_OLD DRAWER_LAYOUT)
-    (foreach D_IFDIR "~(#?.info|#?.old)"
+    (foreach D_IFDIR "~(#?.info)"
       (if (< @each-type 0)
         (
           (set KEPT_IF (tackon D_IFDIR @each-name))
@@ -2893,14 +2905,16 @@
             (delete "S:Network-Startup.old"
                     (prompt "Removing the previous S:Network-Startup.old")
                     (help @copyfiles-help)
-                    (optional "force" "nofail")))
+                    (optional "force" "nofail")
+                    (safe)))
         (rename "S:Network-Startup" "S:Network-Startup.old"
                 (prompt "Renaming the old S:Network-Startup out of the way")
                 (help "S:Network-Startup already exists -- Roadshow keeps its "
                       "own there, and so may an earlier AmiNetXDuo.  It is "
                       "renamed to S:Network-Startup.old rather than being "
                       "overwritten, so nothing in it is lost.  To go back to "
-                      "it, rename it over the new one from a Shell."))
+                      "it, rename it over the new one from a Shell.")
+                (safe))
       ))
 
     (textfile
@@ -2927,7 +2941,7 @@
       (append "; To start EVERY definition in the drawer, which is what\n")
       (append "; Roadshow does, use the pattern instead of a name:\n")
       (append ";\n")
-      (append ";     " C_PREFIX "AddNetInterface DEVS:NetInterfaces/~(#?.info|#?.old) QUIET\n")
+      (append ";     " C_PREFIX "AddNetInterface DEVS:NetInterfaces/~(#?.info) QUIET\n")
       (append ";\n")
       (append "; To stop the network starting at boot, comment the line out\n")
       (append "; with a leading semicolon.  Nothing else has to change.\n")
