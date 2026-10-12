@@ -695,6 +695,9 @@
       "ariadne_ii.device" "hydra.device" "eb920.device"
       "x-surf.device" "cnet.device" "anxwifipi.device"
       "uaenet.device" CUSTOM_DEV))
+  ; Emu68 1.0.x with Emu68's own driver installed (GENET_LEGACY, section 3).
+  (if (AND (= CARD_INDEX 0) GENET_LEGACY)
+    (set DEV_NAME "genet.device"))
   (set CARD_KEY
     (select CARD_INDEX
       "" "" "xsurf100" "xsurf500" "a2065" "ariadne" "ariadne2"
@@ -727,7 +730,7 @@
   (P_dev_path)
   (set DEV_WRITE dev_write)
 
-  (if (AND (= CARD_INDEX 0) DO_ANXNET)
+  (if (AND (= CARD_INDEX 0) DO_ANXNET (NOT GENET_LEGACY))
     (set DEV_WRITE W_ANXGENET)
     (if (AND (= CARD_INDEX 11) DO_ANXNET)
       (set DEV_WRITE W_ANXWIFIPI)
@@ -926,6 +929,27 @@
                 (help "This reads Emu68's device tree.  It does not open or "
                       "reset the Ethernet device.")
                 (safe))) 1 0))
+; A GENET the tree names at an address the 68k cannot reach is Emu68 1.0.x,
+; which predates the /scb mapping anxgenet.device needs.  Emu68's own
+; genet.device, where one is installed, drives it instead; with none, the Pi
+; Ethernet is left out, and a machine with nothing else stops below.
+(set GENET_OLD 0)
+(set GENET_LEGACY 0)
+(if AUTO_GENET
+  (
+    (set PROBE_CMD ("\"%s\" GENETOK" S_NETPROBE))
+    (if (= 5 (run PROBE_CMD
+                   (prompt "Checking the Emu68 version")
+                   (help "This reads Emu68's device tree.  It does not open or "
+                         "reset the Ethernet device.")
+                   (safe)))
+      (
+        (set GENET_OLD 1)
+        (if (OR (exists "DEVS:Networks/genet.device" (noreq))
+                (exists "DEVS:genet.device" (noreq)))
+          (set GENET_LEGACY 1))
+      ))
+  ))
 (set PROBE_CMD ("\"%s\" WIFIPI" S_NETPROBE))
 (set AUTO_WIFIPI
   (if (= 0 (run PROBE_CMD
@@ -970,8 +994,20 @@
 (set PROBE_CMD ("\"%s\" CARD uae" S_NETPROBE))
 (if (= 0 (run PROBE_CMD (quiet) (safe)))
   (set CARD_DEFAULT (bitor CARD_DEFAULT 4096)))
-(if AUTO_GENET  (set CARD_DEFAULT (bitor CARD_DEFAULT 1)))
+(if (AND AUTO_GENET (OR (NOT GENET_OLD) GENET_LEGACY))
+  (set CARD_DEFAULT (bitor CARD_DEFAULT 1)))
 (if AUTO_WIFIPI (set CARD_DEFAULT (bitor CARD_DEFAULT 2048)))
+
+; Only the unreachable GENET was found, and no driver file either: nothing
+; this installer writes can bring the network up.  Before any question, so
+; nothing has been written.  Expert continues to the card page.
+(if (AND GENET_OLD (NOT GENET_LEGACY) (< @user-level 2)
+         (= (bitor CARD_DEFAULT DRIVER_DEFAULT) 0))
+    (abort "anxgenet.device needs Emu68 1.1 alpha.1 or newer.  This Emu68 "
+           "does not map the Raspberry Pi Ethernet for the 68k.\n\n"
+           "Update Emu68, or install Emu68's genet.device, then run this "
+           "installer again.\n\n"
+           "Nothing was changed."))
 
 ; If hardware was enumerated, do not also preselect stale Zorro driver files.
 ; Preserve only the devices that have no safe hardware identity to inspect.

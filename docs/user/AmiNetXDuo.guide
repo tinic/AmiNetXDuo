@@ -1908,11 +1908,12 @@
       3ccfem556  3cxem556
 
   anxgenet.device is the separate driver for the Ethernet of a Raspberry Pi
-  4 or CM4 on a PiStorm32 running Emu68 1.1 alpha.1 or newer. Emu68 1.0.3 is
-  not supported: it
-  predates both the working RGMII pin setup and the /scb mapping the driver
-  consumes. The driver finds GENET through Emu68's device tree and takes its
-  interrupt through gic400.library.
+  4 or CM4 on a PiStorm32 running Emu68 1.1 alpha.1 or newer. Emu68 1.0.x is
+  not supported: it predates both the working RGMII pin setup and the /scb
+  mapping the driver consumes. On an older Emu68 the installer writes
+  DEVICE=genet.device when Emu68's own driver is installed. With no other
+  network device found, it stops before it changes anything. The driver finds GENET through Emu68's
+  device tree and takes its interrupt through gic400.library.
   Name it with DEVICE=anxgenet.device and UNIT=0; it does not use CARD=.
   Measured on an A1200 with a PiStorm32 Lite: iperf 900 Mbit/s in and
   580 out with receive offload (142 and 65 before it).

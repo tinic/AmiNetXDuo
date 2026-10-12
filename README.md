@@ -56,7 +56,9 @@ Any SANA-II driver works. The archive also brings its own:
 | `anxwifipi.device` | Raspberry Pi 4 Wi-Fi, PiStorm32 with Emu68 (experimental) |
 
 The installer finds the card and writes the interface definition; on Emu68 it
-finds the Pi's Ethernet and Wi-Fi itself.
+finds the Pi's Ethernet and Wi-Fi itself. On an Emu68 older than 1.1 alpha.1
+it uses Emu68's own `genet.device` when one is installed; with no other network
+device found, it stops.
 
 The Wi-Fi driver needs the firmware Emu68 installs in `DEVS:Firmware`. With
 the Pi Wi-Fi selected, at every installer level:
