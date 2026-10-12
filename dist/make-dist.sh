@@ -76,7 +76,7 @@ DEVICES=(netdev/anxnet netdev/anxgenet wifipi/anxwifipi)
 if grep -q '^AMINETXDUO_ZZ9000:BOOL=ON$' "$BUILD/CMakeCache.txt" 2>/dev/null; then
     DEVICES+=(netdev/anxzz9000)
 fi
-CMDS=(AddNetInterface NetSetup NetPrefs NetMeter NetWirelessPrefs Online Offline ShowNetStatus ShowNetServices
+CMDS=(AddNetInterface NetSetup NetPrefs NetMeter NetWireless NetWirelessPrefs Online Offline ShowNetStatus ShowNetServices
       ping netstat host hostname
       nslookup arp fetch nc telnet NetTrace NetCapture sntp traceroute tftp
       whois httpd

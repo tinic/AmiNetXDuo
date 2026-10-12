@@ -85,11 +85,7 @@ static struct IOSana2Req *nw_req_copy(const struct IOSana2Req *from,
 
 LONG nw_dev_open(NwDev *d, const char *device, ULONG unit)
 {
-    static const char prefix[] = "Networks/";
-    char  path[128];
     LONG  err;
-    ULONG i, n;
-    BOOL  resident;
 
     d->port  = CreateMsgPort();
     d->async = CreateMsgPort();
@@ -105,29 +101,33 @@ LONG nw_dev_open(NwDev *d, const char *device, ULONG unit)
     d->req->ios2_Req.io_Message.mn_ReplyPort = d->port;
     d->req->ios2_BufferManagement = nw_buffer_tags;
 
+    /* As given (a relative name is looked for in DEVS:), then a bare name
+       in DEVS:Networks/, where the installer puts drivers, unless a
+       resident driver of that name refused. */
     err = (LONG)(BYTE)OpenDevice((CONST_STRPTR)device, unit,
                                  (struct IORequest *)d->req, 0);
-    Forbid();
-    resident = FindName(&SysBase->DeviceList, (CONST_STRPTR)device) != NULL;
-    Permit();
-    /* A resident driver that refused was not a file that was missing. */
-    if (err != 0 && !resident)
+    if (err != 0)
     {
-        LONG first = err;
+        char        path[128] = "Networks/";
+        const char *c;
+        ULONG       i = 9;
+        BOOL        bare = TRUE, resident;
 
-        /* A bare name is also looked for where the installer puts it. */
-        for (n = 0; device[n] != '\0'; n++)
-            if (device[n] == ':' || device[n] == '/') break;
-        if (device[n] == '\0' && n + sizeof(prefix) <= sizeof(path))
+        for (c = device; *c != '\0' && i + 1 < sizeof(path); c++)
         {
-            for (i = 0; prefix[i] != '\0'; i++) path[i] = prefix[i];
-            for (n = 0; device[n] != '\0'; n++) path[i++] = device[n];
-            path[i] = '\0';
+            if (*c == ':' || *c == '/') bare = FALSE;
+            path[i++] = *c;
+        }
+        path[i] = '\0';
+        Forbid();
+        resident = FindName(&SysBase->DeviceList, (CONST_STRPTR)device) != NULL;
+        Permit();
+        if (bare && !resident && *c == '\0')
+        {
             d->req->ios2_Req.io_Device = NULL;
             d->req->ios2_Req.io_Unit = NULL;
-            err = (LONG)(BYTE)OpenDevice((CONST_STRPTR)path, unit,
-                                         (struct IORequest *)d->req, 0);
-            if (err != 0) err = first;
+            if (OpenDevice((CONST_STRPTR)path, unit, (struct IORequest *)d->req, 0) == 0)
+                err = 0;
         }
     }
     if (err != 0)
@@ -260,6 +260,7 @@ BOOL nw_dev_network(NwDev *d, UBYTE ssid[NW_SSID_MAX], LONG *ssid_len,
     BOOL            ok = FALSE;
 
     *ssid_len = -1;
+    d->net_channel = d->net_band5 = -1;
     if (pool == NULL) return FALSE;
     d->req->ios2_Data = pool;
     d->req->ios2_StatData = NULL;
@@ -273,7 +274,17 @@ BOOL nw_dev_network(NwDev *d, UBYTE ssid[NW_SSID_MAX], LONG *ssid_len,
                 *ssid_len = nw_copy_ssid((const UBYTE *)t->ti_Data, ssid);
             else if (t->ti_Tag == NW_S2INFO_BSSID && t->ti_Data != 0)
                 CopyMem((APTR)t->ti_Data, bssid, 6);
+            else if (t->ti_Tag == NW_S2INFO_Channel)
+                d->net_channel = (LONG)t->ti_Data;
+            else if (t->ti_Tag == NW_S2INFO_Band)
+                /* A is 5 GHz, B and G 2.4 GHz; N is either. */
+                d->net_band5 = t->ti_Data == NW_S2BAND_A ? 1 :
+                               (t->ti_Data == NW_S2BAND_B ||
+                                t->ti_Data == NW_S2BAND_G) ? 0 : -1;
         }
+        /* A band the driver left out follows from the channel. */
+        if (d->net_band5 < 0 && d->net_channel > 0)
+            d->net_band5 = d->net_channel > 14;
     }
     d->req->ios2_Data = NULL;
     d->req->ios2_StatData = NULL;

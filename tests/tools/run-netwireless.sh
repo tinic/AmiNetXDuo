@@ -27,8 +27,10 @@ case "$BUILD" in /*) ;; *) BUILD="$ROOT/$BUILD" ;; esac
 
 EXE="$BUILD/tests/tools/WifiStub"
 PREFS="$BUILD/src/tools/NetWirelessPrefs"
+CX="$BUILD/src/tools/NetWireless"
+WAITBREAK="$BUILD/tests/tools/WaitBreak"
 WM="$BUILD/tests/tools/WmStub"
-for f in "$EXE" "$PREFS" "$WM"; do
+for f in "$EXE" "$PREFS" "$CX" "$WM" "$WAITBREAK"; do
     [ -f "$f" ] || { echo "missing $f (build the cross tree first)" >&2; exit 2; }
 done
 
@@ -52,11 +54,12 @@ cp "$WM" "$STAGE/c/WirelessManager"
 . "$ROOT/tools/test-verdict.sh"
 
 set +e
-"$ROOT/tools/amiberry-run.sh" -m "$MODEL" -t "$TIMEOUT" "$EXE" "$PREFS" \
+"$ROOT/tools/amiberry-run.sh" -m "$MODEL" -t "$TIMEOUT" "$EXE" "$PREFS" "$CX" \
+    "$WAITBREAK" \
     "$STAGE/devs" "$STAGE/c"
 RUN_RC=$?
 set -e
 
-verdict_guest "netwireless" 28 "$RUN_RC" \
+verdict_guest "netwireless" 39 "$RUN_RC" \
     "$(verdict_hd_amiberry)/stdout.txt" "$(verdict_serial_amiberry)" && exit 0
 exit $?

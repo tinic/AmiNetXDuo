@@ -135,9 +135,10 @@ static struct
     struct Node     row[NW_LIST_MAX];
     char            row_text[NW_LIST_MAX][NW_ROW_LEN];
     char            net_text[NW_SSID_MAX + 16];
-    char            sig_text[40];
+    char            sig_text[56];
     char            status[80];
     LONG            selected;
+    int             shown_bars;             /* the Signal line's, held     */
     ULONG           click_secs, click_micros;
     WORD            want_left, want_top;
     struct WBStartup *wbs;
@@ -257,6 +258,10 @@ static LONG nw_shell_status(VOID)
         nw_print_ssid(ssid, ssid_len, 0);
         tool_format_mac(bssid, mac, sizeof(mac));
         tool_printf("\nAccess point  %s\n", (LONG)mac);
+        if (nw.dev.net_channel > 0)
+            tool_printf("Channel       %ld%s\n", nw.dev.net_channel,
+                        (LONG)(nw.dev.net_band5 == 1 ? ", 5 GHz"
+                               : nw.dev.net_band5 == 0 ? ", 2.4 GHz" : ""));
     }
     tool_printf("Signal        %ld dBm, %ld of 4 bars\n", signal,
                 (LONG)nw_bars(signal));
@@ -620,6 +625,7 @@ static VOID nw_refresh_status(VOID)
 
     nw.sig_text[0] = '\0';
     link = nw.dev_open ? nw_dev_signal(&nw.dev, &signal, &noise) : NW_LINK_NODEV;
+    if (link != NW_LINK_UP) nw.shown_bars = 0;
     tool_copy_string(nw.net_text, sizeof(nw.net_text), words[link]);
     if (link == NW_LINK_UP)
     {
@@ -627,10 +633,20 @@ static VOID nw_refresh_status(VOID)
             nw_ssid_text(ssid, (int)len, nw.net_text);
         nw_decimal(signal, nw.sig_text);
         nw_append(nw.sig_text, sizeof(nw.sig_text), " dBm, ");
-        bars[0] = (char)('0' + nw_bars(signal));
+        /* With the commodity's hysteresis, so the two agree. */
+        nw.shown_bars = nw_bars_held(signal, nw.shown_bars);
+        bars[0] = (char)('0' + nw.shown_bars);
         bars[1] = '\0';
         nw_append(nw.sig_text, sizeof(nw.sig_text), bars);
         nw_append(nw.sig_text, sizeof(nw.sig_text), " of 4 bars");
+        if (len >= 0 && nw.dev.net_channel > 0)
+        {
+            nw_append(nw.sig_text, sizeof(nw.sig_text), ", channel ");
+            nw_decimal(nw.dev.net_channel, nw.sig_text + nw_len(nw.sig_text));
+            if (nw.dev.net_band5 >= 0)
+                nw_append(nw.sig_text, sizeof(nw.sig_text),
+                          nw.dev.net_band5 ? ", 5 GHz" : ", 2.4 GHz");
+        }
     }
     nw_set(nw.main.win, NW_M_NETWORK, GTTX_Text, (ULONG)nw.net_text);
     nw_set(nw.main.win, NW_M_SIGNAL, GTTX_Text, (ULONG)nw.sig_text);
