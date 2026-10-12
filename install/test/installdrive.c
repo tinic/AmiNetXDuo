@@ -648,6 +648,36 @@ static LONG option_pages[32];
 static LONG previous_options;
 static LONG current_options;
 
+/*
+ * Whether the Installer's window is still open, whatever it shows.  While it
+ * works -- a long (run), a wait -- the page has no button, and that is not
+ * the run having ended: taking it for the end started the next run, or the
+ * check after the last, beside an Installer that was still writing.  The
+ * window's title names the script: "Install-AmiNetXDuo (n% done)" for an
+ * install, "SYS:AmiNetXDuo/Uninstall-AmiNetXDuo" for an uninstall, so the
+ * match leaves out the first letter.
+ */
+static BOOL installer_window_open(void)
+{
+    struct Screen *screen;
+    BOOL           open = FALSE;
+    ULONG          ilock = LockIBase(0);
+
+    for (screen = IntuitionBase->FirstScreen; screen != NULL && !open;
+         screen = screen->NextScreen)
+    {
+        struct Window *window;
+
+        for (window = screen->FirstWindow; window != NULL && !open;
+             window = window->NextWindow)
+            if (window->Title != NULL &&
+                strstr((const char *)window->Title, "nstall-AmiNetXDuo") != NULL)
+                open = TRUE;
+    }
+    UnlockIBase(ilock);
+    return open;
+}
+
 static struct Window *find_installer_window(struct Gadget **click_out)
 {
     struct Screen *screen;
@@ -1484,7 +1514,15 @@ static BOOL drive_once(LONG run_number, BPTR nil_in, BPTR nil_out)
         }
         else if (seen > 0)
         {
-            if (++gone >= GONE_LIMIT)
+            if (installer_window_open())
+            {
+                /* Working: a trace every ten seconds, so a hang shows. */
+                if (gone != 0 || (polls % 10) == 9)
+                    say("installdrive: poll %ld: the Installer is working\n",
+                        polls);
+                gone = 0;
+            }
+            else if (++gone >= GONE_LIMIT)
                 break;
         }
         else if ((polls % 10) == 9)
