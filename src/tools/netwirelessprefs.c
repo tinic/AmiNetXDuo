@@ -152,6 +152,8 @@ static struct
     UBYTE           join_ssid[NW_SSID_MAX];
     UBYTE           scan_ssid[NW_SSID_MAX];  /* the network selected      */
     LONG            scan_ssid_len;
+    UBYTE           join_bssid[6];          /* before the restart          */
+    BOOL            join_down;
     LONG            join_ssid_len;
     LONG            join_wait;              /* seconds left; 0: not waiting */
     BOOL            join_saved;
@@ -212,7 +214,8 @@ static VOID nw_decimal(LONG v, char *out)
 }
 
 /* DEVICE as given (argument, then ToolType); else the named interface
-   file's; else wifipi's; else the Pi Wi-Fi's own driver.  FALSE for a named
+   file's; else the first interface file with a Wi-Fi driver (wifipi
+   first); else the Pi Wi-Fi's own driver.  FALSE for a named
    interface that names no DEVICE. */
 static BOOL nw_pick_device(const char *device, LONG unit, const char *iface)
 {
@@ -224,8 +227,7 @@ static BOOL nw_pick_device(const char *device, LONG unit, const char *iface)
         if (!nw_dev_from_interface(iface, nw.device, sizeof(nw.device), &nw.unit))
             return FALSE;
     }
-    else if (!nw_dev_from_interface(NW_DEFAULT_INTERFACE, nw.device,
-                                    sizeof(nw.device), &nw.unit))
+    else if (!nw_dev_find(nw.device, sizeof(nw.device), &nw.unit))
         tool_copy_string(nw.device, sizeof(nw.device), NW_DEFAULT_DEVICE);
     if (unit >= 0) nw.unit = (ULONG)unit;
     return TRUE;
@@ -249,7 +251,7 @@ static LONG nw_shell_status(VOID)
     UBYTE ssid[NW_SSID_MAX], bssid[6];
     char  mac[20];
 
-    state = nw_dev_signal(&nw.dev, &signal, &noise);
+    state = nw_dev_link(&nw.dev, &signal, &noise);
     tool_printf("Device        %s, unit %lu\n", (LONG)nw.device, (LONG)nw.unit);
     tool_printf("Supplicant    WirelessManager %s\n",
                 (LONG)(nw_wm_running(NULL, 0) ? "running" : "not running"));
@@ -270,12 +272,18 @@ static LONG nw_shell_status(VOID)
             break;
     }
     tool_printf("Link          connected\n");
-    if (nw_dev_network(&nw.dev, ssid, &ssid_len, bssid) && ssid_len >= 0)
+    for (ssid_len = 0; ssid_len < 6; ssid_len++) bssid[ssid_len] = 0;
+    if (nw_dev_network(&nw.dev, ssid, &ssid_len, bssid))
     {
-        tool_printf("Network       ");
-        nw_print_ssid(ssid, ssid_len, 0);
+        /* prism2.device reports the access point and not the name. */
+        if (ssid_len >= 0)
+        {
+            tool_printf("Network       ");
+            nw_print_ssid(ssid, ssid_len, 0);
+            tool_printf("\n");
+        }
         tool_format_mac(bssid, mac, sizeof(mac));
-        tool_printf("\nAccess point  %s\n", (LONG)mac);
+        tool_printf("Access point  %s\n", (LONG)mac);
         if (nw.dev.net_channel > 0)
             tool_printf("Channel       %ld%s\n", nw.dev.net_channel,
                         (LONG)(nw.dev.net_band5 == 1 ? ", 5 GHz"
@@ -643,7 +651,7 @@ static VOID nw_refresh_status(VOID)
     char  bars[2];
 
     nw.sig_text[0] = '\0';
-    link = nw.dev_open ? nw_dev_signal(&nw.dev, &signal, &noise) : NW_LINK_NODEV;
+    link = nw.dev_open ? nw_dev_link(&nw.dev, &signal, &noise) : NW_LINK_NODEV;
     if (link != NW_LINK_UP) nw.shown_bars = 0;
     tool_copy_string(nw.net_text, sizeof(nw.net_text), words[link]);
     if (link == NW_LINK_UP)
@@ -1061,6 +1069,16 @@ static const char *nw_join_save(const char *ssid, const char *pass, int pass_len
 /* WirelessManager stopped and started on the new file.  NULL or why not. */
 static const char *nw_restart_wm(VOID)
 {
+    LONG  len;
+    UBYTE ssid[NW_SSID_MAX];
+    int   i;
+
+    /* The access point before, for a driver that does not name networks:
+       a join is counted once the link went down or the access point
+       changed, not because the card is still on the old one. */
+    for (i = 0; i < 6; i++) nw.join_bssid[i] = 0;
+    nw.join_down = FALSE;
+    if (nw.dev_open) (VOID)nw_dev_network(&nw.dev, ssid, &len, nw.join_bssid);
     if (!nw_wm_stop()) return "WirelessManager did not stop.";
     if (!nw_wm_start(nw.wm, nw.device, nw.unit))
         return "WirelessManager could not be started.";
@@ -1073,12 +1091,24 @@ static BOOL nw_joined(VOID)
     LONG  signal, noise, len = -1, i;
     UBYTE ssid[NW_SSID_MAX], bssid[6];
 
-    if (!nw.dev_open || nw_dev_signal(&nw.dev, &signal, &noise) != NW_LINK_UP)
+    if (!nw.dev_open) return FALSE;
+    if (nw_dev_link(&nw.dev, &signal, &noise) != NW_LINK_UP)
+    {
+        nw.join_down = TRUE;
         return FALSE;
+    }
     /* Kickstart 2.04 cannot ask which network: associated is joined. */
     if (SysBase->LibNode.lib_Version < 39) return TRUE;
-    if (!nw_dev_network(&nw.dev, ssid, &len, bssid) || len != nw.join_ssid_len)
-        return FALSE;
+    if (!nw_dev_network(&nw.dev, ssid, &len, bssid)) return FALSE;
+    /* A driver that does not name the network (prism2.device): joined once
+       the link went down on the restart or the access point changed. */
+    if (len < 0)
+    {
+        for (i = 0; i < 6 && bssid[i] == nw.join_bssid[i]; i++)
+            ;
+        return nw.join_down || i < 6;
+    }
+    if (len != nw.join_ssid_len) return FALSE;
     for (i = 0; i < len && ssid[i] == nw.join_ssid[i]; i++)
         ;
     return i == len;
