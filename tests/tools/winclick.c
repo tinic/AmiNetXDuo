@@ -1,9 +1,10 @@
 /*
  * WinClick: click one gadget of a window on the default public screen.
  *
- *     WinClick TITLE/A,GADGET/N,TIMES/N,ZIP/S
+ *     WinClick TITLE/A,GADGET/N,TIMES/N,ZIP/S,AT/K/N
  *
- * ZIP clicks the window's zoom gadget rather than GADGET.
+ * ZIP clicks the window's zoom gadget rather than GADGET.  AT clicks that
+ * many pixels below the gadget's top edge instead of its middle (a list row).
  *
  * TITLE is a prefix of the window title, GADGET the GadgetID.  The pointer is
  * placed with injected IECLASS_POINTERPOS events and corrected against
@@ -110,7 +111,7 @@ static struct Window *find_window(struct Screen *sc, const char *prefix)
 int main(int argc, char **argv)
 {
     struct RDArgs *rda;
-    LONG           args[4] = { 0, 0, 0, 0 };
+    LONG           args[5] = { 0, 0, 0, 0, 0 };
     struct Screen *sc = NULL;
     struct Window *w;
     struct Gadget *g;
@@ -124,7 +125,7 @@ int main(int argc, char **argv)
         (CONST_STRPTR)"intuition.library", 37);
     if (IntuitionBase == NULL) return RETURN_FAIL;
 
-    rda = ReadArgs((CONST_STRPTR)"TITLE/A,GADGET/N,TIMES/N,ZIP/S", args, NULL);
+    rda = ReadArgs((CONST_STRPTR)"TITLE/A,GADGET/N,TIMES/N,ZIP/S,AT/K/N", args, NULL);
     if (rda == NULL || (args[1] == 0 && args[3] == 0))
     {
         Printf((CONST_STRPTR)"error=bad arguments\n");
@@ -160,7 +161,8 @@ int main(int argc, char **argv)
     /* GZZ gadgets are relative to the inner window; the zoom gadget sits in
        the border, placed from the right edge. */
     x = (WORD)(w->LeftEdge + g->LeftEdge + g->Width / 2);
-    y = (WORD)(w->TopEdge + g->TopEdge + g->Height / 2);
+    y = (WORD)(w->TopEdge + g->TopEdge +
+               (args[4] != 0 ? *(LONG *)args[4] : g->Height / 2));
     if (g->Flags & GFLG_RELRIGHT) x = (WORD)(x + w->Width - 1);
     if ((w->Flags & WFLG_GIMMEZEROZERO) && !(g->GadgetType & GTYP_SYSGADGET))
     {

@@ -179,13 +179,15 @@ static struct
     NwNetwork   nets[NW_NETS_MAX];
     LONG        count;
     UBYTE       order[NW_NETS_MAX];
+    UBYTE       was[NW_NETS_MAX];      /* the order as opened */
     LONG        shown;
     LONG        sel;
-    BOOL        changed;
     struct List list;
     struct Node node[NW_NETS_MAX];
     char        name[NW_NETS_MAX][NW_SSID_MAX + 16];
 } kn;
+
+static VOID nw_known_joining(VOID);
 
 static ULONG nw_len(const char *s)
 {
@@ -363,6 +365,17 @@ static LONG nw_shell_list(VOID)
 
 /* ------------------------------------------------- Wireless.prefs -- */
 
+/* A file buffer cleared before it is freed: it can hold a psk. */
+static VOID nw_free_file(char *buf)
+{
+    volatile char *v = buf;
+    ULONG          i;
+
+    if (buf == NULL) return;
+    for (i = 0; i < NW_FILE_MAX; i++) v[i] = 0;
+    FreeVec(buf);
+}
+
 /* The file, or NULL with *missing TRUE when it is not there and FALSE when
    it could not be read: only a missing file may be written as new. */
 static char *nw_read(const char *path, ULONG *len, BOOL *missing)
@@ -383,11 +396,20 @@ static char *nw_read(const char *path, ULONG *len, BOOL *missing)
     Close(fh);
     if (got < 0 || got >= (LONG)NW_FILE_MAX)
     {
-        if (buf != NULL) FreeVec(buf);
+        nw_free_file(buf);
         return NULL;
     }
     *len = (ULONG)got;
     return buf;
+}
+
+/* ENV: is what WirelessManager reads; ENVARC: when ENV: has none. */
+static char *nw_read_prefs(ULONG *len, BOOL *missing)
+{
+    char *t = nw_read(nw_prefs_env, len, missing);
+
+    if (t == NULL && *missing) t = nw_read(nw_prefs_envarc, len, missing);
+    return t;
 }
 
 /* A new file beside the old one, then renamed over it. */
@@ -438,15 +460,13 @@ static const char *nw_save_network(const UBYTE *ssid, LONG ssid_len,
     const char      *why = NULL;
     BOOL             missing;
 
-    /* ENV: is what WirelessManager reads; ENVARC: when ENV: has none. */
-    old = nw_read(nw_prefs_env, &old_len, &missing);
-    if (old == NULL && missing) old = nw_read(nw_prefs_envarc, &old_len, &missing);
+    old = nw_read_prefs(&old_len, &missing);
     if (old == NULL && !missing)
         return "Wireless.prefs could not be read, so it was not changed.";
     count = nw_prefs_parse(old != NULL ? old : "", old_len, nets, NW_NETS_MAX);
     if (count < 0 || count > NW_NETS_MAX)
     {
-        if (old != NULL) FreeVec(old);
+        nw_free_file(old);
         return count < 0 ? "Wireless.prefs has a network={ with no closing }."
                          : "Wireless.prefs has more networks than this edits.";
     }
@@ -494,8 +514,8 @@ static const char *nw_save_network(const UBYTE *ssid, LONG ssid_len,
             !nw_write(nw_prefs_env, out, (ULONG)new_len))
             why = "Wireless.prefs could not be written.";
     }
-    if (out != NULL) FreeVec(out);
-    if (old != NULL) FreeVec(old);
+    nw_free_file(out);
+    nw_free_file(old);
     return why;
 }
 
@@ -806,9 +826,11 @@ static struct Window *nw_open(int which, struct Gadget *glist, const char *title
     T(WA_AutoAdjust, TRUE);
     if (which == NW_WIN_MAIN)
     {
-        /* The zoom gadget folds the window to its title bar. */
-        zoom[0] = left;
-        zoom[1] = top;
+        /* The zoom gadget folds the window to its title bar, where it
+           stands from V39 (~0), where it opened before.  Intuition does
+           not fold below the borders and one inner line. */
+        zoom[0] = IntuitionBase->LibNode.lib_Version >= 39 ? (WORD)~0 : left;
+        zoom[1] = IntuitionBase->LibNode.lib_Version >= 39 ? (WORD)~0 : top;
         zoom[2] = w;
         zoom[3] = (WORD)(nw.screen->WBorTop + nw.screen->Font->ta_YSize + 1 +
                          nw.screen->WBorBottom + 1);
@@ -898,6 +920,7 @@ static VOID nw_close_join(VOID)
     nw.join.glist = NULL;
     for (i = NW_J_SSID; i <= NW_J_CANCEL; i++) nw.g[i] = NULL;
     nw.join_wait = 0;
+    nw_known_joining();
 }
 
 static VOID nw_join_status(const char *s)
@@ -1184,6 +1207,7 @@ static VOID nw_join(VOID)
     else
     {
         nw.join_wait = NW_JOIN_WAIT;
+        nw_known_joining();
         nw_join_status("Waiting for the connection.");
     }
 }
@@ -1202,6 +1226,7 @@ static VOID nw_join_tick(VOID)
     }
     if (--nw.join_wait == 0)
     {
+        nw_known_joining();
         nw_join_status("Not connected after 30 seconds.");
         return;
     }
@@ -1307,6 +1332,15 @@ static VOID nw_snapshot(VOID)
 
 /* ----------------------------------------------------- known networks -- */
 
+/* Save and Use wait while a join waits for its connection: either
+   restarts WirelessManager under it. */
+static VOID nw_known_joining(VOID)
+{
+    if (nw.known.win == NULL) return;
+    nw_set(nw.known.win, NW_K_SAVE, GA_Disabled, nw.join_wait != 0);
+    nw_set(nw.known.win, NW_K_USE, GA_Disabled, nw.join_wait != 0);
+}
+
 static VOID nw_known_fill(VOID)
 {
     LONG i;
@@ -1348,6 +1382,7 @@ static VOID nw_known_fill(VOID)
     nw_set(nw.known.win, NW_K_UP, GA_Disabled, kn.sel <= 0);
     nw_set(nw.known.win, NW_K_DOWN, GA_Disabled, kn.sel < 0 || kn.sel + 1 >= kn.shown);
     nw_set(nw.known.win, NW_K_REMOVE, GA_Disabled, kn.sel < 0);
+    nw_known_joining();
 }
 
 static VOID nw_close_known(VOID)
@@ -1359,7 +1394,7 @@ static VOID nw_close_known(VOID)
     nw.known.win = NULL;
     nw.known.glist = NULL;
     for (i = NW_K_LIST; i <= NW_K_CANCEL; i++) nw.g[i] = NULL;
-    if (kn.text != NULL) FreeVec(kn.text);
+    nw_free_file(kn.text);
     kn.text = NULL;
 }
 
@@ -1370,6 +1405,7 @@ static VOID nw_open_known(VOID)
     struct Gadget *g;
     struct TagItem t[3];
     BOOL           missing;
+    LONG           i;
 
     if (nw.known.win != NULL)
     {
@@ -1377,9 +1413,7 @@ static VOID nw_open_known(VOID)
         ActivateWindow(nw.known.win);
         return;
     }
-    kn.text = nw_read(nw_prefs_env, &kn.len, &missing);
-    if (kn.text == NULL && missing)
-        kn.text = nw_read(nw_prefs_envarc, &kn.len, &missing);
+    kn.text = nw_read_prefs(&kn.len, &missing);
     if (kn.text == NULL && !missing)
     {
         nw_requester("Wireless.prefs could not be read.");
@@ -1395,9 +1429,9 @@ static VOID nw_open_known(VOID)
         return;
     }
     nw_prefs_order(kn.nets, (int)kn.count, kn.order);
+    for (i = 0; i < kn.count; i++) kn.was[i] = kn.order[i];
     kn.shown = kn.count;
     kn.sel = -1;
-    kn.changed = FALSE;
 
     g = CreateContext(&nw.known.glist);
     kn.list.lh_Head = (struct Node *)&kn.list.lh_Tail;
@@ -1414,7 +1448,8 @@ static VOID nw_open_known(VOID)
     g = nw_gadget(BUTTON_KIND, g, NW_K_CANCEL, NULL);
     if (g == NULL ||
         (nw.known.win = nw_open(NW_WIN_KNOWN, nw.known.glist, "Known Wi-Fi networks",
-                                NW_IDCMP & ~IDCMP_MENUPICK, -1, -1)) == NULL)
+                                (NW_IDCMP & ~IDCMP_MENUPICK) | IDCMP_VANILLAKEY,
+                                -1, -1)) == NULL)
     {
         nw_close_known();
         return;
@@ -1430,7 +1465,6 @@ static VOID nw_known_move(LONG to)
     kn.order[kn.sel] = kn.order[to];
     kn.order[to] = b;
     kn.sel = to;
-    kn.changed = TRUE;
     nw_known_fill();
 }
 
@@ -1441,7 +1475,6 @@ static VOID nw_known_remove(VOID)
     for (i = kn.sel; i + 1 < kn.shown; i++) kn.order[i] = kn.order[i + 1];
     kn.shown--;
     if (kn.sel >= kn.shown) kn.sel = kn.shown - 1;
-    kn.changed = TRUE;
     nw_known_fill();
 }
 
@@ -1456,11 +1489,15 @@ static VOID nw_known_store(BOOL save)
     char              *out;
     size_t             len;
     int                n;
-    BOOL               ok = FALSE;
-    const char        *why;
+    const char        *why = NULL;
+    BOOL               moved = kn.shown != kn.count;
 
-    /* Nothing moved or removed: nothing written, nothing restarted. */
-    if (!kn.changed)
+    if (nw.join_wait != 0) return;
+    /* Nothing moved or removed, in the end: nothing written, nothing
+       restarted. */
+    for (n = 0; !moved && n < (int)kn.shown; n++)
+        if (kn.order[n] != kn.was[n]) moved = TRUE;
+    if (!moved)
     {
         nw_close_known();
         return;
@@ -1469,14 +1506,14 @@ static VOID nw_known_store(BOOL save)
     {
         ULONG now_len;
         BOOL  missing;
-        char *now = nw_read(nw_prefs_env, &now_len, &missing);
+        char *now = nw_read_prefs(&now_len, &missing);
         BOOL  same = (now == NULL && kn.text == NULL) ||
                      (now != NULL && kn.text != NULL && now_len == kn.len);
         ULONG i;
 
         for (i = 0; same && now != NULL && i < now_len; i++)
             if (now[i] != kn.text[i]) same = FALSE;
-        if (now != NULL) FreeVec(now);
+        nw_free_file(now);
         if (!same)
         {
             nw_requester("Wireless.prefs changed since this window opened, "
@@ -1488,24 +1525,28 @@ static VOID nw_known_store(BOOL save)
     n = nw_prefs_order_edits(kn.nets, (int)kn.count, kn.order, (int)kn.shown,
                              e, f, prio);
     out = (char *)AllocVec(NW_FILE_MAX, MEMF_ANY);
-    if (out != NULL &&
-        nw_prefs_write(kn.text != NULL ? kn.text : "", kn.len, kn.nets, (int)kn.count,
-                       e, n, out, NW_FILE_MAX - 1, &len))
+    if (out == NULL)
+        why = "Not enough memory.";
+    else if (!nw_prefs_write(kn.text != NULL ? kn.text : "", kn.len, kn.nets,
+                             (int)kn.count, e, n, out, NW_FILE_MAX - 1, &len))
+        why = "Wireless.prefs would be too large.";
+    else
     {
         /* ENVARC: first, as a join writes them. */
-        ok = TRUE;
         if (save)
         {
             nw_make_dir("ENVARC:Sys");
-            ok = nw_write(nw_prefs_envarc, out, (ULONG)len);
+            if (!nw_write(nw_prefs_envarc, out, (ULONG)len))
+                why = "Wireless.prefs could not be written.";
         }
         nw_make_dir("ENV:Sys");
-        ok = ok && nw_write(nw_prefs_env, out, (ULONG)len);
+        if (why == NULL && !nw_write(nw_prefs_env, out, (ULONG)len))
+            why = "Wireless.prefs could not be written.";
     }
-    if (out != NULL) FreeVec(out);
-    if (!ok)
+    nw_free_file(out);
+    if (why != NULL)
     {
-        nw_requester("Wireless.prefs could not be written.");
+        nw_requester(why);
         return;
     }
     nw_close_known();
@@ -1629,6 +1670,9 @@ static VOID nw_window_msgs(NwWin *w)
                 break;
             case IDCMP_GADGETUP:  nw_gadget_up(&copy); break;
             case IDCMP_MENUPICK:  nw_menu_pick(copy.Code); break;
+            case IDCMP_VANILLAKEY:              /* Esc is Cancel */
+                if (w == &nw.known && copy.Code == 0x1b) nw_close_known();
+                break;
             default: break;
         }
     }

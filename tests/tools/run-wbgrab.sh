@@ -12,7 +12,8 @@
 # window's box for cropping.  -s netwireless grabs NetWirelessPrefs against
 # tests/tools/wifistub.c's unit with the NetWireless AppIcon beside it, then
 # its join form and the Known networks window, as netwireless.pfs,
-# netwireless-1.pfs and netwireless-2.pfs.
+# netwireless-1.pfs and netwireless-2.pfs; then, with ENVARC: alone, moves
+# Home below Cafe there and saves (known_envarc).
 #
 # SPDX-License-Identifier: MIT
 
@@ -344,6 +345,17 @@ C:Wait 1
 C:WinClick "Wi-Fi" 5 >NIL:
 C:Wait 2
 C:wbgrab TO DH0:netwireless-2.pfs >NIL:
+C:WinClick "Known Wi-Fi" 21 >NIL:
+C:Wait 1
+Delete >NIL: ENV:Sys/Wireless.prefs
+C:WinClick "Wi-Fi" 5 >NIL:
+C:Wait 2
+C:WinClick "Known Wi-Fi" 15 AT 6 >NIL:
+C:WinClick "Known Wi-Fi" 17 >NIL:
+C:WinClick "Known Wi-Fi" 19 >NIL:
+C:Wait 2
+C:WinClick "Known Wi-Fi" 21 TIMES 0 >DH0:known-envarc.txt
+Type ENV:Sys/Wireless.prefs >>DH0:known-envarc.txt
 Echo >DH0:.done "$RC"
 EOF
         ;;
@@ -465,6 +477,21 @@ for seq in "${SEQUENCES[@]}"; do
     else
         say "${seq}_pfs" "MISSING"
         FAILED=1
+    fi
+
+    # Known networks with ENVARC: alone: Home moved below Cafe and saved,
+    # the window closed.
+    if [ "$seq" = netwireless ]; then
+        k="$HD/known-envarc.txt"
+        if [ -f "$k" ] && tr -d '\r\t' < "$k" |
+               awk '/ssid="Home"/{h=1} /ssid="Cafe"/{h=0} h&&/^priority=2$/{hp=1}
+                    !h&&/^priority=3$/{cp=1} /^error=no window$/{w=1}
+                    END{exit !(hp&&cp&&w)}'; then
+            say known_envarc PASS
+        else
+            say known_envarc FAIL
+            FAILED=1
+        fi
     fi
 
     [ "$BOOT_STATUS" = "0" ] || FAILED=1
