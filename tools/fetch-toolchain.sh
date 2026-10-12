@@ -34,7 +34,7 @@ TC_GCC_VERSION="16.2.0b"
 # rebases GCC onto AmigaPorts v16.2-rc15 (0edaa619), which carries the
 # sibcall fix, plus AmigaPorts/gcc PR #82 for the visibility warning
 # (tinic/gcc amiga16.2-rc15-anx). 16.2.7 is AmigaPorts amiga16.2 1d4ca5d4
-# with no local patches. 16.2.8 is AmigaPorts amiga16.2 f098a8ef and binutils ffe2ad82 (PC-relative fix).
+# with no local patches. 16.2.8 is tinic/gcc f098a8ef (AmigaPorts 1d4ca5d4 + 3 m68k commits) and binutils ffe2ad82 (PC-relative fix).
 # The reported version remains 16.2.0b.
 # Older asset hashes remain at their original tags.
 TC_ASSET_VERSION="16.2.8"

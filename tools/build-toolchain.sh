@@ -11,9 +11,8 @@
 # GCC 16.2.0b + binutils 2.46 + NDK 3.9, PINNED BY COMMIT, not by branch.
 # binutils is tinic/binutils-gdb ffe2ad82 (AmigaPorts amiga-2.46 106606ef plus
 # the same-named-section PC-relative fix); it already carries the changes the
-# three diffs in tools/patches/binutils-2.46/ made, so none are applied.  With them this tree builds at
-# -DAMINETXDUO_LTO=ON and emits the four shipped images byte for byte as the
-# earlier 2.39 pin did.  Moving the pin back is the one PINS line below:
+# three diffs in tools/patches/binutils-2.46/ made, so none are applied.  This
+# tree builds at -DAMINETXDUO_LTO=ON with it.  Moving the pin back is the one PINS line below:
 # tools/patches/binutils/ still holds the 2.39 set.  Each entry records the
 # remote verified to serve its pin: bebbo's GitHub repos are gone and Codeberg
 # does not carry every branch.
@@ -373,7 +372,8 @@ PY
 fi
 
 # -flto.  Two changes to binutils; GCC needs no patch for it, only the pin
-# above.  That pin is AmigaPorts amiga16.2 f098a8ef with no local patches; it
+# above.  That pin is tinic/gcc amiga16.2 f098a8ef: AmigaPorts amiga16.2
+# 1d4ca5d4 plus 3 local m68k commits; it
 # has the LTO visibility-warning fix (PR #82), the A5/SP argument-register
 # diagnostic (PR #83) and the narrow __asm argument lowering (PR #84).  It carries the
 # sibcall fix that 16.2.4 and 16.2.5 added on bebbo 134541b3: an indirect
