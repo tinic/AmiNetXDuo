@@ -119,7 +119,8 @@ if(AMINETXDUO_BSDSOCKET_LINK)
     # The sources are listed directly rather than linked from the archive: an
     # archive member is only pulled in when something references it, and NOTHING
     # references the romtag, it is found by Exec scanning the loaded segment.
-    add_executable(bsdsocket_library ${BSDSOCKET_SOURCES})
+    add_executable(bsdsocket_library ${BSDSOCKET_SOURCES}
+        application_memory.c)
     set_target_properties(bsdsocket_library PROPERTIES
         OUTPUT_NAME "bsdsocket.library")
 

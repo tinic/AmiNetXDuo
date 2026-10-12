@@ -380,9 +380,10 @@ void    _tx_amiga_start_interrupts(void);
 /* Port tunables and internals.                                              */
 /* ------------------------------------------------------------------------ */
 
-/* Bytes handed to tx_application_define() as "first unused memory".  ThreadX
-   sub-allocates its own pools out of this.  Override with
-   tx_amiga_set_kernel_memory() before tx_kernel_enter().  */
+/* Default bytes handed to a standalone application's tx_application_define()
+   as "first unused memory". The shared library needs no such arena and
+   overrides the allocation size at link time. Supply caller-owned memory with
+   tx_amiga_set_kernel_memory() before tx_kernel_enter(). */
 
 #ifndef TX_AMIGA_MEMORY_SIZE
 #define TX_AMIGA_MEMORY_SIZE                    (32UL * 1024UL)

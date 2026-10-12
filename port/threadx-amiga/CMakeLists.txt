@@ -8,6 +8,7 @@
 
 add_library(threadx_port STATIC
     src/tx_initialize_low_level.c
+    src/tx_amiga_memory.c
     src/tx_thread_schedule.c
     src/tx_thread_system_return.c
     src/tx_thread_context_save.c

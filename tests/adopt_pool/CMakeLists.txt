@@ -86,3 +86,32 @@ target_compile_options(test_thread_create_status PRIVATE
 
 add_test(NAME thread_create_status_fail COMMAND test_thread_create_status fail)
 add_test(NAME thread_create_status_ok COMMAND test_thread_create_status ok)
+
+# Actual allocator/ownership paths, with both the standalone weak default and
+# the shared library's strong zero-arena definition on the link line.
+foreach(_arena IN ITEMS standalone library)
+    add_executable(test_application_memory_${_arena}
+        host/test_application_memory_host.c
+        "${CMAKE_SOURCE_DIR}/port/threadx-amiga/src/tx_amiga_memory.c")
+    target_include_directories(test_application_memory_${_arena} PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/host/memory-shim"
+        "${CMAKE_SOURCE_DIR}/port/threadx-amiga/src"
+        "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"
+        "${CMAKE_SOURCE_DIR}/port/threadx-amiga/inc"
+        "${CMAKE_SOURCE_DIR}/tests/bsdsocket/host/shim"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${AMINETXDUO_THREADX}/common/inc")
+    target_compile_definitions(test_application_memory_${_arena} PRIVATE
+        AMINETXDUO_HOST_VENDORED_TX_PORT="${CMAKE_SOURCE_DIR}/port/threadx-amiga/inc/tx_port.h")
+    if(_arena STREQUAL "library")
+        target_sources(test_application_memory_${_arena} PRIVATE
+            "${CMAKE_SOURCE_DIR}/src/bsdsocket/application_memory.c")
+        target_compile_definitions(test_application_memory_${_arena} PRIVATE
+            EXPECTED_ARENA_SIZE=0UL)
+    else()
+        target_compile_definitions(test_application_memory_${_arena} PRIVATE
+            EXPECTED_ARENA_SIZE=32768UL)
+    endif()
+    add_test(NAME application_memory_${_arena}
+        COMMAND test_application_memory_${_arena})
+endforeach()
