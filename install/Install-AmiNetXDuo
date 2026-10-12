@@ -230,15 +230,16 @@
 (set H_KEEPOLD
   (cat "This machine already has an AmiNetXDuo or Roadshow style network "
        "configuration in DEVS:NetInterfaces.\n\n"
-       "Answer \"Keep it\" to update the software and leave the existing "
-       "configuration alone.  That is the usual choice for an update to a "
-       "newer version.  If S:Network-Startup already exists, it is kept too, "
-       "so the same interfaces continue to start at boot.\n\n"
-       "Answer \"Set them up again\" to answer all the network questions "
-       "again.  That rewrites the interface file, DEVS:Internet/routes and "
+       "\"Keep it\" updates the software and leaves the existing "
+       "configuration alone.  If S:Network-Startup already exists, it is kept "
+       "too, so the same interfaces continue to start at boot.  That is the "
+       "default when the existing configuration is AmiNetXDuo's.\n\n"
+       "\"Set them up again\" answers the network questions again.  That "
+       "rewrites the interface files, DEVS:Internet/routes and "
        "DEVS:Internet/name_resolution, and writes a new S:Network-Startup.  "
-       "The old startup file is saved as S:Network-Startup.old, but manual "
-       "changes in the three configuration files are lost."))
+       "Each file it replaces is kept beside it with .old added to its name.  "
+       "That is the default when the configuration belongs to another stack "
+       "and a network device was found."))
 
 (set H_STARTUP
   (cat "S:User-Startup is the file that the Amiga runs at every boot.  "
@@ -1327,7 +1328,17 @@
 ; the card and address pages merely to reach an abort at their end.
 (set REPLACE_LIB 1)
 
-(if (AND OLD_BSD (= DRAWER_LAYOUT 0))
+; WHOSE LIBRARY.  Ours names itself AmiNetXDuo inside; Roadshow's, AmiTCP's
+; and Miami's do not.  Replacing our own is an update, not a decision, so
+; the page is not drawn for it, and the configuration it left is kept by
+; default below.
+(set LIB_OURS 0)
+(if OLD_BSD
+    (if (= 0 (run ("Search >NIL: FROM \"%s\" SEARCH AmiNetXDuo QUIET" D_BSD)
+                  (quiet) (safe)))
+        (set LIB_OURS 1)))
+
+(if (AND OLD_BSD (= DRAWER_LAYOUT 0) (= LIB_OURS 0))
     (set REPLACE_LIB
       (askbool
         (prompt (F_OLDLIB OLD_BSD_VER OLD_BSD_REV))
@@ -1344,11 +1355,19 @@
 (set OLD_IF "")
 (set D_IFDIR (tackon D_DEVS "NetInterfaces"))
 (if (= (exists D_IFDIR (noreq)) 2)
-    (foreach D_IFDIR "~(#?.info)"
+    (foreach D_IFDIR "~(#?.info|#?.old)"
       (if (= (strlen OLD_IF) 0)
           (if (< @each-type 0)
               (set OLD_IF @each-name)))))
 (set HAVE_OLD (if (> (strlen OLD_IF) 0) 1 0))
+
+; Ours: our library, or an interface file this installer wrote.
+(set CONFIG_OURS LIB_OURS)
+(if (AND HAVE_OLD (= CONFIG_OURS 0))
+    (if (= 0 (run ("Search >NIL: FROM \"%s\" SEARCH \"AmiNetXDuo\" QUIET"
+                   (tackon D_IFDIR OLD_IF))
+                  (quiet) (safe)))
+        (set CONFIG_OURS 1)))
 
 ; A novice run makes no decisions of its own, so with nothing detected and no
 ; existing configuration to keep, there is no honest default to fall back on.
@@ -1376,13 +1395,20 @@
 
 (set KEEP_OLD 0)
 
+; Keep is the default for our own configuration.  Another stack's is set up
+; again, its files kept as .old, when there is a device to set it up for: with
+; none detected a Novice run has no card to write, so it keeps that one.  The
+; default is the page's first button either way.
+(set KEEP_DEF (if (OR CONFIG_OURS (= CARD_DEFAULT 0)) 1 0))
 (if HAVE_OLD
     (set KEEP_OLD
-      (askbool
-        (prompt (F_KEEPOLD OLD_IF))
-        (help H_KEEPOLD)
-        (choices "Keep it" "Set them up again")
-        (default 1))))
+      (if (askbool
+            (prompt (F_KEEPOLD OLD_IF))
+            (help H_KEEPOLD)
+            (choices (if KEEP_DEF "Keep it" "Set them up again")
+                     (if KEEP_DEF "Set them up again" "Keep it"))
+            (default 1))
+          KEEP_DEF (- 1 KEEP_DEF))))
 
 ; Kept settings are not checked, and saying so is the only honest option.
 ;
@@ -1394,7 +1420,7 @@
 ; It cannot be examined: the Installer language cannot read the DEVICE= line
 ; back out of the file, so there is no name to look for. Reported by a user who
 ; took the drivers away, installed again and was told nothing.
-(if (AND HAVE_OLD KEEP_OLD)
+(if (AND HAVE_OLD KEEP_OLD (= @user-level 2))
     (message
       "The existing configuration for \"" OLD_IF "\" is kept as it is.\n\n"
       "It is not checked.  If the card or its driver changed since the file "
@@ -2377,7 +2403,24 @@
 
 ; --- the interface file --------------------------------------------------
 
+; Rename FILE_OLD_SRC to <it>.old when it exists, replacing an older .old.
+(procedure P_keep_old
+  (if (exists FILE_OLD_SRC (noreq))
+    (
+      (if (exists (cat FILE_OLD_SRC ".old") (noreq))
+          (delete (cat FILE_OLD_SRC ".old")
+                  (prompt ("Removing the previous %s.old" FILE_OLD_SRC))
+                  (help @copyfiles-help)
+                  (optional "force" "nofail")))
+      (rename FILE_OLD_SRC (cat FILE_OLD_SRC ".old")
+              (prompt ("Keeping the old %s as .old" FILE_OLD_SRC))
+              (help H_KEEPOLD))
+    ))
+)
+
 (procedure P_write_interface
+  (set FILE_OLD_SRC (tackon (tackon D_DEVS "NetInterfaces") IFNAME))
+  (P_keep_old)
   (textfile
     (prompt ("Writing DEVS:NetInterfaces/%s" IFNAME))
     (help   "This file describes one network card.  It gives the driver "
@@ -2476,6 +2519,8 @@
 
     ; --- the default route ---------------------------------------------
 
+    (set FILE_OLD_SRC (tackon D_DEVS "Internet/routes"))
+    (P_keep_old)
     (textfile
       (prompt "Writing DEVS:Internet/routes")
       (help   "This file holds the default route.  The default route is "
@@ -2497,6 +2542,8 @@
 
     ; --- name resolution ------------------------------------------------
 
+    (set FILE_OLD_SRC (tackon D_DEVS "Internet/name_resolution"))
+    (P_keep_old)
     (textfile
       (prompt "Writing DEVS:Internet/name_resolution")
       (help   "This file gives the name servers to ask when a program "
@@ -2528,7 +2575,7 @@
 ; in this drawer, or the one the assign still names, and only its value.
 ; Another driver, or one of ours elsewhere, is the user's choice and stays.
 (if (AND KEEP_OLD DRAWER_LAYOUT)
-    (foreach D_IFDIR "~(#?.info)"
+    (foreach D_IFDIR "~(#?.info|#?.old)"
       (if (< @each-type 0)
         (
           (set KEPT_IF (tackon D_IFDIR @each-name))
@@ -2880,7 +2927,7 @@
       (append "; To start EVERY definition in the drawer, which is what\n")
       (append "; Roadshow does, use the pattern instead of a name:\n")
       (append ";\n")
-      (append ";     " C_PREFIX "AddNetInterface DEVS:NetInterfaces/~(#?.info) QUIET\n")
+      (append ";     " C_PREFIX "AddNetInterface DEVS:NetInterfaces/~(#?.info|#?.old) QUIET\n")
       (append ";\n")
       (append "; To stop the network starting at boot, comment the line out\n")
       (append "; with a leading semicolon.  Nothing else has to change.\n")

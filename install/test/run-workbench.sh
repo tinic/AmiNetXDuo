@@ -916,6 +916,10 @@ fi
 if [ "$RECONFIGURE" = "1" ]; then
     ANSWER_LINES+=("2|BOOL|Set them up again")
 fi
+# A reinstall over our own library is an update: no replace-library page.
+for ((answer_run = 2; answer_run <= DRIVE_RUNS; answer_run++)); do
+    ANSWER_LINES+=("$answer_run|ABSENT|Leave it alone")
+done
 case "$FOREIGN_MODE" in
     *-leave) ANSWER_LINES+=("1|BOOL|Leave it alone") ;;
 esac
@@ -1444,17 +1448,21 @@ esac
 # backup policy and preservation, not executing somebody else's copyrighted
 # stack in the gate.
 FOREIGN_TREE_BEFORE=""
-FOREIGN_CONFIG_BEFORE=""
 FOREIGN_OLD_BSD_SUM=""
 FOREIGN_OLD_UG_SUM=""
 FOREIGN_OLD_TLS_SUM=""
 FOREIGN_CONFIG_FILES=()
+FOREIGN_REPLACED_FILES=()
+FOREIGN_OLD_EXPECTED=""
 if [ -n "$FOREIGN_MODE" ]; then
     mkdir -p "$HD/Libs" "$HD/Devs/NetInterfaces" "$HD/Devs/Internet" \
              "$HD/Devs/Networks" "$HD/S"
-    cp "$UNPACK/AmiNetXDuo/Libs/bsdsocket.library" "$HD/Libs/bsdsocket.library"
-    cp "$UNPACK/AmiNetXDuo/Libs/usergroup.library" "$HD/Libs/usergroup.library"
-    cp "$UNPACK/AmiNetXDuo/Libs/tls.library" "$HD/Libs/tls.library"
+    # Another stack's libraries: anything that does not name AmiNetXDuo,
+    # which is how the Installer tells its own library from one to replace.
+    for _lib in bsdsocket.library usergroup.library tls.library; do
+        printf 'existing %s library: %s\n' "${FOREIGN_MODE%%-*}" "$_lib" \
+            > "$HD/Libs/$_lib"
+    done
     # Simulate a previously interrupted/older replacement too.  Declining
     # replacement must preserve these byte-for-byte; accepting it must discard
     # every stale .new and replace every stale .old with the live library that
@@ -1481,11 +1489,16 @@ if [ -n "$FOREIGN_MODE" ]; then
     done
     printf '; existing stack boot policy -- preserve byte for byte\nC:AddNetInterface DEVS:NetInterfaces/eth0 QUIET\n' \
         > "$HD/S/Network-Startup"
-    FOREIGN_CONFIG_FILES=(
+    # The four the Installer rewrites when it sets the network up again, which
+    # is the default for another stack's configuration; each must survive as
+    # .old.  The netdb files it never touches.
+    FOREIGN_REPLACED_FILES=(
         Devs/NetInterfaces/eth0 Devs/Internet/routes
-        Devs/Internet/name_resolution Devs/Internet/hosts
+        Devs/Internet/name_resolution S/Network-Startup
+    )
+    FOREIGN_CONFIG_FILES=(
+        "${FOREIGN_REPLACED_FILES[@]}" Devs/Internet/hosts
         Devs/Internet/protocols Devs/Internet/services Devs/Internet/networks
-        S/Network-Startup
     )
     case "$FOREIGN_MODE" in
         amitcpng-*)
@@ -1501,8 +1514,15 @@ if [ -n "$FOREIGN_MODE" ]; then
     FOREIGN_OLD_BSD_SUM=$(shasum "$HD/Libs/bsdsocket.library" | cut -d' ' -f1)
     FOREIGN_OLD_UG_SUM=$(shasum "$HD/Libs/usergroup.library" | cut -d' ' -f1)
     FOREIGN_OLD_TLS_SUM=$(shasum "$HD/Libs/tls.library" | cut -d' ' -f1)
-    FOREIGN_CONFIG_BEFORE=$(
-        for f in "${FOREIGN_CONFIG_FILES[@]}"; do shasum "$HD/$f"; done
+    # What each replaced file must be as .old, and what the kept ones stay.
+    FOREIGN_OLD_EXPECTED=$(
+        for f in "${FOREIGN_REPLACED_FILES[@]}"; do
+            printf '%s.old %s\n' "$f" "$(shasum < "$HD/$f" | cut -d' ' -f1)"
+        done
+        for f in "${FOREIGN_CONFIG_FILES[@]}"; do
+            case " ${FOREIGN_REPLACED_FILES[*]} " in *" $f "*) continue ;; esac
+            printf '%s %s\n' "$f" "$(shasum < "$HD/$f" | cut -d' ' -f1)"
+        done
     )
 fi
 
@@ -2437,19 +2457,32 @@ fi
 
 case "$FOREIGN_MODE" in
 *-replace)
+    # Set up again by default: the replaced files as .old, byte for byte,
+    # the netdb files untouched, and new files of ours in their place.
     FOREIGN_CONFIG_AFTER=$(
-        for f in "${FOREIGN_CONFIG_FILES[@]}"; do
-            shasum "$HD/$f" 2>/dev/null || echo "MISSING $f"
-        done
+        while read -r _f _sum; do
+            _real=$(amiga_path "$_f" 2>/dev/null || true)
+            if [ -n "$_real" ] && [ -f "$_real" ]; then
+                printf '%s %s\n' "$_f" "$(shasum < "$_real" | cut -d' ' -f1)"
+            else
+                printf '%s MISSING\n' "$_f"
+            fi
+        done <<< "$FOREIGN_OLD_EXPECTED"
     )
-    if [ "$FOREIGN_CONFIG_AFTER" != "$FOREIGN_CONFIG_BEFORE" ]; then
-        echo "!! replacing $FOREIGN_MODE changed the kept configuration"
-        diff -u <(printf '%s\n' "$FOREIGN_CONFIG_BEFORE") \
+    if [ "$FOREIGN_CONFIG_AFTER" != "$FOREIGN_OLD_EXPECTED" ]; then
+        echo "!! replacing $FOREIGN_MODE lost a configuration file"
+        diff -u <(printf '%s\n' "$FOREIGN_OLD_EXPECTED") \
                 <(printf '%s\n' "$FOREIGN_CONFIG_AFTER") || true
         fail=1
     else
-        echo "  ok      $FOREIGN_MODE kept configuration and boot policy verbatim"
+        echo "  ok      $FOREIGN_MODE configuration set up again, the old files kept as .old"
     fi
+    for _f in "${FOREIGN_REPLACED_FILES[@]}"; do
+        if ! grep -q 'AmiNetXDuo' "$(amiga_path "$_f" 2>/dev/null || echo /nonexistent)" 2>/dev/null; then
+            echo "!! $_f is not the installer's after setting up again"
+            fail=1
+        fi
+    done
     for spec in \
         "bsdsocket.library:$FOREIGN_OLD_BSD_SUM" \
         "usergroup.library:$FOREIGN_OLD_UG_SUM" \
@@ -2480,10 +2513,6 @@ case "$FOREIGN_MODE" in
             echo "  ok      stale $_name.new removed"
         fi
     done
-    if amiga_path S/Network-Startup.old >/dev/null 2>&1; then
-        echo "!! kept foreign S:Network-Startup was rotated to .old"
-        fail=1
-    fi
     ;;
 esac
 

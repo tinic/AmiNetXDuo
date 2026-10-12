@@ -101,7 +101,8 @@ The installer asks, in this order:
        and examples goes                          (any drawer)
      Into the system, or into its own drawer      (into the system;
                                                    Intermediate and Expert)
-     Keep an existing configuration               (yes, when there is one)
+     Keep an existing configuration               (yes for AmiNetXDuo's;
+                                                   no for another stack's)
      Which card, and for PCMCIA which card type
      The interface name and unit                  (eth0, 0; Expert)
      Answer to <hostname>.local on the network    (no)
@@ -166,8 +167,11 @@ that library to bsdsocket.library.old, or remove the other stack first.
 
 In the system layout, a bsdsocket.library already in LIBS: -- from AmiTCP,
 Miami, Genesis or Roadshow -- is renamed to bsdsocket.library.old rather
-than deleted, and the installer says so.  Every library is copied in under
-a .new name first and swapped after, so a copy that fails leaves the
+than deleted, after a page that asks first; an earlier AmiNetXDuo's is
+replaced without one.  Another stack's network configuration is set up
+again by default, and every file that replaces one of its files keeps the
+old one beside it with .old added to the name.  Every library is copied in
+under a .new name first and swapped after, so a copy that fails leaves the
 installed file in place.
 
 The Developer drawer is not installed, deliberately: it holds headers, and

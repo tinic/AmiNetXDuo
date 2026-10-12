@@ -5,6 +5,12 @@ Add new entries under `Unreleased`; published release sections are history.
 
 ## Unreleased
 
+- Installer: an update over AmiNetXDuo no longer asks to replace its own
+  bsdsocket.library or says that the kept configuration is not checked.
+
+- Installer: another stack's network configuration is set up again by
+  default, its replaced files kept as .old.
+
 - Installer: a PCMCIA NE2000 card with a manufacturer ID (DFE-670TXD and
   most branded clones) is detected at Novice.
 
