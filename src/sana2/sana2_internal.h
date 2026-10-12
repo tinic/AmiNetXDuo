@@ -1121,7 +1121,6 @@ VOID ami_sana2_block_enter(VOID);
 VOID ami_sana2_block_leave(VOID);
 VOID ami_sana2_port_init(struct MsgPort *port, struct Task *task, BYTE sigbit,
                          UBYTE flags);
-LONG ami_sana2_do_io(struct IORequest *req);
 LONG ami_sana2_command(AmiSana2If *iface, struct IOSana2Req *req, UWORD command);
 LONG ami_sana2_online(AmiSana2If *iface);
 BOOL ami_sana2_keeps_online(const char *device);
@@ -1171,6 +1170,7 @@ UWORD ami_sana2_rx_post_batch(AmiSana2Rx *rx, AmiRxBatch *bt);
 UWORD ami_sana2_rx_drain_batch(AmiSana2Reader *rd, AmiRxBatch *bt);
 #endif
 VOID  ami_sana2_rx_abort_outstanding(AmiSana2Reader *rd);
+VOID  ami_sana2_rx_flush(AmiSana2Reader *rd);
 #endif
 
 /* sana2_tx.c */

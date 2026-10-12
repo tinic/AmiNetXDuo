@@ -264,6 +264,8 @@ typedef struct AmiSana2Info {
     ULONG   read_pending;       /* of those, outstanding at the device now  */
     ULONG   write_requests;     /* CMD_WRITE slots allocated                */
     ULONG   write_pending;      /* of those, in flight now                  */
+    ULONG   command_orphans;    /* commands the device kept past AbortIO()  */
+    ULONG   offline_orphans;    /* S2_OFFLINEs it kept the same way         */
 } AmiSana2Info;
 
 VOID ami_sana2_get_info(const AmiSana2If *iface, AmiSana2Info *out);

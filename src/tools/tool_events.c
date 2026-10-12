@@ -105,21 +105,23 @@ static const ToolEventRow tool_event_rows[] =
 
 /* The two codes whose value is a name rather than a number. */
 
+/* By NETEVENT_HELD_RX | _TX | _CMD. */
+static const char *const tool_event_held_text[8] =
+{
+    NULL,
+    "a read",
+    "a write",
+    "a read and a write",
+    "a command",
+    "a read and a command",
+    "a write and a command",
+    "a read, a write and a command"
+};
+
 static const char *tool_event_held(ULONG value)
 {
-    switch (value & (NETEVENT_HELD_RX | NETEVENT_HELD_TX))
-    {
-    case NETEVENT_HELD_RX:
-        return "a read";
-    case NETEVENT_HELD_TX:
-        return "a write";
-    case NETEVENT_HELD_RX | NETEVENT_HELD_TX:
-        return "a read and a write";
-    default:
-        break;
-    }
-
-    return NULL;
+    return tool_event_held_text[value & (NETEVENT_HELD_RX | NETEVENT_HELD_TX |
+                                         NETEVENT_HELD_CMD)];
 }
 
 static const char *tool_event_expunge(ULONG value)

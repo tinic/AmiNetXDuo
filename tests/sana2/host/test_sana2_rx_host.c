@@ -387,7 +387,24 @@ ULONG _tx_time_get(VOID) { return 0; }
 UWORD ami_sana2_bound_count(VOID) { return 1; }
 VOID ami_sana2_block_enter(VOID) { }
 VOID ami_sana2_block_leave(VOID) { }
-LONG ami_sana2_do_io(struct IORequest *req) { (VOID)req; return 0; }
+/* The teardown's CMD_FLUSH goes through the bounded command; recorded.
+   Copied at the call: the request is the caller's stack frame. */
+static int             h_commands;
+static UWORD           h_command_last;
+static AmiSana2If     *h_command_iface;
+static struct Device  *h_command_device;
+static struct Unit    *h_command_unit;
+static struct MsgPort *h_command_port;
+LONG ami_sana2_command(AmiSana2If *ifp, struct IOSana2Req *req, UWORD command)
+{
+    h_commands++;
+    h_command_last   = command;
+    h_command_iface  = ifp;
+    h_command_device = req->ios2_Req.io_Device;
+    h_command_unit   = req->ios2_Req.io_Unit;
+    h_command_port   = req->ios2_Req.io_Message.mn_ReplyPort;
+    return 0;
+}
 
 static AmiSana2If   iface;
 static NX_IP        ip;
@@ -2325,8 +2342,37 @@ static void test_reclaim_zombie_and_dropped_packets(void)
     h_free_watch       = NULL;
 }
 
+/* CMD_FLUSH from the teardown is ami_sana2_command()'s: bounded, and a
+   device that keeps it keeps the interface, not the reader's frame.  No reply
+   port of the reader's own any more. */
+static void test_flush_is_bounded(void)
+{
+    AmiSana2Reader rd;
+    int            deletes = h_port_deletes;
+
+    printf("sana2: the teardown's CMD_FLUSH is a bounded command\n");
+
+    memset(&rd, 0, sizeof(rd));
+    rd.iface   = &iface;
+    h_commands = 0;
+
+    ami_sana2_rx_flush(&rd);
+
+    h_check(h_commands == 1 && h_command_last == CMD_FLUSH,
+            "flush: one CMD_FLUSH through ami_sana2_command()");
+    h_check(h_command_iface == &iface,
+            "flush: on the reader's interface");
+    h_check(h_command_device == iface.templ.ios2_Req.io_Device &&
+            h_command_unit == iface.templ.ios2_Req.io_Unit,
+            "flush: from the interface's template");
+    h_check(h_command_port == iface.templ.ios2_Req.io_Message.mn_ReplyPort &&
+            h_port_deletes == deletes,
+            "flush: no reply port of its own");
+}
+
 int main(void)
 {
+    test_flush_is_bounded();
 #ifdef AMINETXDUO_RX_BATCH
     test_batch_post_and_drain();
     test_batch_fallback_with_a_sibling_in_flight();

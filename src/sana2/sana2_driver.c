@@ -242,13 +242,14 @@ static BOOL ami_sana2_detaching_entry(NX_IP_DRIVER *driver_req,
         return TRUE;
 
     /* A device command, bounded by ami_sana2_command(), under
-       nx_ip_protection, to a device just taken offline: nx_ip_interface_detach() leaves every group this way.  The
-       filter goes with the CloseDevice() that follows: at once from
-       ami_sana2_close(), or for a retained interface from
-       ami_sana2_retained_sweep() (sana2_device.c) once the device gives its
-       requests back.  A device that never does keeps the unit open, and its
-       filter, for as long as it holds them; nothing is reachable that would
-       close it sooner without freeing memory the device writes into. */
+       nx_ip_protection, to a device just taken offline: this is how each
+       group leave of nx_ip_interface_detach() arrives.  The filter goes with
+       the CloseDevice() that follows: at once from ami_sana2_close(), or for
+       a retained interface from ami_sana2_retained_sweep() (sana2_device.c)
+       once the device gives its requests back.  A device that never does
+       keeps the unit open, and its filter, for as long as it holds them;
+       nothing is reachable that would close it sooner without freeing
+       memory the device writes into. */
     case NX_LINK_MULTICAST_JOIN:
     case NX_LINK_MULTICAST_LEAVE:
     case NX_LINK_DEFERRED_PROCESSING:

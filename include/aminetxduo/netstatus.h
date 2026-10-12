@@ -790,6 +790,7 @@ typedef struct NetStatusOpener
 /* NETEVENT_IFACE_RETAINED values, and they combine. */
 #define NETEVENT_HELD_RX        0x0001UL
 #define NETEVENT_HELD_TX        0x0002UL
+#define NETEVENT_HELD_CMD       0x0004UL    /* S2_OFFLINE or another command */
 
 /* --- expunge ------------------------------------------------------------ */
 #define NETEVENT_EXPUNGE_DECLINED 40 /* value = NETEVENT_EXP_*               */

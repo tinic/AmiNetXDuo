@@ -2379,9 +2379,12 @@ INSTALL_RUNS_DONE=$(awk '
     /^installdrive:   window "/ { last = $0 }
     /^installdrive: run [0-9]+ finished/ { if (last ~ /\(100% done\)"$/) ok++; else bad++ }
     END { printf "%d %d\n", ok, bad }' "$HD/installdrive.txt" 2>/dev/null)
+[ -f "$HD/installdrive.txt" ] || INSTALL_RUNS_DONE="-1 -1"
 echo "installer_runs_completed=${INSTALL_RUNS_DONE% *} installer_runs_stopped=${INSTALL_RUNS_DONE#* }"
-if [ "$REFUSAL" != 1 ] &&
-   { [ "${INSTALL_RUNS_DONE#* }" != 0 ] || [ "${INSTALL_RUNS_DONE% *}" = 0 ]; }; then
+# "Leave it alone" ends a run with (abort) before any progress, by design.
+case "$FOREIGN_MODE" in *-leave) RUNS_GATE=0 ;; *) RUNS_GATE=1 ;; esac
+if [ "$REFUSAL" != 1 ] && [ "$RUNS_GATE" = 1 ] &&
+   { [ "${INSTALL_RUNS_DONE#* }" != 0 ] || [ "${INSTALL_RUNS_DONE% *}" -le 0 ]; }; then
     echo "!! an Installer run stopped before its last page"
     [ "$INSTALL_STATUS" = 0 ] && INSTALL_STATUS=21
 fi
