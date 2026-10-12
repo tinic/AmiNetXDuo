@@ -38,8 +38,9 @@ for source in artifacts.values():
     if not source.is_file():
         parser.error(f"build {source} first")
 (root / "build").mkdir(exist_ok=True)
-with tempfile.TemporaryDirectory(prefix="multicast-", dir=root / "build") as scratch:
-    stage = Path(scratch)
+stage = Path(tempfile.mkdtemp(prefix="multicast-", dir=root / "build"))
+passed = False
+try:
     for name, source in artifacts.items():
         destination = stage / name
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -54,14 +55,26 @@ with tempfile.TemporaryDirectory(prefix="multicast-", dir=root / "build") as scr
                                  "--exit-on-return", "--noaudio"],
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 text=True, timeout=args.timeout)
-    except subprocess.TimeoutExpired:
-        print("multicast: guest timed out", file=sys.stderr)
-        sys.exit(1)
+        run_rc, emulator_output = result.returncode, result.stdout
+    except subprocess.TimeoutExpired as error:
+        run_rc = 124
+        emulator_output = error.stdout or ""
+        if isinstance(emulator_output, bytes):
+            emulator_output = emulator_output.decode(errors="replace")
+    (stage / "emulator.log").write_text(emulator_output)
     output = stage / "stdout.txt"
     transcript = output.read_text(errors="replace") if output.exists() else ""
-    print(transcript, end="")
-    if result.returncode != 0 or "21 checks, 0 failures, PASS" not in transcript.splitlines():
-        print(result.stdout, file=sys.stderr)
-        print(f"multicast: incomplete or failing guest (emulator exit {result.returncode})", file=sys.stderr)
-        sys.exit(1)
+    print(transcript, end="", flush=True)
+    verdict = subprocess.run(["bash", "-c",
+                              '. "$1"; verdict_guest netmulticast 21 "$2" "$3"',
+                              "multicast-verdict", str(root / "tools/test-verdict.sh"),
+                              str(run_rc), str(output)])
+    passed = verdict.returncode == 0
+finally:
+    if passed:
+        shutil.rmtree(stage)
+    else:
+        print(f"artifacts={stage}", file=sys.stderr)
+if not passed:
+    sys.exit(1)
 PY

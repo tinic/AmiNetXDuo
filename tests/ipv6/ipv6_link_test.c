@@ -22,6 +22,7 @@
 #include <proto/dos.h>
 
 #include <stdarg.h>
+#include <string.h>
 
 #ifdef NX_DISABLE_IPV6
 #error "tests/ipv6 requires -DAMINETXDUO_IPV6=ON"
@@ -239,7 +240,7 @@ ULONG   waited =  0;
 static VOID t_readd(VOID)
 {
 
-AmiIfConfig     cfg;
+AmiIfConfig     cfg = {0};
 const AmiIfConfig *existing = netstack_iface_config(0);
 UWORD           index =  0xFFFFU;
 LONG            rc;
@@ -248,11 +249,16 @@ LONG            rc;
 
     if (!t_check((UINT)(existing != NULL), "interface config exists for re-add", 0UL))
         return;
-    /* Preserve the configured device/card and IPv6 policy across removal;
-       zero initialization would silently change CONFIGURE6 to OFF. */
-    cfg = *existing;
+    /* Model AddInterfaceTagList's defaults, using the actual interface
+       identity rather than assuming a2065.device on unit zero. */
+    memcpy(cfg.name, existing->name, sizeof(cfg.name));
+    memcpy(cfg.device, existing->device, sizeof(cfg.device));
+    cfg.unit   =  existing->unit;
     cfg.iptype =  AMI_IPTYPE_STATIC;
     cfg.up     =  FALSE;
+#ifdef AMINETXDUO_IPV6
+    cfg.ip6type = AMI_IP6TYPE_AUTO;
+#endif
 
     rc =  netstack_interface_remove(0, TRUE);
     if (!t_check((UINT)(rc == AMI_NET_OK), "RemoveInterface(eth0)", (ULONG)rc))
