@@ -13,7 +13,10 @@
 # tests/tools/wifistub.c's unit with the NetWireless AppIcon beside it, then
 # its join form and the Known networks window, as netwireless.pfs,
 # netwireless-1.pfs and netwireless-2.pfs; then, with ENVARC: alone, moves
-# Home below Cafe there and saves (known_envarc).  -s icons leaves the
+# Home below Cafe there and saves (known_envarc); then selects the hidden
+# Attic there and presses Connect, with wmstub as C:WirelessManager: Attic
+# on top in ENV: (known_connect), the windows joining it grabbed as
+# netwireless-3.pfs.  -s icons leaves the
 # release tree's C drawer out on Workbench (DH0:.backdrop), opens it with a
 # double-click and grabs its icons as icons.pfs; the tree is AMINETXDUO_DIST,
 # build/dist/AmiNetXDuo by default (dist/make-dist.sh).
@@ -64,6 +67,7 @@ NETWIRELESS="$BUILD/src/tools/NetWirelessPrefs"
 NETWIRELESSCX="$BUILD/src/tools/NetWireless"
 WIFISTUB="$BUILD/tests/tools/WifiStub"
 WINCLICK="$BUILD/tests/tools/WinClick"
+WMSTUB="$BUILD/tests/tools/WmStub"
 for seq in "${SEQUENCES[@]}"; do
     [ "$seq" = netwireless ] || [ "$seq" = screens ] || continue
     [ -x "$NETWIRELESS" ] && [ -x "$NETWIRELESSCX" ] && [ -x "$WIFISTUB" ] &&
@@ -192,6 +196,9 @@ EOF
         cp "$NETWIRELESS" "$HD/C/NetWirelessPrefs"
         cp "$NETWIRELESSCX" "$HD/C/NetWireless"
         cp "$WIFISTUB" "$HD/C/WifiStub"
+        # Connect restarts WirelessManager: the stand-in that logs it.
+        [ -x "$WMSTUB" ] && cp "$WMSTUB" "$HD/C/WirelessManager" &&
+            chmod 755 "$HD/C/WirelessManager"
         cp "$WINCLICK" "$HD/C/WinClick"
         chmod 755 "$HD/C/NetWirelessPrefs" "$HD/C/NetWireless" \
             "$HD/C/WifiStub" "$HD/C/WinClick"
@@ -359,6 +366,13 @@ C:WinClick "Known Wi-Fi" 19 >NIL:
 C:Wait 2
 C:WinClick "Known Wi-Fi" 21 TIMES 0 >DH0:known-envarc.txt
 Type ENV:Sys/Wireless.prefs >>DH0:known-envarc.txt
+C:WinClick "Wi-Fi" 5 >NIL:
+C:Wait 2
+C:WinClick "Known Wi-Fi" 15 AT 22 >NIL:
+C:WinClick "Known Wi-Fi" 22 >NIL:
+C:Wait 3
+C:wbgrab TO DH0:netwireless-3.pfs >NIL:
+Type ENV:Sys/Wireless.prefs >DH0:known-connect.txt
 Echo >DH0:.done "$RC"
 EOF
         ;;
@@ -517,6 +531,16 @@ for seq in "${SEQUENCES[@]}"; do
             say known_envarc PASS
         else
             say known_envarc FAIL
+            FAILED=1
+        fi
+        # Connect on the hidden Attic: on top in ENV:.
+        k="$HD/known-connect.txt"
+        if [ -f "$k" ] && tr -d '\r\t' < "$k" |
+               awk '/ssid="Attic"/{a=1} /ssid="(Home|Cafe)"/{a=0} a&&/^priority=3$/{ok=1}
+                    END{exit !ok}'; then
+            say known_connect PASS
+        else
+            say known_connect FAIL
             FAILED=1
         fi
     fi

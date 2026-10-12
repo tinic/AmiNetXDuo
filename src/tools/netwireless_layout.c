@@ -43,6 +43,7 @@ const NwItem nw_items[NW_L_COUNT] =
     [NW_K_SAVE]       = { "Save",              NW_PLACE_IN,    NW_WIN_KNOWN },
     [NW_K_USE]        = { "Use",               NW_PLACE_IN,    NW_WIN_KNOWN },
     [NW_K_CANCEL]     = { "Cancel",            NW_PLACE_IN,    NW_WIN_KNOWN },
+    [NW_K_CONNECT]    = { "Connect",           NW_PLACE_IN,    NW_WIN_KNOWN },
 };
 
 const char *const nw_security_choices[] = { "WPA/WPA2 Personal", "Open", 0 };
@@ -171,10 +172,10 @@ static void layout_join(const NwFont *f, NwLayout *l)
 
 static void layout_known(const NwFont *f, NwLayout *l)
 {
-    static const int side[] = { NW_K_UP, NW_K_DOWN, NW_K_REMOVE };
+    static const int side[] = { NW_K_CONNECT, NW_K_UP, NW_K_DOWN, NW_K_REMOVE };
     static const int bottom[] = { NW_K_SAVE, NW_K_USE, NW_K_CANCEL };
     int fh = f->height, nw = text_w(f, "n");
-    int sw = button_w(f, side, 3), bw = button_w(f, bottom, 3);
+    int sw = button_w(f, side, 4), bw = button_w(f, bottom, 3);
     int list_w = 28 * nw + 8 + SCROLLER_W, list_h = NW_LIST_ROWS * fh + 4;
     int cw, y, i;
 
@@ -182,10 +183,10 @@ static void layout_known(const NwFont *f, NwLayout *l)
     list_w = cw - COL_GAP - sw;
     y = MARGIN_Y + fh + 2;
     put(l, NW_K_LIST, MARGIN_X, y, list_w, list_h);
-    for (i = 0; i < 3; i++)
+    for (i = 0; i < 4; i++)
         put(l, side[i], MARGIN_X + list_w + COL_GAP, y + i * (fh + 6 + ROW_GAP),
             sw, fh + 6);
-    y += max2(list_h, 3 * (fh + 6) + 2 * ROW_GAP) + ROW_GAP + 2;
+    y += max2(list_h, 4 * (fh + 6) + 3 * ROW_GAP) + ROW_GAP + 2;
     button_row(l, bottom, 3, MARGIN_X, y, cw, bw, fh + 6);
     l->inner_w[NW_WIN_KNOWN] = cw + 2 * MARGIN_X;
     l->inner_h[NW_WIN_KNOWN] = y + fh + 6 + MARGIN_Y;
