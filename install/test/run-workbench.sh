@@ -1742,7 +1742,13 @@ if [ -n "$FOREIGN_MODE" ]; then
             printf 'AmiNetXDuo/Backup/1/%s %s\n' "$f" "$(shasum < "$HD/$f" | cut -d' ' -f1)"
         done
         for f in "${FOREIGN_REPLACED_FILES[@]}" Devs/NetInterfaces/A2065; do
-            [ "$_bk_cfg" = 2 ] && [ "$f" = S/Network-Startup ] && continue
+            if [ "$_bk_cfg" = 2 ] && [ "$f" = S/Network-Startup ]; then
+                # Run 1 kept it, and installdrive marked it between the runs.
+                printf 'AmiNetXDuo/Backup/2/%s %s\n' "$f" "$({ cat "$HD/$f"
+                    printf '; user startup policy -- installer must preserve this\n'
+                  } | shasum | cut -d' ' -f1)"
+                continue
+            fi
             printf 'AmiNetXDuo/Backup/%s/%s %s\n' "$_bk_cfg" "$f" "$(shasum < "$HD/$f" | cut -d' ' -f1)"
         done
         for f in "${FOREIGN_CONFIG_FILES[@]}"; do
@@ -3043,8 +3049,14 @@ case "$FOREIGN_MODE" in
             fail=1
         fi
     done
+    # Set up again over the same, unchanged files: nothing new to keep, so
+    # no second Backup drawer.
+    if [ "$RECONFIGURE" = 1 ] && amiga_path AmiNetXDuo/Backup/2 >/dev/null 2>&1; then
+        echo "!! a second run kept unchanged files again, in Backup/2"
+        fail=1
+    fi
     # A second run renames our own first copy to .old; Backup has theirs.
-    [ "$RERUN" = 1 ] ||
+    [ "$DRIVE_RUNS" != 1 ] ||
     for spec in \
         "bsdsocket.library:$FOREIGN_OLD_BSD_SUM" \
         "usergroup.library:$FOREIGN_OLD_UG_SUM" \
@@ -3287,7 +3299,7 @@ elif [ -n "$FOREIGN_MODE" ]; then
     # This fixture contributed only stale .new files, never a live driver.
     # Removing those and installing fresh copies must not invent .old files;
     # a second run keeps the first run's driver as .old, as any update does.
-    if [ -n "$ANXNET_OLD" ] && [ "$RERUN" = 0 ]; then
+    if [ -n "$ANXNET_OLD" ] && [ "$DRIVE_RUNS" = 1 ]; then
         echo "!! interrupted-staging fixture created an anxnet.device.old"
         fail=1
     else
