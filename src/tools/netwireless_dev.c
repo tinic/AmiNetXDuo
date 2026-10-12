@@ -151,6 +151,15 @@ LONG nw_dev_open(NwDev *d, const char *device, ULONG unit)
     d->req->ios2_Req.io_Message.mn_ReplyPort = d->port;
     d->req->ios2_BufferManagement = nw_buffer_tags;
 
+    /* The Pi Wi-Fi driver needs Emu68's device tree: opened without one
+       (an A1200 under Amiberry) it takes the machine down. */
+    if (nw_wireless_driver(device) == NW_DRIVER_PI &&
+        OpenResource((CONST_STRPTR)"devicetree.resource") == NULL)
+    {
+        nw_dev_close(d);
+        return IOERR_OPENFAIL;
+    }
+
     /* As given (a relative name is looked for in DEVS:), then a bare name
        in DEVS:Networks/, where the installer puts drivers, unless a
        resident driver of that name refused. */
