@@ -117,9 +117,9 @@ The installer asks, in this order:
 
 At Novice level every question takes its default without being shown.
 
-On a machine that had no bsdsocket.library before, the installer starts the
-network at the end through S:Network-Startup, and the last page says whether
-it is running.
+A system installation on a machine with no bsdsocket.library in LIBS: and
+no stack running runs the S:Network-Startup it writes, and the last page
+says whether the network is running.
 
 If the answer to the DHCP question is not known, answer yes.  Nearly every
 home network hands out addresses, and the change afterwards is one line in

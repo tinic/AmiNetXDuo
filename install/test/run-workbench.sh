@@ -1014,7 +1014,8 @@ UNINSTALL_DEF=""
 # A first installation with a board on the network starts the network: the
 # hardware-discovery runs, whose install boot has the board.
 NETCHECK=0
-if [ "$MANUAL_CARD" = 1 ] && [ "$DRIVE_RUNS" = 1 ] && [ "$UNINSTALL" = 0 ]; then
+if [ "$MANUAL_CARD" = 1 ] && [ "$DRIVE_RUNS" = 1 ] && [ "$UNINSTALL" = 0 ] &&
+   [ "$NO_BOOT" = 0 ] && [ "$STATIC" = 0 ]; then
     NETCHECK=1
     UNINSTALL_DEF="-DDRIVE_NETCHECK=1"
 fi
