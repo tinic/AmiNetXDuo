@@ -148,39 +148,13 @@ LONG ami_sana2_do_io(struct IORequest *req)
     return (LONG)(BYTE)req->io_Error;
 }
 
-/*
- * Run one synchronous device command.  A fresh reply port per call: DoIO()
- * waits on mn_ReplyPort->mp_SigTask and control commands come from whichever
- * task is driving, so a cached port would signal the wrong task.
- */
+static LONG ami_sana2_command_stat(AmiSana2If *iface, struct IOSana2Req *req,
+                                   UWORD command, ULONG stat_size);
+
+/* One synchronous device command, bounded (ami_sana2_command_stat()). */
 LONG ami_sana2_command(AmiSana2If *iface, struct IOSana2Req *req, UWORD command)
 {
-    struct MsgPort *port;
-    LONG            err;
-
-    if (iface == NULL || !iface->device_open || req == NULL)
-        return (LONG)IOERR_OPENFAIL;
-
-    port = CreateMsgPort();
-    if (port == NULL)
-        return (LONG)S2ERR_NO_RESOURCES;
-
-    req->ios2_Req.io_Message.mn_Node.ln_Type = NT_MESSAGE;
-    req->ios2_Req.io_Message.mn_ReplyPort    = port;
-    req->ios2_Req.io_Message.mn_Length       = (UWORD)sizeof(struct IOSana2Req);
-    req->ios2_Req.io_Command                 = command;
-    req->ios2_Req.io_Flags                   = 0;
-    req->ios2_Req.io_Error                   = 0;
-    req->ios2_WireError                      = 0;
-
-    /* NX_LINK_ENABLE reaches here on the IP thread; the helper picks the
-       bracket-and-DoIO or the green SendIO shape as the context demands. */
-    err = ami_sana2_do_io((struct IORequest *)req);
-
-    req->ios2_Req.io_Message.mn_ReplyPort = NULL;
-    DeleteMsgPort(port);
-
-    return err;
+    return ami_sana2_command_stat(iface, req, command, 0UL);
 }
 
 /* ------------------------------------------------------------ device query */
@@ -197,7 +171,8 @@ static LONG ami_sana2_query(AmiSana2If *iface)
     query.SizeAvailable = (ULONG)sizeof(query);
     req.ios2_StatData   = &query;
 
-    err = ami_sana2_command(iface, &req, S2_DEVICEQUERY);
+    err = ami_sana2_command_stat(iface, &req, S2_DEVICEQUERY,
+                                 (ULONG)sizeof(query));
     if (err != 0)
         return err;
 
@@ -638,10 +613,10 @@ static BOOL ami_sana2_offline_reap(AmiSana2If *iface)
 }
 
 /*
- * Wait for offline_req with a deadline, or for timer.device to say it has
- * passed.  Both ports share one signal.  Runs in the baton bracket.
+ * Wait for req with a deadline, or for timer.device to say it has passed.
+ * Both ports share one signal.  Runs in the baton bracket.
  */
-static VOID ami_sana2_offline_wait(struct IORequest *req,
+static VOID ami_sana2_bounded_wait(struct IORequest *req,
                                    struct timerequest *tr, ULONG ms)
 {
     tr->tr_node.io_Command = TR_ADDREQUEST;
@@ -658,60 +633,60 @@ static VOID ami_sana2_offline_wait(struct IORequest *req,
     (VOID)WaitIO((struct IORequest *)tr);
 }
 
-/*
- * S2_OFFLINE, bounded.  SendIO(), then the command's deadline, then AbortIO()
- * and the abort's deadline.  A device that answers neither keeps the request:
- * the port goes PA_IGNORE under Disable(), so a late ReplyMsg() only queues,
- * and offline_held keeps the interface from CloseDevice() and from being
- * freed until ami_sana2_offline_reap() takes the reply off the port.  A device
- * that answers inside BeginIO() never sees the timer.
- */
-static LONG ami_sana2_offline_io(AmiSana2If *iface, ULONG *wire)
-{
-    struct IOSana2Req  *req  = &iface->offline_req;
-    struct MsgPort     *port = &iface->offline_port;
-    struct IORequest   *io   = (struct IORequest *)req;
-    struct timerequest  tr    = { 0 };
-    struct MsgPort      tport = { 0 };
-    struct Task        *self;
-    BYTE                sig;
-    UWORD               phase;
-    BOOL                replied;
+enum { AMI_S2IO_DONE, AMI_S2IO_HELD, AMI_S2IO_NOSIG };
 
-    /* What ami_sana2_command() left in its copy when it failed early. */
-    *wire = iface->templ.ios2_WireError;
+/*
+ * Send io, a SANA-II request, with port as its reply port: SendIO(), or with
+ * quick DoIO()'s IOF_QUICK and BeginIO(), then the command's deadline, then
+ * AbortIO() and the abort's (ms[0], ms[1]).  quick matters to the driver: an
+ * a2065.device answers S2_DEVICEQUERY as DoIO() asks and keeps it when it
+ * comes by SendIO().  tr and
+ * tport are the timer's, the caller's storage.  AMI_S2IO_DONE: the reply is
+ * back and taken.  AMI_S2IO_HELD: the device kept it, and port went PA_IGNORE
+ * with no task in the same Disable() as the last look, so a late ReplyMsg()
+ * only queues there; the request and port are the device's until a GetMsg()
+ * on port returns it.  AMI_S2IO_NOSIG: nothing was sent.  A device that
+ * answers inside BeginIO() never sees the timer.
+ */
+static LONG ami_sana2_send_bounded(struct IORequest *io, struct MsgPort *port,
+                                   BOOL quick, const ULONG ms[2],
+                                   struct timerequest *tr,
+                                   struct MsgPort *tport)
+{
+    struct Task *self;
+    BYTE         sig;
+    UWORD        phase;
+    BOOL         replied;
 
     sig = AllocSignal(-1);
     if (sig < 0)
-        return (LONG)S2ERR_NO_RESOURCES;
+        return AMI_S2IO_NOSIG;
     self = FindTask(NULL);
 
     ami_sana2_port_init(port, self, sig, PA_SIGNAL);
-
-    *req = iface->templ;
-    req->ios2_Req.io_Message.mn_Node.ln_Type = NT_MESSAGE;
-    req->ios2_Req.io_Message.mn_ReplyPort    = port;
-    req->ios2_Req.io_Message.mn_Length       = (UWORD)sizeof(struct IOSana2Req);
-    req->ios2_Req.io_Command                 = S2_OFFLINE;
-    req->ios2_Req.io_Flags                   = 0;
-    req->ios2_Req.io_Error                   = 0;
-    req->ios2_WireError                      = 0;
+    io->io_Message.mn_ReplyPort = port;
 
     /* The whole exchange in the baton bracket, SendIO() included: a
        BeginIO() that waits (ObtainSemaphore() on a busy unit) must not
        hold the hosted scheduler, as DoIO() did not. */
     ami_sana2_block_enter();
-    SendIO(io);
+    if (quick)
+    {
+        io->io_Flags = IOF_QUICK;
+        BeginIO(io);
+    }
+    else
+        SendIO(io);
 
     if (CheckIO(io) == NULL)
     {
-        ami_sana2_port_init(&tport, self, sig, PA_SIGNAL);
-        tr.tr_node.io_Message.mn_Node.ln_Type = NT_MESSAGE;
-        tr.tr_node.io_Message.mn_ReplyPort    = &tport;
-        tr.tr_node.io_Message.mn_Length       = (UWORD)sizeof(tr);
+        ami_sana2_port_init(tport, self, sig, PA_SIGNAL);
+        tr->tr_node.io_Message.mn_Node.ln_Type = NT_MESSAGE;
+        tr->tr_node.io_Message.mn_ReplyPort    = tport;
+        tr->tr_node.io_Message.mn_Length       = (UWORD)sizeof(*tr);
 
         if (OpenDevice((STRPTR)TIMERNAME, UNIT_VBLANK,
-                       (struct IORequest *)&tr, 0) != 0)
+                       (struct IORequest *)tr, 0) != 0)
         {
             /* No clock to bound a wait with: abort at once, and abandon
                the request below if that does not return it. */
@@ -723,9 +698,9 @@ static LONG ami_sana2_offline_io(AmiSana2If *iface, ULONG *wire)
             {
                 if (phase != 0)
                     (VOID)AbortIO(io);
-                ami_sana2_offline_wait(io, &tr, ami_offline_wait_ms[phase]);
+                ami_sana2_bounded_wait(io, tr, ms[phase]);
             }
-            CloseDevice((struct IORequest *)&tr);
+            CloseDevice((struct IORequest *)tr);
         }
     }
     ami_sana2_block_leave();
@@ -739,8 +714,6 @@ static LONG ami_sana2_offline_io(AmiSana2If *iface, ULONG *wire)
     {
         port->mp_Flags   = PA_IGNORE;
         port->mp_SigTask = NULL;
-        iface->offline_held = TRUE;
-        iface->offline_orphans++;
     }
     Enable();
 
@@ -748,13 +721,49 @@ static LONG ami_sana2_offline_io(AmiSana2If *iface, ULONG *wire)
         (VOID)WaitIO(io);
     FreeSignal(sig);
 
-    if (!replied)
+    return replied ? AMI_S2IO_DONE : AMI_S2IO_HELD;
+}
+
+/*
+ * S2_OFFLINE, bounded (ami_sana2_send_bounded()).  A device that answers
+ * neither keeps the request: offline_held keeps the interface from
+ * CloseDevice() and from being freed until ami_sana2_offline_reap() takes
+ * the reply off the port.
+ */
+static LONG ami_sana2_offline_io(AmiSana2If *iface, ULONG *wire)
+{
+    struct IOSana2Req  *req  = &iface->offline_req;
+    struct timerequest  tr    = { 0 };
+    struct MsgPort      tport = { 0 };
+    LONG                done;
+
+    /* What ami_sana2_command() left in its copy when it failed early. */
+    *wire = iface->templ.ios2_WireError;
+
+    *req = iface->templ;
+    req->ios2_Req.io_Message.mn_Node.ln_Type = NT_MESSAGE;
+    req->ios2_Req.io_Message.mn_Length       = (UWORD)sizeof(struct IOSana2Req);
+    req->ios2_Req.io_Command                 = S2_OFFLINE;
+    req->ios2_Req.io_Flags                   = 0;
+    req->ios2_Req.io_Error                   = 0;
+    req->ios2_WireError                      = 0;
+
+    done = ami_sana2_send_bounded((struct IORequest *)req,
+                                  &iface->offline_port, FALSE,
+                                  ami_offline_wait_ms,
+                                  &tr, &tport);
+    if (done == AMI_S2IO_NOSIG)
+        return (LONG)S2ERR_NO_RESOURCES;
+
+    if (done == AMI_S2IO_HELD)
     {
         /* The unit's last user has left: the slot is taken again to say
            the device still holds this request.  No slot: only this
            interface's own online is held back. */
         AmiSana2Unit *u = ami_sana2_unit_slot(iface, TRUE);
 
+        iface->offline_held = TRUE;
+        iface->offline_orphans++;
         if (u != NULL)
             u->held_by = iface;
         AMI_ERROR("sana2: %s answered neither S2_OFFLINE nor its AbortIO. "
@@ -764,6 +773,160 @@ static LONG ami_sana2_offline_io(AmiSana2If *iface, ULONG *wire)
     }
 
     *wire = req->ios2_WireError;
+    return (LONG)(BYTE)req->ios2_Req.io_Error;
+}
+
+/* ------------------------------------------------ bounded synchronous I/O */
+
+/*
+ * One synchronous command with everything the device may write to: the
+ * request, its reply port, the timer's, and stat_size bytes of statistics
+ * after this header for ios2_StatData.  Freed when the reply is back; kept
+ * on iface->cmd_held when it is not.
+ */
+typedef struct AmiSana2Cmd
+{
+    struct AmiSana2Cmd *next;
+    struct IOSana2Req   req;
+    struct MsgPort      port;
+    struct timerequest  tr;
+    struct MsgPort      tport;
+} AmiSana2Cmd;
+
+/* The commands that bring hardware up, given AMI_SANA2_CMD_SLOW_MS. */
+static const UWORD ami_sana2_slow_cmds[] = { S2_CONFIGINTERFACE, S2_ONLINE };
+
+static VOID ami_sana2_copy_raw(UBYTE *to, const UBYTE *from, ULONG len)
+{
+    while (len-- != 0)
+        *to++ = *from++;
+}
+
+/*
+ * The kept commands the device has given back since, freed.  Never waits.
+ * TRUE while it still holds one.  The list is walked under Disable(): the
+ * IP thread, a reader and the close can all get here.
+ */
+static BOOL ami_sana2_cmd_reap(AmiSana2If *iface)
+{
+    AmiSana2Cmd **link;
+    AmiSana2Cmd  *cmd;
+    AmiSana2Cmd  *done = NULL;
+    BOOL          held;
+
+    if (iface->cmd_held == NULL)
+        return FALSE;
+
+    Disable();
+    link = &iface->cmd_held;
+    while ((cmd = *link) != NULL)
+    {
+        if (GetMsg(&cmd->port) == NULL)
+        {
+            link = &cmd->next;
+            continue;
+        }
+        *link     = cmd->next;
+        cmd->next = done;
+        done      = cmd;
+    }
+    held = (iface->cmd_held != NULL) ? TRUE : FALSE;
+    Enable();
+
+    while ((cmd = done) != NULL)
+    {
+        done = cmd->next;
+        AMI_INFO("sana2: %s answered the abandoned command %ld",
+                 iface->device, (long)cmd->req.ios2_Req.io_Command);
+        ami_free(cmd);
+    }
+
+    return held;
+}
+
+/*
+ * A synchronous command, bounded: AMI_SANA2_CMD_WAIT_MS (SLOW_MS for the
+ * ami_sana2_slow_cmds), then AbortIO() and AMI_SANA2_CMD_ABORT_MS.  The
+ * request goes out from its own allocation, never the caller's: a device
+ * that keeps it keeps that, not a stack frame, and the interface is kept
+ * with it (ami_sana2_close()).  stat_size is how much of ios2_StatData the
+ * command reads or writes, copied in and back out.  While a kept command is
+ * outstanding every other is refused at once with IOERR_UNITBUSY.
+ */
+static LONG ami_sana2_command_stat(AmiSana2If *iface, struct IOSana2Req *req,
+                                   UWORD command, ULONG stat_size)
+{
+    AmiSana2Cmd *cmd;
+    APTR         stat;
+    ULONG        ms[2];
+    ULONG        i;
+    LONG         done;
+
+    if (iface == NULL || !iface->device_open || req == NULL)
+        return (LONG)IOERR_OPENFAIL;
+
+    if (ami_sana2_cmd_reap(iface))
+        return (LONG)IOERR_UNITBUSY;
+
+    cmd = (AmiSana2Cmd *)ami_alloc((ULONG)sizeof(AmiSana2Cmd) + stat_size);
+    if (cmd == NULL)
+        return (LONG)S2ERR_NO_RESOURCES;
+
+    stat     = req->ios2_StatData;
+    cmd->req = *req;
+    if (stat_size != 0)
+    {
+        ami_sana2_copy_raw((UBYTE *)(cmd + 1), (const UBYTE *)stat, stat_size);
+        cmd->req.ios2_StatData = (APTR)(cmd + 1);
+    }
+
+    cmd->req.ios2_Req.io_Message.mn_Node.ln_Type = NT_MESSAGE;
+    cmd->req.ios2_Req.io_Message.mn_Length = (UWORD)sizeof(struct IOSana2Req);
+    cmd->req.ios2_Req.io_Command           = command;
+    cmd->req.ios2_Req.io_Error             = 0;
+    cmd->req.ios2_WireError                = 0;
+
+    ms[0] = AMI_SANA2_CMD_WAIT_MS;
+    ms[1] = AMI_SANA2_CMD_ABORT_MS;
+    for (i = 0; i < (ULONG)(sizeof(ami_sana2_slow_cmds) /
+                            sizeof(ami_sana2_slow_cmds[0])); i++)
+    {
+        if (ami_sana2_slow_cmds[i] == command)
+            ms[0] = AMI_SANA2_CMD_SLOW_MS;
+    }
+
+    done = ami_sana2_send_bounded((struct IORequest *)&cmd->req, &cmd->port,
+                                  TRUE, ms, &cmd->tr, &cmd->tport);
+    if (done == AMI_S2IO_NOSIG)
+    {
+        ami_free(cmd);
+        return (LONG)S2ERR_NO_RESOURCES;
+    }
+
+    if (done == AMI_S2IO_HELD)
+    {
+        Disable();
+        cmd->next       = iface->cmd_held;
+        iface->cmd_held = cmd;
+        Enable();
+        iface->cmd_orphans++;
+
+        req->ios2_Req.io_Error = (BYTE)IOERR_ABORTED;
+        req->ios2_WireError    = 0;
+        AMI_ERROR("sana2: %s unit %lu did not answer command %ld in %lu s. "
+                  "The interface leaks until it does",
+                  iface->device, (unsigned long)iface->unit, (long)command,
+                  (unsigned long)((ms[0] + ms[1]) / 1000UL));
+        return (LONG)IOERR_ABORTED;
+    }
+
+    *req = cmd->req;
+    req->ios2_Req.io_Message.mn_ReplyPort = NULL;
+    req->ios2_StatData = stat;
+    if (stat_size != 0)
+        ami_sana2_copy_raw((UBYTE *)stat, (const UBYTE *)(cmd + 1), stat_size);
+    ami_free(cmd);
+
     return (LONG)(BYTE)req->ios2_Req.io_Error;
 }
 
@@ -960,7 +1123,8 @@ VOID ami_sana2_refresh_stats(AmiSana2If *iface)
 
     req.ios2_StatData = &stats;
 
-    if (ami_sana2_command(iface, &req, S2_GETGLOBALSTATS) != 0)
+    if (ami_sana2_command_stat(iface, &req, S2_GETGLOBALSTATS,
+                               (ULONG)sizeof(stats)) != 0)
         return;
 
     iface->stats.bad_data         = stats.BadData;
@@ -979,7 +1143,8 @@ VOID ami_sana2_refresh_stats(AmiSana2If *iface)
         (ULONG)(sizeof(special.rec) / sizeof(special.rec[0]));
     req.ios2_StatData = &special;
 
-    if (ami_sana2_command(iface, &req, S2_GETSPECIALSTATS) == 0)
+    if (ami_sana2_command_stat(iface, &req, S2_GETSPECIALSTATS,
+                               (ULONG)sizeof(special)) == 0)
     {
         ULONG n = special.hdr.RecordCountSupplied;
 
@@ -1576,7 +1741,7 @@ BOOL ami_sana2_close(AmiSana2If *iface)
      * much as a CMD_READ -- tx_port and the tx ring are fields of AmiSana2If.
      */
     if (iface->rx_orphaned || iface->tx_orphaned ||
-        ami_sana2_offline_reap(iface))
+        ami_sana2_offline_reap(iface) || ami_sana2_cmd_reap(iface))
     {
         ami_sana2_retain(iface);
         return FALSE;
@@ -1633,7 +1798,7 @@ UWORD ami_sana2_retained_sweep(BOOL release_packets)
         rx_clear = ami_sana2_rx_reclaim(iface, release_packets);
 
         if (!rx_clear || iface->tx_orphaned ||
-            ami_sana2_offline_reap(iface))
+            ami_sana2_offline_reap(iface) || ami_sana2_cmd_reap(iface))
         {
             link = &iface->retained_next;
             continue;
@@ -1734,7 +1899,8 @@ VOID ami_sana2_poll_overruns(AmiSana2If *iface)
     struct Sana2DeviceStats stats = { 0 };
 
     req.ios2_StatData = &stats;
-    if (ami_sana2_command(iface, &req, S2_GETGLOBALSTATS) != 0)
+    if (ami_sana2_command_stat(iface, &req, S2_GETGLOBALSTATS,
+                               (ULONG)sizeof(stats)) != 0)
         return;
     if (stats.Overruns != iface->overruns_seen)
         iface->overruns_new += stats.Overruns - iface->overruns_seen;

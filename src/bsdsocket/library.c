@@ -811,7 +811,12 @@ static struct Process *bsd_netstack_spawn(BsdNetBoot *boot, BYTE sig)
  * only out of memory; an open that says so is a diagnosable machine.
  */
 /* Run one job to completion on the launched process.  The caller holds the
-   master base's sb_Lock, which keeps bsd_net_boot to one job at a time. */
+   master base's sb_Lock, which keeps bsd_net_boot to one job at a time.
+   The Wait() has no deadline of its own: boot is on this stack and the job
+   writes its result there, so it must not return first.  The job is bounded
+   instead, by the deadline on every SANA-II command it sends
+   (AMI_SANA2_CMD_WAIT_MS, sana2_internal.h); OpenDevice() and a BeginIO()
+   that blocks are not. */
 static LONG bsd_netstack_run(BsdNetBoot *boot, const char *what)
 {
     BYTE sig;

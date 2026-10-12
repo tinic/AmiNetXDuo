@@ -157,6 +157,28 @@
 #endif
 
 /*
+ * Every other synchronous command's deadlines, in milliseconds
+ * (ami_sana2_command()).  The attach runs them on the stack process while
+ * the caller waits holding the library's sb_Lock, so a driver that never
+ * answered held every library call that needs it for good.  A working driver
+ * answers a query inside BeginIO(); WAIT is far past that.  SLOW is for the
+ * two that bring hardware up: anxwifipi's S2_CONFIGINTERFACE is a run of
+ * firmware control packets of up to 2.5 s each.  The first command a device
+ * keeps fails the rest at once, so an attach spends one deadline, not one per
+ * command.  They bound the reply only: a BeginIO() or OpenDevice() that blocks
+ * itself still blocks (#92).
+ */
+#ifndef AMI_SANA2_CMD_WAIT_MS
+#define AMI_SANA2_CMD_WAIT_MS       20000UL
+#endif
+#ifndef AMI_SANA2_CMD_SLOW_MS
+#define AMI_SANA2_CMD_SLOW_MS       60000UL
+#endif
+#ifndef AMI_SANA2_CMD_ABORT_MS
+#define AMI_SANA2_CMD_ABORT_MS      2000UL
+#endif
+
+/*
  * How many completed reads one reader may take before it must release the
  * ThreadX baton once, even with another completion already on its port.
  *
@@ -975,6 +997,12 @@ struct AmiSana2If
     struct MsgPort      offline_port;
     BOOL                offline_held;
     UWORD               offline_orphans;    /* times it was abandoned */
+    /* Synchronous commands the device kept past their deadline and AbortIO()
+       (ami_sana2_command()), each one allocation holding its request, reply
+       port and statistics buffer.  Listed until the reply is taken off the
+       port; while any is, the interface is kept as for offline_held. */
+    struct AmiSana2Cmd *cmd_held;
+    UWORD               cmd_orphans;        /* times one was abandoned */
     /* Administrative state: the stack's intent, not the wire's condition.
        Only the driver entry's enable/disable cases write it. */
     BOOL                admin_up;
