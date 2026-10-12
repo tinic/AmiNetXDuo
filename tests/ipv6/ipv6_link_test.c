@@ -22,6 +22,7 @@
 #include <proto/dos.h>
 
 #include <stdarg.h>
+#include <string.h>
 
 #ifdef NX_DISABLE_IPV6
 #error "tests/ipv6 requires -DAMINETXDUO_IPV6=ON"
@@ -236,41 +237,28 @@ ULONG   waited =  0;
     return(TX_TRUE);
 }
 
-static VOID t_setstr(char *dst, ULONG size, const char *src)
-{
-
-ULONG   i;
-
-    for (i = 0; (i + 1UL) < size && src[i] != '\0'; i++)
-    {
-        dst[i] =  src[i];
-    }
-    dst[i] =  '\0';
-}
-
 static VOID t_readd(VOID)
 {
 
-AmiIfConfig     cfg;
-UBYTE          *raw =  (UBYTE *)&cfg;
-ULONG           i;
+AmiIfConfig     cfg = {0};
+const AmiIfConfig *existing = netstack_iface_config(0);
 UWORD           index =  0xFFFFU;
 LONG            rc;
 
     t_log("remove and re-add interface 0:");
 
-    for (i = 0; i < (ULONG)sizeof(cfg); i++)
-    {
-        raw[i] =  0;
-    }
-
-    /* The tag list AddInterfaceTagList() can express: a name, a device and a
-       unit. Everything else is the machine's own record of the interface. */
-    t_setstr(cfg.name,   sizeof(cfg.name),   "eth0");
-    t_setstr(cfg.device, sizeof(cfg.device), "a2065.device");
-    cfg.unit   =  0UL;
+    if (!t_check((UINT)(existing != NULL), "interface config exists for re-add", 0UL))
+        return;
+    /* Model AddInterfaceTagList's defaults, using the actual interface
+       identity rather than assuming a2065.device on unit zero. */
+    memcpy(cfg.name, existing->name, sizeof(cfg.name));
+    memcpy(cfg.device, existing->device, sizeof(cfg.device));
+    cfg.unit   =  existing->unit;
     cfg.iptype =  AMI_IPTYPE_STATIC;
     cfg.up     =  FALSE;
+#ifdef AMINETXDUO_IPV6
+    cfg.ip6type = AMI_IP6TYPE_AUTO;
+#endif
 
     rc =  netstack_interface_remove(0, TRUE);
     if (!t_check((UINT)(rc == AMI_NET_OK), "RemoveInterface(eth0)", (ULONG)rc))
