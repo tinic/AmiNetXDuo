@@ -25,9 +25,9 @@
  * not kept twice.
  *
  * MARK: RETURN_OK when the file FIRST holds the bytes SECOND anywhere,
- * RETURN_WARN when it does not, RETURN_ERROR when it cannot be read.  Search
- * reads lines, and on a large binary file (the certificate store) it took the
- * Installer down with it; this reads blocks.
+ * RETURN_WARN when it does not, RETURN_ERROR when it cannot be read.  Exact
+ * bytes, case and all, in blocks: AmigaDOS Search ignores case and reads
+ * lines, which in a program or the certificate store mean nothing.
  *
  * HOSTLINE: FIRST is a name_resolution file; the name the stack takes from it
  * (ami_cfg_resolver_hostname_file, the stack's own parser) is written to
