@@ -2693,10 +2693,15 @@ fi
 # interface for the full and fat stacks on a 68020 or newer, NO on a 68000
 # and on the reduced stacks.
 _res=$(amiga_path "${INST}Devs/Internet/name_resolution" 2>/dev/null || true)
-if [ "$HAND_HOST" = 1 ]; then
+_hand_name=""
+[ "$HAND_HOST" = 1 ] && _hand_name=handset
+# Another stack's name_resolution named the machine: setting it up again
+# carries that name over.
+case "$FOREIGN_MODE" in *-replace) _hand_name=foreign-amiga ;; esac
+if [ -n "$_hand_name" ]; then
     if [ "$(grep -c '^hostname' "$_res" 2>/dev/null)" = 1 ] &&
-       grep -q '^hostname handset$' "$_res"; then
-        echo "  ok      the hand-set hostname survived setting the network up again"
+       grep -q "^hostname $_hand_name\$" "$_res"; then
+        echo "  ok      the hostname set by hand ($_hand_name) survived setting the network up again"
     else
         echo "!! the hand-set hostname did not survive: $(grep '^hostname' "$_res" 2>/dev/null)"
         fail=1
