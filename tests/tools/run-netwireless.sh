@@ -63,6 +63,6 @@ set +e
 RUN_RC=$?
 set -e
 
-verdict_guest "netwireless" 48 "$RUN_RC" \
+verdict_guest "netwireless" 52 "$RUN_RC" \
     "$(verdict_hd_amiberry)/stdout.txt" "$(verdict_serial_amiberry)" && exit 0
 exit $?

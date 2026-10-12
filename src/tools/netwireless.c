@@ -79,6 +79,7 @@ static struct
     BOOL                want_menu;
     BOOL                offline;            /* the event mask's online bit  */
     LONG                assoc;              /* -1 unknown, from events      */
+    BOOL                reliable;           /* signal says "not associated" */
     char                envbuf[24];
 
     struct MsgPort     *cxport, *appport, *tport;
@@ -270,8 +271,12 @@ static VOID nw_refresh(BOOL event)
     int   i;
 
     nw.link = nw.dev_open ? nw_dev_signal(&nw.dev, &signal, &noise) : NW_LINK_NODEV;
-    /* A signal from a unit that is only online (prism2.device). */
-    if (nw.link == NW_LINK_UP && nw.assoc == 0) nw.link = NW_LINK_DOWN;
+    /* A unit that refuses the signal when not associated (anxwifipi.device)
+       says so itself; for one that answers whenever online (prism2.device)
+       the events say. */
+    if (nw.link == NW_LINK_DOWN) nw.reliable = TRUE;
+    if (nw.link == NW_LINK_UP && nw.assoc == 0 && !nw.reliable)
+        nw.link = NW_LINK_DOWN;
     tool_copy_string(label, sizeof(label), "Wi-Fi");
     switch (nw.link)
     {
@@ -309,15 +314,61 @@ static VOID nw_refresh(BOOL event)
    change of that, and CONNECT and DISCONNECT wait. */
 static VOID nw_event_arm(VOID)
 {
+    ULONG assoc;
+
     if (!nw.dev_open || nw.events_broken) return;
-    /* Only the change from what the unit is: prism2.device answers every
-       event bit that is true at once, so asking for the present state
-       would spin.  Unknown, both are asked, and such a driver says which. */
-    (VOID)nw_dev_event_arm(&nw.dev, nw.offline ? S2EVENT_ONLINE :
-                           S2EVENT_OFFLINE |
-                           (nw.assoc == 1 ? NW_S2EVENT_DISCONNECT :
-                            nw.assoc == 0 ? NW_S2EVENT_CONNECT :
-                            NW_S2EVENT_CONNECT | NW_S2EVENT_DISCONNECT));
+    /* A unit whose signal answer says it is not associated reports
+       connects and disconnects as they happen: both are asked, and one
+       missed is found again by reading the signal.  prism2.device answers
+       every bit that is true at once, so only the change from what it is
+       is asked; unknown, both, and it says which. */
+    assoc = NW_S2EVENT_CONNECT | NW_S2EVENT_DISCONNECT;
+    if (!nw.reliable && nw.assoc == 1) assoc = NW_S2EVENT_DISCONNECT;
+    if (!nw.reliable && nw.assoc == 0) assoc = NW_S2EVENT_CONNECT;
+    (VOID)nw_dev_event_arm(&nw.dev, nw.offline ? S2EVENT_ONLINE
+                                               : (S2EVENT_OFFLINE | assoc));
+}
+
+/* An event reply taken off the port. */
+static VOID nw_event_got(VOID)
+{
+    LONG  err = nw.dev.event->ios2_Req.io_Error;
+    ULONG got = nw.dev.event->ios2_WireError;
+
+    /* A unit without events is polled.  Any other refusal (an aborted
+       request, a CMD_FLUSH from another opener) is asked again on the next
+       tick, never at once: a driver that refuses every request must not
+       spin. */
+    if (err == IOERR_NOCMD || err == S2ERR_NOT_SUPPORTED)
+        nw.events_broken = TRUE;
+    else if (err != 0)
+        nw.event_retry = TRUE;
+    if (err != 0) return;
+    if (got & S2EVENT_ONLINE) nw.offline = FALSE;
+    if (got & NW_S2EVENT_CONNECT) nw.assoc = 1;
+    if (got & NW_S2EVENT_DISCONNECT) nw.assoc = 0;
+    if (got & S2EVENT_OFFLINE)
+    {
+        nw.offline = TRUE;
+        nw.assoc = -1;
+    }
+}
+
+/* Armed, then read.  Answers a driver gives at once are taken first, so
+   the reading starts from what the unit says it is. */
+static VOID nw_event_cycle(VOID)
+{
+    int k;
+
+    for (k = 0; k < 4 && !nw.events_broken && !nw.event_retry; k++)
+    {
+        nw_event_arm();
+        if (!nw.dev.event_busy || !CheckIO((struct IORequest *)nw.dev.event))
+            break;
+        if (nw_dev_reply(&nw.dev) != NW_REPLY_EVENT) break;
+        nw_event_got();
+    }
+    nw_refresh(TRUE);
 }
 
 /* -------------------------------------------------------- commodity -- */
@@ -474,8 +525,7 @@ int main(int argc, char **argv)
     nw.label[0] = 1;                    /* differs from every label: shown */
     nw.offline = TRUE;                  /* a unit online answers at once  */
     nw.assoc = -1;
-    nw_event_arm();
-    nw_refresh(TRUE);
+    nw_event_cycle();
 
     while (run)
     {
@@ -501,24 +551,8 @@ int main(int argc, char **argv)
             }
         if ((sigs & dev) && nw_dev_reply(&nw.dev) == NW_REPLY_EVENT)
         {
-            LONG  err = nw.dev.event->ios2_Req.io_Error;
-            ULONG got = nw.dev.event->ios2_WireError;
-
-            /* A unit without events is polled.  Any other refusal (an
-               aborted request, a CMD_FLUSH from another opener) is asked
-               again on the next tick, never at once: a driver that refuses
-               every request must not spin. */
-            if (err == IOERR_NOCMD || err == S2ERR_NOT_SUPPORTED)
-                nw.events_broken = TRUE;
-            else if (err != 0)
-                nw.event_retry = TRUE;
-            if (err == 0 && (got & S2EVENT_OFFLINE)) nw.offline = TRUE;
-            if (err == 0 && (got & S2EVENT_ONLINE)) nw.offline = FALSE;
-            if (err == 0 && (got & NW_S2EVENT_CONNECT)) nw.assoc = 1;
-            if (err == 0 && (got & NW_S2EVENT_DISCONNECT)) nw.assoc = 0;
-            if (err == 0 && (got & S2EVENT_OFFLINE)) nw.assoc = -1;
-            if (err == 0) nw_event_arm();
-            nw_refresh(TRUE);
+            nw_event_got();
+            nw_event_cycle();
         }
         if ((sigs & tim) && GetMsg(nw.tport) != NULL)
         {
@@ -528,8 +562,7 @@ int main(int argc, char **argv)
                 /* Armed, then read, as everywhere else: a change while
                    the request was down is seen now. */
                 nw.event_retry = FALSE;
-                nw_event_arm();
-                nw_refresh(TRUE);
+                nw_event_cycle();
                 continue;
             }
             if (nw.want_menu && nw.appmenu == NULL && nw.appport != NULL)

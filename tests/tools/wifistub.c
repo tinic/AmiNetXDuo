@@ -67,6 +67,7 @@ typedef struct WsDevice
     BOOL          break_next;           /* Ctrl-C the next scanner         */
     BOOL          level;                /* prism2.device: events and signal
                                            answered from the state         */
+    UBYTE         ap;                   /* the access point's last byte    */
     char          ssid[33];             /* what S2_SETOPTIONS joined       */
     APTR          assoc;                /* the request that joined it      */
     ULONG         n_setoptions;
@@ -186,11 +187,14 @@ static VOID ws_network_info(struct IOSana2Req *io)
     }
     CopyMem(ws->ssid, ssid, 33);
     CopyMem((APTR)ws_mac, bssid, 6);
+    bssid[5] = (UBYTE)(bssid[5] + ws->ap);
     if (ws->level)
     {
-        /* prism2.device names no network: the BSSID alone. */
+        /* prism2.device names no network: the BSSID, an ignored slot and
+           the WPA element, as its GetNetworkInfo() lays them out. */
         t[0].ti_Tag = S2INFO_BSSID; t[0].ti_Data = (ULONG)bssid;
-        t[1].ti_Tag = TAG_DONE;
+        t[1].ti_Tag = TAG_IGNORE;   t[1].ti_Data = 0;
+        t[2].ti_Tag = TAG_DONE;
         io->ios2_StatData = t;
         ws_reply(io, 0, 0);
         return;
@@ -245,7 +249,8 @@ static VOID ws_begin_io(register struct Device *dev __asm("a6"),
                 preset |= ws->connected ? S2EVENT_CONNECT : S2EVENT_DISCONNECT;
 
             ws->n_event++;
-            if (io->ios2_WireError & ~WS_EVENTS)
+            /* prism2.device also takes LINKUP and LINKDOWN (1 << 11, 12). */
+            if (io->ios2_WireError & ~(WS_EVENTS | (ws->level ? 0x1800UL : 0)))
                 ws_reply(io, S2ERR_NOT_SUPPORTED, S2WERR_BAD_EVENT);
             else if (io->ios2_WireError & preset)
             {
@@ -296,6 +301,7 @@ static VOID ws_begin_io(register struct Device *dev __asm("a6"),
                     ws->assoc = io;
                     ws->connected = TRUE;
                     ws->signal = -61;
+                    ws->ap++;            /* associated anew */
                 }
             ws_reply(io, 0, 0);
             if (ws->connected) ws_report(S2EVENT_CONNECT);
@@ -560,6 +566,7 @@ static LONG run(const char *command)
 }
 
 #define PREFS "DH0:NetWirelessPrefs DEVICE=" WS_NAME
+#define PREFS_P2 "DH0:NetWirelessPrefs"
 
 /* A file into out, for has(). */
 static VOID slurp(const char *path)
@@ -891,36 +898,57 @@ int main(void)
         rc = run("DH0:NetWirelessPrefs STATUS");
         check(rc == RETURN_WARN && has("prism2.device, unit 0") &&
               has("Link          not connected"),
-              "prism2: found with nothing named, online is not connected");
+              "prism2: found from wifi0 with nothing named, online is not connected");
         ws->connected = TRUE;
         rc = run("DH0:NetWirelessPrefs STATUS");
         check(rc == 0 && has("Link          connected") && has("Access point"),
               "prism2: associated, the BSSID without a name");
+        rc = run("DH0:NetWirelessPrefs INTERFACE=wifitest STATUS");
+        check(rc == RETURN_ERROR && has("cannot open wifistub.device"),
+              "a named INTERFACE wins over the search");
+        rc = run("DH0:NetWirelessPrefs DEVICE=prism2.device UNIT=0 STATUS");
+        check(rc == 0, "a named DEVICE and UNIT win over the search");
 
+        /* A JOIN on a card already on an access point counts only once it
+           has moved to the one WirelessManager joins. */
+        rc = run(PREFS_P2 " JOIN=Home");
+        check(rc == 0 && has("Connected."), "prism2: JOIN waits for the new association");
+        stop_wm();
+
+        /* The commodity started on an unassociated card shows that from the
+           first picture, and its requests do not spin. */
+        ws->connected = FALSE;
+        ws->assoc = NULL;
         in = Open((CONST_STRPTR)"NIL:", MODE_OLDFILE);
         o = Open((CONST_STRPTR)"NIL:", MODE_NEWFILE);
         SystemTags((CONST_STRPTR)"DH0:NetWireless INTERVAL=1", SYS_Input, (ULONG)in,
                    SYS_Output, (ULONG)o, SYS_Asynch, TRUE, TAG_DONE);
         Delay(100);
-        check(env_is("Wi-Fi 3/4"), "prism2: the commodity shows the link");
+        check(env_is("Not connected"), "prism2: the commodity starts not connected");
+        polls = ws->n_signal;
         events = ws->n_event;
         Delay(150);
         Printf((CONST_STRPTR)"prism2_event_requests_3s=%lu\n", ws->n_event - events);
-        check(ws->n_event - events <= 2, "prism2: events do not spin");
-        ws->connected = FALSE;
-        ws_report(S2EVENT_DISCONNECT);
-        Delay(50);
-        check(env_is("Not connected"), "prism2: DISCONNECT seen");
-        polls = ws->n_signal;
-        Delay(200);
+        check(ws->n_event == events, "prism2: events do not spin");
         check(ws->n_signal == polls, "prism2: nothing polled while not associated");
         ws->connected = TRUE;
         ws_report(S2EVENT_CONNECT);
         Delay(50);
         check(env_is("Wi-Fi 3/4"), "prism2: CONNECT seen");
+        ws->connected = FALSE;
+        ws_report(S2EVENT_DISCONNECT);
+        Delay(50);
+        check(env_is("Not connected"), "prism2: DISCONNECT seen");
         stop_named("NetWireless");
         Delay(25);
     }
+
+    /* No interface file names a Wi-Fi driver: the Pi driver is tried, and
+       its absence is said plainly. */
+    DeleteFile((CONST_STRPTR)"DEVS:NetInterfaces/wifi0");
+    rc = run("DH0:NetWirelessPrefs STATUS");
+    check(rc == RETURN_ERROR && has("anxwifipi.device"),
+          "nothing found: anxwifipi.device, refused with its name");
 
     check(ws->n_scan_abort == 0, "no running scan was aborted");
     check(ws->dd.dd_Library.lib_OpenCnt == 0, "every opener closed");

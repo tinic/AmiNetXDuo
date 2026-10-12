@@ -3333,8 +3333,9 @@
   a Wi-Fi driver (anxwifipi.device for the Pi, prism2.device for PC Card
   and PCI cards), DEVS:NetInterfaces/wifipi first; with none,
   anxwifipi.device unit 0. prism2.device reports the access point and not
-  the network's name, so the window and the AppIcon show "Wi-Fi" for the
-  network there, and a join counts any association. DEVICE,
+  the network's name: the window shows "Connected" and the AppIcon "Wi-Fi"
+  for the network there, and a join counts once the card has left the
+  network it was on. DEVICE,
   UNIT, INTERFACE and WM (the WirelessManager command, C:WirelessManager by
   default) are also ToolTypes, and arguments win over the icon. Project >
   Snapshot keeps the window's position in the icon as LEFT and TOP.

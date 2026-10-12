@@ -100,11 +100,10 @@ BOOL nw_dev_bring_up(NwDev *d);
 LONG nw_dev_signal(NwDev *d, LONG *signal, LONG *noise);
 
 /* The same, NW_LINK_UP only when associated.  prism2.device answers the
-   signal whenever it is online; asked S2_ONEVENT {CONNECT|DISCONNECT}, it
-   answers at once from its state.  A driver that waits for the next event
-   instead (anxwifipi.device, whose signal answer already says) has the
-   request aborted, which is safe for events.  Not with an event request of
-   the caller's outstanding. */
+   signal whenever it is online, and S2_ONEVENT with every bit of its state
+   at once; anxwifipi.device answers the online/offline bit alone, and its
+   signal answer already says.  Not with an event request of the caller's
+   outstanding. */
 LONG nw_dev_link(NwDev *d, LONG *signal, LONG *noise);
 
 /* The SSID and BSSID of the associated network, and d->net_channel and

@@ -70,19 +70,39 @@ BOOL nw_dev_from_interface(const char *name, char *device, ULONG cap,
     return found;
 }
 
+/* One interface file's DEVICE and UNIT if the DEVICE is a Wi-Fi driver;
+   nothing of a file that is not is kept. */
+static BOOL nw_dev_wireless(const char *name, char *device, ULONG cap, ULONG *unit)
+{
+    char  found[128];
+    ULONG u = 0;
+
+    if (!nw_dev_from_interface(name, found, sizeof(found), &u) ||
+        !nw_wireless_driver(found))
+        return FALSE;
+    tool_copy_string(device, cap, found);
+    *unit = u;
+    return TRUE;
+}
+
 BOOL nw_dev_find(char *device, ULONG cap, ULONG *unit)
 {
     static char names[24][TOOL_NAME_LEN];
-    ULONG       n, i;
+    char        t[TOOL_NAME_LEN];
+    ULONG       n, i, k;
 
-    if (nw_dev_from_interface(NW_DEFAULT_INTERFACE, device, cap, unit) &&
-        nw_wireless_driver(device))
-        return TRUE;
+    if (nw_dev_wireless(NW_DEFAULT_INTERFACE, device, cap, unit)) return TRUE;
+    /* In name order, so that the same file is chosen every time. */
     n = tool_list_dir("DEVS:NetInterfaces", names, 24, NULL);
+    for (i = 1; i < n; i++)
+        for (k = i; k > 0 && tool_stricmp(names[k - 1], names[k]) > 0; k--)
+        {
+            tool_copy_string(t, sizeof(t), names[k]);
+            tool_copy_string(names[k], TOOL_NAME_LEN, names[k - 1]);
+            tool_copy_string(names[k - 1], TOOL_NAME_LEN, t);
+        }
     for (i = 0; i < n; i++)
-        if (nw_dev_from_interface(names[i], device, cap, unit) &&
-            nw_wireless_driver(device))
-            return TRUE;
+        if (nw_dev_wireless(names[i], device, cap, unit)) return TRUE;
     return FALSE;
 }
 
@@ -236,17 +256,21 @@ LONG nw_dev_link(NwDev *d, LONG *signal, LONG *noise)
     LONG link = nw_dev_signal(d, signal, noise);
 
     if (link != NW_LINK_UP || d->event_busy) return link;
+    /* ONLINE or OFFLINE is always true, so every driver answers this at
+       once and nothing is aborted: a driver may already have taken the
+       request off its queue.  prism2.device adds the association bit;
+       anxwifipi.device adds none, and its signal answer stands. */
     d->event->ios2_Req.io_Command = S2_ONEVENT;
     d->event->ios2_Req.io_Error = 0;
-    d->event->ios2_WireError = NW_S2EVENT_CONNECT | NW_S2EVENT_DISCONNECT;
-    SendIO((struct IORequest *)d->event);
-    if (!CheckIO((struct IORequest *)d->event))
-        AbortIO((struct IORequest *)d->event);
-    else if (d->event->ios2_Req.io_Error == 0 &&
-             (d->event->ios2_WireError & NW_S2EVENT_DISCONNECT))
-        link = NW_LINK_DOWN;
-    WaitIO((struct IORequest *)d->event);
-    /* WaitIO() may have taken the port's signal from a scan reply queued
+    d->event->ios2_WireError = NW_S2EVENT_CONNECT | NW_S2EVENT_DISCONNECT |
+                               S2EVENT_ONLINE | S2EVENT_OFFLINE;
+    (VOID)DoIO((struct IORequest *)d->event);
+    if (d->event->ios2_Req.io_Error == 0)
+    {
+        if (d->event->ios2_WireError & S2EVENT_OFFLINE) link = NW_LINK_OFF;
+        else if (d->event->ios2_WireError & NW_S2EVENT_DISCONNECT) link = NW_LINK_DOWN;
+    }
+    /* DoIO() may have taken the port's signal from a scan reply queued
        behind; the caller's Wait() must still see it. */
     if (d->async->mp_MsgList.lh_Head->ln_Succ != NULL)
         Signal(d->async->mp_SigTask, 1UL << d->async->mp_SigBit);

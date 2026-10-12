@@ -5,7 +5,7 @@ Add new entries under `Unreleased`; published release sections are history.
 
 ## Unreleased
 
-- NetWireless and NetWirelessPrefs find a prism2.device PC Card Wi-Fi from its interface file when no DEVICE is given.
+- NetWireless and NetWirelessPrefs find a prism2.device Wi-Fi card (PC Card or PCI) from its interface file when neither DEVICE nor INTERFACE is given.
 
 - New NetWireless commodity: Wi-Fi state and signal as an AppIcon, a Tools menu item and ENV:WiFi; the signal is read only while connected.
 
