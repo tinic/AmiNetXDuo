@@ -346,6 +346,50 @@ int nw_prefs_write(const char *old, size_t oldlen,
     return 1;
 }
 
+void nw_prefs_order(const NwNetwork *nets, int count, unsigned char *order)
+{
+    int i, k;
+
+    for (i = 0; i < count; i++)
+    {
+        for (k = i; k > 0 && nets[order[k - 1]].priority < nets[i].priority; k--)
+            order[k] = order[k - 1];
+        order[k] = (unsigned char)i;
+    }
+}
+
+int nw_prefs_order_edits(const NwNetwork *nets, int count,
+                         const unsigned char *order, int shown,
+                         NwBlockEdit *edits, NwField *fields, char (*prio)[12])
+{
+    int i, k, n = 0;
+
+    for (i = 0; i < count; i++)
+    {
+        for (k = 0; k < shown && order[k] != i; k++)
+            ;
+        edits[n].index = i;
+        edits[n].remove = k == shown;
+        edits[n].fields = &fields[n];
+        edits[n].nfields = 0;
+        if (k < shown && nets[i].priority != shown - k)
+        {
+            long v = shown - k;
+            char rev[12];
+            int  d = 0, j = 0;
+
+            do rev[d++] = (char)('0' + v % 10); while ((v /= 10) != 0);
+            while (d > 0) prio[n][j++] = rev[--d];
+            prio[n][j] = '\0';
+            fields[n].key = "priority";
+            fields[n].value = prio[n];
+            edits[n].nfields = 1;
+        }
+        if (edits[n].remove || edits[n].nfields != 0) n++;
+    }
+    return n;
+}
+
 void nw_prefs_ssid_value(const unsigned char *ssid, int len, char *out)
 {
     static const char hex[] = "0123456789abcdef";

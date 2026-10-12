@@ -61,6 +61,8 @@
 #                   gets a PRIORITY=10 line of its own
 #   EMU68_WIFI_KEEPIT_LIVE the same, the kept genet file ending in a live
 #                   "UNIT=0 PRIORITY=3": nothing is appended
+#   EMU68_WIFI_KEEPIT_FW  keepit that empties DEVS:Firmware between the runs:
+#                   the kept anxwifipi definition alone brings the firmware back
 #   EMU68_WIFI_USERSTART S:User-Startup starts WirelessManager already
 #   EMU68_WIFI_DRAWER a drawer install beside the user's C:WirelessManager
 #   EMU68_BOTH_NOVICE NOVICE still asks for the Wi-Fi network, a Latin-1 name
@@ -119,6 +121,7 @@ SCENARIOS=(
     ROADSHOW_LEAVE ROADSHOW_REPLACE AMITCPNG_LEAVE AMITCPNG_REPLACE
     EMU68_GENET EMU68_WIFI EMU68_BOTH EMU68_BOTH_MICRO
     EMU68_WIFI_JOIN EMU68_WIFI_KEEP EMU68_WIFI_KEEPIT EMU68_WIFI_KEEPIT_BOTH EMU68_WIFI_KEEPIT_LIVE
+    EMU68_WIFI_KEEPIT_FW
     EMU68_WIFI_USERSTART EMU68_WIFI_DRAWER EMU68_BOTH_NOVICE
     EMU68_GENET_OLD EMU68_GENET_OLD_BARE
     CANCEL_DRIVERS MISSING_CORE MISSING_DRIVER MISSING_PROBE MISSING_MINIMAL
@@ -229,6 +232,7 @@ for scenario in "${SCENARIOS[@]}"; do
         EMU68_WIFI_KEEPIT)     opts=(-l AVERAGE -e wifi -w keepit -R) ;;
         EMU68_WIFI_KEEPIT_BOTH) opts=(-l AVERAGE -e both -w keepit -R) ;;
         EMU68_WIFI_KEEPIT_LIVE) opts=(-l AVERAGE -e both -w keepitlive -R) ;;
+        EMU68_WIFI_KEEPIT_FW)  opts=(-l AVERAGE -e wifi -w keepitfw -R) ;;
         EMU68_WIFI_USERSTART)  opts=(-l AVERAGE -e wifi -w userstart) ;;
         EMU68_WIFI_DRAWER)     opts=(-l AVERAGE -e wifi -D -w userwm) ;;
         EMU68_BOTH_NOVICE)     opts=(-l NOVICE -e both -w join) ;;

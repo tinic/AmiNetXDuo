@@ -263,9 +263,11 @@ twelve classic card definitions.  anxgenet.device supports the Raspberry Pi
 4/CM4 Ethernet behind a PiStorm32 running Emu68 1.1 alpha.1 or newer.  On an
 older Emu68 the installer uses Emu68's own genet.device when one is installed.
 With no other network device found, it stops before it changes anything.
-anxwifipi.device supports the same machine's Wi-Fi and needs the Emu68
-firmware plus a supplicant before it can associate.  With the Pi Wi-Fi
-selected, at every installer level, the installer puts WirelessManager 1.5
+anxwifipi.device supports the same machine's Wi-Fi and needs its firmware
+in DEVS:Firmware plus a supplicant before it can associate.  With the Pi
+Wi-Fi selected, at every installer level, the installer copies the firmware
+files DEVS:Firmware lacks from the archive's Devs/Firmware, with their
+licences (WHENCE says which file is under which), and puts WirelessManager 1.5
 into C: (or its own drawer) unless a WirelessManager it did not install is
 already there.  A window of its own asks for the network name and
 passphrase and writes ENVARC:Sys/Wireless.prefs, unless a Wireless.prefs

@@ -60,9 +60,11 @@ finds the Pi's Ethernet and Wi-Fi itself. On an Emu68 older than 1.1 alpha.1
 it uses Emu68's own `genet.device` when one is installed; with no other network
 device found, it stops.
 
-The Wi-Fi driver needs the firmware Emu68 installs in `DEVS:Firmware`. With
-the Pi Wi-Fi selected, at every installer level:
+The Wi-Fi driver needs its firmware in `DEVS:Firmware`. With the Pi Wi-Fi
+selected, at every installer level:
 
+- The firmware files `DEVS:Firmware` lacks are copied there from the
+  archive's `Devs/Firmware`, with their licences and `WHENCE`.
 - WirelessManager 1.5 goes into `C:` (or the installation's own drawer),
   unless a WirelessManager the installer did not put there already exists.
 - A window asks for the network name and passphrase and writes
