@@ -89,16 +89,26 @@
 (run ("Execute >T:AmiNetXDuo-Log %s" REC)
      (prompt "Deleting AmiNetXDuo's files and putting back what it replaced")
      (help "The AmigaDOS script the installer wrote of what it installed."))
-; The record's last line says it is done; wait for it, bounded.
-(set WAITED 0)
-(while (AND (NOT (exists "T:AmiNetXDuo-Done" (noreq))) (< WAITED 120))
+; The record's last line says it ran to the end; wait for it, bounded.
+; Without it the record stopped part way: it stays, with Backup, so that
+; this can run again.
+(if (= @pretend 0)
   (
-    (run "Wait 1" (safe))
-    (set WAITED (+ WAITED 1))
+    (set WAITED 0)
+    (while (AND (NOT (exists "T:AmiNetXDuo-Done" (noreq))) (< WAITED 120))
+      (
+        (run "Wait 1" (safe))
+        (set WAITED (+ WAITED 1))
+      ))
+    (if (> WAITED 0)
+        (run ("Echo >T:AmiNetXDuo-Waited \"%ld\"" WAITED) (safe)))
+    (if (NOT (exists "T:AmiNetXDuo-Done" (noreq)))
+        (abort "The removal did not complete: S:AmiNetXDuo-Files stopped "
+               "before its end.  T:AmiNetXDuo-Log has what its commands "
+               "said.  S:AmiNetXDuo-Files and the AmiNetXDuo drawer's "
+               "Backup stay, so Uninstall-AmiNetXDuo can be run again."))
+    (delete "T:AmiNetXDuo-Done" (optional "force" "nofail"))
   ))
-(if (> WAITED 0)
-    (run ("Echo >T:AmiNetXDuo-Waited \"%ld\"" WAITED) (safe)))
-(delete "T:AmiNetXDuo-Done" (optional "force" "nofail"))
 
 (set NOT_BACK (exists "T:AmiNetXDuo-NotRestored" (noreq)))
 (set KEPT     (exists "T:AmiNetXDuo-Kept" (noreq)))

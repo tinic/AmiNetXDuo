@@ -2361,7 +2361,8 @@ INSTALL_RUNS_DONE=$(awk '
     /^installdrive: run [0-9]+ finished/ { if (last ~ /\(100% done\)"$/) ok++; else bad++ }
     END { printf "%d %d\n", ok, bad }' "$HD/installdrive.txt" 2>/dev/null)
 echo "installer_runs_completed=${INSTALL_RUNS_DONE% *} installer_runs_stopped=${INSTALL_RUNS_DONE#* }"
-if [ "${INSTALL_RUNS_DONE#* }" != 0 ] && [ "$REFUSAL" != 1 ]; then
+if [ "$REFUSAL" != 1 ] &&
+   { [ "${INSTALL_RUNS_DONE#* }" != 0 ] || [ "${INSTALL_RUNS_DONE% *}" = 0 ]; }; then
     echo "!! an Installer run stopped before its last page"
     [ "$INSTALL_STATUS" = 0 ] && INSTALL_STATUS=21
 fi
@@ -2380,7 +2381,8 @@ if [ "$UNINSTALL" = 1 ]; then
     cat "$HD/uninstall-log.txt" 2>/dev/null || echo "(none written)"
     echo "uninstall_notrestored=$(wc -l < "$HD/uninstall-notrestored.txt" 2>/dev/null || echo 0)"
     echo "uninstall_kept=$(wc -l < "$HD/uninstall-kept.txt" 2>/dev/null || echo 0)"
-    echo "uninstall_waited=$(cat "$HD/uninstall-waited.txt" 2>/dev/null || echo 0)"
+    _waited=$(cat "$HD/uninstall-waited.txt" 2>/dev/null || echo 0)
+    echo "uninstall_waited=$_waited"
     echo "---- what the record said ----"
     cat "$HD/uninstall-record-log.txt" 2>/dev/null || echo "(none)"
     sed 's/^/  not restored: /' "$HD/uninstall-notrestored.txt" 2>/dev/null || true
@@ -2488,6 +2490,10 @@ if [ "$UNINSTALL" = 1 ]; then
     fi
     if [ "$INSTALL_STATUS" != 0 ]; then
         echo "!! the driver returned $INSTALL_STATUS"
+        _u_ok=0
+    fi
+    if [ "$_waited" != 0 ]; then
+        echo "!! the uninstaller waited ${_waited}s for the record to end"
         _u_ok=0
     fi
     if [ "$UNINSTALL_PREP" != restorefail ] && [ "$UNINSTALL_PREP" != nsedit ] &&

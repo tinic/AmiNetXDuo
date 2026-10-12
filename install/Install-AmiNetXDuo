@@ -1417,7 +1417,7 @@
 ; default below.
 (set LIB_OURS 0)
 (if OLD_BSD
-    (if (= 0 (run ("Search >NIL: FROM \"%s\" SEARCH AmiNetXDuo QUIET" D_BSD)
+    (if (= 0 (run ("\"%s\" \"%s\" AmiNetXDuo MARK" S_SAMEFILE D_BSD)
                   (quiet) (safe)))
         (set LIB_OURS 1)))
 
@@ -1454,8 +1454,8 @@
 ; Ours: our library, or an interface file this installer wrote.
 (set CONFIG_OURS LIB_OURS)
 (if (AND HAVE_OLD (= CONFIG_OURS 0))
-    (if (= 0 (run ("Search >NIL: FROM \"%s\" SEARCH AmiNetXDuo QUIET"
-                   (tackon D_IFDIR OLD_IF))
+    (if (= 0 (run ("\"%s\" \"%s\" AmiNetXDuo MARK"
+                   S_SAMEFILE (tackon D_IFDIR OLD_IF))
                   (quiet) (safe)))
         (set CONFIG_OURS 1)))
 
@@ -2403,9 +2403,8 @@
                                 "  If WARN\n"))
               (set BK_CLASH (cat "    Echo >>T:AmiNetXDuo-NotRestored \"" BK_SRC
                                  " is not the one in " BK_FILE "\"\n"))
-              (set BK_RESTORE
-                (cat BK_RESTORE
-                     "If NOT EXISTS \"" BK_SRC "\"\n"
+              (set BK_ADD
+                (cat "If NOT EXISTS \"" BK_SRC "\"\n"
                      "  Copy \"" BK_FILE "\" TO \"" BK_SRC "\" CLONE QUIET\n"
                      "  If ERROR\n"
                      "    Delete \"" BK_SRC "\" QUIET\n"
@@ -2422,7 +2421,7 @@
                          BK_CLASH)
                      "  EndIf\n"
                      "EndIf\n"))
-              (if (> (strlen BK_RESTORE) 2000)
+              (if (> (+ (strlen BK_RESTORE) (strlen BK_ADD)) 2000)
                 (
                   (set BK_PART (+ BK_PART 1))
                   (textfile
@@ -2432,6 +2431,7 @@
                     (append BK_RESTORE))
                   (set BK_RESTORE "")
                 ))
+              (set BK_RESTORE (cat BK_RESTORE BK_ADD))
             ))
         ))
     ))
@@ -2473,8 +2473,9 @@
       (set REC_TEXT "")
     ))
 )
-(procedure P_rec_maybe
-  (if (> (strlen REC_TEXT) 2000) (P_rec_flush))
+(procedure P_rec_add
+  (if (> (+ (strlen REC_TEXT) (strlen REC_ADD)) 2000) (P_rec_flush))
+  (set REC_TEXT (cat REC_TEXT REC_ADD))
 )
 (procedure P_rem_flush
   (if (> (strlen REM_TEXT) 0)
@@ -2495,9 +2496,12 @@
   (while (<= JN_I JN_N)
     (
       (set JN_F (tackon D_INSTALLED ("%s%ld" JN_STEM JN_I)))
-      (run ("Type >>\"%s\" \"%s\"" JN_DEST JN_F)
-           (prompt "Writing the record of this installation")
-           (help   H_BACKUP))
+      (if (<> 0 (run ("Type >>\"%s\" \"%s\"" JN_DEST JN_F)
+                     (prompt "Writing the record of this installation")
+                     (help   H_BACKUP)))
+          (abort (cat "Writing " JN_DEST " failed: " JN_F " could not be "
+                      "added to it.  Free space on that volume and run the "
+                      "installer again.")))
       (delete JN_F (optional "force" "nofail"))
       (set JN_I (+ JN_I 1))
     ))
@@ -2506,8 +2510,7 @@
 ; REC_F, a program this installation put there: another stack's or the
 ; user's file of that name is in Backup, and comes back after.
 (procedure P_rec_ours
-  (set REC_TEXT (cat REC_TEXT "Delete \"" REC_F "\" QUIET\n"))
-  (P_rec_maybe)
+  ((set REC_ADD (cat "Delete \"" REC_F "\" QUIET\n")) (P_rec_add))
 )
 
 ; REC_F a .old in REC_SUB, deleted when it is ours, or the other stack's
@@ -2536,12 +2539,11 @@
       (P_is_ours)
       (set BK_SUB RO_SUB)
       (if IS_OURS
-          (set REC_TEXT (cat REC_TEXT "Delete \"" REC_F "\" QUIET\n"))
+          ((set REC_ADD (cat "Delete \"" REC_F "\" QUIET\n")) (P_rec_add))
           ; The other stack's file, renamed: it goes only where the
           ; original's place is free for its Backup copy to come back to.
           (if (> (strlen RO_LB) 0)
-              (set REC_TEXT
-                (cat REC_TEXT
+              ((set REC_ADD (cat
                      "If NOT EXISTS \"" (substr REC_F 0 (- (strlen REC_F) 4)) "\"\n"
                      "  If EXISTS \"" REC_F "\"\n"
                      "    \"" REC_SF "\" \"" REC_F "\" \"" RO_LB "\" BYTES\n"
@@ -2549,7 +2551,7 @@
                      "      Delete \"" REC_F "\" QUIET\n"
                      "    EndIf\n"
                      "  EndIf\n"
-                     "EndIf\n"))))
+                     "EndIf\n")) (P_rec_add))))
     ))
 )
 
@@ -2565,7 +2567,7 @@
             (help   H_BACKUP)
             (dest   RD_MARK)
             (append "; made by the AmiNetXDuo installer\n")))
-      (set REC_TEXT (cat REC_TEXT "Delete \"" REC_F "\" QUIET\n"))
+      ((set REC_ADD (cat "Delete \"" REC_F "\" QUIET\n")) (P_rec_add))
     ))
 )
 
@@ -2584,19 +2586,15 @@
               (foreach RT_SUBSRC "#?"
                 (if (< @each-type 0)
                     (
-                      (set REC_TEXT
-                        (cat REC_TEXT "Delete \""
-                             (tackon RT_SUBDST @each-name) "\" QUIET\n"))
-                      (P_rec_maybe)
+                      ((set REC_ADD (cat "Delete \""
+                             (tackon RT_SUBDST @each-name) "\" QUIET\n")) (P_rec_add))
                     )))
-              (set REC_TEXT (cat REC_TEXT "Delete \"" RT_SUBDST "\" QUIET\n"))
+              ((set REC_ADD (cat "Delete \"" RT_SUBDST "\" QUIET\n")) (P_rec_add))
             )
-            (set REC_TEXT
-              (cat REC_TEXT "Delete \"" (tackon RT_DST RT_NAME) "\" QUIET\n")))
-          (P_rec_maybe)
+            ((set REC_ADD (cat "Delete \"" (tackon RT_DST RT_NAME) "\" QUIET\n")) (P_rec_add)))
         ))
       (if RT_SELF
-          (set REC_TEXT (cat REC_TEXT "Delete \"" RT_DST "\" QUIET\n")))
+          ((set REC_ADD (cat "Delete \"" RT_DST "\" QUIET\n")) (P_rec_add)))
     ))
 )
 
@@ -2639,8 +2637,8 @@
                    (help   H_BACKUP))
             ))
           (if (exists SN_COPY (noreq))
-              (set REM_TEXT
-                (cat REM_TEXT
+              (set REM_ADD
+                (cat
                      "If EXISTS \"" SN_T "\"\n"
                      "  \"" REC_SF "\" \"" SN_T "\" \"" SN_COPY "\" BYTES\n"
                      "  If WARN\n"
@@ -2649,7 +2647,11 @@
                      "    Delete \"" SN_T "\" QUIET\n"
                      "  EndIf\n"
                      "EndIf\n")))
-          (if (> (strlen REM_TEXT) 2000) (P_rem_flush))
+          (if (exists SN_COPY (noreq))
+            (
+              (if (> (+ (strlen REM_TEXT) (strlen REM_ADD)) 2000) (P_rem_flush))
+              (set REM_TEXT (cat REM_TEXT REM_ADD))
+            ))
         ))
     ))
   (set BK_MARK "")
@@ -2792,11 +2794,10 @@
   (while (<= REC_N REC_TOPN)
     (
       (set REC_F (tackon (tackon D_BACKUP_TOP ("%ld" REC_N)) "Restore"))
-      (set REC_TEXT
-        (cat REC_TEXT
+      ((set REC_ADD (cat
              "If EXISTS \"" REC_F "\"\n"
              "  Execute \"" REC_F "\"\n"
-             "EndIf\n"))
+             "EndIf\n")) (P_rec_add))
       (set REC_N (+ REC_N 1))
     ))
   ; The drawers this installation made, empty by now unless somebody else
@@ -2809,12 +2810,11 @@
   (set RD_KEY "Made-NetInterfaces") (P_rec_dir)
   (set REC_F (tackon D_DEVS "Internet")) (set RD_MADE MADE_INTERNET)
   (set RD_KEY "Made-Internet") (P_rec_dir)
-  (set REC_TEXT
-    (cat REC_TEXT
+  ((set REC_ADD (cat
          "If NOT EXISTS T:AmiNetXDuo-NotRestored\n"
          "  Delete \"" D_BACKUP_TOP "\" ALL QUIET\n"
          "  Delete \"" D_INSTALLED "\" ALL QUIET\n"
-         "EndIf\n"))
+         "EndIf\n")) (P_rec_add))
   ; The drawer's own files, by name.
   (set RT_SELF 0)
   (set RT_SRC S_DOCS) (set RT_DST DOCDIR) (P_rec_tree)
@@ -2827,8 +2827,7 @@
                                     "ReadMe.info" "Examples.info"
                                     "Terminal.info" "WirelessManager-LICENSE" ""))
     (
-      (set REC_TEXT
-        (cat REC_TEXT "Delete \"" (tackon DOCDIR REC_SUB) "\" QUIET\n"))
+      ((set REC_ADD (cat "Delete \"" (tackon DOCDIR REC_SUB) "\" QUIET\n")) (P_rec_add))
       (set REC_N (+ REC_N 1))
     ))
   (if DRAWER_LAYOUT
@@ -2836,15 +2835,13 @@
       (set REC_N 0)
       (while (set REC_SUB (select REC_N "NetPrefs.info" "NetMeter.info" "C.info" ""))
         (
-          (set REC_TEXT
-            (cat REC_TEXT "Delete \"" (tackon D_ROOT REC_SUB) "\" QUIET\n"))
+          ((set REC_ADD (cat "Delete \"" (tackon D_ROOT REC_SUB) "\" QUIET\n")) (P_rec_add))
           (set REC_N (+ REC_N 1))
         ))
       (set RT_SELF 0)
       (set RT_SRC S_C) (set RT_DST D_C) (P_rec_tree)
       (set RT_SRC S_FIRMWARE) (set RT_DST (tackon D_DEVS "Firmware")) (P_rec_tree)
-      (set REC_TEXT
-        (cat REC_TEXT
+      ((set REC_ADD (cat
              "Delete \"" (tackon D_C "fat") "\" QUIET\n"
              "Delete \"" (tackon D_DEVS "Firmware") "\" QUIET\n"
              "Delete \"" (tackon D_DEVS "Networks") "\" QUIET\n"
@@ -2852,11 +2849,10 @@
              "Delete \"" (tackon D_DEVS "Internet") "\" QUIET\n"
              "Delete \"" D_DEVS "\" QUIET\n"
              "Delete \"" D_LIBS "\" QUIET\n"
-             "Delete \"" D_C "\" QUIET\n"))
+             "Delete \"" D_C "\" QUIET\n")) (P_rec_add))
     ))
   ; Assign EXISTS first: naming an assign that is not there asks for a volume.
-  (set REC_TEXT
-    (cat REC_TEXT
+  ((set REC_ADD (cat
          "Assign >NIL: AmiNetXDuo: EXISTS\n"
          "If WARN\n"
          "Else\n"
@@ -2873,7 +2869,7 @@
          "Else\n"
          "  Delete \"" DOCDIR ".info\" QUIET\n"
          "EndIf\n"
-         "Echo >T:AmiNetXDuo-Done \"done\"\n"))
+         "Echo >T:AmiNetXDuo-Done \"done\"\n")) (P_rec_add))
 
   (P_rec_flush)
   (textfile
@@ -2979,9 +2975,13 @@
     (while (<= JN_I BK_PART)
       (
         (set JN_F (tackon D_BACKUP ("RestorePart%ld" JN_I)))
-        (run ("Type >>\"%s\" \"%s\"" (tackon D_BACKUP "Restore") JN_F)
-             (prompt "Writing the Backup drawer's Restore script")
-             (help   H_BACKUP))
+        (if (<> 0 (run ("Type >>\"%s\" \"%s\"" (tackon D_BACKUP "Restore") JN_F)
+                       (prompt "Writing the Backup drawer's Restore script")
+                       (help   H_BACKUP)))
+            (abort (cat "Writing " (tackon D_BACKUP "Restore") " failed: " JN_F
+                        " could not be added to it.  Nothing on the disk has "
+                        "been replaced.  Free space on that volume and run "
+                        "the installer again.")))
         (delete JN_F (optional "force" "nofail"))
         (set JN_I (+ JN_I 1))
       ))
