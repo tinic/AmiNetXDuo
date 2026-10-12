@@ -490,7 +490,8 @@ host_test_targets() { # builddir
 #      Annex H) and signal/security modules.
 #      562 with netprobe_pcmcia_kind: InstallNetProbe calls a PC Card an
 #      NE2000 by anxnet.device's rule, less the 802.11 cards.
-HOST_TESTS_EXPECTED=562
+#      563 with NetWirelessPrefs' font layout and hidden passphrase.
+HOST_TESTS_EXPECTED=563
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,

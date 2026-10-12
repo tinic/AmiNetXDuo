@@ -290,7 +290,14 @@ aminetxduo_add_tool(tool_netmeter NetMeter NX SOURCES netmeter.c netmeter_fmt.c)
 # LIST and STATUS print the same answers from a Shell.
 aminetxduo_add_tool(tool_netwirelessprefs NetWirelessPrefs
     SOURCES netwirelessprefs.c netwireless_dev.c netwireless_sig.c
-            netwireless_prefs.c)
+            netwireless_prefs.c netwireless_key.c netwireless_layout.c
+            netwireless_wm.c
+            "${AMINETXDUO_NETXDUO}/crypto_libraries/src/nx_crypto_sha1.c")
+# The vendored SHA-1 in the mode that needs no nx_api.h, as httpd has it.
+target_compile_definitions(tool_netwirelessprefs PRIVATE
+    NX_CRYPTO_STANDALONE_ENABLE)
+target_include_directories(tool_netwirelessprefs PRIVATE
+    "${AMINETXDUO_NETXDUO}/crypto_libraries/inc")
 
 # AddNetRoute and DeleteNetRoute are one source, the same way Online and
 # Offline are: they parse the same destination and differ in one library call.
@@ -689,7 +696,8 @@ add_dependencies(tools
     tool_addnetroute tool_deletenetroute
     tool_getnetstatus tool_netshutdown tool_removenetinterface
     tool_configurenetinterface
-    tool_netsetup tool_netprefs tool_netmeter tool_online tool_offline tool_host tool_hostname
+    tool_netsetup tool_netprefs tool_netmeter tool_netwirelessprefs
+    tool_online tool_offline tool_host tool_hostname
     tool_fetch tool_nc tool_telnet tool_nettrace tool_netcapture
     tool_traceroute tool_nslookup tool_arp
     tool_tftp tool_whois tool_httpd tool_iperf
@@ -1006,6 +1014,16 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(test_netwireless_sig PRIVATE -Wall -Wextra)
     set_target_properties(test_netwireless_sig PROPERTIES C_STANDARD 11)
 
+    # NetWirelessPrefs' three windows at four fonts, and the hidden
+    # passphrase's edit arithmetic.
+    add_executable(test_netwireless_layout
+        test/test_netwireless_layout.c
+        netwireless_layout.c)
+    target_include_directories(test_netwireless_layout PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    target_compile_options(test_netwireless_layout PRIVATE -Wall -Wextra)
+    set_target_properties(test_netwireless_layout PROPERTIES C_STANDARD 11)
+
     target_include_directories(test_fetchurl PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}")
 
@@ -1241,6 +1259,7 @@ if(NOT CMAKE_CROSSCOMPILING)
     add_test(NAME netwireless_prefs_text COMMAND test_netwireless_prefs)
     add_test(NAME netwireless_wpa_key COMMAND test_netwireless_key)
     add_test(NAME netwireless_signal COMMAND test_netwireless_sig)
+    add_test(NAME netwireless_font_layout COMMAND test_netwireless_layout)
     add_test(NAME console_clipboard_text COMMAND test_clipftxt)
     add_test(NAME httpframe_bodies COMMAND test_httpframe)
     add_test(NAME httplock_rfc4918 COMMAND test_httplock)

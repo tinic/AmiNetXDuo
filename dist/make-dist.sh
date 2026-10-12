@@ -76,7 +76,7 @@ DEVICES=(netdev/anxnet netdev/anxgenet wifipi/anxwifipi)
 if grep -q '^AMINETXDUO_ZZ9000:BOOL=ON$' "$BUILD/CMakeCache.txt" 2>/dev/null; then
     DEVICES+=(netdev/anxzz9000)
 fi
-CMDS=(AddNetInterface NetSetup NetPrefs NetMeter Online Offline ShowNetStatus ShowNetServices
+CMDS=(AddNetInterface NetSetup NetPrefs NetMeter NetWirelessPrefs Online Offline ShowNetStatus ShowNetServices
       ping netstat host hostname
       nslookup arp fetch nc telnet NetTrace NetCapture sntp traceroute tftp
       whois httpd
@@ -298,10 +298,7 @@ fi
 # InstallSameFile and InstallNetProbe do ship, but beside the Installer rather
 # than in C:; they are installer primitives, not user commands.  The other
 # names do not ship.
-# NetWirelessPrefs is packed once its window lands; until then it is
-# LIST and STATUS for the emulator harness alone.
-NOT_SHIPPED=(InstallSameFile InstallNetProbe InstallWiFi ToolsSmoke CensusProbe UafProbe HangProbe wbgrab El3Diag paysum
-             NetWirelessPrefs)
+NOT_SHIPPED=(InstallSameFile InstallNetProbe InstallWiFi ToolsSmoke CensusProbe UafProbe HangProbe wbgrab El3Diag paysum)
 missing_from_cmds=()
 # What the build system says it builds (src/tools/CMakeLists.txt writes the
 # manifest), not what happens to lie in the directory: a reused build tree
