@@ -369,7 +369,7 @@ if [ -n "$FOREIGN_MODE" ]; then
     }
 fi
 if [ -n "$CANCEL_MODE" ]; then
-    [ "$CANCEL_MODE" = dhcp ] || {
+    [ "$CANCEL_MODE" = "dhcp" ] || {
         echo "unknown cancellation point: $CANCEL_MODE" >&2; exit 2
     }
     [ "$LEVEL" != NOVICE ] || {
