@@ -19,6 +19,12 @@
  * as it should be, RETURN_ERROR when it could not be read or replaced, and
  * then it is unchanged.
  *
+ * HOSTLINE: FIRST is a name_resolution file; the name the stack takes from it
+ * (ami_cfg_resolver_hostname_file, the stack's own parser) is written to
+ * SECOND as a hostname line, so the Installer can carry a name set by hand
+ * over into the file it writes.  RETURN_OK with a line written, RETURN_WARN when
+ * there is none, RETURN_ERROR when either file fails.
+ *
  * SPDX-License-Identifier: MIT
  */
 
@@ -31,6 +37,7 @@
 #include <proto/exec.h>
 
 #include "aminetxduo/version.h"
+#include "aminetxduo/config.h"
 #include "devicehome.h"
 
 const char *const tool_name = "InstallSameFile";
@@ -38,7 +45,7 @@ const char *const tool_name = "InstallSameFile";
 static const char version_tag[] __attribute__((used)) =
     TOOL_VERSTAG("InstallSameFile");
 
-#define TEMPLATE "FIRST/A,SECOND/A/M,DEVICES/S"
+#define TEMPLATE "FIRST/A,SECOND/A/M,DEVICES/S,HOSTLINE/S"
 
 /* An interface file is a few hundred bytes; the cap only bounds a stray. */
 #define DEVICES_FILE_MAX 65536L
@@ -49,6 +56,7 @@ enum
     ARG_FIRST = 0,
     ARG_SECOND,
     ARG_DEVICES,
+    ARG_HOSTLINE,
     ARG_COUNT
 };
 
@@ -199,9 +207,32 @@ static LONG rehome_devices(const char *path, STRPTR *drawers)
     return rc;
 }
 
+static LONG copy_hostline(const char *from, const char *to)
+{
+    char  name[AMI_CFG_NAME_LEN];
+    char  line[AMI_CFG_NAME_LEN + 16];
+    BPTR  fh;
+    LONG  n = 0, got;
+    const char *p;
+
+    if (!ami_cfg_resolver_hostname_file(from, name, sizeof(name)))
+        return RETURN_WARN;
+    for (p = "hostname "; *p != '\0'; p++)
+        line[n++] = *p;
+    for (p = name; *p != '\0' && n < (LONG)sizeof(line) - 1; p++)
+        line[n++] = *p;
+    line[n++] = '\n';
+    fh = Open((CONST_STRPTR)to, MODE_NEWFILE);
+    if (fh == 0)
+        return RETURN_ERROR;
+    got = Write(fh, line, n);
+    Close(fh);
+    return (got == n) ? RETURN_OK : RETURN_ERROR;
+}
+
 int main(int argc, char **argv)
 {
-    LONG           args[ARG_COUNT] = { 0, 0, 0 };
+    LONG           args[ARG_COUNT] = { 0 };
     struct RDArgs *rda;
     STRPTR        *second;
     LONG           rc;
@@ -216,7 +247,11 @@ int main(int argc, char **argv)
         return RETURN_ERROR;
 
     second = (STRPTR *)args[ARG_SECOND];
-    if (args[ARG_DEVICES] != 0)
+    if (args[ARG_HOSTLINE] != 0)
+        rc = (second[1] != NULL) ? RETURN_ERROR
+                                 : copy_hostline((const char *)args[ARG_FIRST],
+                                                 (const char *)second[0]);
+    else if (args[ARG_DEVICES] != 0)
     {
         /* A DEVICE line naming a volume that is not mounted is simply not
            ours; it must not stop the Installer at "Please insert". */

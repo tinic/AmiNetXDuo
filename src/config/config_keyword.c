@@ -825,3 +825,30 @@ ULONG ami_cfg_nameserver_line_file(const char *path, ULONG want, UWORD occur)
 
     return found;
 }
+
+BOOL ami_cfg_resolver_hostname(char *buf, char *out, ULONG outlen)
+{
+    AmiResolverConfig res = { 0 };
+
+    if (out == NULL || outlen == 0)
+        return FALSE;
+    out[0] = '\0';
+    if (buf == NULL)
+        return FALSE;
+    ami_cfg_parse_resolver(buf, &res, out, outlen);
+    return (BOOL)(out[0] != '\0');
+}
+
+BOOL ami_cfg_resolver_hostname_file(const char *path, char *out, ULONG outlen)
+{
+    char *buf = (char *)ami_cfg_read_file(path, NULL);
+    BOOL  found;
+
+    if (out != NULL && outlen != 0)
+        out[0] = '\0';
+    if (buf == NULL)
+        return FALSE;
+    found = ami_cfg_resolver_hostname(buf, out, outlen);
+    ami_free(buf);
+    return found;
+}

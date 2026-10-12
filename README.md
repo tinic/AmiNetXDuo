@@ -154,11 +154,12 @@ unpack it, and run `Install-AmiNetXDuo`. It asks:
 | Where the `AmiNetXDuo` drawer of documentation and examples goes | any drawer; nothing in it is needed for the network |
 | Into the system (`LIBS:`, `C:`, `DEVS:`), or into its own drawer, added last to those assigns; refused if `LIBS:` already has a `bsdsocket.library` (Intermediate and Expert) | into the system |
 | Which card, and the interface name | the driver found in `DEVS:` |
-| Answer to `<hostname>.local` on the network | no |
+| Answer to `<hostname>.local` on the network | yes on a 68020 or newer, no on a 68000 or 68010 |
 | DHCP, or a fixed address, netmask and gateway | DHCP |
-| The machine's name | `amiga-` and the card's last three address octets |
+| The machine's name (Expert) | `amiga-` and the card's last three address octets |
 | Start the network at boot | yes |
 | Start `httpd` at boot, exposing mounted volumes with a browser file manager and Shell, on which port | no |
+| Set the clock at boot, and from which server (Expert) | yes, `pool.ntp.org` |
 
 The configuration follows the layout of Roadshow: `DEVS:NetInterfaces/<name>`
 defines an interface, `DEVS:Internet/routes`, `DEVS:Internet/name_resolution`

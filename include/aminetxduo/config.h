@@ -810,6 +810,14 @@ ULONG ami_cfg_keyword_line(char *buf, const char *keyword);
    be read. */
 ULONG ami_cfg_keyword_line_file(const char *path, const char *keyword);
 
+/* The name name_resolution gives this machine, read by the stack's own
+   ami_cfg_parse_resolver(): HOSTNAME in any case, with a space or '=', the
+   last such line, or else the first non-loopback HOST line.  TRUE with a
+   name in `out`.  `buf` is a whole file's text, split in place. */
+BOOL ami_cfg_resolver_hostname(char *buf, char *out, ULONG outlen);
+/* The same for a file, read whole through ami_cfg_read_file(). */
+BOOL ami_cfg_resolver_hostname_file(const char *path, char *out, ULONG outlen);
+
 /* How many KEY=VALUE pairs of an interface file name `key` or `alias` (NULL
    for none), lexed exactly as ami_cfg_parse_interface() lexes them: comments
    stripped, several pairs to a line.  Any value counts, as written; of the

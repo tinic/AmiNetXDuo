@@ -2415,6 +2415,56 @@ static void test_hostname_offer(void)
     ami_config_free(&cfg);
 }
 
+/* InstallSameFile HOSTLINE: the name the stack itself takes from the file. */
+static void test_resolver_hostname(void)
+{
+    char  name[64];
+    char *buf;
+    char *big;
+    int   i;
+
+    buf = dup_text("; hostname   <name>\n;hostname amiga\n# hostname x\n");
+    CHECK(!ami_cfg_resolver_hostname(buf, name, sizeof(name)));
+    free(buf);
+
+    buf = dup_text("HOSTNAME MyAmiga\n");
+    CHECK(ami_cfg_resolver_hostname(buf, name, sizeof(name)));
+    CHECK_STR(name, "MyAmiga");
+    free(buf);
+
+    buf = dup_text("Hostname=eq-amiga\n");
+    CHECK(ami_cfg_resolver_hostname(buf, name, sizeof(name)));
+    CHECK_STR(name, "eq-amiga");
+    free(buf);
+
+    buf = dup_text("hostname first\nnameserver 1.1.1.1\nhostname last\n");
+    CHECK(ami_cfg_resolver_hostname(buf, name, sizeof(name)));
+    CHECK_STR(name, "last");
+    free(buf);
+
+    buf = dup_text("HOST 127.0.0.1 localhost\nHOST 192.168.1.9 hostline alias\n");
+    CHECK(ami_cfg_resolver_hostname(buf, name, sizeof(name)));
+    CHECK_STR(name, "hostline");
+    free(buf);
+
+    /* Past and across the 4 KB a single read would have stopped at. */
+    big = (char *)malloc(9000);
+    CHECK(big != NULL);
+    if (big == NULL)
+        return;
+    for (i = 0; i < 4090; i++)
+        big[i] = (i % 64 == 63) ? '\n' : ';';
+    strcpy(big + 4090, "\nhostname straddle\n");
+    CHECK(ami_cfg_resolver_hostname(big, name, sizeof(name)));
+    CHECK_STR(name, "straddle");
+    for (i = 0; i < 6000; i++)
+        big[i] = (i % 64 == 63) ? '\n' : '#';
+    strcpy(big + 6000, "\nhostname far\n");
+    CHECK(ami_cfg_resolver_hostname(big, name, sizeof(name)));
+    CHECK_STR(name, "far");
+    free(big);
+}
+
 static void test_resolver(void)
 {
     AmiResolverConfig res;
@@ -4996,6 +5046,7 @@ int main(int argc, char **argv)
     test_hostname_from_hwaddr();
     test_hostname_offer();
     test_resolver();
+    test_resolver_hostname();
     test_search_domains();
     test_dhcp_search_option();
     test_ra_search_option();

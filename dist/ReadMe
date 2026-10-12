@@ -95,7 +95,8 @@ the current directory.)
 
 The installer asks, in this order:
 
-     Which stack: Everything, Minimal or Micro   (Everything)
+     Which stack: Everything, Minimal, Micro
+       or Fat                                     (Everything; Fat on Emu68)
      Install the three supplied network drivers  (yes)
      Where the AmiNetXDuo drawer of documentation
        and examples goes                          (any drawer)
@@ -106,14 +107,17 @@ The installer asks, in this order:
                                                    when a device was found)
      Which card, and for PCMCIA which card type
      The interface name and unit                  (eth0, 0; Expert)
-     Answer to <hostname>.local on the network    (no)
+     Answer to <hostname>.local on the network    (yes on a 68020 or
+                                                   newer)
      DHCP, or a fixed address, netmask, gateway   (DHCP)
      The name of this machine                     (amiga- and the last
                                                    three octets of the
-                                                   card's address)
+                                                   card's address; Expert)
      Start the network at boot                    (yes)
      Start httpd at boot, with a browser file
        manager, text editor and Shell; which port (no)
+     Set the clock at boot; which server          (yes, pool.ntp.org;
+                                                   the server at Expert)
 
 At Novice level every question takes its default without being shown.
 
@@ -186,8 +190,9 @@ machine.
 
 A second run of the installer over a working installation is safe.  It
 notices the existing configuration and offers to leave it exactly as it is,
-and it only ever replaces its own block in S:User-Startup.  An existing
-S:Network-Startup is renamed to S:Network-Startup.old.
+and it only ever replaces its own block in S:User-Startup.  A kept
+configuration keeps its S:Network-Startup; a new one that starts the network
+at boot renames the existing file to S:Network-Startup.old.
 
 
 HOW THE NETWORK STARTS
