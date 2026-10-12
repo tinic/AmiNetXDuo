@@ -9,23 +9,23 @@ Which asset is pinned, and its expected hash, is recorded in
 
 | | |
 |---|---|
-| GCC | 16.2.0b (C/C++/ObjC), tinic/gcc `1d4ca5d4` (AmigaPorts `amiga16.2` `1d4ca5d4`, no local patches) |
-| binutils | 2.46, bebbo `amiga-2.46` + `tools/patches/binutils-2.46/` |
+| GCC | 16.2.0b (C/C++/ObjC), tinic/gcc `f098a8ef` (AmigaPorts `amiga16.2` `1d4ca5d4` + 3 m68k commits) |
+| binutils | 2.46, tinic/binutils-gdb `ffe2ad82` (AmigaPorts `amiga-2.46` `106606ef` + same-named-section PC-relative fix), no local patches |
 | NDK | 3.9 (`INCLUDE_VERSION` 45) + Roadshow bsdsocket/SANA-II headers |
 | Also | libnix, libgcc, libpthread, vasm, sfdc, fd2sfd, fd2pragma, gprof |
 | Prefix | `opt/m68k-amigaos/` |
 
 | Asset | Host | Size | SHA-256 |
 |---|---|---|---|
-| `m68k-amigaos-gcc-16.2.7-ndk3.9-linux-x86_64.tar.xz` | Linux x86-64 (glibc) | 37,872,184 | `8d04c18e4b04d861848854922b6761651958932af85b4a6a26918e6da4d60e97` |
-| `m68k-amigaos-gcc-16.2.7-ndk3.9-darwin-arm64.tar.xz` | macOS arm64 | 32,754,352 | `59c695e980c9866580e32409dcfa9854e97cc0d4d9dffc5383c0c064da602cb3` |
+| `m68k-amigaos-gcc-16.2.8-ndk3.9-linux-x86_64.tar.xz` | Linux x86-64 (glibc) | 41,002,012 | `98e7959f7806fe119f847feda024665cd8426ea20793034f4ee12b63f7c5678e` |
+| `m68k-amigaos-gcc-16.2.8-ndk3.9-darwin-arm64.tar.xz` | macOS arm64 | 32,425,580 | `f9f1d0d07aee53380280a1a3a8e53b734f1367dd710b89c4c07333a23daa879f` |
 
 **Not covered:** macOS x86-64 and Linux aarch64. There is no asset for either;
 `tools/build-toolchain.sh` builds on both.
 
 ```sh
-sha256sum m68k-amigaos-gcc-16.2.7-ndk3.9-linux-x86_64.tar.xz
-tar xJf   m68k-amigaos-gcc-16.2.7-ndk3.9-linux-x86_64.tar.xz
+sha256sum m68k-amigaos-gcc-16.2.8-ndk3.9-linux-x86_64.tar.xz
+tar xJf   m68k-amigaos-gcc-16.2.8-ndk3.9-linux-x86_64.tar.xz
 # -> opt/m68k-amigaos/bin/m68k-amigaos-gcc
 ```
 
@@ -38,13 +38,13 @@ here; its own notes describe it.
 
 ## binutils 2.46
 
-From asset series 16.2.4 binutils is bebbo's `amiga-2.46` at the commit below,
-with the three diffs in `tools/patches/binutils-2.46/`: one keeps
-`HUNK_RELOC32` through `strip`, one restores the archive symbol index for slim
-LTO members, and one (a backport of bebbo `6fa839d0`) stops `ar` dividing by
-zero when it indexes a C++ COMDAT object. With them, the tree builds at `-DAMINETXDUO_LTO=ON` and
-the four shipped images are byte-identical to the 2.39 build. Series up to
-16.2.3 used 2.39.0 (`ab4e5183f56fd83165356a03c890bf0b681d7535`).
+From asset series 16.2.8 binutils is tinic/binutils-gdb `ffe2ad82`: AmigaPorts
+`amiga-2.46` `106606ef` plus the same-named-section PC-relative fix
+(AmigaPorts/binutils-gdb#32). It carries the `HUNK_RELOC32` `strip`, slim-LTO
+archive symbol index and C++ COMDAT `ar` repairs, so no local diffs are applied.
+Series 16.2.4 to 16.2.7 used bebbo `amiga-2.46` `a50544a9` with the three diffs
+in `tools/patches/binutils-2.46/`. Series up to 16.2.3 used 2.39.0
+(`ab4e5183f56fd83165356a03c890bf0b681d7535`).
 
 ## How these were built
 
@@ -53,8 +53,8 @@ commit rather than a branch, because bebbo's branches move.
 
 ```
 build driver   https://codeberg.org/bebbo/amiga-gcc            86f8ba62f7a5035e309600c86962681e1cbacccb
-binutils/GDB   https://franke.ms/git/bebbo/binutils-gdb        a50544a917284847c99e97d41c69ece9d5cb2fef   (amiga-2.46)
-GCC            https://github.com/tinic/gcc                    1d4ca5d4b1592b663af2f00589b245934d872eb3   (amiga16.2-16.2.7)
+binutils/GDB   https://github.com/tinic/binutils-gdb           ffe2ad82e34e11206efd706338b32a696185ebb4   (fix/amiga-pcrel-local-regression)
+GCC            https://github.com/tinic/gcc                    f098a8ef44ac8d11204a3cb0c39c1e4f5cd63fc8   (amiga16.2)
 newlib         https://franke.ms/git/bebbo/newlib-cygwin       0909ae9abc18b38595425143e7a63d9e2fc31174
 libnix         https://franke.ms/git/bebbo/libnix              b7268e35510b8b7b4ccdad67fbcbb25e73189aef
 sfdc           https://franke.ms/git/bebbo/sfdc                5d4efca359e949547553463f5873778bd85e5506
@@ -70,8 +70,8 @@ bebbo's GitHub repositories are gone. Codeberg and his own franke.ms Gitea are
 what survive, and they are not interchangeable. Each line above is the remote
 verified to serve its pin.
 
-GCC is AmigaPorts `amiga16.2` at `1d4ca5d4` with no local patches. binutils carries the three diffs in
-`tools/patches/binutils-2.46/`; newlib and aros-stuff carry the diffs under
+GCC is tinic/gcc `f098a8ef` (AmigaPorts `amiga16.2` `1d4ca5d4` + 3 m68k commits). binutils carries no
+local diffs; newlib and aros-stuff carry the diffs under
 `tools/patches/newlib/` and `tools/patches/aros-stuff/`. amiga-gcc's own
 Makefile gets `--with-system-zlib`, `--disable-gdb --disable-sim` and
 `--enable-plugins` on the binutils configure line. The rest is carried as
