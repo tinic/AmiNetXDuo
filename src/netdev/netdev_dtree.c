@@ -369,9 +369,12 @@ BOOL netdev_dtree_alias_present(const char *alias)
             ;
         if (n < len)
         {
+            /* The node, whatever its status.  On a Pi 4 and a CM4 the
+               firmware tree marks the "mmc" target disabled -- the Wi-Fi is
+               on mmcnr at the same address -- and anxwifipi.device reads its
+               base through the alias all the same. */
             target = dt_openkey(path);
-            if (target != NULL)
-                found = (BOOL)!dt_stringlist_has(target, "status", "disabled");
+            found = (BOOL)(target != NULL);
         }
     }
 

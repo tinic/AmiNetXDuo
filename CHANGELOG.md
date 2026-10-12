@@ -5,6 +5,9 @@ Add new entries under `Unreleased`; published release sections are history.
 
 ## Unreleased
 
+- Installer: the supplied drivers are always installed; the drawer place, .local names, boot start, httpd port and time server are Expert questions.
+- Installer: a WirelessManager already in C: is started from S:Network-Startup.
+- Installer: the Pi 4 and CM4 Wi-Fi, and a PCMCIA card already in use by a driver, are detected.
 - NetWireless and NetWirelessPrefs show "Wi-Fi off" after Disconnect, not the network that was connected.
 - Installer: a Wi-Fi started after another interface starts in the background, so the boot does not wait for it.
 

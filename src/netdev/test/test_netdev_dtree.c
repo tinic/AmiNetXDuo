@@ -145,9 +145,10 @@ static const Prop aliases_props[] =
     { "mmc", mmc_path, sizeof(mmc_path) },
     { NULL, NULL, 0 }
 };
+/* Disabled, as the Pi 4 and CM4 firmware trees have it. */
 static const Prop mmc_props[] =
 {
-    { "status", STR("okay") },
+    { "status", STR("disabled") },
     { NULL, NULL, 0 }
 };
 /* A second GENET node, disabled, and listed BEFORE the real one: the walk

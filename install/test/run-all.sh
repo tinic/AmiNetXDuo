@@ -17,8 +17,6 @@
 #   INVALID_STATIC enters an out-of-range address, requires the validation
 #                   page to repeat, then corrects it before files are written
 #   INVALID_NAMES does the same for the Expert interface and host-name fields
-#   NO_DRIVERS declines the three supplied device images and proves an
-#              existing vendor driver still boots unchanged
 #   NO_BOOT    installs without startup lines, then starts it manually
 #   SYSTEM_RERUN    installs the system layout twice in place
 #   SYSTEM_RECONFIGURE installs twice and takes "Set them up again", proving
@@ -82,7 +80,7 @@
 #   FAT_68000       picks fat on an A600 and requires the refusal and re-ask
 #   FAT_FULL / FULL_FAT reinstall across fat and full; every library, driver
 #                   and command must be the selected drawer's, by sha256
-#   CANCEL_DRIVERS clicks the real Abort button before writes and requires an
+#   CANCEL_DHCP clicks the real Abort button before writes and requires an
 #                   exact zero-diff destination
 #   MISSING_* corrupt the throw-away archive at four distinct preflights and
 #                   require refusal before the destination changes
@@ -96,8 +94,8 @@
 #   HARDWARE_PCMCIA does the same through card.resource and identity tuples
 #   TERMINAL        opts into the browser services, reinstalls, and exercises
 #                   them from a second machine
-#   STATIC_NO_DRIVERS proves two non-default questions can be answered in one
-#                   run while the existing vendor driver supplies the card
+#   STATIC_NO_BOOT proves two non-default questions can be answered in one
+#                   run
 #
 # AMINETXDUO_REQUIRE_ALL_SCENARIOS=1 makes any missing ingredient or peer a
 # failure.  The release e2e stage sets it: a release gate may not go green
@@ -114,7 +112,7 @@ ARGS=("$@")
 
 SCENARIOS=(
     NOVICE AVERAGE EXPERT STATIC INVALID_STATIC INVALID_NAMES
-    NO_DRIVERS NO_BOOT
+    NO_BOOT
     SYSTEM_RERUN SYSTEM_RECONFIGURE SYSTEM_MINIMAL SYSTEM_MICRO SYSTEM_FAT
     FAT_NOVICE FAT_68000 FAT_FULL FULL_FAT PROBE_FAIL PROBE_BROKEN
     XSURF100_MINIMAL_DHCP XSURF100_MINIMAL_STATIC
@@ -132,9 +130,9 @@ SCENARIOS=(
     EMU68_WIFI_KEEPIT_FW
     EMU68_WIFI_USERSTART EMU68_WIFI_DRAWER EMU68_BOTH_NOVICE
     EMU68_GENET_OLD EMU68_GENET_OLD_BARE
-    CANCEL_DRIVERS MISSING_CORE MISSING_DRIVER MISSING_PROBE MISSING_MINIMAL
+    CANCEL_DHCP MISSING_CORE MISSING_DRIVER MISSING_PROBE MISSING_MINIMAL
     NO_CARD STALE_PI_DRIVERS HARDWARE_XSURF100 HARDWARE_PCMCIA
-    TERMINAL STATIC_NO_DRIVERS
+    TERMINAL STATIC_NO_BOOT
     SNTP SNTP_INVALID SNTP_RERUN MDNS_OFF HAND_HOSTNAME
     SPACES SPACES_DRAWER
 )
@@ -201,8 +199,7 @@ for scenario in "${SCENARIOS[@]}"; do
         STATIC)                opts=(-l AVERAGE -S) ;;
         INVALID_STATIC)        opts=(-l AVERAGE -V) ;;
         INVALID_NAMES)         opts=(-l EXPERT -I) ;;
-        NO_DRIVERS)            opts=(-l AVERAGE -J) ;;
-        NO_BOOT)               opts=(-l AVERAGE -B) ;;
+        NO_BOOT)               opts=(-l EXPERT -B) ;;
         SYSTEM_RERUN)          opts=(-l AVERAGE -R) ;;
         SYSTEM_RECONFIGURE)    opts=(-l AVERAGE -U) ;;
         SYSTEM_MINIMAL)        opts=(-l AVERAGE -p minimal) ;;
@@ -262,7 +259,7 @@ for scenario in "${SCENARIOS[@]}"; do
         EMU68_BOTH_NOVICE)     opts=(-l NOVICE -e both -w join) ;;
         EMU68_GENET_OLD)       opts=(-l NOVICE -e genet-old) ;;
         EMU68_GENET_OLD_BARE)  opts=(-l NOVICE -e genet-old-bare) ;;
-        CANCEL_DRIVERS)        opts=(-l AVERAGE -c drivers) ;;
+        CANCEL_DHCP)           opts=(-l AVERAGE -c dhcp) ;;
         MISSING_CORE)          opts=(-l AVERAGE -m core) ;;
         MISSING_DRIVER)        opts=(-l AVERAGE -m driver) ;;
         MISSING_PROBE)         opts=(-l AVERAGE -m probe) ;;
@@ -272,11 +269,11 @@ for scenario in "${SCENARIOS[@]}"; do
         HARDWARE_XSURF100)     opts=(-l AVERAGE -M -N xsurf100z2) ;;
         HARDWARE_PCMCIA)       opts=(-l AVERAGE -M -N ne2000_pcmcia) ;;
         TERMINAL)              opts=(-l AVERAGE -H) ;;
-        STATIC_NO_DRIVERS)     opts=(-l AVERAGE -S -J) ;;
+        STATIC_NO_BOOT)        opts=(-l EXPERT -S -B) ;;
         SNTP)                  opts=(-l EXPERT -s yes) ;;
         SNTP_INVALID)          opts=(-l EXPERT -s invalid) ;;
         SNTP_RERUN)            opts=(-l EXPERT -s yes -R) ;;
-        MDNS_OFF)              opts=(-l AVERAGE -O) ;;
+        MDNS_OFF)              opts=(-l EXPERT -O) ;;
         HAND_HOSTNAME)         opts=(-l AVERAGE -U -n) ;;
 SPACES)                opts=(-l AVERAGE -W) ;;
 SPACES_DRAWER)         opts=(-l AVERAGE -D -W) ;;
