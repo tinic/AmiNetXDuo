@@ -7,6 +7,8 @@ Add new entries under `Unreleased`; published release sections are history.
 
 - Installer: with the Pi Wi-Fi selected, installs WirelessManager 1.5, asks for the network name and passphrase, and starts the Wi-Fi at boot, beside the Ethernet.
 
+- NetWireless and NetWirelessPrefs find a prism2.device Wi-Fi card (PC Card or PCI) from its interface file when neither DEVICE nor INTERFACE is given.
+
 - New NetWireless commodity: Wi-Fi state and signal as an AppIcon, a Tools menu item and ENV:WiFi; the signal is read only while connected.
 
 - New NetWirelessPrefs: Wi-Fi networks in range, joining one through WirelessManager, and the link's state; Shell forms LIST, STATUS and JOIN.

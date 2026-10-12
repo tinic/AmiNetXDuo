@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include "tools.h"
 #include "netwireless_dev.h"
 #include "netwireless_prefs.h"
 
@@ -38,20 +39,24 @@ BOOL nw_dev_from_interface(const char *name, char *device, ULONG cap,
                            ULONG *unit)
 {
     static const char dir[] = "DEVS:NetInterfaces/";
-    char          path[128], *text;
+    char          given[128], where[128], *text;
+    const char   *path;
     BPTR          fh;
     LONG          got;
     ULONG         i = 0, n;
     unsigned long u = *unit;
     BOOL          found = FALSE;
 
-    for (n = 0; dir[n] != '\0'; n++) path[i++] = dir[n];
+    for (n = 0; dir[n] != '\0'; n++) given[i++] = dir[n];
     for (n = 0; name[n] != '\0'; n++)
     {
-        if (i + 1 >= sizeof(path)) return FALSE;
-        path[i++] = name[n];
+        if (i + 1 >= sizeof(given)) return FALSE;
+        given[i++] = name[n];
     }
-    path[i] = '\0';
+    given[i] = '\0';
+    /* A self-contained installation's own Devs drawer first, as the stack
+       reads it. */
+    path = ami_cfg_resolve(given, where, sizeof(where));
 
     /* The installer's interface files carry 2 KB of comments ahead of
        DEVICE; NW_IFACE_MAX holds every one it writes. */
@@ -66,6 +71,51 @@ BOOL nw_dev_from_interface(const char *name, char *device, ULONG cap,
         found = TRUE;
     }
     if (text != NULL) FreeVec(text);
+    return found;
+}
+
+/* One interface file's DEVICE and UNIT if the DEVICE is a Wi-Fi driver;
+   nothing of a file that is not is kept. */
+static BOOL nw_dev_wireless(const char *name, char *device, ULONG cap, ULONG *unit)
+{
+    char  found[128];
+    ULONG u = 0;
+
+    if (!nw_dev_from_interface(name, found, sizeof(found), &u) ||
+        !nw_wireless_driver(found))
+        return FALSE;
+    tool_copy_string(device, cap, found);
+    *unit = u;
+    return TRUE;
+}
+
+#define NW_FIND_MAX 64
+
+BOOL nw_dev_find(char *device, ULONG cap, ULONG *unit)
+{
+    char        (*names)[TOOL_NAME_LEN];
+    char        t[TOOL_NAME_LEN], where[128];
+    ULONG       n, i, k;
+    BOOL        found = FALSE;
+
+    if (nw_dev_wireless(NW_DEFAULT_INTERFACE, device, cap, unit)) return TRUE;
+    /* A temporary list, not a resident one, in name order so that the same
+       file is chosen every time. */
+    names = AllocVec(NW_FIND_MAX * TOOL_NAME_LEN, MEMF_ANY);
+    if (names == NULL) return FALSE;
+    n = tool_list_dir(ami_cfg_resolve("DEVS:NetInterfaces", where, sizeof(where)),
+                      names, NW_FIND_MAX, NULL);
+    for (i = 1; i < n; i++)
+        for (k = i; k > 0 && tool_stricmp(names[k - 1], names[k]) > 0; k--)
+        {
+            tool_copy_string(t, sizeof(t), names[k]);
+            tool_copy_string(names[k], TOOL_NAME_LEN, names[k - 1]);
+            tool_copy_string(names[k - 1], TOOL_NAME_LEN, t);
+        }
+    for (i = 0; i < n && !found; i++)
+        if (tool_stricmp(names[i], NW_DEFAULT_INTERFACE) != 0)
+            found = nw_dev_wireless(names[i], device, cap, unit);
+    FreeVec(names);
     return found;
 }
 
@@ -137,6 +187,7 @@ LONG nw_dev_open(NwDev *d, const char *device, ULONG unit)
         return err;
     }
 
+    d->signal_says = nw_wireless_driver(device) != NW_DRIVER_PRISM2;
     d->scan  = nw_req_copy(d->req, d->async);
     d->event = nw_req_copy(d->req, d->async);
     if (d->scan == NULL || d->event == NULL)
@@ -212,6 +263,51 @@ LONG nw_dev_signal(NwDev *d, LONG *signal, LONG *noise)
     if (d->req->ios2_WireError == S2WERR_UNIT_OFFLINE) return NW_LINK_OFF;
     if (d->req->ios2_WireError == S2WERR_NOT_CONFIGURED) return NW_LINK_DOWN;
     return NW_LINK_ERROR;
+}
+
+LONG nw_dev_link(NwDev *d, LONG *signal, LONG *noise)
+{
+    LONG link = nw_dev_signal(d, signal, noise);
+
+    if (link != NW_LINK_UP || d->signal_says || d->event_busy) return link;
+    /* ONLINE or OFFLINE is always true, so every driver answers this at
+       once and nothing is aborted: a driver may already have taken the
+       request off its queue.  prism2.device adds the association bit;
+       anxwifipi.device adds none, and its signal answer stands. */
+    d->event->ios2_Req.io_Command = S2_ONEVENT;
+    d->event->ios2_Req.io_Error = 0;
+    d->event->ios2_WireError = NW_S2EVENT_CONNECT | NW_S2EVENT_DISCONNECT |
+                               S2EVENT_ONLINE | S2EVENT_OFFLINE;
+    (VOID)DoIO((struct IORequest *)d->event);
+    if (d->event->ios2_Req.io_Error != 0) link = NW_LINK_ONLINE;
+    else if (d->event->ios2_WireError & S2EVENT_OFFLINE) link = NW_LINK_OFF;
+    else if (d->event->ios2_WireError & NW_S2EVENT_DISCONNECT) link = NW_LINK_DOWN;
+    else if (!(d->event->ios2_WireError & NW_S2EVENT_CONNECT)) link = NW_LINK_ONLINE;
+    /* DoIO() may have taken the port's signal from a scan reply queued
+       behind; the caller's Wait() must still see it. */
+    if (d->async->mp_MsgList.lh_Head->ln_Succ != NULL)
+        Signal(d->async->mp_SigTask, 1UL << d->async->mp_SigBit);
+    return link;
+}
+
+LONG nw_dev_operational(NwDev *d)
+{
+    LONG r = -1;
+
+    if (d->event_busy) return -1;
+    d->event->ios2_Req.io_Command = S2_ONEVENT;
+    d->event->ios2_Req.io_Error = 0;
+    d->event->ios2_WireError = NW_S2EVENT_LINKUP | NW_S2EVENT_LINKDOWN |
+                               S2EVENT_ONLINE | S2EVENT_OFFLINE;
+    (VOID)DoIO((struct IORequest *)d->event);
+    if (d->event->ios2_Req.io_Error == 0)
+    {
+        if (d->event->ios2_WireError & NW_S2EVENT_LINKUP) r = 1;
+        else if (d->event->ios2_WireError & (NW_S2EVENT_LINKDOWN | S2EVENT_OFFLINE)) r = 0;
+    }
+    if (d->async->mp_MsgList.lh_Head->ln_Succ != NULL)
+        Signal(d->async->mp_SigTask, 1UL << d->async->mp_SigBit);
+    return r;
 }
 
 /* utility.library's NextTagItem(), without opening it. */

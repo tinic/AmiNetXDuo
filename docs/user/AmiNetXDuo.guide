@@ -3328,8 +3328,18 @@
   announce its name. WEP, WPA3-only and Enterprise networks are listed and
   cannot be joined: WirelessManager 1.5 does not support them.
 
-  The Wi-Fi unit is DEVICE and UNIT of DEVS:NetInterfaces/wifipi, or of
-  the interface named by INTERFACE, or anxwifipi.device unit 0. DEVICE,
+  The Wi-Fi unit is DEVICE and UNIT as given, or of the interface named by
+  INTERFACE. With neither, it is the first interface file whose DEVICE is
+  a Wi-Fi driver (anxwifipi.device for the Pi, prism2.device for PC Card
+  and PCI cards), DEVS:NetInterfaces/wifipi first; with none,
+  anxwifipi.device unit 0. On a self-contained installation the
+  interface files in AmiNetXDuo:Devs/NetInterfaces are the ones read, as
+  the stack reads them. prism2.device reports the access point and not
+  the network's name: the window shows "Connected" and the AppIcon "Wi-Fi"
+  for the network there. prism2.device 2.9 says when the card is
+  associated and keyed, and a join counts only then; an older one says
+  neither until it changes, so the link reads "Online" until then and a
+  join counts only on a new access point. DEVICE,
   UNIT, INTERFACE and WM (the WirelessManager command, C:WirelessManager by
   default) are also ToolTypes, and arguments win over the icon. Project >
   Snapshot keeps the window's position in the icon as LEFT and TOP.
