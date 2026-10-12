@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate genuine AmigaOS 2.x .info (icon) files.
+"""Generate Amiga .info files with classic images and optional GlowIcons.
 
 The .info format is a `struct DiskObject` written big-endian, followed by the
 things its pointers say are present, in a fixed order.  Everything here comes
@@ -35,11 +35,17 @@ read past the end.
 Bitmaps are written as planar data, plane 0 first, each row padded to a
 whole number of 16-bit words, the Amiga's native bitmap layout.
 
-Usage:  makeicon.py <outdir>
+GlowIcon FORM ICON data follows the complete classic icon, including its
+DrawerData tail. Older icon.library versions can still load the classic
+image; color-capable libraries use the normal and selected color images.
+The compiled artwork needs no image-processing dependencies at package time.
+
+Usage:  makeicon.py <outdir> [--style glow|classic]
 
 SPDX-License-Identifier: MIT
 """
 
+import argparse
 import os
 import struct
 import sys
@@ -129,7 +135,7 @@ class Canvas:
 # ------------------------------------------------------------ file writer --
 
 def diskobject(canvas, obj_type, default_tool=None, tooltypes=(),
-               stack=4096, drawer=False):
+               stack=4096, drawer=False, window=(60, 40, 450, 180)):
     w, h = canvas.w, canvas.h
 
     gadget = struct.pack(
@@ -167,7 +173,7 @@ def diskobject(canvas, obj_type, default_tool=None, tooltypes=(),
         # struct DrawerData: a NewWindow (48) plus dd_CurrentX/dd_CurrentY.
         nw = struct.pack(
             ">hhhhBBIIIIIIIhhHHH",
-            50, 40, 300, 150,               # LeftEdge TopEdge Width Height
+            *window,                        # LeftEdge TopEdge Width Height
             255, 255,                       # DetailPen, BlockPen
             0,                              # IDCMPFlags
             0x0004022F,                     # Flags: the usual drawer window
@@ -382,10 +388,11 @@ def plain_drawer_icon():
 
 
 def main(argv):
-    if len(argv) != 2:
-        print("usage: makeicon.py <outdir>", file=sys.stderr)
-        return 2
-    outdir = argv[1]
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("outdir")
+    parser.add_argument("--style", choices=("glow", "classic"), default="glow")
+    args = parser.parse_args(argv[1:])
+    outdir = args.outdir
     os.makedirs(outdir, exist_ok=True)
 
     icons = {
@@ -401,7 +408,7 @@ def main(argv):
             ],
             stack=10000),
         "AmiNetXDuo.info": diskobject(
-            drawer_icon(), WBDRAWER, drawer=True),
+            drawer_icon(), WBDRAWER, drawer=True, window=(10, 12, 620, 236)),
         "Drawer.info": diskobject(
             plain_drawer_icon(), WBDRAWER, drawer=True),
         "Document.info": diskobject(
@@ -430,6 +437,17 @@ def main(argv):
     }
 
     for name, blob in icons.items():
+        if args.style == "glow":
+            artwork = "Document" if name == "Guide.info" else name[:-5]
+            path = os.path.join(os.path.dirname(__file__), "..", "icons",
+                                "glow", artwork + ".glow")
+            with open(path, "rb") as fh:
+                color = fh.read()
+            if (color[:4] != b"FORM" or color[8:12] != b"ICON" or
+                    len(color) < 12 or
+                    struct.unpack(">I", color[4:8])[0] != len(color) - 8):
+                raise ValueError(f"invalid GlowIcon artwork: {path}")
+            blob += color
         path = os.path.join(outdir, name)
         with open(path, "wb") as fh:
             fh.write(blob)

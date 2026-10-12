@@ -488,8 +488,10 @@ host_test_targets() { # builddir
 #      their worker, preserve one binding, and release it on removal.
 #      561 with NetWireless's Wireless.prefs text, WPA key (IEEE 802.11i
 #      Annex H) and signal/security modules.
-#      562 with NetWirelessPrefs' font layout and hidden passphrase.
-HOST_TESTS_EXPECTED=562
+#      562 with netprobe_pcmcia_kind: InstallNetProbe calls a PC Card an
+#      NE2000 by anxnet.device's rule, less the 802.11 cards.
+#      563 with NetWirelessPrefs' font layout and hidden passphrase.
+HOST_TESTS_EXPECTED=563
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,
