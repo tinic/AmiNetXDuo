@@ -277,7 +277,10 @@ BOOL nw_dev_network(NwDev *d, UBYTE ssid[NW_SSID_MAX], LONG *ssid_len,
             else if (t->ti_Tag == NW_S2INFO_Channel)
                 d->net_channel = (LONG)t->ti_Data;
             else if (t->ti_Tag == NW_S2INFO_Band)
-                d->net_band5 = t->ti_Data == NW_S2BAND_A;
+                /* A is 5 GHz, B and G 2.4 GHz; N is either. */
+                d->net_band5 = t->ti_Data == NW_S2BAND_A ? 1 :
+                               (t->ti_Data == NW_S2BAND_B ||
+                                t->ti_Data == NW_S2BAND_G) ? 0 : -1;
         }
         /* A band the driver left out follows from the channel. */
         if (d->net_band5 < 0 && d->net_channel > 0)

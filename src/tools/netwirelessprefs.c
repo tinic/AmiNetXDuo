@@ -139,6 +139,7 @@ static struct
     char            sig_text[56];
     char            status[80];
     LONG            selected;
+    int             shown_bars;             /* the Signal line's, held     */
     ULONG           click_secs, click_micros;
     WORD            want_left, want_top;
     struct WBStartup *wbs;
@@ -643,6 +644,7 @@ static VOID nw_refresh_status(VOID)
 
     nw.sig_text[0] = '\0';
     link = nw.dev_open ? nw_dev_signal(&nw.dev, &signal, &noise) : NW_LINK_NODEV;
+    if (link != NW_LINK_UP) nw.shown_bars = 0;
     tool_copy_string(nw.net_text, sizeof(nw.net_text), words[link]);
     if (link == NW_LINK_UP)
     {
@@ -650,7 +652,9 @@ static VOID nw_refresh_status(VOID)
             nw_ssid_text(ssid, (int)len, nw.net_text);
         nw_decimal(signal, nw.sig_text);
         nw_append(nw.sig_text, sizeof(nw.sig_text), " dBm, ");
-        bars[0] = (char)('0' + nw_bars(signal));
+        /* With the commodity's hysteresis, so the two agree. */
+        nw.shown_bars = nw_bars_held(signal, nw.shown_bars);
+        bars[0] = (char)('0' + nw.shown_bars);
         bars[1] = '\0';
         nw_append(nw.sig_text, sizeof(nw.sig_text), bars);
         nw_append(nw.sig_text, sizeof(nw.sig_text), " of 4 bars");

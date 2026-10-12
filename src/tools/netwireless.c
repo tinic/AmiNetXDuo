@@ -511,8 +511,12 @@ int main(int argc, char **argv)
             nw.tarmed = FALSE;
             if (nw.event_retry)
             {
+                /* Armed, then read, as everywhere else: a change while
+                   the request was down is seen now. */
                 nw.event_retry = FALSE;
                 nw_event_arm();
+                nw_refresh(TRUE);
+                continue;
             }
             if (nw.want_menu && nw.appmenu == NULL && nw.appport != NULL)
                 nw.appmenu = AddAppMenuItemA(0, 0, (STRPTR)"Wi-Fi...", nw.appport, NULL);

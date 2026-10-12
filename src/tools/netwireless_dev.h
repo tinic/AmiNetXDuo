@@ -37,6 +37,8 @@
 #define NW_S2_GETNETWORKINFO    0xc014
 
 #define NW_S2BAND_A             0           /* 5 GHz */
+#define NW_S2BAND_B             1
+#define NW_S2BAND_G             2
 
 /* Cafferkey's sana2.h additions; anxwifipi.device reports both. */
 #define NW_S2EVENT_CONNECT      (1L << 9)
