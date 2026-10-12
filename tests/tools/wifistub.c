@@ -837,6 +837,21 @@ int main(void)
 
         stop_named("NetWireless");
         Delay(25);
+
+        /* The same start around a program that only waits: what the
+           commodity's figure has beyond this one is the commodity. */
+        in = Open((CONST_STRPTR)"NIL:", MODE_OLDFILE);
+        o = Open((CONST_STRPTR)"NIL:", MODE_NEWFILE);
+        polls = AvailMem(MEMF_ANY);
+        SystemTags((CONST_STRPTR)"DH0:WaitBreak", SYS_Input, (ULONG)in,
+                   SYS_Output, (ULONG)o, SYS_Asynch, TRUE, TAG_DONE);
+        Delay(100);
+        polls -= AvailMem(MEMF_ANY);
+        Printf((CONST_STRPTR)"commodity_own_ram=%lu (control %lu)\n",
+               used - polls, polls);
+        check(used - polls <= 16384, "the commodity holds at most 16 KB");
+        stop_named("WaitBreak");
+        Delay(25);
     }
 
     check(ws->n_scan_abort == 0, "no running scan was aborted");

@@ -10,7 +10,7 @@
  * while connected.  Not connected, nothing is polled.
  *
  * Kickstart 2.04: commodities.library, workbench.library and icon.library
- * are each optional.  A new picture is a new AppIcon; from Workbench 3.9 on
+ * are each optional.  A new picture is a new AppIcon; from Workbench 3.5 on
  * WBAPPICONA_PropagatePosition keeps the place it was dragged to, before
  * that it returns to a free place.
  *
@@ -74,8 +74,9 @@ static struct
     LONG                bars;
     LONG                icon;               /* NW_ICON_*                    */
     char                label[NW_SSID_MAX + 1];
-    char                env[NW_SSID_MAX + 8];
     BOOL                events_broken;
+    BOOL                offline;            /* the event mask's online bit  */
+    char                envbuf[24];
 
     struct MsgPort     *cxport, *appport, *tport;
     CxObj              *broker;
@@ -99,13 +100,6 @@ static struct DiskObject nw_dob =
       0, NULL, 0, NULL },
     WBAPPICON, NULL, NULL, NO_ICON_POSITION, NO_ICON_POSITION, NULL, NULL, 0
 };
-
-static ULONG nw_len(const char *s)
-{
-    ULONG n = 0;
-    while (s[n] != '\0') n++;
-    return n;
-}
 
 /* ---------------------------------------------------------- options -- */
 
@@ -149,15 +143,28 @@ static BOOL nw_opt_yes(int k, BOOL fallback)
 
 /* ------------------------------------------------------------- show -- */
 
-/* NetWirelessPrefs finds the unit the way this program did.  A second one
-   brings the first one's window forward. */
+/* RawDoFmt() into a buffer: move.b d0,(a3)+ ; rts. */
+static const UWORD nw_stuff[] = { 0x16c0, 0x4e75 };
+
+static VOID nw_format(char *out, const char *fmt, ULONG *args)
+{
+    RawDoFmt((CONST_STRPTR)fmt, args, (VOID (*)())(APTR)nw_stuff, out);
+}
+
+/* NetWirelessPrefs on the same unit.  A second one brings the first one's
+   window forward. */
 static VOID nw_launch(VOID)
 {
-    BPTR in = Open((CONST_STRPTR)"NIL:", MODE_OLDFILE);
-    BPTR out = Open((CONST_STRPTR)"NIL:", MODE_NEWFILE);
+    char  line[180];
+    ULONG args[2];
+    BPTR  in = Open((CONST_STRPTR)"NIL:", MODE_OLDFILE);
+    BPTR  out = Open((CONST_STRPTR)"NIL:", MODE_NEWFILE);
 
+    args[0] = (ULONG)nw.device;
+    args[1] = nw.unit;
+    nw_format(line, "NetWirelessPrefs DEVICE=\"%s\" UNIT=%lu", args);
     if (in == (BPTR)0 || out == (BPTR)0 ||
-        SystemTags((CONST_STRPTR)"NetWirelessPrefs", SYS_Input, (ULONG)in,
+        SystemTags((CONST_STRPTR)line, SYS_Input, (ULONG)in,
                    SYS_Output, (ULONG)out, SYS_Asynch, TRUE, TAG_DONE) == -1)
     {
         if (in != (BPTR)0) Close(in);
@@ -175,7 +182,7 @@ static VOID nw_icon_add(VOID)
 {
     struct TagItem t[2];
 
-    /* Workbench 3.9 and later write a position the user dragged the icon
+    /* Workbench 3.5 and later write a position the user dragged the icon
        to back into nw_dob, so the next AddAppIcon puts it there again. */
     t[0].ti_Tag = WBAPPICONA_PropagatePosition;
     t[0].ti_Data = TRUE;
@@ -191,8 +198,7 @@ static VOID nw_icon_add(VOID)
    is a new AppIcon. */
 static VOID nw_show(VOID)
 {
-    char  env[sizeof(nw.env)];
-    int   n;
+    char env[NW_SSID_MAX + 8];
 
     if (nw.want_icon && nw.planes != NULL)
     {
@@ -201,32 +207,27 @@ static VOID nw_show(VOID)
         nw_icon_add();
     }
 
-    if (nw.envvar == NULL || nw.envvar[0] == '\0') return;
-    switch (nw.icon)
+    /* Called only for a change, so the variable is written only then. */
+    if (nw.envvar[0] == '\0') return;
     {
-        case NW_ICON_CONNECTED:
-            tool_copy_string(env, sizeof(env), nw.label);
-            n = (int)nw_len(env);
-            env[n++] = ' ';
-            env[n++] = (char)('0' + nw.bars);
-            env[n++] = '/';
-            env[n++] = '4';
-            env[n] = '\0';
-            break;
-        case NW_ICON_NODEV:   tool_copy_string(env, sizeof(env), "No Wi-Fi unit"); break;
-        case NW_ICON_JOINING: tool_copy_string(env, sizeof(env), "Not connected"); break;
-        case NW_ICON_ERROR:   tool_copy_string(env, sizeof(env), "No answer"); break;
-        default:              tool_copy_string(env, sizeof(env), "Off"); break;
+        static const char *const words[] =
+            { "No Wi-Fi unit", "Off", "Not connected", "%s %ld/4", "No answer" };
+        ULONG args[2];
+
+        args[0] = (ULONG)nw.label;
+        args[1] = (ULONG)nw.bars;
+        nw_format(env, words[nw.icon], args);
     }
-    for (n = 0; env[n] == nw.env[n] && env[n] != '\0'; n++)
-        ;
-    if (env[n] == nw.env[n]) return;            /* unchanged: nothing written */
-    tool_copy_string(nw.env, sizeof(nw.env), env);
-    (VOID)SetVar((CONST_STRPTR)nw.envvar, (CONST_STRPTR)nw.env, -1,
-                 GVF_GLOBAL_ONLY);
+    (VOID)SetVar((CONST_STRPTR)nw.envvar, (CONST_STRPTR)env, -1, GVF_GLOBAL_ONLY);
 }
 
 /* ------------------------------------------------------------ state -- */
+
+static BOOL nw_polling(VOID)
+{
+    return nw.dev_open && (nw.link == NW_LINK_UP || nw.link == NW_LINK_ERROR ||
+                           nw.events_broken);
+}
 
 static VOID nw_timer_arm(VOID)
 {
@@ -238,9 +239,10 @@ static VOID nw_timer_arm(VOID)
     nw.tarmed = TRUE;
 }
 
-/* The link read again: after an event, at start, and once an INTERVAL
+/* The link read again: after an event (asked again then, since the network
+   may have changed between two events), at start, and once an INTERVAL
    while connected. */
-static VOID nw_refresh(VOID)
+static VOID nw_refresh(BOOL event)
 {
     LONG  signal = 0, noise = 0, len = -1, icon, bars = 0;
     UBYTE ssid[NW_SSID_MAX], bssid[6];
@@ -255,7 +257,7 @@ static VOID nw_refresh(VOID)
         case NW_LINK_UP:
             icon = NW_ICON_CONNECTED;
             bars = nw_bars(signal);
-            if (was_up)
+            if (was_up && !event)
                 tool_copy_string(label, sizeof(label), nw.label);
             else if (nw_dev_network(&nw.dev, ssid, &len, bssid) && len > 0)
                 nw_ssid_text(ssid, (int)len, label);
@@ -276,17 +278,19 @@ static VOID nw_refresh(VOID)
         nw_show();
     }
 
-    /* Polled only while connected, or when the unit has no events. */
-    if (nw.link == NW_LINK_UP || (nw.events_broken && nw.dev_open)) nw_timer_arm();
+    /* Polled while connected; while a reading failed, to see it come back;
+       always when the unit has no events. */
+    if (nw_polling()) nw_timer_arm();
 }
 
+/* Armed before the link is read, so that nothing happening while it is read
+   is missed: the online/offline preset the driver answers at once covers a
+   change of that, and CONNECT and DISCONNECT wait. */
 static VOID nw_event_arm(VOID)
 {
     if (!nw.dev_open || nw.events_broken) return;
-    (VOID)nw_dev_event_arm(&nw.dev, nw.link == NW_LINK_OFF
-                           ? S2EVENT_ONLINE
-                           : NW_S2EVENT_CONNECT | NW_S2EVENT_DISCONNECT |
-                             S2EVENT_OFFLINE);
+    (VOID)nw_dev_event_arm(&nw.dev, NW_S2EVENT_CONNECT | NW_S2EVENT_DISCONNECT |
+                           (nw.offline ? S2EVENT_ONLINE : S2EVENT_OFFLINE));
 }
 
 /* -------------------------------------------------------- commodity -- */
@@ -386,13 +390,17 @@ int main(int argc, char **argv)
                                     nw.device, sizeof(nw.device), &nw.unit))
         tool_copy_string(nw.device, sizeof(nw.device), NW_DEFAULT_DEVICE);
     nw.unit = (ULONG)nw_opt_number(ARG_UNIT, (LONG)nw.unit);
-    nw.interval = (ULONG)nw_opt_number(ARG_INTERVAL, 5);
-    if (nw.interval < 1) nw.interval = 1;
-    nw.envvar = nw_opt(ARG_ENVVAR);
-    if (nw.envvar == NULL) nw.envvar = "WiFi";
+    {
+        LONG iv = nw_opt_number(ARG_INTERVAL, 5);
+
+        nw.interval = iv < 1 ? 1 : (ULONG)iv;
+    }
+    tool_copy_string(nw.envbuf, sizeof(nw.envbuf),
+                     nw_opt(ARG_ENVVAR) != NULL ? nw_opt(ARG_ENVVAR) : "WiFi");
+    nw.envvar = nw.envbuf;
 
     nw.dev_open = nw_dev_open(&nw.dev, nw.device, nw.unit) == 0;
-    if (!nw.dev_open && (nw_tool != NULL ? nw_opt(ARG_QUIET) != NULL
+    if (!nw.dev_open && (nw_tool != NULL ? nw_opt_yes(ARG_QUIET, FALSE)
                                          : nw_args[ARG_QUIET] != 0))
         goto out;
 
@@ -427,12 +435,17 @@ int main(int argc, char **argv)
         }
     }
 
+    if (nw_opt_yes(ARG_POPUP, FALSE)) nw_launch();
+    /* Every option is read: the icon goes, its imagery can be large. */
+    if (nw_tool != NULL) FreeDiskObject(nw_tool);
+    nw_tool = NULL;
+
     nw.icon = -1;
     nw.link = NW_LINK_NODEV;
     nw.label[0] = 1;                    /* differs from every label: shown */
-    nw_refresh();
+    nw.offline = TRUE;                  /* a unit online answers at once  */
     nw_event_arm();
-    if (nw_opt_yes(ARG_POPUP, FALSE)) nw_launch();
+    nw_refresh(TRUE);
 
     while (run)
     {
@@ -448,23 +461,32 @@ int main(int argc, char **argv)
         if (sigs & app)
             while ((am = (struct AppMessage *)GetMsg(nw.appport)) != NULL)
             {
-                /* A double-click on the icon or the menu item; dropped
-                   icons are not for this program. */
-                BOOL open = am->am_NumArgs == 0;
+                /* The menu item, whatever is selected, or a double-click
+                   on the icon; icons dropped on it are not for this. */
+                BOOL open = am->am_Type == AMTYPE_APPMENUITEM ||
+                            am->am_NumArgs == 0;
 
                 ReplyMsg((struct Message *)am);
                 if (open) nw_launch();
             }
         if ((sigs & dev) && nw_dev_reply(&nw.dev) == NW_REPLY_EVENT)
         {
-            if (nw.dev.event->ios2_Req.io_Error != 0) nw.events_broken = TRUE;
-            nw_refresh();
+            LONG  err = nw.dev.event->ios2_Req.io_Error;
+            ULONG got = nw.dev.event->ios2_WireError;
+
+            /* A unit without events is polled; an aborted request (a
+               CMD_FLUSH from another opener) is asked again. */
+            if (err == IOERR_NOCMD || err == S2ERR_NOT_SUPPORTED)
+                nw.events_broken = TRUE;
+            if (err == 0 && (got & S2EVENT_OFFLINE)) nw.offline = TRUE;
+            if (err == 0 && (got & S2EVENT_ONLINE)) nw.offline = FALSE;
             nw_event_arm();
+            nw_refresh(TRUE);
         }
         if ((sigs & tim) && GetMsg(nw.tport) != NULL)
         {
             nw.tarmed = FALSE;
-            nw_refresh();
+            if (nw_polling()) nw_refresh(FALSE);
         }
     }
 

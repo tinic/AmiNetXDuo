@@ -3357,17 +3357,18 @@
   one to four bars by signal (from -55, -66 and -77 dBm), bar outlines
   while not connected, dotted outlines when the unit is offline, crossed
   out with no Wi-Fi unit, and a '!' when the unit does not answer; the
-  label is the network's name. It also adds "Wi-Fi..." to Workbench's
+  label is the network's name (on Kickstart 3.0 and later; "Wi-Fi" before). It also adds "Wi-Fi..." to Workbench's
   Tools menu and keeps the state in the variable ENV:WiFi, for example
   "Home 3/4", which a Workbench 3.2 title bar shows with %e WiFi. A
   double-click on the icon, the menu item, the hotkey and Exchange's Show
   open NetWirelessPrefs.
 
   The unit reports connects and disconnects as events; the signal is read
-  every INTERVAL seconds only while connected, and nothing is read while
-  not connected. A changed picture replaces the AppIcon; on Workbench 3.9
-  and later it keeps the place it was dragged to, before that it returns
-  to a free place on the desktop.
+  every INTERVAL seconds only while connected, or while a reading has
+  failed, and nothing is read while not connected. A unit that reports no
+  events is read every INTERVAL seconds. A changed picture replaces the
+  AppIcon; on Workbench 3.5 and later it keeps the place it was dragged
+  to, before that it returns to a free place on the desktop.
 
   ToolTypes, also Shell arguments:
 
@@ -3379,11 +3380,13 @@
       INTERVAL=5            seconds between signal readings
       APPICON=YES           NO: no AppIcon
       APPMENU=YES           NO: no Tools menu item
-      ENVVAR=WiFi           the variable; ENVVAR= with no name: none
+      ENVVAR=WiFi           the variable; an empty name ("" from a
+                            Shell): none
       QUIET                 with no Wi-Fi unit, end at once
 
-  Without commodities.library or Workbench the variable alone is kept.
-  Ctrl-C and Exchange's Remove end it.
+  Without commodities.library there is no hotkey and no Exchange entry;
+  without Workbench there is no AppIcon and no menu item; the variable is
+  kept either way. Ctrl-C and Exchange's Remove end it.
 
   @{b}Drivers@{ub}
 

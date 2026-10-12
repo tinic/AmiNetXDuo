@@ -182,7 +182,8 @@ EOF
             "CONFIGURE=DHCP" "MTU=1500" > "$HD/Devs/NetInterfaces/ETH0"
     fi
 
-    if [ -x "$NETWIRELESS" ] && [ -x "$WIFISTUB" ] && [ -x "$WINCLICK" ]; then
+    if [ -x "$NETWIRELESS" ] && [ -x "$NETWIRELESSCX" ] && [ -x "$WIFISTUB" ] &&
+       [ -x "$WINCLICK" ]; then
         cp "$NETWIRELESS" "$HD/C/NetWirelessPrefs"
         cp "$NETWIRELESSCX" "$HD/C/NetWireless"
         cp "$WIFISTUB" "$HD/C/WifiStub"
