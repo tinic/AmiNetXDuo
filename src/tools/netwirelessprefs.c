@@ -148,6 +148,8 @@ static struct
     BOOL            pass_shown;
     BOOL            open_network;
     UBYTE           join_ssid[NW_SSID_MAX];
+    UBYTE           scan_ssid[NW_SSID_MAX];  /* the network selected      */
+    LONG            scan_ssid_len;
     LONG            join_ssid_len;
     LONG            join_wait;              /* seconds left; 0: not waiting */
     BOOL            join_saved;
@@ -327,14 +329,21 @@ static LONG nw_shell_list(VOID)
 
 /* ------------------------------------------------- Wireless.prefs -- */
 
-static char *nw_read(const char *path, ULONG *len)
+/* The file, or NULL with *missing TRUE when it is not there and FALSE when
+   it could not be read: only a missing file may be written as new. */
+static char *nw_read(const char *path, ULONG *len, BOOL *missing)
 {
     BPTR  fh = Open((CONST_STRPTR)path, MODE_OLDFILE);
     char *buf;
     LONG  got;
 
     *len = 0;
-    if (fh == (BPTR)0) return NULL;
+    *missing = FALSE;
+    if (fh == (BPTR)0)
+    {
+        *missing = IoErr() == ERROR_OBJECT_NOT_FOUND;
+        return NULL;
+    }
     buf = (char *)AllocVec(NW_FILE_MAX, MEMF_ANY);
     got = buf != NULL ? Read(fh, buf, NW_FILE_MAX) : -1;
     Close(fh);
@@ -393,9 +402,13 @@ static const char *nw_save_network(const UBYTE *ssid, LONG ssid_len,
     size_t           new_len;
     LONG             count, i, k, top = 0;
     const char      *why = NULL;
+    BOOL             missing;
 
-    old = nw_read(nw_prefs_env, &old_len);
-    if (old == NULL) old = nw_read(nw_prefs_envarc, &old_len);
+    /* ENV: is what WirelessManager reads; ENVARC: when ENV: has none. */
+    old = nw_read(nw_prefs_env, &old_len, &missing);
+    if (old == NULL && missing) old = nw_read(nw_prefs_envarc, &old_len, &missing);
+    if (old == NULL && !missing)
+        return "Wireless.prefs could not be read, so it was not changed.";
     count = nw_prefs_parse(old != NULL ? old : "", old_len, nets, NW_NETS_MAX);
     if (count < 0 || count > NW_NETS_MAX)
     {
@@ -800,18 +813,27 @@ static BOOL nw_open_main(VOID)
     return TRUE;
 }
 
+/* The passphrase gone from this program's memory and from the gadget. */
+static VOID nw_wipe_pass(VOID)
+{
+    int i;
+
+    for (i = 0; i < (int)sizeof(nw.pass); i++) nw.pass[i] = '\0';
+    nw.pass_len = 0;
+    nw_set(nw.join.win, NW_J_PASS, GTST_String, (ULONG)"");
+}
+
 static VOID nw_close_join(VOID)
 {
     int i;
 
+    nw_wipe_pass();
     if (nw.join.win != NULL) CloseWindow(nw.join.win);
     if (nw.join.glist != NULL) FreeGadgets(nw.join.glist);
     nw.join.win = NULL;
     nw.join.glist = NULL;
     for (i = NW_J_SSID; i <= NW_J_CANCEL; i++) nw.g[i] = NULL;
     nw.join_wait = 0;
-    for (i = 0; i < (int)sizeof(nw.pass); i++) nw.pass[i] = '\0';
-    nw.pass_len = 0;
 }
 
 static VOID nw_join_status(const char *s)
@@ -840,7 +862,13 @@ static VOID nw_open_join(VOID)
         return;
     }
     ssid_text[0] = '\0';
-    if (e != NULL) nw_ssid_text(e->ssid, e->ssid_len, ssid_text);
+    nw.scan_ssid_len = 0;
+    if (e != NULL)
+    {
+        nw_ssid_text(e->ssid, e->ssid_len, ssid_text);
+        CopyMem((APTR)e->ssid, nw.scan_ssid, (ULONG)e->ssid_len);
+        nw.scan_ssid_len = e->ssid_len;
+    }
     nw.pass_len = 0;
     nw.pass[0] = '\0';
     nw.pass_shown = FALSE;
@@ -881,7 +909,20 @@ static VOID nw_open_join(VOID)
                          nw.join.win, NULL);
 }
 
-/* Between key steps: the percentage shown, Cancel honoured. */
+/* The form frozen while the key is derived, Cancel left alone; the busy
+   pointer on Intuition V39. */
+static VOID nw_join_busy(BOOL busy)
+{
+    int i;
+
+    for (i = NW_J_SSID; i <= NW_J_JOIN; i++)
+        if (i != NW_J_STATUS) nw_set(nw.join.win, i, GA_Disabled, busy);
+    if (!busy) nw_set(nw.join.win, NW_J_PASS, GA_Disabled, nw.open_network);
+    if (IntuitionBase->LibNode.lib_Version >= 39)
+        SetWindowPointer(nw.join.win, WA_BusyPointer, busy, TAG_DONE);
+}
+
+/* Between key steps: the percentage shown, Cancel and close honoured. */
 static int nw_key_progress(void *ctx, unsigned long done)
 {
     struct IntuiMessage *m;
@@ -895,17 +936,27 @@ static int nw_key_progress(void *ctx, unsigned long done)
     nw_join_status(text);
     while ((m = GT_GetIMsg(nw.join.win->UserPort)) != NULL)
     {
-        if ((m->Class == IDCMP_GADGETUP &&
-             ((struct Gadget *)m->IAddress)->GadgetID == NW_J_CANCEL) ||
-            m->Class == IDCMP_CLOSEWINDOW)
-            cancel = TRUE;
+        ULONG cls = m->Class;
+        BOOL  stop = cls == IDCMP_CLOSEWINDOW ||
+                     (cls == IDCMP_GADGETUP &&
+                      ((struct Gadget *)m->IAddress)->GadgetID == NW_J_CANCEL);
+
         GT_ReplyIMsg(m);
+        if (stop) cancel = TRUE;
+        if (cls == IDCMP_REFRESHWINDOW)
+        {
+            GT_BeginRefresh(nw.join.win);
+            GT_EndRefresh(nw.join.win, TRUE);
+        }
     }
     return !cancel;
 }
 
+/* The first answer stands: a close queued behind a SETUP that wrote the
+   file must not turn 0 into 5. */
 static VOID nw_finish(int rc)
 {
+    if (nw.done) return;
     nw.result = rc;
     nw.done = TRUE;
 }
@@ -921,7 +972,18 @@ static const char *nw_join_save(const char *ssid, const char *pass, int pass_len
     LONG        len = (LONG)nw_len(ssid), kind, i;
 
     if (len < 1 || len > NW_SSID_MAX) return "Type the name of the network.";
-    for (i = 0; i < len; i++) nw.join_ssid[i] = (UBYTE)ssid[i];
+    /* A scanned name shown unedited is joined by its own bytes, which the
+       gadget showed with '?' for control characters. */
+    nw_ssid_text(nw.scan_ssid, (int)nw.scan_ssid_len, hex);
+    for (i = 0; hex[i] != '\0' && hex[i] == ssid[i]; i++)
+        ;
+    if (nw.scan_ssid_len > 0 && hex[i] == ssid[i])
+    {
+        len = nw.scan_ssid_len;
+        for (i = 0; i < len; i++) nw.join_ssid[i] = nw.scan_ssid[i];
+    }
+    else
+        for (i = 0; i < len; i++) nw.join_ssid[i] = (UBYTE)ssid[i];
     nw.join_ssid_len = len;
     if (!open)
     {
@@ -958,8 +1020,11 @@ static BOOL nw_joined(VOID)
     LONG  signal, noise, len = -1, i;
     UBYTE ssid[NW_SSID_MAX], bssid[6];
 
-    if (nw_dev_signal(&nw.dev, &signal, &noise) != NW_LINK_UP ||
-        !nw_dev_network(&nw.dev, ssid, &len, bssid) || len != nw.join_ssid_len)
+    if (!nw.dev_open || nw_dev_signal(&nw.dev, &signal, &noise) != NW_LINK_UP)
+        return FALSE;
+    /* Kickstart 2.04 cannot ask which network: associated is joined. */
+    if (SysBase->LibNode.lib_Version < 39) return TRUE;
+    if (!nw_dev_network(&nw.dev, ssid, &len, bssid) || len != nw.join_ssid_len)
         return FALSE;
     for (i = 0; i < len && ssid[i] == nw.join_ssid[i]; i++)
         ;
@@ -1000,10 +1065,13 @@ static VOID nw_join(VOID)
     struct StringInfo *si = (struct StringInfo *)nw.g[NW_J_SSID]->SpecialInfo;
     const char *why;
 
+    nw_join_busy(TRUE);
     why = nw_join_save((const char *)si->Buffer, nw.pass, nw.pass_len,
                        nw.open_network,
                        (nw.g[NW_J_HIDDEN]->Flags & GFLG_SELECTED) != 0,
                        nw_key_progress);
+    nw_join_busy(FALSE);
+    if (why == NULL) nw_wipe_pass();
     if (why != NULL)
     {
         nw_join_status(why);
@@ -1105,7 +1173,7 @@ static BOOL nw_is_key(const char *tt, const char *key)
 static VOID nw_snapshot(VOID)
 {
     static char   val[2][16];
-    static STRPTR tt[34];
+    static STRPTR tt[35];
     char          name[108];
     BPTR          dir, old;
     struct DiskObject *dob;
@@ -1167,7 +1235,7 @@ static VOID nw_gadget_up(const struct IntuiMessage *m)
     switch (g->GadgetID)
     {
         case NW_M_LIST:
-            if ((LONG)code == nw.selected &&
+            if ((LONG)code == nw.selected && nw.dev_open &&
                 DoubleClick(nw.click_secs, nw.click_micros, m->Seconds, m->Micros))
                 nw_open_join();
             nw.selected = (LONG)code;
@@ -1182,6 +1250,7 @@ static VOID nw_gadget_up(const struct IntuiMessage *m)
             break;
         case NW_J_SECURITY:
             nw.open_network = code == 1;
+            if (nw.open_network) nw_wipe_pass();
             nw_set(nw.join.win, NW_J_PASS, GA_Disabled, nw.open_network);
             break;
         case NW_J_SHOW:
@@ -1212,7 +1281,7 @@ static VOID nw_menu_pick(UWORD n)
         switch ((ULONG)GTMENUITEM_USERDATA(item))
         {
             case MENU_SCAN:     nw_scan(); break;
-            case MENU_JOIN:     nw_open_join(); break;
+            case MENU_JOIN:     if (nw.dev_open) nw_open_join(); break;
             case MENU_SNAPSHOT: nw_snapshot(); break;
             case MENU_QUIT:     nw_finish(RETURN_OK); break;
             default: break;
@@ -1295,20 +1364,22 @@ static int nw_window(VOID)
     me = FindPort((CONST_STRPTR)port_name);
     if (me != NULL) Signal(me->mp_SigTask, SIGBREAKF_CTRL_F);
     Permit();
-    if (me != NULL) return RETURN_OK;
+    if (me != NULL) return nw.setup ? NW_SETUP_CANCELLED : RETURN_OK;
     me = CreateMsgPort();
     if (me == NULL) return RETURN_FAIL;
     me->mp_Node.ln_Name = port_name;
     AddPort(me);
 
-    nw.result = nw.setup ? NW_SETUP_NO_DEVICE : RETURN_FAIL;
+    nw.result = RETURN_FAIL;
     IntuitionBase = (struct IntuitionBase *)OpenLibrary("intuition.library", 37);
     GfxBase = (struct GfxBase *)OpenLibrary("graphics.library", 37);
     GadToolsBase = OpenLibrary("gadtools.library", 37);
     if (IntuitionBase != NULL && GfxBase != NULL && GadToolsBase != NULL &&
         (nw.screen = LockPubScreen(NULL)) != NULL &&
-        (nw_layout_in(nw.screen->Font) || nw_layout_in(&nw_topaz8)) &&
-        (nw.visual = GetVisualInfoA(nw.screen, NULL)) != NULL)
+        !nw_layout_in(nw.screen->Font) && !nw_layout_in(&nw_topaz8))
+        nw_requester("The window does not fit on this screen.");
+    else if (nw.screen != NULL &&
+             (nw.visual = GetVisualInfoA(nw.screen, NULL)) != NULL)
     {
         nw.tport = CreateMsgPort();
         nw.treq = (struct timerequest *)CreateIORequest(nw.tport, sizeof(struct timerequest));
@@ -1320,16 +1391,23 @@ static int nw_window(VOID)
             nw.treq = NULL;
         }
         nw.dev_open = nw_dev_open(&nw.dev, nw.device, nw.unit) == 0;
-        if ((nw.dev_open || !nw.setup) && nw_open_main())
+        if (!nw.dev_open && nw.setup)
+            nw.result = NW_SETUP_NO_DEVICE;
+        else if (nw_open_main())
         {
+            /* No unit, or no pools to scan with: nothing to scan or join. */
+            BOOL can_scan = nw.dev_open && SysBase->LibNode.lib_Version >= 39;
+
+            nw_set(nw.main.win, NW_M_SCAN, GA_Disabled, !can_scan);
+            nw_set(nw.main.win, NW_M_JOIN, GA_Disabled, !nw.dev_open);
             nw_refresh_status();
             nw_fill_list();
-            nw_scan();
+            if (can_scan) nw_scan();
             nw_timer_arm();
             nw_loop();
         }
-        else if (!nw.setup)
-            nw_requester("The window does not fit on this screen.");
+        else
+            nw_requester("The window could not be opened.");
     }
 
     nw_close_join();
@@ -1452,6 +1530,7 @@ int main(int argc, char **argv)
     else if (args[ARG_LIST] != 0 || args[ARG_STATUS] != 0 || args[ARG_JOIN] != 0)
     {
         err = nw_dev_open(&nw.dev, nw.device, nw.unit);
+        nw.dev_open = err == 0;
         if (err != 0)
         {
             tool_error("cannot open %s unit %lu (error %ld)", (LONG)nw.device,
@@ -1461,9 +1540,13 @@ int main(int argc, char **argv)
         else
         {
             if (args[ARG_JOIN] != 0)
-                rc = nw_shell_join((const char *)args[ARG_JOIN],
-                                   (const char *)args[ARG_PASSPHRASE],
+            {
+                char *p = (char *)args[ARG_PASSPHRASE];
+
+                rc = nw_shell_join((const char *)args[ARG_JOIN], p,
                                    args[ARG_HIDDEN] != 0);
+                while (p != NULL && *p != '\0') *p++ = '\0';
+            }
             else
                 rc = args[ARG_LIST] != 0 ? nw_shell_list() : nw_shell_status();
             nw_dev_close(&nw.dev);

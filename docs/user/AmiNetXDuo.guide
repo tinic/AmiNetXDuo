@@ -3305,14 +3305,17 @@
 
   NetWirelessPrefs is the Wi-Fi window. It lists the networks in range,
   strongest first, with signal bars and a padlock for a network that asks
-  for a key, and shows the network the unit is connected to. Join writes
-  the network to ENVARC:Sys/Wireless.prefs and ENV:Sys/Wireless.prefs,
-  above every other network there, and restarts WirelessManager with the
-  DEVICE and UNIT of DEVS:NetInterfaces/wifipi; the window then waits up
-  to 30 seconds for the connection. Disconnect stops WirelessManager.
-  WirelessManager joins the network and holds the keys; NetWirelessPrefs
-  only writes its file. Comments, other networks and keys not shown in the
-  window are kept byte for byte.
+  for a key (on Kickstart 3.0 and later; 2.04 shows the same as text), and
+  shows the network the unit is connected to. Join writes the network to
+  ENVARC:Sys/Wireless.prefs and ENV:Sys/Wireless.prefs, above every other
+  network there, and restarts WirelessManager with the DEVICE and UNIT of
+  DEVS:NetInterfaces/wifipi; the window then waits up to 30 seconds for
+  the connection. Disconnect stops WirelessManager. WirelessManager joins
+  the network and holds the keys; NetWirelessPrefs only writes its file.
+  The file is edited from the copy in ENV:, or ENVARC: when ENV: has none;
+  comments, other networks and keys not shown in the window are kept as
+  they are, and a file that cannot be read is not written. The Known
+  button is for a later release.
 
   The passphrase is not stored. Join derives the WPA key from passphrase
   and network name and stores it as psk=<64 hex digits>, which also
@@ -3339,10 +3342,15 @@
                                       join as the window does; without
                                       PASSPHRASE, an open network
 
-  STATUS returns 0 when connected and 5 when not. A passphrase given in
-  a Shell is visible in that Shell's history. SETUP opens the window for
-  the installer: it returns 0 after Join has written the file, 5 when the
-  window was closed, and 10 when there is no Wi-Fi unit.
+  STATUS returns 0 when connected and 5 when not. JOIN returns 0 when
+  connected, 5 when not connected after 30 seconds, and 10 when the file
+  or WirelessManager failed. On Kickstart 2.04 the unit cannot report which
+  network it joined, so any connection counts. A passphrase given in a
+  Shell is visible in that Shell's history. SETUP opens the window for the
+  installer: it returns 0 after Join has written the file, 5 when the
+  window was closed or another NetWirelessPrefs is running, 10 when there
+  is no Wi-Fi unit, and 20 when the window could not open. SETUP does not
+  restart WirelessManager.
 
   @{b}Drivers@{ub}
 

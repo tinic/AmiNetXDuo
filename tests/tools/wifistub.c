@@ -694,8 +694,8 @@ int main(void)
           has("ssid=\"Cafe\"\n\tkey_mgmt=NONE\n\tpriority=5\n}"),
           "Cafe added above Other, the rest kept");
     slurp("T:wmstub.log");
-    check(has("start device=wifistub.device unit=0 stack=32768 ssid=Cafe") ||
-          has("stack=3277"), "WirelessManager started with the unit and 32 KB");
+    check(has("start device=wifistub.device unit=0 stack=32768 ssid=Cafe"),
+          "WirelessManager started with the unit and 32 KB");
 
     /* The key derived on this CPU: the host tests cannot see big-endian. */
     {
@@ -721,7 +721,7 @@ int main(void)
     check(has("WirelessManager running") && has("Network       Home"),
           "status names the joined network");
     rc = run(PREFS " JOIN=Bad PASSPHRASE=short");
-    check(rc == RETURN_ERROR, "a seven-character passphrase is refused");
+    check(rc == RETURN_ERROR, "a five-character passphrase is refused");
     stop_wm();
 
     check(ws->n_scan_abort == 0, "no running scan was aborted");
