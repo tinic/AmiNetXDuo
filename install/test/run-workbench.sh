@@ -2343,6 +2343,13 @@ if [ "$UNINSTALL" = 1 ]; then
         _before=$(printf '%s\n' "$_before" |
             sed -E "s|^[0-9a-f]+(\tS/Network-Startup)\$|$MARKED_NS_SHA\1|" | sort)
     fi
+    # A driver staged from the archive before the install is AmiNetXDuo's,
+    # and goes with it.
+    for _d in "$UNPACK"/AmiNetXDuo/Devs/Networks/anx*.device; do
+        [ -f "$_d" ] || continue
+        _before=$(printf '%s\n' "$_before" |
+            grep -v -F -x "$(shasum < "$_d" | cut -d' ' -f1)	Devs/Networks/${_d##*/}" || true)
+    done
     _after=$(product_manifest | _strip)
     _u_ok=1
     if [ "$_before" != "$_after" ]; then
