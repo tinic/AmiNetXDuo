@@ -403,7 +403,7 @@ int nw_wireless_driver(const char *device)
             a++;
             b++;
         }
-        if (*a == '\0' && *b == '\0') return 1;
+        if (*a == '\0' && *b == '\0') return i < 2 ? NW_DRIVER_PI : NW_DRIVER_PRISM2;
     }
     return 0;
 }

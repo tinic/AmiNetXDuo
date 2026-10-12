@@ -332,9 +332,10 @@ int main(void)
     test_edits();
     test_ssid_value();
     test_iface();
-    check(nw_wireless_driver("DEVS:Networks/anxwifipi.device") &&
-          nw_wireless_driver("prism2.device") &&
-          nw_wireless_driver("Work:Drivers/PRISM2.DEVICE") &&
+    check(nw_wireless_driver("DEVS:Networks/anxwifipi.device") == NW_DRIVER_PI &&
+          nw_wireless_driver("wifipi.device") == NW_DRIVER_PI &&
+          nw_wireless_driver("prism2.device") == NW_DRIVER_PRISM2 &&
+          nw_wireless_driver("Work:Drivers/PRISM2.DEVICE") == NW_DRIVER_PRISM2 &&
           !nw_wireless_driver("anxnet.device") &&
           !nw_wireless_driver("prism2.device.old") &&
           !nw_wireless_driver(""), "Wi-Fi drivers known by name");

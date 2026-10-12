@@ -53,16 +53,20 @@ cp "$WM" "$STAGE/c/WirelessManager"
 # The PC Card Wi-Fi, found by its driver's name when nothing is given.
 printf '%s\n' "DEVICE=prism2.device" "UNIT=0" "CONFIGURE=DHCP" \
     > "$STAGE/devs/NetInterfaces/wifi0"
+# A self-contained installation's own Devs drawer, assigned in the guest.
+mkdir -p "$STAGE/anxd/Devs/NetInterfaces"
+printf '%s\n' "DEVICE=prism2.device" "UNIT=0" \
+    > "$STAGE/anxd/Devs/NetInterfaces/pcmcia"
 
 . "$ROOT/tools/test-verdict.sh"
 
 set +e
 "$ROOT/tools/amiberry-run.sh" -m "$MODEL" -t "$TIMEOUT" "$EXE" "$PREFS" "$CX" \
     "$WAITBREAK" \
-    "$STAGE/devs" "$STAGE/c"
+    "$STAGE/devs" "$STAGE/c" "$STAGE/anxd"
 RUN_RC=$?
 set -e
 
-verdict_guest "netwireless" 52 "$RUN_RC" \
+verdict_guest "netwireless" 59 "$RUN_RC" \
     "$(verdict_hd_amiberry)/stdout.txt" "$(verdict_serial_amiberry)" && exit 0
 exit $?

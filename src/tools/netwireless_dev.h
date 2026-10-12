@@ -43,6 +43,8 @@
 /* Cafferkey's sana2.h additions; anxwifipi.device reports both. */
 #define NW_S2EVENT_CONNECT      (1L << 9)
 #define NW_S2EVENT_DISCONNECT   (1L << 10)
+#define NW_S2EVENT_LINKUP       (1L << 16)      /* prism2.device 2.9 */
+#define NW_S2EVENT_LINKDOWN     (1L << 17)
 
 /* What the unit says about the link. */
 enum
@@ -51,6 +53,7 @@ enum
     NW_LINK_OFF,                    /* unit offline                        */
     NW_LINK_DOWN,                   /* online, not associated              */
     NW_LINK_UP,                     /* associated                          */
+    NW_LINK_ONLINE,                 /* online, association not known      */
     NW_LINK_ERROR                   /* the unit did not answer             */
 };
 
@@ -69,6 +72,8 @@ typedef struct NwDev
     UBYTE              scan_ssid[NW_SSID_MAX + 1];
     LONG               net_channel;     /* from nw_dev_network, -1: absent */
     LONG               net_band5;       /* 1: 5 GHz, 0: 2.4 GHz, -1        */
+    BOOL               signal_says;     /* the signal answer tells associated
+                                           from online (all but prism2)    */
 } NwDev;
 
 #define NW_IFACE_MAX            8192
@@ -85,6 +90,10 @@ BOOL nw_dev_from_interface(const char *name, char *device, ULONG cap,
    ahead of the rest.  FALSE when there is none. */
 BOOL nw_dev_find(char *device, ULONG cap, ULONG *unit);
 
+/* prism2.device 2.9 and later's LINKUP: associated and keyed, so a wrong
+   key never counts as joined.  1 up, 0 down, -1 the driver does not say. */
+LONG nw_dev_operational(NwDev *d);
+
 /* DEVICE as given, then DEVS:Networks/ for a bare name.  Returns the
    OpenDevice() error, 0 on success; d is closed either way on failure. */
 LONG nw_dev_open(NwDev *d, const char *device, ULONG unit);
@@ -99,11 +108,13 @@ BOOL nw_dev_bring_up(NwDev *d);
    the state the refusal names. */
 LONG nw_dev_signal(NwDev *d, LONG *signal, LONG *noise);
 
-/* The same, NW_LINK_UP only when associated.  prism2.device answers the
-   signal whenever it is online, and S2_ONEVENT with every bit of its state
-   at once; anxwifipi.device answers the online/offline bit alone, and its
-   signal answer already says.  Not with an event request of the caller's
-   outstanding. */
+/* The same, NW_LINK_UP only when associated.  For a unit whose signal
+   answer says (d->signal_says, anxwifipi.device) that answer.  Any other
+   (prism2.device) answers the signal whenever it is online, so it is asked
+   S2_ONEVENT with ONLINE|OFFLINE, which every driver answers at once:
+   prism2 2.9 adds CONNECT or DISCONNECT, an older one neither, and then
+   the answer is NW_LINK_ONLINE.  Not with an event request of the
+   caller's outstanding. */
 LONG nw_dev_link(NwDev *d, LONG *signal, LONG *noise);
 
 /* The SSID and BSSID of the associated network, and d->net_channel and

@@ -245,6 +245,9 @@ static LONG nw_shell_status(VOID)
         case NW_LINK_DOWN:
             tool_printf("Link          not connected\n");
             return RETURN_WARN;
+        case NW_LINK_ONLINE:
+            tool_printf("Link          online; the driver does not say whether it is associated\n");
+            return RETURN_WARN;
         case NW_LINK_ERROR:
             tool_printf("Link          no answer (error %ld, wire error %lu)\n",
                         (LONG)nw.dev.req->ios2_Req.io_Error,
@@ -626,7 +629,7 @@ static VOID nw_fill_list(VOID)
 static VOID nw_refresh_status(VOID)
 {
     static const char *const words[] =
-        { "No Wi-Fi unit", "Off", "Not connected", "Connected", "No answer" };
+        { "No Wi-Fi unit", "Off", "Not connected", "Connected", "Online", "No answer" };
     LONG  signal = 0, noise = 0, len = -1, link;
     UBYTE ssid[NW_SSID_MAX], bssid[6];
     char  bars[2];
@@ -1051,27 +1054,35 @@ static const char *nw_restart_wm(VOID)
 /* Associated with the SSID of the join? */
 static BOOL nw_joined(VOID)
 {
-    LONG  signal, noise, len = -1, i;
+    LONG  signal, noise, len = -1, i, link, op = -1;
     UBYTE ssid[NW_SSID_MAX], bssid[6];
 
     if (!nw.dev_open) return FALSE;
-    if (nw_dev_link(&nw.dev, &signal, &noise) != NW_LINK_UP)
+    link = nw_dev_link(&nw.dev, &signal, &noise);
+    /* prism2.device 2.9's LINKUP is associated and keyed: a wrong key
+       associates and never comes up. */
+    if (!nw.dev.signal_says) op = nw_dev_operational(&nw.dev);
+    if (link == NW_LINK_DOWN || link == NW_LINK_OFF || op == 0)
     {
         nw.join_down = TRUE;
         return FALSE;
     }
-    /* Kickstart 2.04 cannot ask which network: associated is joined. */
-    if (SysBase->LibNode.lib_Version < 39) return TRUE;
+    if (op == 1) link = NW_LINK_UP;
+    if (link != NW_LINK_UP && link != NW_LINK_ONLINE) return FALSE;
+    /* Kickstart 2.04 cannot ask which network. */
+    if (SysBase->LibNode.lib_Version < 39) return link == NW_LINK_UP;
+    for (i = 0; i < 6; i++) bssid[i] = 0;
     if (!nw_dev_network(&nw.dev, ssid, &len, bssid)) return FALSE;
-    /* A driver that does not name the network (prism2.device): joined once
-       the link went down on the restart or the access point changed. */
     if (len < 0)
     {
+        /* No network name (prism2.device): joined once the link went down
+           on the restart, or the access point changed.  A driver that does
+           not report association at all counts only a new access point. */
         for (i = 0; i < 6 && bssid[i] == nw.join_bssid[i]; i++)
             ;
-        return nw.join_down || i < 6;
+        return link == NW_LINK_UP ? (nw.join_down || i < 6) : i < 6;
     }
-    if (len != nw.join_ssid_len) return FALSE;
+    if (link != NW_LINK_UP || len != nw.join_ssid_len) return FALSE;
     for (i = 0; i < len && ssid[i] == nw.join_ssid[i]; i++)
         ;
     return i == len;

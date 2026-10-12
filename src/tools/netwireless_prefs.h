@@ -72,8 +72,11 @@ int nw_prefs_write(const char *old, size_t oldlen,
 void nw_prefs_ssid_value(const unsigned char *ssid, int len, char *out);
 
 /* A DEVICE, path aside and case aside, that is a Wi-Fi driver these tools
-   know: anxwifipi.device or wifipi.device (the Pi), prism2.device (Neil
-   Cafferkey's, PC Card and PCI). */
+   know: NW_DRIVER_PI for anxwifipi.device or wifipi.device, whose signal
+   answer says whether it is associated; NW_DRIVER_PRISM2 for prism2.device
+   (Neil Cafferkey's, PC Card and PCI), which answers the signal whenever
+   it is online; 0 for any other. */
+enum { NW_DRIVER_PI = 1, NW_DRIVER_PRISM2 = 2 };
 int nw_wireless_driver(const char *device);
 
 /* The DEVICE and UNIT of a Roadshow interface file: keyword=value or
