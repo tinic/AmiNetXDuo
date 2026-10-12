@@ -78,6 +78,7 @@ static struct
     BOOL                event_retry;        /* asked again on the next tick */
     BOOL                want_menu;
     BOOL                offline;            /* the event mask's online bit  */
+    LONG                assoc;              /* -1 unknown, from events      */
     char                envbuf[24];
 
     struct MsgPort     *cxport, *appport, *tport;
@@ -269,6 +270,8 @@ static VOID nw_refresh(BOOL event)
     int   i;
 
     nw.link = nw.dev_open ? nw_dev_signal(&nw.dev, &signal, &noise) : NW_LINK_NODEV;
+    /* A signal from a unit that is only online (prism2.device). */
+    if (nw.link == NW_LINK_UP && nw.assoc == 0) nw.link = NW_LINK_DOWN;
     tool_copy_string(label, sizeof(label), "Wi-Fi");
     switch (nw.link)
     {
@@ -307,8 +310,14 @@ static VOID nw_refresh(BOOL event)
 static VOID nw_event_arm(VOID)
 {
     if (!nw.dev_open || nw.events_broken) return;
-    (VOID)nw_dev_event_arm(&nw.dev, NW_S2EVENT_CONNECT | NW_S2EVENT_DISCONNECT |
-                           (nw.offline ? S2EVENT_ONLINE : S2EVENT_OFFLINE));
+    /* Only the change from what the unit is: prism2.device answers every
+       event bit that is true at once, so asking for the present state
+       would spin.  Unknown, both are asked, and such a driver says which. */
+    (VOID)nw_dev_event_arm(&nw.dev, nw.offline ? S2EVENT_ONLINE :
+                           S2EVENT_OFFLINE |
+                           (nw.assoc == 1 ? NW_S2EVENT_DISCONNECT :
+                            nw.assoc == 0 ? NW_S2EVENT_CONNECT :
+                            NW_S2EVENT_CONNECT | NW_S2EVENT_DISCONNECT));
 }
 
 /* -------------------------------------------------------- commodity -- */
@@ -404,8 +413,9 @@ int main(int argc, char **argv)
     iface = nw_opt(ARG_INTERFACE);
     if (device != NULL)
         tool_copy_string(nw.device, sizeof(nw.device), device);
-    else if (!nw_dev_from_interface(iface != NULL ? iface : NW_DEFAULT_INTERFACE,
-                                    nw.device, sizeof(nw.device), &nw.unit))
+    else if (iface != NULL
+             ? !nw_dev_from_interface(iface, nw.device, sizeof(nw.device), &nw.unit)
+             : !nw_dev_find(nw.device, sizeof(nw.device), &nw.unit))
         tool_copy_string(nw.device, sizeof(nw.device), NW_DEFAULT_DEVICE);
     nw.unit = (ULONG)nw_opt_number(ARG_UNIT, (LONG)nw.unit);
     {
@@ -463,6 +473,7 @@ int main(int argc, char **argv)
     nw.link = NW_LINK_NODEV;
     nw.label[0] = 1;                    /* differs from every label: shown */
     nw.offline = TRUE;                  /* a unit online answers at once  */
+    nw.assoc = -1;
     nw_event_arm();
     nw_refresh(TRUE);
 
@@ -503,6 +514,9 @@ int main(int argc, char **argv)
                 nw.event_retry = TRUE;
             if (err == 0 && (got & S2EVENT_OFFLINE)) nw.offline = TRUE;
             if (err == 0 && (got & S2EVENT_ONLINE)) nw.offline = FALSE;
+            if (err == 0 && (got & NW_S2EVENT_CONNECT)) nw.assoc = 1;
+            if (err == 0 && (got & NW_S2EVENT_DISCONNECT)) nw.assoc = 0;
+            if (err == 0 && (got & S2EVENT_OFFLINE)) nw.assoc = -1;
             if (err == 0) nw_event_arm();
             nw_refresh(TRUE);
         }

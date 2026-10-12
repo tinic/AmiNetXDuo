@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include "tools.h"
 #include "netwireless_dev.h"
 #include "netwireless_prefs.h"
 
@@ -67,6 +68,22 @@ BOOL nw_dev_from_interface(const char *name, char *device, ULONG cap,
     }
     if (text != NULL) FreeVec(text);
     return found;
+}
+
+BOOL nw_dev_find(char *device, ULONG cap, ULONG *unit)
+{
+    static char names[24][TOOL_NAME_LEN];
+    ULONG       n, i;
+
+    if (nw_dev_from_interface(NW_DEFAULT_INTERFACE, device, cap, unit) &&
+        nw_wireless_driver(device))
+        return TRUE;
+    n = tool_list_dir("DEVS:NetInterfaces", names, 24, NULL);
+    for (i = 0; i < n; i++)
+        if (nw_dev_from_interface(names[i], device, cap, unit) &&
+            nw_wireless_driver(device))
+            return TRUE;
+    return FALSE;
 }
 
 static struct IOSana2Req *nw_req_copy(const struct IOSana2Req *from,
@@ -212,6 +229,28 @@ LONG nw_dev_signal(NwDev *d, LONG *signal, LONG *noise)
     if (d->req->ios2_WireError == S2WERR_UNIT_OFFLINE) return NW_LINK_OFF;
     if (d->req->ios2_WireError == S2WERR_NOT_CONFIGURED) return NW_LINK_DOWN;
     return NW_LINK_ERROR;
+}
+
+LONG nw_dev_link(NwDev *d, LONG *signal, LONG *noise)
+{
+    LONG link = nw_dev_signal(d, signal, noise);
+
+    if (link != NW_LINK_UP || d->event_busy) return link;
+    d->event->ios2_Req.io_Command = S2_ONEVENT;
+    d->event->ios2_Req.io_Error = 0;
+    d->event->ios2_WireError = NW_S2EVENT_CONNECT | NW_S2EVENT_DISCONNECT;
+    SendIO((struct IORequest *)d->event);
+    if (!CheckIO((struct IORequest *)d->event))
+        AbortIO((struct IORequest *)d->event);
+    else if (d->event->ios2_Req.io_Error == 0 &&
+             (d->event->ios2_WireError & NW_S2EVENT_DISCONNECT))
+        link = NW_LINK_DOWN;
+    WaitIO((struct IORequest *)d->event);
+    /* WaitIO() may have taken the port's signal from a scan reply queued
+       behind; the caller's Wait() must still see it. */
+    if (d->async->mp_MsgList.lh_Head->ln_Succ != NULL)
+        Signal(d->async->mp_SigTask, 1UL << d->async->mp_SigBit);
+    return link;
 }
 
 /* utility.library's NextTagItem(), without opening it. */

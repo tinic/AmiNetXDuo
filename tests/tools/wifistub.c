@@ -65,6 +65,8 @@ typedef struct WsDevice
     ULONG         n_config, n_online, n_scan, n_signal, n_info, n_event;
     ULONG         n_scan_abort;
     BOOL          break_next;           /* Ctrl-C the next scanner         */
+    BOOL          level;                /* prism2.device: events and signal
+                                           answered from the state         */
     char          ssid[33];             /* what S2_SETOPTIONS joined       */
     APTR          assoc;                /* the request that joined it      */
     ULONG         n_setoptions;
@@ -184,6 +186,15 @@ static VOID ws_network_info(struct IOSana2Req *io)
     }
     CopyMem(ws->ssid, ssid, 33);
     CopyMem((APTR)ws_mac, bssid, 6);
+    if (ws->level)
+    {
+        /* prism2.device names no network: the BSSID alone. */
+        t[0].ti_Tag = S2INFO_BSSID; t[0].ti_Data = (ULONG)bssid;
+        t[1].ti_Tag = TAG_DONE;
+        io->ios2_StatData = t;
+        ws_reply(io, 0, 0);
+        return;
+    }
     t[0].ti_Tag = S2INFO_SSID;  t[0].ti_Data = (ULONG)ssid;
     t[1].ti_Tag = S2INFO_BSSID; t[1].ti_Data = (ULONG)bssid;
     /* As anxwifipi.device reports them from WiFiPi 70eae25 on. */
@@ -230,6 +241,9 @@ static VOID ws_begin_io(register struct Device *dev __asm("a6"),
         {
             ULONG preset = ws->online ? S2EVENT_ONLINE : S2EVENT_OFFLINE;
 
+            if (ws->level)
+                preset |= ws->connected ? S2EVENT_CONNECT : S2EVENT_DISCONNECT;
+
             ws->n_event++;
             if (io->ios2_WireError & ~WS_EVENTS)
                 ws_reply(io, S2ERR_NOT_SUPPORTED, S2WERR_BAD_EVENT);
@@ -246,7 +260,7 @@ static VOID ws_begin_io(register struct Device *dev __asm("a6"),
             ws->n_signal++;
             if (!ws->online)
                 ws_reply(io, S2ERR_OUTOFSERVICE, S2WERR_UNIT_OFFLINE);
-            else if (!ws->connected)
+            else if (!ws->connected && !ws->level)
                 ws_reply(io, S2ERR_OUTOFSERVICE, S2WERR_NOT_CONFIGURED);
             else
             {
@@ -260,7 +274,7 @@ static VOID ws_begin_io(register struct Device *dev __asm("a6"),
             ws->n_info++;
             if (!ws->online)
                 ws_reply(io, S2ERR_OUTOFSERVICE, S2WERR_UNIT_OFFLINE);
-            else if (!ws->connected)
+            else if (!ws->connected && !ws->level)
                 ws_reply(io, S2ERR_OUTOFSERVICE, S2WERR_NOT_CONFIGURED);
             else
                 ws_network_info(io);
@@ -449,7 +463,7 @@ static VOID ws_replier(VOID)
     ws_alive = FALSE;
 }
 
-static BOOL ws_install(VOID)
+static BOOL ws_install(const char *name, BOOL level)
 {
     WsDevice *d = (WsDevice *)MakeLibrary((APTR)ws_vectors, NULL, NULL,
                                           sizeof(WsDevice), (BPTR)0);
@@ -457,7 +471,9 @@ static BOOL ws_install(VOID)
     ws_new_list(&d->scans);
     ws_new_list(&d->events);
     d->dd.dd_Library.lib_Node.ln_Type = NT_DEVICE;
-    d->dd.dd_Library.lib_Node.ln_Name = (char *)ws_name;
+    d->dd.dd_Library.lib_Node.ln_Name = (char *)name;
+    d->level = level;
+    ws_stop = FALSE;
     d->dd.dd_Library.lib_Flags = LIBF_SUMUSED | LIBF_CHANGED;
     d->dd.dd_Library.lib_Version = 1;
     d->dd.dd_Library.lib_IdString = (char *)ws_id;
@@ -677,7 +693,7 @@ int main(void)
     LONG        rc;
     const char *a = (const char *)GetArgStr();
 
-    if (!ws_install())
+    if (!ws_install(ws_name, FALSE))
     {
         Printf((CONST_STRPTR)"could not make %s\n0 checks, 1 failures\n", (LONG)WS_NAME);
         return RETURN_FAIL;
@@ -851,6 +867,58 @@ int main(void)
                used - polls, polls);
         check(used - polls <= 16384, "the commodity holds at most 16 KB");
         stop_named("WaitBreak");
+        Delay(25);
+    }
+
+    /* prism2.device: found by its interface file with nothing named; its
+       signal answered while merely online, its events from its state. */
+    check(ws->n_scan_abort == 0, "no running scan was aborted (wifistub)");
+    check(ws->dd.dd_Library.lib_OpenCnt == 0, "every opener closed (wifistub)");
+    ws_remove();
+    if (!ws_install("prism2.device", TRUE))
+    {
+        Printf((CONST_STRPTR)"could not make prism2.device\n");
+        failures++;
+    }
+    else
+    {
+        BPTR  in, o;
+        ULONG events, polls;
+
+        ws->configured = ws->online = TRUE;
+        ws->connected = FALSE;
+        ws->signal = -61;
+        rc = run("DH0:NetWirelessPrefs STATUS");
+        check(rc == RETURN_WARN && has("prism2.device, unit 0") &&
+              has("Link          not connected"),
+              "prism2: found with nothing named, online is not connected");
+        ws->connected = TRUE;
+        rc = run("DH0:NetWirelessPrefs STATUS");
+        check(rc == 0 && has("Link          connected") && has("Access point"),
+              "prism2: associated, the BSSID without a name");
+
+        in = Open((CONST_STRPTR)"NIL:", MODE_OLDFILE);
+        o = Open((CONST_STRPTR)"NIL:", MODE_NEWFILE);
+        SystemTags((CONST_STRPTR)"DH0:NetWireless INTERVAL=1", SYS_Input, (ULONG)in,
+                   SYS_Output, (ULONG)o, SYS_Asynch, TRUE, TAG_DONE);
+        Delay(100);
+        check(env_is("Wi-Fi 3/4"), "prism2: the commodity shows the link");
+        events = ws->n_event;
+        Delay(150);
+        Printf((CONST_STRPTR)"prism2_event_requests_3s=%lu\n", ws->n_event - events);
+        check(ws->n_event - events <= 2, "prism2: events do not spin");
+        ws->connected = FALSE;
+        ws_report(S2EVENT_DISCONNECT);
+        Delay(50);
+        check(env_is("Not connected"), "prism2: DISCONNECT seen");
+        polls = ws->n_signal;
+        Delay(200);
+        check(ws->n_signal == polls, "prism2: nothing polled while not associated");
+        ws->connected = TRUE;
+        ws_report(S2EVENT_CONNECT);
+        Delay(50);
+        check(env_is("Wi-Fi 3/4"), "prism2: CONNECT seen");
+        stop_named("NetWireless");
         Delay(25);
     }
 

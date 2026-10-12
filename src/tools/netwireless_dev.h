@@ -80,6 +80,11 @@ typedef struct NwDev
 BOOL nw_dev_from_interface(const char *name, char *device, ULONG cap,
                            ULONG *unit);
 
+/* When nothing names the unit: the first file in DEVS:NetInterfaces whose
+   DEVICE is a Wi-Fi driver (nw_wireless_driver()), DEVS:NetInterfaces/wifipi
+   ahead of the rest.  FALSE when there is none. */
+BOOL nw_dev_find(char *device, ULONG cap, ULONG *unit);
+
 /* DEVICE as given, then DEVS:Networks/ for a bare name.  Returns the
    OpenDevice() error, 0 on success; d is closed either way on failure. */
 LONG nw_dev_open(NwDev *d, const char *device, ULONG unit);
@@ -93,6 +98,14 @@ BOOL nw_dev_bring_up(NwDev *d);
 /* One S2_GETSIGNALQUALITY: NW_LINK_UP with *signal and *noise in dBm, or
    the state the refusal names. */
 LONG nw_dev_signal(NwDev *d, LONG *signal, LONG *noise);
+
+/* The same, NW_LINK_UP only when associated.  prism2.device answers the
+   signal whenever it is online; asked S2_ONEVENT {CONNECT|DISCONNECT}, it
+   answers at once from its state.  A driver that waits for the next event
+   instead (anxwifipi.device, whose signal answer already says) has the
+   request aborted, which is safe for events.  Not with an event request of
+   the caller's outstanding. */
+LONG nw_dev_link(NwDev *d, LONG *signal, LONG *noise);
 
 /* The SSID and BSSID of the associated network, and d->net_channel and
    d->net_band5 where the driver reports them (exec V39: the driver

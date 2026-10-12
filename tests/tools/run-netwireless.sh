@@ -50,6 +50,9 @@ cp "$WM" "$STAGE/c/WirelessManager"
     echo "UNIT=0"
     echo "CONFIGURE=DHCP"
 } > "$STAGE/devs/NetInterfaces/wifitest"
+# The PC Card Wi-Fi, found by its driver's name when nothing is given.
+printf '%s\n' "DEVICE=prism2.device" "UNIT=0" "CONFIGURE=DHCP" \
+    > "$STAGE/devs/NetInterfaces/wifi0"
 
 . "$ROOT/tools/test-verdict.sh"
 
@@ -60,6 +63,6 @@ set +e
 RUN_RC=$?
 set -e
 
-verdict_guest "netwireless" 39 "$RUN_RC" \
+verdict_guest "netwireless" 48 "$RUN_RC" \
     "$(verdict_hd_amiberry)/stdout.txt" "$(verdict_serial_amiberry)" && exit 0
 exit $?

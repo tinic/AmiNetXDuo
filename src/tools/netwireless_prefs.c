@@ -385,6 +385,29 @@ static int nw_keyword(const char *word, size_t n, const char *keyword)
     return keyword[n] == '\0';
 }
 
+int nw_wireless_driver(const char *device)
+{
+    static const char *const known[] =
+        { "anxwifipi.device", "wifipi.device", "prism2.device", 0 };
+    const char *base = device;
+    int         i;
+
+    for (; *device != '\0'; device++)
+        if (*device == ':' || *device == '/') base = device + 1;
+    for (i = 0; known[i] != 0; i++)
+    {
+        const char *a = base, *b = known[i];
+
+        while (*a != '\0' && (*a == *b || (*a >= 'A' && *a <= 'Z' && *a + 32 == *b)))
+        {
+            a++;
+            b++;
+        }
+        if (*a == '\0' && *b == '\0') return 1;
+    }
+    return 0;
+}
+
 int nw_iface_device(const char *text, size_t len, char *device, size_t cap,
                     unsigned long *unit)
 {
