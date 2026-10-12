@@ -832,6 +832,42 @@ static void test_interface_ipv6(void)
     CHECK(cfg.address6_count == 0);
 }
 
+/* The Installer's PRIORITY check (InstallWiFi PRIORITY): live pairs only,
+   lexed as the parser lexes them. */
+static void test_key_count(void)
+{
+    char buf[512];
+
+    printf("key count\n");
+
+    strcpy(buf, "DEVICE=a2065.device\nPRIORITY=5\n");
+    CHECK(ami_cfg_key_count(buf, "PRIORITY", "PRI") == 1);
+    strcpy(buf, "DEVICE=a2065.device\npri = 5\n");
+    CHECK(ami_cfg_key_count(buf, "PRIORITY", "PRI") == 1);
+    strcpy(buf, "; PRIORITY -- a note\n;PRIORITY=0\n# PRIORITY=3\n"
+                "DEVICE=a2065.device\n");
+    CHECK(ami_cfg_key_count(buf, "PRIORITY", "PRI") == 0);
+    strcpy(buf, "DEVICE=a2065.device UNIT=0 PRIORITY=7\n");
+    CHECK(ami_cfg_key_count(buf, "PRIORITY", "PRI") == 1);
+    strcpy(buf, "DEVICE=a2065.device ;PRIORITY=7\n");
+    CHECK(ami_cfg_key_count(buf, "PRIORITY", "PRI") == 0);
+    strcpy(buf, "DEVICE=a2065.device\n;PRIORITY=0\nPRIORITY=3");
+    CHECK(ami_cfg_key_count(buf, "PRIORITY", "PRI") == 1);
+    strcpy(buf, "PRIORITY=3\nPRI=4\n;PRIORITY=9\n");
+    CHECK(ami_cfg_key_count(buf, "PRIORITY", "PRI") == 2);
+    strcpy(buf, "PRIORITYX=3\nMYPRIORITY=4\n");
+    CHECK(ami_cfg_key_count(buf, "PRIORITY", "PRI") == 0);
+
+    /* The parser keeps the last PRIORITY that parses. */
+    {
+        AmiIfConfig ifc;
+
+        strcpy(buf, "DEVICE=a2065.device\nPRIORITY=3\nPRI=4\n;PRIORITY=9\n");
+        CHECK(ami_cfg_parse_interface("eth0", buf, &ifc) == AMI_CFG_OK);
+        CHECK(ifc.priority == 4);
+    }
+}
+
 static void test_address6_line(void)
 {
     ULONG second[AMI_CFG_IP6_WORDS];
@@ -4925,6 +4961,7 @@ int main(int argc, char **argv)
 #ifdef AMINETXDUO_IPV6
     test_interface_ipv6();
     test_address6_line();
+    test_key_count();
 #endif
     test_interface_roadshow();
     test_interface_filter();
