@@ -200,6 +200,13 @@ static void test_value_names(void)
     check_str(tool_event_value_name(NETEVENT_IFACE_RETAINED,
                                     NETEVENT_HELD_RX | NETEVENT_HELD_TX),
               "a read and a write", "both sides retained");
+    check_str(tool_event_value_name(NETEVENT_IFACE_RETAINED,
+                                    NETEVENT_HELD_CMD),
+              "a command", "a retained command");
+    check_str(tool_event_value_name(NETEVENT_IFACE_RETAINED,
+                                    NETEVENT_HELD_RX | NETEVENT_HELD_TX |
+                                    NETEVENT_HELD_CMD),
+              "a read, a write and a command", "all three retained");
 
     check_str(tool_event_value_name(NETEVENT_EXPUNGE_DECLINED,
                                     NETEVENT_EXP_TCP),

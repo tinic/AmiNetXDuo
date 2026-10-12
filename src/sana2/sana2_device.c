@@ -131,23 +131,6 @@ VOID ami_sana2_port_init(struct MsgPort *port, struct Task *task, BYTE sigbit,
     port->mp_MsgList.lh_TailPred = (struct Node *)&port->mp_MsgList.lh_Head;
 }
 
-/*
- * Complete one submitted IORequest without blocking the machine underneath the
- * stack.  DoIO() runs inside the baton bracket so its Exec wait does not hold
- * the hosted ThreadX scheduler.
- */
-LONG ami_sana2_do_io(struct IORequest *req)
-{
-
-    /* DoIO() blocks in exec Wait(), so the same baton rule as the readers
-       applies. */
-    ami_sana2_block_enter();
-    DoIO(req);
-    ami_sana2_block_leave();
-
-    return (LONG)(BYTE)req->io_Error;
-}
-
 static LONG ami_sana2_command_stat(AmiSana2If *iface, struct IOSana2Req *req,
                                    UWORD command, ULONG stat_size);
 
@@ -640,13 +623,13 @@ enum { AMI_S2IO_DONE, AMI_S2IO_HELD, AMI_S2IO_NOSIG };
  * quick DoIO()'s IOF_QUICK and BeginIO(), then the command's deadline, then
  * AbortIO() and the abort's (ms[0], ms[1]).  quick matters to the driver: an
  * a2065.device answers S2_DEVICEQUERY as DoIO() asks and keeps it when it
- * comes by SendIO().  tr and
- * tport are the timer's, the caller's storage.  AMI_S2IO_DONE: the reply is
- * back and taken.  AMI_S2IO_HELD: the device kept it, and port went PA_IGNORE
- * with no task in the same Disable() as the last look, so a late ReplyMsg()
- * only queues there; the request and port are the device's until a GetMsg()
- * on port returns it.  AMI_S2IO_NOSIG: nothing was sent.  A device that
- * answers inside BeginIO() never sees the timer.
+ * comes by SendIO().  tr and tport are the timer's, the caller's storage.
+ * AMI_S2IO_DONE: the reply is back and taken.  AMI_S2IO_HELD: the device
+ * kept it, and port went PA_IGNORE with no task in the same Disable() as the
+ * last look, so a late ReplyMsg() only queues there; the request and port
+ * are the device's until a GetMsg() on port returns it.  AMI_S2IO_NOSIG:
+ * nothing was sent.  A device that answers inside BeginIO() never sees the
+ * timer.
  */
 static LONG ami_sana2_send_bounded(struct IORequest *io, struct MsgPort *port,
                                    BOOL quick, const ULONG ms[2],
@@ -1270,6 +1253,9 @@ VOID ami_sana2_get_info(const AmiSana2If *iface, AmiSana2Info *out)
         if (iface->tx[i].busy)
             out->write_pending++;
     }
+
+    out->command_orphans = (ULONG)iface->cmd_orphans;
+    out->offline_orphans = (ULONG)iface->offline_orphans;
 }
 
 /* ------------------------------------------------------------- open / close */
@@ -1661,7 +1647,9 @@ static UWORD       ami_sana2_retained_n;
 static ULONG ami_sana2_held(const AmiSana2If *iface)
 {
     return (iface->rx_orphaned ? NETEVENT_HELD_RX : 0UL) |
-           (iface->tx_orphaned ? NETEVENT_HELD_TX : 0UL);
+           (iface->tx_orphaned ? NETEVENT_HELD_TX : 0UL) |
+           ((iface->offline_held || iface->cmd_held != NULL)
+                ? NETEVENT_HELD_CMD : 0UL);
 }
 
 /* Neither NetX Duo's slot nor the (NX_IP, index) binding reaches it after
