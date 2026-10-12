@@ -3325,13 +3325,27 @@
                                       in wpa_supplicant's format
       WirelessManager-LICENSE         its licence, in the AmiNetXDuo
                                       drawer
+      S:AmiNetXDuo-WiFi               the Wi-Fi files the Installer
+                                      created; executing it removes
+                                      them
 
-  The Installer adds these when the Pi Wi-Fi is selected. An existing
-  C:WirelessManager or Wireless.prefs is kept as it is. When the Wi-Fi
-  interface is the one S:Network-Startup starts, that file starts
-  WirelessManager first, once, and only when ENV:Sys/Wireless.prefs
-  exists; the interface then waits at most 30 seconds for an address,
-  and DHCP continues after the boot goes on.
+  The Installer adds these when the Pi Wi-Fi is selected, at every user
+  level; WirelessManager goes into the installation's own drawer in that
+  layout. Its window asks for the network name and passphrase; the
+  passphrase appears as asterisks and does not reach the installation
+  log. A WirelessManager or Wireless.prefs the Installer did not create
+  is kept as it is.
+
+  S:Network-Startup starts the Wi-Fi only when ENV:Sys/Wireless.prefs
+  exists: WirelessManager first, then the interface, which waits at most
+  30 seconds for an address; DHCP continues after the boot goes on. With
+  the Pi Ethernet as well, both start, the Ethernet first with
+  PRIORITY=10, so the default route stays on the cable; the micro stack
+  starts the Ethernet only. Where WirelessManager is set up on the
+  machine already -- a copy or a Wireless.prefs the Installer did not
+  create, or a mention in S:User-Startup, S:Startup-Sequence or
+  SYS:WBStartup -- the lines that would start a second copy are written
+  commented out.
 
 @endnode
 

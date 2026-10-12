@@ -298,7 +298,7 @@ fi
 # InstallSameFile and InstallNetProbe do ship, but beside the Installer rather
 # than in C:; they are installer primitives, not user commands.  The other
 # names do not ship.
-NOT_SHIPPED=(InstallSameFile InstallNetProbe ToolsSmoke CensusProbe UafProbe HangProbe wbgrab El3Diag paysum)
+NOT_SHIPPED=(InstallSameFile InstallNetProbe InstallWiFi ToolsSmoke CensusProbe UafProbe HangProbe wbgrab El3Diag paysum)
 missing_from_cmds=()
 # What the build system says it builds (src/tools/CMakeLists.txt writes the
 # manifest), not what happens to lie in the directory: a reused build tree
@@ -575,6 +575,12 @@ chmod 755 "$TREE/InstallSameFile"
 need "$CMD_BUILD/src/tools/InstallNetProbe"
 cp "$CMD_BUILD/src/tools/InstallNetProbe" "$TREE/InstallNetProbe"
 chmod 755 "$TREE/InstallNetProbe"
+
+# The Installer's Wi-Fi page: Installer logs every askstring answer, so the
+# passphrase is asked for in this window and written straight to a file.
+need "$CMD_BUILD/src/tools/InstallWiFi"
+cp "$CMD_BUILD/src/tools/InstallWiFi" "$TREE/InstallWiFi"
+chmod 755 "$TREE/InstallWiFi"
 
 cp -R "$INSTALL/devs/Internet/." "$TREE/Devs/Internet/"
 cp -R "$INSTALL/examples/."      "$TREE/Examples/"

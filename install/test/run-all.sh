@@ -44,19 +44,24 @@
 #   EMU68_* inject deterministic device-tree results and prove the Installer
 #                   creates genet/wifipi definitions and starts only Ethernet;
 #                   on a 68020+ they also prove fat is the default under Emu68
-#   EMU68_WIFI_JOIN types a Wi-Fi network, reinstalls with "Set them up again"
-#                   and requires the Wireless.prefs kept, then boots the written
-#                   S:Network-Startup: WirelessManager (a stand-in) starts once,
-#                   ahead of the bounded Wi-Fi AddNetInterface, and is reused
-#   EMU68_WIFI_KEEP plants a Wireless.prefs and a C:WirelessManager and requires
-#                   both untouched, with the Wi-Fi defined but not started
-#   PROBE_FAIL / PROBE_BROKEN make InstallNetProbe fail or not load and require
-#                   the full stack as the default
-#   FAT_NOVICE      Emu68 fixture at NOVICE on a 68020+: fat with no questions,
-#                   C:ssh, C:scp and C:scp-runner the C/fat ones
-#   FAT_68000       picks fat on an A600 and requires the refusal and re-ask
-#   FAT_FULL / FULL_FAT reinstall across fat and full; every library, driver
-#                   and command must be the selected drawer's, by sha256
+#   EMU68_WIFI_JOIN answers InstallWiFi's window with a name and passphrase
+#                   full of quotes, #, = and backslashes, reinstalls with "Set
+#                   them up again" and requires the Wireless.prefs kept, then
+#                   boots the written S:Network-Startup: WirelessManager (a
+#                   stand-in) starts once ahead of the bounded Wi-Fi
+#                   AddNetInterface and is reused, and the real WirelessManager
+#                   1.5 reads the written file without a parse error
+#   EMU68_WIFI_TIMEOUT the same install, booted with the card on no network:
+#                   no lease, and the boot goes on after the 30 s bound
+#   EMU68_WIFI_KEEP plants a Wireless.prefs and a C:WirelessManager beside
+#                   Ethernet: both untouched, both interfaces started, the
+#                   lines that start WirelessManager commented out
+#   EMU68_WIFI_KEEPIT "Keep it" with run 1's S:Network-Startup gone: the
+#                   Wi-Fi is found by DEVICE= and its block written
+#   EMU68_WIFI_USERSTART S:User-Startup starts WirelessManager already
+#   EMU68_WIFI_DRAWER a drawer install beside the user's C:WirelessManager
+#   EMU68_BOTH_NOVICE NOVICE still asks for the Wi-Fi network, and with it
+#                   Ethernet and Wi-Fi both start, Ethernet at PRIORITY=10
 #   CANCEL_DRIVERS clicks the real Abort button before writes and requires an
 #                   exact zero-diff destination
 #   MISSING_* corrupt the throw-away archive at four distinct preflights and
@@ -99,7 +104,8 @@ SCENARIOS=(
     DRAWER_FULL_MINIMAL DRAWER_MICRO_FULL
     ROADSHOW_LEAVE ROADSHOW_REPLACE AMITCPNG_LEAVE AMITCPNG_REPLACE
     EMU68_GENET EMU68_WIFI EMU68_BOTH EMU68_BOTH_MICRO
-    EMU68_WIFI_JOIN EMU68_WIFI_KEEP
+    EMU68_WIFI_JOIN EMU68_WIFI_TIMEOUT EMU68_WIFI_KEEP EMU68_WIFI_KEEPIT
+    EMU68_WIFI_USERSTART EMU68_WIFI_DRAWER EMU68_BOTH_NOVICE
     CANCEL_DRIVERS MISSING_CORE MISSING_DRIVER MISSING_PROBE MISSING_MINIMAL
     NO_CARD STALE_PI_DRIVERS HARDWARE_XSURF100 HARDWARE_PCMCIA
     TERMINAL STATIC_NO_DRIVERS
@@ -203,7 +209,12 @@ for scenario in "${SCENARIOS[@]}"; do
         EMU68_BOTH)            opts=(-l AVERAGE -e both) ;;
         EMU68_BOTH_MICRO)      opts=(-l AVERAGE -e both -p micro) ;;
         EMU68_WIFI_JOIN)       opts=(-l AVERAGE -e wifi -w join -U) ;;
+        EMU68_WIFI_TIMEOUT)    opts=(-l AVERAGE -e wifi -w timeout) ;;
         EMU68_WIFI_KEEP)       opts=(-l AVERAGE -e both -w keep) ;;
+        EMU68_WIFI_KEEPIT)     opts=(-l AVERAGE -e wifi -w keepit -R) ;;
+        EMU68_WIFI_USERSTART)  opts=(-l AVERAGE -e wifi -w userstart) ;;
+        EMU68_WIFI_DRAWER)     opts=(-l AVERAGE -e wifi -D -w userwm) ;;
+        EMU68_BOTH_NOVICE)     opts=(-l NOVICE -e both -w join) ;;
         CANCEL_DRIVERS)        opts=(-l AVERAGE -c drivers) ;;
         MISSING_CORE)          opts=(-l AVERAGE -m core) ;;
         MISSING_DRIVER)        opts=(-l AVERAGE -m driver) ;;

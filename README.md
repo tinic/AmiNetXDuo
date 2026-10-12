@@ -59,12 +59,26 @@ The installer finds the card and writes the interface definition; on Emu68 it
 finds the Pi's Ethernet and Wi-Fi itself.
 
 The Wi-Fi driver needs the firmware Emu68 installs in `DEVS:Firmware`. With
-the Pi Wi-Fi selected, the installer puts WirelessManager 1.5 in `C:`, writes
-the network name and passphrase it asks for to `ENVARC:Sys/Wireless.prefs`,
-and `S:Network-Startup` starts WirelessManager before the Wi-Fi interface,
-which then waits at most 30 seconds for an address. An existing
-`C:WirelessManager` or `Wireless.prefs` is kept. Use the driver or
-`wifipi.device`, not both in one boot.
+the Pi Wi-Fi selected, at every installer level:
+
+- WirelessManager 1.5 goes into `C:` (or the installation's own drawer),
+  unless a WirelessManager the installer did not put there already exists.
+- A window asks for the network name and passphrase and writes
+  `ENVARC:Sys/Wireless.prefs`, unless a `Wireless.prefs` exists. The
+  passphrase appears as asterisks and is not written to the installation log.
+- `S:Network-Startup` starts the Wi-Fi only when `ENV:Sys/Wireless.prefs`
+  exists: WirelessManager first, then the interface, which waits at most 30
+  seconds for an address. With the Pi's Ethernet as well, both start, and
+  the Ethernet's `PRIORITY=10` keeps the default route on the cable; the
+  micro stack starts only the Ethernet.
+- Where WirelessManager is already set up on the machine (a copy or a
+  `Wireless.prefs` the installer did not write, or a mention in
+  `S:User-Startup`, `S:Startup-Sequence` or `SYS:WBStartup`), the lines that
+  would start a second copy are written commented out.
+- `S:AmiNetXDuo-WiFi` lists the Wi-Fi files the installer created; executing
+  it removes them.
+
+Use the driver or `wifipi.device`, not both in one boot.
 
 Fast cards get faster TCP receive with every driver: the stack merges
 consecutive segments before TCP sees them. Driver authors can opt into a few

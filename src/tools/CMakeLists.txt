@@ -229,6 +229,10 @@ aminetxduo_add_tool(tool_installsamefile InstallSameFile
 aminetxduo_add_tool(tool_installnetprobe InstallNetProbe
     SOURCES installnetprobe.c ../netdev/netdev_dtree.c)
 
+# The Installer's Wi-Fi page.  Installer logs every askstring answer, so the
+# passphrase is asked here and written straight to the prefs file.
+aminetxduo_add_tool(tool_installwifi InstallWiFi SOURCES installwifi.c)
+
 # CheckNetConfig is config-only in the strictest sense there is: it never opens
 # bsdsocket.library at all.  That is not an omission, the machine that needs
 # checking is the one where the stack did not come up, so a checker that needed
@@ -672,7 +676,7 @@ endif()
 
 add_custom_target(tools ALL)
 add_dependencies(tools
-    tool_addnetinterface tool_installsamefile tool_installnetprobe
+    tool_addnetinterface tool_installsamefile tool_installnetprobe tool_installwifi
     tool_checknetconfig tool_checknetdevice tool_statusreport tool_netdevstats
     tool_addnetroute tool_deletenetroute
     tool_getnetstatus tool_netshutdown tool_removenetinterface
