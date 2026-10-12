@@ -401,6 +401,8 @@ stage_build() {          # $1 = build dir, $2 = "" for the top or a drawer name
         done
         cp "$INSTALL/NetPrefs.info" "$TREE/C/fat/NetPrefs.info"
         cp "$INSTALL/NetMeter.info" "$TREE/C/fat/NetMeter.info"
+        cp "$INSTALL/NetWireless.info" "$TREE/C/fat/NetWireless.info"
+        cp "$INSTALL/NetWirelessPrefs.info" "$TREE/C/fat/NetWirelessPrefs.info"
         chmod 755 "$TREE"/C/fat/*
     fi
 }
@@ -449,6 +451,8 @@ for cmd in "${CMDS[@]}"; do
 done
 cp "$INSTALL/NetPrefs.info" "$TREE/C/NetPrefs.info"
 cp "$INSTALL/NetMeter.info" "$TREE/C/NetMeter.info"
+cp "$INSTALL/NetWireless.info" "$TREE/C/NetWireless.info"
+cp "$INSTALL/NetWirelessPrefs.info" "$TREE/C/NetWirelessPrefs.info"
 chmod 755 "$TREE"/C/*
 
 # The ssh and scp clients, when they have been built.  Optional, because they

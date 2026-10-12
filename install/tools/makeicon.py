@@ -46,6 +46,7 @@ SPDX-License-Identifier: MIT
 """
 
 import argparse
+import math
 import os
 import struct
 import sys
@@ -360,6 +361,51 @@ def meter_icon():
     return c
 
 
+def _arc(c, cx, cy, r, a0, a1, colour):
+    """Points of a circle of radius r from angle a0 to a1 (degrees, 0 is
+    right, 90 up), one pixel thick."""
+    steps = max(8, int(r * abs(a1 - a0) / 20))
+    for i in range(steps + 1):
+        a = math.radians(a0 + (a1 - a0) * i / steps)
+        c.set(int(round(cx + r * math.cos(a))),
+              int(round(cy - r * 1.0 * math.sin(a))), colour)
+
+
+def wireless_icon():
+    """NetWireless: an antenna mast sending arcs to both sides."""
+    c = Canvas(48, 26, GREY)
+    c.fill(2, 2, 45, 23, WHITE)
+    c.bevel(1, 1, 46, 24)
+    c.vline(23, 12, 20, BLACK)
+    c.vline(24, 12, 20, BLACK)
+    c.hline(18, 29, 21, BLACK)
+    c.fill(22, 10, 25, 12, BLUE)
+    for r in (5, 9, 13):
+        _arc(c, 23.5, 11, r, 145, 215, BLUE)
+        _arc(c, 23.5, 11, r, -35, 35, BLUE)
+    return c
+
+
+def wireless_prefs_icon():
+    """NetWirelessPrefs: Wi-Fi arcs beside a gear."""
+    c = Canvas(48, 26, GREY)
+    c.fill(2, 2, 45, 23, WHITE)
+    c.bevel(1, 1, 46, 24)
+    c.fill(13, 18, 15, 20, BLUE)
+    for r in (4, 8, 12):
+        _arc(c, 14, 19, r, 45, 135, BLUE)
+    # The gear: a ring with eight teeth.
+    for r in (5, 6):
+        _arc(c, 35, 13, r, 0, 360, BLACK)
+    for k in range(8):
+        a = math.radians(k * 45)
+        for r in (7, 8):
+            c.set(int(round(35 + r * math.cos(a))),
+                  int(round(13 - r * math.sin(a))), BLACK)
+    c.fill(34, 12, 36, 14, BLUE)
+    return c
+
+
 # The stock Workbench 3.1 drawer, a bevelled front with a handle, for Docs
 # and Examples: a drawer that holds files should look like every other one.
 STOCK_DRAWER_ART = [
@@ -433,6 +479,17 @@ def main(argv):
         "NetMeter.info": diskobject(
             meter_icon(), WBTOOL,
             tooltypes=["DONOTWAIT"],
+            stack=8192),
+        # The Wi-Fi commodity: DONOTWAIT for WBStartup, as NetMeter.
+        "NetWireless.info": diskobject(
+            wireless_icon(), WBTOOL,
+            tooltypes=["DONOTWAIT", "CX_PRIORITY=0",
+                       "CX_POPKEY=ctrl alt w", "CX_POPUP=NO", "INTERVAL=5",
+                       "APPICON=YES"],
+            stack=8192),
+        "NetWirelessPrefs.info": diskobject(
+            wireless_prefs_icon(), WBTOOL,
+            tooltypes=[],
             stack=8192),
     }
 
