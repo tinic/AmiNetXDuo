@@ -9,11 +9,10 @@
 #   tools/build-toolchain.sh --print-pins        # what this would build
 #
 # GCC 16.2.0b + binutils 2.46 + NDK 3.9, PINNED BY COMMIT, not by branch.
-# binutils is bebbo's amiga-2.46 at the commit the three diffs in
-# tools/patches/binutils-2.46/ are written against; the branch tip has moved
-# on and those diffs no longer apply to it.  With them this tree builds at
-# -DAMINETXDUO_LTO=ON and emits the four shipped images byte for byte as the
-# earlier 2.39 pin did.  Moving the pin back is the one PINS line below:
+# binutils is tinic/binutils-gdb ffe2ad82 (AmigaPorts amiga-2.46 106606ef plus
+# the same-named-section PC-relative fix); it already carries the changes the
+# three diffs in tools/patches/binutils-2.46/ made, so none are applied.  This
+# tree builds at -DAMINETXDUO_LTO=ON with it.  Moving the pin back is the one PINS line below:
 # tools/patches/binutils/ still holds the 2.39 set.  Each entry records the
 # remote verified to serve its pin: bebbo's GitHub repos are gone and Codeberg
 # does not carry every branch.
@@ -34,11 +33,10 @@ PIN_AMIGA_GCC_SHA="86f8ba62f7a5035e309600c86962681e1cbacccb"
 # projects/<name>|<remote that serves this commit>|<commit>|<branch it was on>
 #
 # The branch is recorded only so a human can find the commit again; nothing
-# reads it as a pin.  `binutils` has no mirror: franke.ms is the remote
-# verified to serve the amiga-2.46 commit.
+# reads it as a pin.
 PINS="
-binutils|https://franke.ms/git/bebbo/binutils-gdb|a50544a917284847c99e97d41c69ece9d5cb2fef|amiga-2.46
-gcc|https://github.com/tinic/gcc|1d4ca5d4b1592b663af2f00589b245934d872eb3|amiga16.2-16.2.7
+binutils|https://github.com/tinic/binutils-gdb|ffe2ad82e34e11206efd706338b32a696185ebb4|fix/amiga-pcrel-local-regression
+gcc|https://github.com/tinic/gcc|f098a8ef44ac8d11204a3cb0c39c1e4f5cd63fc8|amiga16.2
 newlib-cygwin|https://franke.ms/git/bebbo/newlib-cygwin|0909ae9abc18b38595425143e7a63d9e2fc31174|amiga
 libnix|https://franke.ms/git/bebbo/libnix|b7268e35510b8b7b4ccdad67fbcbb25e73189aef|master
 sfdc|https://franke.ms/git/bebbo/sfdc|5d4efca359e949547553463f5873778bd85e5506|master
@@ -374,7 +372,8 @@ PY
 fi
 
 # -flto.  Two changes to binutils; GCC needs no patch for it, only the pin
-# above.  That pin is AmigaPorts amiga16.2 1d4ca5d4 with no local patches; it
+# above.  That pin is tinic/gcc amiga16.2 f098a8ef: AmigaPorts amiga16.2
+# 1d4ca5d4 plus 3 local m68k commits; it
 # has the LTO visibility-warning fix (PR #82), the A5/SP argument-register
 # diagnostic (PR #83) and the narrow __asm argument lowering (PR #84).  It carries the
 # sibcall fix that 16.2.4 and 16.2.5 added on bebbo 134541b3: an indirect
@@ -424,6 +423,7 @@ BU_BRANCH=$(printf '%s\n' "$PINS" | awk -F'|' '$1 == "binutils" { print $4 }')
 case "$BU_BRANCH" in
     amiga-2.39.0) BU_PATCH_SET="binutils" ;;
     amiga-2.46)   BU_PATCH_SET="binutils-2.46" ;;
+    fix/amiga-pcrel-local-regression) BU_PATCH_SET="binutils-current" ;;
     *)
         echo "!! no patch set under tools/patches/ for binutils $BU_BRANCH" >&2
         echo "   Write one and name it here.  An unpatched binutils links" >&2

@@ -24,7 +24,7 @@ set -euo pipefail
 
 # ------------------------------------------------------------------- pin ----
 
-# binutils 2.46, patched by tools/patches/binutils-2.46/: it builds this tree
+# binutils 2.46 (tinic/binutils-gdb ffe2ad82, no local patches): it builds this tree
 # at -DAMINETXDUO_LTO=ON and emits the four shipped images byte for byte as
 # the earlier 2.39 assets do.  NDK 3.9, not the newer 3.2: 3.2 renamed long-standing types and the
 # sources are written to the spellings both accept.
@@ -34,9 +34,10 @@ TC_GCC_VERSION="16.2.0b"
 # rebases GCC onto AmigaPorts v16.2-rc15 (0edaa619), which carries the
 # sibcall fix, plus AmigaPorts/gcc PR #82 for the visibility warning
 # (tinic/gcc amiga16.2-rc15-anx). 16.2.7 is AmigaPorts amiga16.2 1d4ca5d4
-# with no local patches. The reported version remains 16.2.0b.
+# with no local patches. 16.2.8 is tinic/gcc f098a8ef (AmigaPorts 1d4ca5d4 + 3 m68k commits) and binutils ffe2ad82 (PC-relative fix).
+# The reported version remains 16.2.0b.
 # Older asset hashes remain at their original tags.
-TC_ASSET_VERSION="16.2.7"
+TC_ASSET_VERSION="16.2.8"
 TC_PREFIX_IN_TAR="opt/m68k-amigaos"
 
 # Compiler assets live with the fork rather than topping the product releases.
@@ -53,11 +54,11 @@ ARCH=$(uname -m)
 case "$OS/$ARCH" in
     Linux/x86_64|Linux/amd64)
         TC_PLATFORM="linux-x86_64"
-        TC_SHA256="8d04c18e4b04d861848854922b6761651958932af85b4a6a26918e6da4d60e97"
+        TC_SHA256="98e7959f7806fe119f847feda024665cd8426ea20793034f4ee12b63f7c5678e"
         ;;
     Darwin/arm64|Darwin/aarch64)
         TC_PLATFORM="darwin-arm64"
-        TC_SHA256="59c695e980c9866580e32409dcfa9854e97cc0d4d9dffc5383c0c064da602cb3"
+        TC_SHA256="f9f1d0d07aee53380280a1a3a8e53b734f1367dd710b89c4c07333a23daa879f"
         ;;
     *)
         TC_PLATFORM=""
