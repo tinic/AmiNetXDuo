@@ -27,18 +27,15 @@ class GlowIcons(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="icon-layout-", dir=ROOT / "build") as tmp:
             out = Path(tmp)
             tree = out / "AmiNetXDuo"
-            (tree / "C/fat").mkdir(parents=True)
+            (tree / "Icons").mkdir(parents=True)
             for target, source in {
                     "Install-AmiNetXDuo.info": "Install-AmiNetXDuo",
                     "ReadMe.info": "Document", "Docs.info": "Drawer",
                     "Examples.info": "Drawer", "Terminal.info": "Drawer",
                     "Developer.info": "Drawer", "AmiNetXDuo.info": "AmiNetXDuo",
-                    "C/NetMeter.info": "NetMeter", "C/NetPrefs.info": "NetPrefs",
-                    "C/fat/NetMeter.info": "NetMeter", "C/fat/NetPrefs.info": "NetPrefs",
-                    "C/NetWireless.info": "NetWireless",
-                    "C/NetWirelessPrefs.info": "NetWirelessPrefs",
-                    "C/fat/NetWireless.info": "NetWireless",
-                    "C/fat/NetWirelessPrefs.info": "NetWirelessPrefs"}.items():
+                    "Icons/NetMeter.info": "NetMeter", "Icons/NetPrefs.info": "NetPrefs",
+                    "Icons/NetWireless.info": "NetWireless",
+                    "Icons/NetWirelessPrefs.info": "NetWirelessPrefs"}.items():
                 shutil.copyfile(ROOT / "install" / (source + ".info"), tree / target)
             original = {p: p.read_bytes() for p in tree.rglob("*.info")}
             subprocess.run([sys.executable, str(ROOT / "install/tools/layout-icons.py"),
@@ -51,7 +48,8 @@ class GlowIcons(unittest.TestCase):
                 self.assertEqual(after[66:], before[66:])
                 with contextlib.redirect_stdout(io.StringIO()):
                     self.assertTrue(reader.show(path))
-                if path.parent == tree and path.name != "AmiNetXDuo.info":
+                # Icons/ lands in the drawer root of a private install.
+                if path.parent in (tree, tree / "Icons") and path.name != "AmiNetXDuo.info":
                     x, y = struct.unpack_from(">ii", after, 58)
                     self.assertNotIn((x, y), occupied)
                     occupied.add((x, y))
@@ -62,15 +60,7 @@ class GlowIcons(unittest.TestCase):
             # leave its position to Workbench instead of overlapping other apps.
             self.assertEqual((tree / "AmiNetXDuo.info").read_bytes(),
                              original[tree / "AmiNetXDuo.info"])
-            tools = (tree / "C.info").read_bytes()
-            left, top, width, height = struct.unpack_from(">hhhh", tools, 78)
-            self.assertLessEqual(left + width, 640)
-            self.assertLessEqual(top + height, 256)
-            for path in (tree / "C").glob("*.info"):
-                x, y = struct.unpack_from(">ii", path.read_bytes(), 58)
-                self.assertGreaterEqual(x, 0)
-                self.assertLess(x + 48 + 12, width - 18)
-                self.assertLess(y + 48 + 12, height - 20)
+            self.assertFalse((tree / "C.info").exists())
             # Re-running packaging must not drift positions or data.
             once = {p: p.read_bytes() for p in tree.rglob("*.info")}
             subprocess.run([sys.executable, str(ROOT / "install/tools/layout-icons.py"),

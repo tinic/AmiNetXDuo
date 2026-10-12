@@ -399,10 +399,6 @@ stage_build() {          # $1 = build dir, $2 = "" for the top or a drawer name
         for cmd in "${CMDS[@]}"; do
             cp "$b/src/tools/$cmd" "$TREE/C/fat/"
         done
-        cp "$INSTALL/NetPrefs.info" "$TREE/C/fat/NetPrefs.info"
-        cp "$INSTALL/NetMeter.info" "$TREE/C/fat/NetMeter.info"
-        cp "$INSTALL/NetWireless.info" "$TREE/C/fat/NetWireless.info"
-        cp "$INSTALL/NetWirelessPrefs.info" "$TREE/C/fat/NetWirelessPrefs.info"
         chmod 755 "$TREE"/C/fat/*
     fi
 }
@@ -449,11 +445,14 @@ fi
 for cmd in "${CMDS[@]}"; do
     cp "$CMD_BUILD/src/tools/$cmd" "$TREE/C/"
 done
-cp "$INSTALL/NetPrefs.info" "$TREE/C/NetPrefs.info"
-cp "$INSTALL/NetMeter.info" "$TREE/C/NetMeter.info"
-cp "$INSTALL/NetWireless.info" "$TREE/C/NetWireless.info"
-cp "$INSTALL/NetWirelessPrefs.info" "$TREE/C/NetWirelessPrefs.info"
 chmod 755 "$TREE"/C/*
+# The Workbench tools' icons, outside C/: C: carries no icon.  The installer
+# copies them beside the tools in SYS:Prefs, SYS:Utilities,
+# SYS:Tools/Commodities or the drawer.  Icons/ has no drawer icon of its own.
+mkdir -p "$TREE/Icons"
+for tool in NetPrefs NetMeter NetWireless NetWirelessPrefs; do
+    cp "$INSTALL/$tool.info" "$TREE/Icons/$tool.info"
+done
 
 # The ssh and scp clients, when they have been built.  Optional, because they
 # come from clients/ rather than the CMake tree and a plain `cmake --build`
@@ -833,6 +832,15 @@ echo "==> flavours: $(cd "$TREE/Flavours" && echo *)"
 # The `need` checks above are the same idea one level down and only in the easy
 # direction: they catch a name in a list with no file.  This catches the hard
 # one, a file with no decision.
+# No icon in C/ or C/fat: the installer copies C/ wholesale into C:.
+CINFO=$(find "$TREE/C" -name '*.info' | head -n 5)
+if [ -n "$CINFO" ]; then
+    echo "!! C/ carries an icon; tool icons belong in Icons/:" >&2
+    echo "$CINFO" >&2
+    exit 2
+fi
+[ ! -e "$TREE/C.info" ] || { echo "!! the archive carries C.info" >&2; exit 2; }
+
 "$ROOT/tools/check-archive-installed.sh" "$OUTDIR" || {
     echo "!! Something in the archive has no decision recorded against it." >&2
     echo "!! install/ARCHIVE-MANIFEST is where it goes: 'installed' with the" >&2

@@ -151,6 +151,9 @@ It puts
      NetCapture, NetTrace                      into C:
      NetPrefs and its icon (system layout)     into SYS:Prefs
      NetMeter and its icon (system layout)     into SYS:Utilities
+     NetWirelessPrefs and its icon (system)    into SYS:Prefs
+     NetWireless and its icon (system layout)  into SYS:Tools/Commodities
+     the four above, with icons (drawer)       into the AmiNetXDuo drawer
      anxnet.device, anxgenet.device,
        anxwifipi.device                        into DEVS:Networks
      WirelessManager (Pi Wi-Fi, none yet)      into C:

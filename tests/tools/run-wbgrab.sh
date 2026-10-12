@@ -420,12 +420,24 @@ EOF
     esac
 }
 
-# The release tree's C drawer, left out on the Workbench window.
+# The release tree's four tools with their Icons/ icons, in a drawer left out
+# on the Workbench window.  The release has no C.info: the drawer's icon is
+# Examples.info at 62,146.
 stage_icons() {
-    local dist="${AMINETXDUO_DIST:-$ROOT/build/dist/AmiNetXDuo}"
-    [ -f "$dist/C.info" ] || { say error "no $dist/C.info (dist/make-dist.sh)"; exit 2; }
-    mkdir -p "$HD/AmiNetXDuo"
-    cp -R "$dist/C" "$dist/C.info" "$HD/AmiNetXDuo/"
+    local dist="${AMINETXDUO_DIST:-$ROOT/build/dist/AmiNetXDuo}" t
+    [ -d "$dist/Icons" ] || { say error "no $dist/Icons (dist/make-dist.sh)"; exit 2; }
+    mkdir -p "$HD/AmiNetXDuo/C"
+    for t in NetPrefs NetMeter NetWireless NetWirelessPrefs; do
+        cp "$dist/C/$t" "$dist/Icons/$t.info" "$HD/AmiNetXDuo/C/"
+    done
+    cp "$dist/Examples.info" "$HD/AmiNetXDuo/C.info"
+    python3 - "$ROOT/install/tools/layout-icons.py" "$HD/AmiNetXDuo/C.info" <<'PY'
+import importlib.util, pathlib, sys
+spec = importlib.util.spec_from_file_location("layout", sys.argv[1])
+layout = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(layout)
+layout.edit(pathlib.Path(sys.argv[2]), (62, 146), (280, 12, 340, 176))
+PY
     printf ':AmiNetXDuo/C\n' > "$HD/.backdrop"
 }
 

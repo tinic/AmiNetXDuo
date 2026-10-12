@@ -103,8 +103,8 @@
                     (tackon SRCDIR "Examples.info") "Examples.info"))
 (set S_TERMICON (if (> (strlen SRCDIR) 0)
                     (tackon SRCDIR "Terminal.info") "Terminal.info"))
-(set S_CICON (if (> (strlen SRCDIR) 0)
-                 (tackon SRCDIR "C.info") "C.info"))
+; The Workbench tools' icons: C/ carries none, so C: gets none.
+(set S_ICONS (if (> (strlen SRCDIR) 0) (tackon SRCDIR "Icons") "Icons"))
 (set S_UNINSTALL (if (> (strlen SRCDIR) 0)
                      (tackon SRCDIR "Uninstall-AmiNetXDuo") "Uninstall-AmiNetXDuo"))
 (set S_UNINSTALLICON (cat S_UNINSTALL ".info"))
@@ -2774,26 +2774,11 @@
         (
           (set BK_SUB "Prefs")
           (set SN_WROTE 1) (set SN_T "SYS:Prefs/NetPrefs.info") (P_snap)
+          (set SN_WROTE 1) (set SN_T "SYS:Prefs/NetWirelessPrefs.info") (P_snap)
           (set BK_SUB "Utilities")
           (set SN_WROTE 1) (set SN_T "SYS:Utilities/NetMeter.info") (P_snap)
-          (set BK_SUB "C")
-          (foreach S_CSEL "#?.info"
-            (if (< @each-type 0)
-              (
-                (set SN_WROTE 1)
-                (set SN_T (tackon D_C @each-name))
-                (P_snap)
-              )))
-          (if (OR MADE_CINFO (exists (tackon D_INSTALLED "Made-Cinfo") (noreq)))
-            (
-              (if MADE_CINFO
-                  (textfile
-                    (prompt "Writing the record of C:'s icon")
-                    (help   H_BACKUP)
-                    (dest   (tackon D_INSTALLED "Made-Cinfo"))
-                    (append "; made by the AmiNetXDuo installer\n")))
-              (set SN_WROTE 1) (set SN_T (tackon D_C ".info")) (P_snap)
-            ))
+          (set BK_SUB "Tools/Commodities")
+          (set SN_WROTE 1) (set SN_T "SYS:Tools/Commodities/NetWireless.info") (P_snap)
         ))
       (set BK_SUB "")
       (P_rem_flush)
@@ -2833,6 +2818,12 @@
   (set REC_F (if DRAWER_LAYOUT (tackon D_ROOT "NetPrefs") "SYS:Prefs/NetPrefs"))
   (P_rec_ours)
   (set REC_F (if DRAWER_LAYOUT (tackon D_ROOT "NetMeter") "SYS:Utilities/NetMeter"))
+  (P_rec_ours)
+  (set REC_F (if DRAWER_LAYOUT (tackon D_ROOT "NetWirelessPrefs")
+                 "SYS:Prefs/NetWirelessPrefs"))
+  (P_rec_ours)
+  (set REC_F (if DRAWER_LAYOUT (tackon D_ROOT "NetWireless")
+                 "SYS:Tools/Commodities/NetWireless"))
   (P_rec_ours)
   (set REC_N 0)
   (while (set REC_SUB (select REC_N "anxnet.device" "anxgenet.device"
@@ -2895,9 +2886,12 @@
   (if DRAWER_LAYOUT
     (
       (set REC_N 0)
-      (while (set REC_SUB (select REC_N "NetPrefs.info" "NetMeter.info" "C.info" ""))
+      (while (set REC_SUB (select REC_N "NetPrefs.info" "NetMeter.info"
+                                        "NetWireless.info" "NetWirelessPrefs.info"
+                                        "C.info" ""))
         (
-          ((set REC_ADD (cat "Delete \"" (tackon D_ROOT REC_SUB) "\" QUIET\n")) (P_rec_add))
+          ((set REC_ADD (cat "Delete \"" (tackon D_ROOT REC_SUB) "\" QUIET\n"
+                             "Delete \"" (tackon D_C REC_SUB) "\" QUIET\n")) (P_rec_add))
           (set REC_N (+ REC_N 1))
         ))
       (set RT_SELF 0)
@@ -2988,21 +2982,31 @@
     (P_backup)
   ))
 ; With the libraries, before anything is replaced, in every run: a command
-; of the same name in C:, NetPrefs, NetMeter and their icons, and the
+; of the same name in C:, the four Workbench tools and their icons, and the
 ; certificate store, when they are another stack's or the user's.  Every
 ; command names AmiNetXDuo; an icon or the store is ours when it is the
 ; archive's own, byte for byte.
 (if (= DRAWER_LAYOUT 0)
   (
     (set BK_SUB "Prefs")
+    (set BK_ARCH "")
     (set BK_SRC "SYS:Prefs/NetPrefs") (P_backup)
-    (set BK_ARCH (tackon S_C "NetPrefs.info"))
+    (set BK_ARCH (tackon S_ICONS "NetPrefs.info"))
     (set BK_SRC "SYS:Prefs/NetPrefs.info") (P_backup)
+    (set BK_ARCH "")
+    (set BK_SRC "SYS:Prefs/NetWirelessPrefs") (P_backup)
+    (set BK_ARCH (tackon S_ICONS "NetWirelessPrefs.info"))
+    (set BK_SRC "SYS:Prefs/NetWirelessPrefs.info") (P_backup)
     (set BK_SUB "Utilities")
     (set BK_ARCH "")
     (set BK_SRC "SYS:Utilities/NetMeter") (P_backup)
-    (set BK_ARCH (tackon S_C "NetMeter.info"))
+    (set BK_ARCH (tackon S_ICONS "NetMeter.info"))
     (set BK_SRC "SYS:Utilities/NetMeter.info") (P_backup)
+    (set BK_SUB "Tools/Commodities")
+    (set BK_ARCH "")
+    (set BK_SRC "SYS:Tools/Commodities/NetWireless") (P_backup)
+    (set BK_ARCH (tackon S_ICONS "NetWireless.info"))
+    (set BK_SRC "SYS:Tools/Commodities/NetWireless.info") (P_backup)
     (set BK_SUB "Devs/Internet")
     (set BK_ARCH (tackon (tackon S_DEVS "Internet") "certificates"))
     (set BK_SRC (tackon (tackon D_DEVS "Internet") "certificates")) (P_backup)
@@ -3056,7 +3060,6 @@
 (set MADE_FIRMWARE   (if (exists (tackon D_DEVS "Firmware") (noreq)) 0 1))
 (set MADE_IFDIR      (if (exists D_IFDIR (noreq)) 0 1))
 (set MADE_INTERNET   (if (exists (tackon D_DEVS "Internet") (noreq)) 0 1))
-(set MADE_CINFO      (if (exists (tackon D_C ".info") (noreq)) 0 1))
 (set REC_FINAL 0)
 (P_write_record)
 
@@ -3472,11 +3475,6 @@
   ; keeps C/fat, the fat stack's commands, out; they are copied over these
   ; below when that stack is selected.
   (pattern "~(fat)")
-  ; NetPrefs and NetMeter are the commands with a Workbench tool icon.
-  ; Copy their icons without fixed positions into C:. Private installs
-  ; expose positioned parent copies below; system folders choose placement.
-  (infos)
-  (noposition)
   (optional "force"))
 
 ; The fat stack's commands, over the ones just copied, ssh, scp and
@@ -3490,81 +3488,88 @@
       (source S_CFAT)
       (dest   D_C)
       (all)
-      (infos)
-      (noposition)
       (optional "force")))
 (set S_CSEL (if (= MINPICK 3) S_CFAT S_C))
 
-; Put the graphical applications beside the documentation in a private
-; installation. Keep command copies in C: for existing CLI callers, with
-; no duplicate Workbench icons once the parent copies are present.
-(if DRAWER_LAYOUT
+; The four Workbench tools, each with its icon from Icons/: in a private
+; installation beside the documentation, in a system one where an Amiga user
+; looks -- SYS:Prefs for the editors, SYS:Utilities for NetMeter and
+; SYS:Tools/Commodities for the commodity.  C: keeps the command copies for
+; CLI callers and carries no icon.
+(procedure P_tool
+  (copyfiles
+    (prompt ("Installing %s into %s" TL_N TL_D))
+    (help   TL_H)
+    (source (tackon S_CSEL TL_N))
+    (dest   TL_D)
+    (optional "force"))
+  (if DRAWER_LAYOUT
+      (copyfiles
+        (prompt ("Installing the %s icon into %s" TL_N TL_D))
+        (help   TL_H)
+        (source (tackon S_ICONS (cat TL_N ".info")))
+        (dest   TL_D)
+        (optional "force"))
+      (copyfiles
+        (prompt ("Installing the %s icon into %s" TL_N TL_D))
+        (help   TL_H)
+        (source (tackon S_ICONS (cat TL_N ".info")))
+        (dest   TL_D)
+        (noposition)
+        (optional "force"))))
+
+(set TL_N "NetPrefs")
+(set TL_D (if DRAWER_LAYOUT D_ROOT "SYS:Prefs"))
+(set TL_H (cat "NetPrefs edits the same DEVS:NetInterfaces files as NetSetup, "
+               "preserves comments and advanced keywords, and can apply a "
+               "saved definition through the normal network commands."))
+(P_tool)
+(set TL_N "NetMeter")
+(set TL_D (if DRAWER_LAYOUT D_ROOT "SYS:Utilities"))
+(set TL_H (cat "NetMeter shows each interface's addresses and how fast it is "
+               "receiving and sending.  Click an address to copy it."))
+(P_tool)
+(set TL_N "NetWirelessPrefs")
+(set TL_D (if DRAWER_LAYOUT D_ROOT "SYS:Prefs"))
+(set TL_H (cat "NetWirelessPrefs lists the Wi-Fi networks in range and joins "
+               "one."))
+(P_tool)
+(set TL_N "NetWireless")
+(set TL_D (if DRAWER_LAYOUT D_ROOT "SYS:Tools/Commodities"))
+(set TL_H (cat "NetWireless is the Wi-Fi commodity: the link's state and "
+               "signal as an AppIcon."))
+(P_tool)
+
+; Icons an earlier installation put in C: or beside the commands drawer.
+(set TL_I 0)
+(while (set TL_N (select TL_I "NetPrefs.info" "NetMeter.info" "NetWireless.info"
+                              "NetWirelessPrefs.info" ""))
   (
-    (copyfiles
-      (prompt "Installing NetPrefs into the AmiNetXDuo drawer")
-      (help "Open NetPrefs directly from the AmiNetXDuo drawer.")
-      (source (tackon S_CSEL "NetPrefs"))
-      (dest D_ROOT)
-      (infos)
-      (optional "force"))
-    (copyfiles
-      (prompt "Installing NetMeter into the AmiNetXDuo drawer")
-      (help "Open NetMeter directly from the AmiNetXDuo drawer.")
-      (source (tackon S_CSEL "NetMeter"))
-      (dest D_ROOT)
-      (infos)
-      (optional "force"))
-    (if (AND (exists (tackon D_ROOT "NetPrefs") (noreq))
-             (exists (tackon D_ROOT "NetPrefs.info") (noreq)))
-      (delete (tackon D_C "NetPrefs.info")
-        (prompt "Removing the duplicate NetPrefs command icon")
-        (help "The application icon is in the parent AmiNetXDuo drawer.")
-        (optional "force" "nofail")))
-    (if (AND (exists (tackon D_ROOT "NetMeter") (noreq))
-             (exists (tackon D_ROOT "NetMeter.info") (noreq)))
-      (delete (tackon D_C "NetMeter.info")
-        (prompt "Removing the duplicate NetMeter command icon")
-        (help "The application icon is in the parent AmiNetXDuo drawer.")
-        (optional "force" "nofail")))
+    (if (exists (tackon D_C TL_N) (noreq))
+        (delete (tackon D_C TL_N)
+          (prompt ("Removing %s" (tackon D_C TL_N)))
+          (help   "C: carries no icon; the tool's icon is beside the tool.")
+          (optional "force" "nofail")))
+    (set TL_I (+ TL_I 1))
   ))
-
-; Give the private commands drawer its icon and window layout.
-(if (AND DRAWER_LAYOUT (exists S_CICON (noreq)))
-    (copyfiles
-      (prompt "Giving the commands drawer its icon")
-      (help @copyfiles-help)
-      (source S_CICON)
-      (dest D_ROOT)
-      (newname "C.info")
-      (optional "force")))
-
-; A system installation also exposes the GUI where an Amiga user expects a
-; preferences editor.  The C: copy remains the canonical executable (and the
-; drawer installation remains genuinely self-contained); this small duplicate
-; means SYS:Prefs/NetPrefs can be launched directly from Workbench.
-(if (NOT DRAWER_LAYOUT)
-    (copyfiles
-      (prompt "Installing NetPrefs into SYS:Prefs")
-      (help   "NetPrefs edits the same DEVS:NetInterfaces files as NetSetup, "
-              "preserves comments and advanced keywords, and can apply a "
-              "saved definition through the normal network commands.")
-      (source (tackon S_CSEL "NetPrefs"))
-      (dest   "SYS:Prefs")
-      (infos)
-      (noposition)
-      (optional "force")))
-
-; NetMeter the same way, where a Workbench user looks for a small tool.
-(if (NOT DRAWER_LAYOUT)
-    (copyfiles
-      (prompt "Installing NetMeter into SYS:Utilities")
-      (help   "NetMeter shows each interface's addresses and how fast it is "
-              "receiving and sending.  Click an address to copy it.")
-      (source (tackon S_CSEL "NetMeter"))
-      (dest   "SYS:Utilities")
-      (infos)
-      (noposition)
-      (optional "force")))
+(if (AND DRAWER_LAYOUT (exists (tackon D_ROOT "C.info") (noreq)))
+    (delete (tackon D_ROOT "C.info")
+      (prompt "Removing the commands drawer's icon")
+      (help   "C: carries no icon; the tool's icon is beside the tool.")
+      (optional "force" "nofail")))
+(if (AND (NOT DRAWER_LAYOUT)
+         (exists (tackon D_INSTALLED "Made-Cinfo") (noreq)))
+  (
+    (if (exists (tackon D_C ".info") (noreq))
+        (delete (tackon D_C ".info")
+          (prompt "Removing the icon an earlier installation gave C:")
+          (help   "C: carries no icon; the tool's icon is beside the tool.")
+          (optional "force" "nofail")))
+    (delete (tackon D_INSTALLED "Made-Cinfo")
+      (prompt "Removing the record of C:'s icon")
+      (help   H_BACKUP)
+      (optional "force" "nofail"))
+  ))
 
 ; WirelessManager, for the Wi-Fi only, and never over one the user had
 ; (WM_USER): that one may be the version another Wi-Fi driver on this machine

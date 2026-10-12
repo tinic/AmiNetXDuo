@@ -3310,6 +3310,7 @@
   again in the same place once Workbench is back. Without it, close
   NetMeter before changing the screen mode.
 
+  NetWirelessPrefs is installed in SYS:Prefs by a system installation.
   NetWirelessPrefs is the Wi-Fi window. It lists the networks in range
   with signal bars and a padlock for a network that asks for a key (on
   Kickstart 3.0 and later; 2.04 shows the same as text), and shows the
@@ -3401,7 +3402,8 @@
   restart WirelessManager. SETUP TO=<file> edits that file alone, not
   ENVARC: and ENV:.
 
-  NetWireless is the Wi-Fi commodity. It shows the link as an AppIcon: one
+  NetWireless is installed in SYS:Tools/Commodities by a system
+  installation. NetWireless is the Wi-Fi commodity. It shows the link as an AppIcon: one
   to four bars by signal (from -55, -66 and -77 dBm), bar outlines while
   not connected, dotted outlines when the Wi-Fi is off, crossed out with
   no Wi-Fi unit, and a '!' when the unit does not answer; the label is the
