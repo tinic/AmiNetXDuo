@@ -257,8 +257,8 @@ With no other network device found, it stops before it changes anything.
 anxwifipi.device supports the same machine's Wi-Fi and needs its firmware in
 DEVS:Firmware plus a supplicant such as WirelessManager before it can
 associate.  When the Pi Wi-Fi is selected, the installer copies the firmware
-files that DEVS:Firmware lacks, with their linux-firmware licences, from the
-archive's Devs/Firmware.
+files that DEVS:Firmware lacks, with their licences, from the archive's
+Devs/Firmware; WHENCE there says which file is under which licence.
 
 The installer asks whether to put all three in DEVS:Networks and offers yes.
 Copying them changes nothing on its own: an interface file selects one with

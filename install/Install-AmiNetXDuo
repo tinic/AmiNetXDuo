@@ -2105,32 +2105,51 @@
     (P_install_device)
   ))
 
+; One file of the archive's Devs/Firmware, FW_NAME, unless DEVS:Firmware
+; already has it.
+(procedure P_install_firmware
+  (if (NOT (OR (exists (tackon "DEVS:Firmware" FW_NAME) (noreq))
+               (exists (tackon D_FIRMWARE FW_NAME) (noreq))))
+      (copyfiles
+        (prompt ("Installing DEVS:Firmware/%s" FW_NAME))
+        (help   (cat "The Cypress and Synaptics Wi-Fi firmware that "
+                     "anxwifipi.device loads into the Raspberry Pi's Wi-Fi "
+                     "chip, with its licences; WHENCE says which file is "
+                     "under which.  Only files DEVS:Firmware does not have "
+                     "are copied."))
+        (source (tackon S_FIRMWARE FW_NAME))
+        (dest   D_FIRMWARE)
+        (optional "nofail")))
+)
+
 ; --- the Pi Wi-Fi firmware ------------------------------------------------
 ;
 ; anxwifipi.device loads its chip's firmware from DEVS:Firmware, where the
 ; Emu68 Imager puts it.  For the Pi Wi-Fi, every file of the archive's
-; Devs/Firmware that DEVS:Firmware does not have goes there, the
-; linux-firmware licences included.  A file already there is kept: it may be
-; a newer firmware the user put in.
+; Devs/Firmware that DEVS:Firmware does not have goes there, the licences
+; and WHENCE included.  A file already there is kept: it may be a newer
+; firmware the user put in.  So is the .clm_blob of a .bin already there:
+; the two are one build.
 (if (> (bitand CARD_MASK 2048) 0)
   (
     (set D_FIRMWARE (tackon D_DEVS "Firmware"))
     (makedir D_FIRMWARE
       (prompt "Creating DEVS:Firmware")
       (help   @makedir-help))
-    (foreach S_FIRMWARE "#?"
-      (if (NOT (OR (exists (tackon "DEVS:Firmware" @each-name) (noreq))
-                   (exists (tackon D_FIRMWARE @each-name) (noreq))))
-          (copyfiles
-            (prompt ("Installing DEVS:Firmware/%s" @each-name))
-            (help   (cat "The Broadcom and Cypress Wi-Fi firmware that "
-                         "anxwifipi.device loads into the Raspberry Pi's "
-                         "Wi-Fi chip, from linux-firmware, with its "
-                         "licences.  Only files DEVS:Firmware does not have "
-                         "are copied."))
-            (source (tackon S_FIRMWARE @each-name))
-            (dest   D_FIRMWARE)
-            (optional "nofail"))))
+    ; The .clm_blob files first, while every .bin there is still the user's.
+    (foreach S_FIRMWARE "#?.clm_blob"
+      (
+        (set FW_NAME @each-name)
+        (set FW_BIN (cat (substr FW_NAME 0 (- (strlen FW_NAME) 9)) ".bin"))
+        (if (NOT (OR (exists (tackon "DEVS:Firmware" FW_BIN) (noreq))
+                     (exists (tackon D_FIRMWARE FW_BIN) (noreq))))
+            (P_install_firmware))
+      ))
+    (foreach S_FIRMWARE "~(#?.clm_blob)"
+      (
+        (set FW_NAME @each-name)
+        (P_install_firmware)
+      ))
   ))
 
 ; --- tls.library, if this archive has one --------------------------------

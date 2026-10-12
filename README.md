@@ -61,7 +61,7 @@ it uses Emu68's own `genet.device` when one is installed; with no other network
 device found, it stops.
 
 The Wi-Fi driver needs its firmware in `DEVS:Firmware`; the installer adds the
-files missing there, with their linux-firmware licences. It also needs
+files missing there, with their licences. It also needs
 WirelessManager (Aminet [`driver/net/prism2v2`](https://aminet.net/package/driver/net/prism2v2))
 to join a network. Use it or `wifipi.device`, not both in one boot.
 

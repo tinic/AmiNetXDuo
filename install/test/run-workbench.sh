@@ -1049,14 +1049,18 @@ if [ "$MANUAL_CARD" = 0 ]; then
         }
     fi
 fi
-# The Wi-Fi fixture starts with one firmware file of the user's own in
-# DEVS:Firmware: the Installer must add the rest and keep that one.  -e both
-# starts with no DEVS:Firmware at all.
-FW_KEPT="brcmfmac43455-sdio.txt"
+# The Wi-Fi fixture starts with two firmware files of the user's own in
+# DEVS:Firmware, a .txt and a .bin: the Installer must keep both, leave out
+# the .clm_blob of that .bin (the two are one build) and add the rest.  -e
+# both starts with no DEVS:Firmware at all.
+FW_KEPT="brcmfmac43455-sdio.txt cyfmac43455-sdio.bin"
+FW_SKIPPED="cyfmac43455-sdio.clm_blob"
 if [ "$EMU68_FIXTURE" = wifi ]; then
     mkdir -p "$HD/Devs/Firmware"
-    printf 'user firmware text, %s\n' "$TAG" > "$HD/Devs/Firmware/$FW_KEPT"
-    echo "==> wifi fixture: DEVS:Firmware/$FW_KEPT staged"
+    for _f in $FW_KEPT; do
+        printf 'user firmware, %s\n' "$TAG" > "$HD/Devs/Firmware/$_f"
+    done
+    echo "==> wifi fixture: DEVS:Firmware/{$FW_KEPT} staged"
 fi
 # Emu68's own GENET driver, as the Emu68 Imager installs it.  Only its name
 # is read: the run stops after the configuration audit.
@@ -2314,11 +2318,16 @@ case "$EMU68_FIXTURE" in
         for _f in "$_fw_src"/*; do
             _b=$(basename "$_f")
             _fw_n=$((_fw_n + 1))
-            if [ -z "$_fw_dir" ] || [ ! -f "$_fw_dir/$_b" ]; then
+            if [ "$EMU68_FIXTURE" = wifi ] && [ "$_b" = "$FW_SKIPPED" ]; then
+                [ ! -e "$_fw_dir/$_b" ] || {
+                    echo "!! DEVS:Firmware/$_b was added beside the user's .bin"
+                    _fw_bad=1; }
+            elif [ -z "$_fw_dir" ] || [ ! -f "$_fw_dir/$_b" ]; then
                 echo "!! DEVS:Firmware/$_b was not installed"
                 _fw_bad=1
-            elif [ "$EMU68_FIXTURE" = wifi ] && [ "$_b" = "$FW_KEPT" ]; then
-                grep -q '^user firmware text' "$_fw_dir/$_b" || {
+            elif [ "$EMU68_FIXTURE" = wifi ] &&
+                 case " $FW_KEPT " in *" $_b "*) true ;; *) false ;; esac; then
+                grep -q '^user firmware' "$_fw_dir/$_b" || {
                     echo "!! DEVS:Firmware/$_b, the user's own, was replaced"
                     _fw_bad=1; }
             elif ! cmp -s "$_f" "$_fw_dir/$_b"; then
