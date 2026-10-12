@@ -7,6 +7,9 @@ Add new entries under `Unreleased`; published release sections are history.
 
 - New NetWirelessPrefs: Wi-Fi networks in range, joining one through WirelessManager, and the link's state; Shell forms LIST, STATUS and JOIN.
 
+- Installer: a PCMCIA NE2000 card with a manufacturer ID (DFE-670TXD and
+  most branded clones) is detected at Novice.
+
 - Installer: on Emu68 older than 1.1 alpha.1 it uses Emu68's genet.device
   for the Pi Ethernet, or stops with one page when no network device works.
 
