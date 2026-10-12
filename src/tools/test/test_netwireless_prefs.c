@@ -309,6 +309,20 @@ static void test_iface(void)
           unit == 3, "a longer keyword is not DEVICE");
     check(!nw_iface_device(a, sizeof(a) - 1, dev, 8, &unit),
           "a DEVICE too long for the buffer is not taken");
+    {
+        /* Two DEVICE lines that each fit: the last wins, written from the
+           start, never after the first (which ran past the buffer). */
+        static const char two[] =
+            "DEVICE=abcdefghijklmn.device\n"
+            "DEVICE=short.device\n";
+        struct { char buf[24]; char canary[16]; } guard;
+
+        memset(&guard, 'x', sizeof(guard));
+        check(nw_iface_device(two, sizeof(two) - 1, guard.buf, sizeof(guard.buf), &unit) &&
+              strcmp(guard.buf, "short.device") == 0, "the last DEVICE line wins");
+        check(guard.canary[0] == 'x' && guard.canary[15] == 'x',
+              "nothing written past the buffer");
+    }
 }
 
 int main(void)
@@ -318,6 +332,13 @@ int main(void)
     test_edits();
     test_ssid_value();
     test_iface();
+    check(nw_wireless_driver("DEVS:Networks/anxwifipi.device") == NW_DRIVER_PI &&
+          nw_wireless_driver("wifipi.device") == NW_DRIVER_PI &&
+          nw_wireless_driver("prism2.device") == NW_DRIVER_PRISM2 &&
+          nw_wireless_driver("Work:Drivers/PRISM2.DEVICE") == NW_DRIVER_PRISM2 &&
+          !nw_wireless_driver("anxnet.device") &&
+          !nw_wireless_driver("prism2.device.old") &&
+          !nw_wireless_driver(""), "Wi-Fi drivers known by name");
     if (failures == 0) printf("netwireless prefs: all passed\n");
     return failures == 0 ? 0 : 1;
 }

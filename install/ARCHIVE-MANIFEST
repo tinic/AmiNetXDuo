@@ -77,6 +77,7 @@ AmiNetXDuo/Installer                | not-installed | always    | Commodore's In
 AmiNetXDuo/InstallSameFile          | not-installed | always    | The Installer's file-identity primitive.  It uses dos.library SameLock to distinguish this drawer's library from a byte-identical system copy, runs before anything is written, and has no use after installation.
 AmiNetXDuo/Flavours/*               | not-installed | always    | One key=value manifest per stack the Installer offers: build flags, CPU floor, and every file with its size and sha256.  It describes the download for whoever checks it, and has no use on the machine.
 AmiNetXDuo/InstallNetProbe          | not-installed | always    | Read-only network-device discovery for the Installer.  It inspects Emu68's device tree, Zorro Autoconfig, PCMCIA identity tuples and UAE's resident device without opening a network device, and has no use after installation.
+AmiNetXDuo/InstallWiFi              | not-installed | always    | The Installer's Wi-Fi page: it asks for the network name and passphrase in its own window and writes Wireless.prefs, because Installer logs every askstring answer and the passphrase must not reach the log.  It has no use after installation.
 
 # ------------------------------------------------------------ the software --
 #
@@ -120,6 +121,15 @@ AmiNetXDuo/Examples/**              | installed     | always    | (source S_EXAM
 AmiNetXDuo/Examples.info            | installed     | always    | (source S_EXAMICON)
 AmiNetXDuo/Terminal/*               | installed     | always    | (source S_TERM)
 AmiNetXDuo/Terminal.info            | installed     | always    | (source S_TERMICON)
+
+# ------------------------------------------------------ the Wi-Fi supplicant --
+#
+# A drawer of its own rather than C/, because C/ is copied wholesale and this
+# is copied only when the Pi Wi-Fi is selected, and never over an existing
+# C:WirelessManager.  The licence goes with it into the AmiNetXDuo drawer.
+
+AmiNetXDuo/Wireless/WirelessManager | installed     | always    | (source S_WM)
+AmiNetXDuo/Wireless/WirelessManager-LICENSE | installed | always | (source S_WMLIC)
 
 # --------------------------------------------------------- the Developer --
 #

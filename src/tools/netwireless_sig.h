@@ -39,6 +39,10 @@ int nw_security_joinable(unsigned sec);
 /* 1 to 4 bars: 4 from -55 dBm, 3 from -66, 2 from -77, 1 below. */
 int nw_bars(long dbm);
 
+/* The same with 3 dB of hysteresis around the bars shown before (0: none
+   shown), so a level at a threshold does not flip the picture. */
+int nw_bars_held(long dbm, int shown);
+
 /* One network of a scan.  aps counts the access points merged into it. */
 typedef struct NwScan
 {

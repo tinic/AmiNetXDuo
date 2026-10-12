@@ -78,6 +78,28 @@ endif()
 target_compile_options(test_wifistub PRIVATE -Wall -Wextra)
 set_target_properties(test_wifistub PROPERTIES OUTPUT_NAME "WifiStub")
 
+# A program that only waits, the control for NetWireless's memory figure.
+add_executable(test_waitbreak waitbreak.c)
+target_include_directories(test_waitbreak PRIVATE ${AMINETXDUO_CORE_INCLUDES})
+if(AMIGA_NDK_INCLUDE)
+    target_include_directories(test_waitbreak PRIVATE "${AMIGA_NDK_INCLUDE}")
+endif()
+target_compile_options(test_waitbreak PRIVATE -Wall -Wextra -Os -fno-lto)
+target_link_options(test_waitbreak PRIVATE -nostartfiles -nostdlib -fno-lto)
+set_target_properties(test_waitbreak PROPERTIES OUTPUT_NAME "WaitBreak")
+
+# C:WirelessManager for run-netwireless.sh: joins by S2_SETOPTIONS, holds
+# the unit until Ctrl-C, logs each start's stack and arguments.
+add_executable(test_wmstub wmstub.c)
+target_include_directories(test_wmstub PRIVATE
+    ${AMINETXDUO_CORE_INCLUDES}
+    "${CMAKE_SOURCE_DIR}/src/sana2")
+if(AMIGA_NDK_INCLUDE)
+    target_include_directories(test_wmstub PRIVATE "${AMIGA_NDK_INCLUDE}")
+endif()
+target_compile_options(test_wmstub PRIVATE -Wall -Wextra)
+set_target_properties(test_wmstub PROPERTIES OUTPUT_NAME "WmStub")
+
 add_executable(test_clockset clockset.c)
 target_include_directories(test_clockset PRIVATE ${AMINETXDUO_CORE_INCLUDES})
 if(AMIGA_NDK_INCLUDE)

@@ -4,12 +4,14 @@
 #
 #   tests/tools/run-wbgrab.sh [-b BUILDDIR] [-m MODEL] [-t SECONDS]
 #                             [-o OUTDIR] [-s SEQUENCE]... [-d DEPTH]
-#                             [-f FONT/SIZE]
+#                             [-f FONT/SIZE] [-V 32]
 #
 # -f sets the Workbench screen font through ENVARC:Sys/font.prefs, e.g.
-# helvetica.font/13.  -s netprefs grabs NetPrefs on each of its pages as
+# helvetica.font/13.  -V 32 boots Workbench 3.2 on its own Kickstart.  -s netprefs grabs NetPrefs on each of its pages as
 # netprefs.pfs, netprefs-1.pfs ... netprefs-4.pfs; netprefs_window is the
-# window's box for cropping.
+# window's box for cropping.  -s netwireless grabs NetWirelessPrefs against
+# tests/tools/wifistub.c's unit with the NetWireless AppIcon beside it, then
+# its join form, as netwireless.pfs and netwireless-1.pfs.
 #
 # SPDX-License-Identifier: MIT
 
@@ -24,9 +26,10 @@ TIMEOUT=180
 OUTDIR="$ROOT/build/wbgrab-out"
 DEPTH=""
 FONT=""
+OSVER=31
 SEQUENCES=()
 
-while getopts "b:m:t:o:s:d:f:" opt; do
+while getopts "b:m:t:o:s:d:f:V:" opt; do
     case "$opt" in
         b) BUILD="$OPTARG" ;;
         m) MODEL="$OPTARG" ;;
@@ -35,6 +38,7 @@ while getopts "b:m:t:o:s:d:f:" opt; do
         d) DEPTH="$OPTARG" ;;
         s) SEQUENCES+=("$OPTARG") ;;
         f) FONT="$OPTARG" ;;
+        V) OSVER="$OPTARG" ;;
         *) sed -n '3,12p' "$0" >&2; exit 2 ;;
     esac
 done
@@ -51,7 +55,19 @@ WBGRAB="$BUILD/src/tools/wbgrab"
 }
 
 NETPREFS="$BUILD/src/tools/NetPrefs"
+NETWIRELESS="$BUILD/src/tools/NetWirelessPrefs"
+NETWIRELESSCX="$BUILD/src/tools/NetWireless"
+WIFISTUB="$BUILD/tests/tools/WifiStub"
 WINCLICK="$BUILD/tests/tools/WinClick"
+for seq in "${SEQUENCES[@]}"; do
+    [ "$seq" = netwireless ] || continue
+    [ -x "$NETWIRELESS" ] && [ -x "$NETWIRELESSCX" ] && [ -x "$WIFISTUB" ] &&
+        [ -x "$WINCLICK" ] || {
+        say error "no NetWirelessPrefs, NetWireless, WifiStub or WinClick under $BUILD"
+        say hint "cmake --build $BUILD --parallel --target tool_netwirelessprefs tool_netwireless test_wifistub test_winclick"
+        exit 2
+    }
+done
 for seq in "${SEQUENCES[@]}"; do
     [ "$seq" = netprefs ] || continue
     [ -x "$NETPREFS" ] && [ -x "$WINCLICK" ] || {
@@ -71,8 +87,14 @@ esac
 
 model_var=$(printf '%s' "$MODEL" | tr '[:lower:]' '[:upper:]' | tr -c 'A-Z0-9' '_')
 model_var=${model_var%_}
-eval "KICKSTART=\${AMINETXDUO_KICKSTART_$model_var:-}"
-KICKSTART="${KICKSTART:-${AMINETXDUO_KICKSTART:-}}"
+if [ "$OSVER" = 32 ]; then
+    eval "KICKSTART=\${AMINETXDUO_KICKSTART_${model_var}_32:-}"
+    [ -n "$KICKSTART" ] || [ "$model_var" != A1200 ] ||
+        KICKSTART="$HOME/amiga-assets/os32/rom/kicka1200.rom"
+else
+    eval "KICKSTART=\${AMINETXDUO_KICKSTART_$model_var:-}"
+    KICKSTART="${KICKSTART:-${AMINETXDUO_KICKSTART:-}}"
+fi
 [ -n "$KICKSTART" ] && [ -f "$KICKSTART" ] || {
     say error "no Kickstart for $MODEL"
     say hint "set AMINETXDUO_KICKSTART_$model_var or AMINETXDUO_KICKSTART"
@@ -99,8 +121,21 @@ rig_claim_drive "$HD" "wbgrab in $ROOT" none || exit $?
 # shellcheck source=tests/tools/wb31-sys.sh
 . "$ROOT/tests/tools/wb31-sys.sh"
 
-wb31_assemble "$ROOT/build/wb31-sys" || exit 2
-WB="$WB31_SYS"
+if [ "$OSVER" = 32 ]; then
+    # Workbench 3.2, as install/test/run-smbmount.sh -o 32 boots it: the
+    # lab's unpacked tree, else tools/mkwb32.sh from the CD's ADFs.
+    WB="$ROOT/build/wb32-sys"
+    TARBALL="${AMINETXDUO_WB32_TARBALL:-$HOME/amiga-assets/os32/wb32-sys-A1200.tar.gz}"
+    if [ ! -d "$WB" ]; then
+        mkdir -p "$WB"
+        if [ -f "$TARBALL" ]; then tar xzf "$TARBALL" -C "$WB"
+        else "$ROOT/tools/mkwb32.sh" -o "$WB" || exit 2; fi
+        chmod -R a+rx "$WB"
+    fi
+else
+    wb31_assemble "$ROOT/build/wb31-sys" || exit 2
+    WB="$WB31_SYS"
+fi
 
 [ -n "$DEPTH" ] && say screen_depth_asked "$DEPTH" || true
 
@@ -147,6 +182,16 @@ EOF
             "CONFIGURE=DHCP" "MTU=1500" > "$HD/Devs/NetInterfaces/ETH0"
     fi
 
+    if [ -x "$NETWIRELESS" ] && [ -x "$NETWIRELESSCX" ] && [ -x "$WIFISTUB" ] &&
+       [ -x "$WINCLICK" ]; then
+        cp "$NETWIRELESS" "$HD/C/NetWirelessPrefs"
+        cp "$NETWIRELESSCX" "$HD/C/NetWireless"
+        cp "$WIFISTUB" "$HD/C/WifiStub"
+        cp "$WINCLICK" "$HD/C/WinClick"
+        chmod 755 "$HD/C/NetWirelessPrefs" "$HD/C/NetWireless" \
+            "$HD/C/WifiStub" "$HD/C/WinClick"
+    fi
+
     [ -n "$DEPTH" ] && wb31_screenmode_prefs "$HD" "$DEPTH"
     [ -n "$FONT" ] && font_prefs "$HD" "${FONT%/*}" "${FONT##*/}"
     return 0
@@ -179,7 +224,11 @@ EOF
 }
 
 startup_with() {
-    sed -e '/^EndCLI/d' "$WB/S/Startup-Sequence" > "$HD/S/Startup-Sequence"
+    # 3.2 spells it Startup-sequence; AmigaDOS does not mind, Linux does.
+    local ss
+    ss=$(find "$WB/S" -maxdepth 1 -iname 'startup-sequence' | head -1)
+    rm -f "$HD/S/$(basename "$ss")"
+    sed -e '/^EndCLI/d' "$ss" > "$HD/S/Startup-Sequence"
     printf '\n%s\n' "$1" >> "$HD/S/Startup-Sequence"
     chmod 755 "$HD/S/Startup-Sequence"
 }
@@ -236,6 +285,29 @@ C:wbgrab TO DH0:netprefs-3.pfs >NIL:
 C:WinClick "AmiNetXDuo Network" 2 >NIL:
 C:Wait 1
 C:wbgrab TO DH0:netprefs-4.pfs >NIL:
+Echo >DH0:.done "$RC"
+EOF
+        ;;
+    netwireless)
+        # The window once its first scan is in, then Join... (gadget 4)
+        # with nothing selected: the form for a hidden network.
+        cat <<'EOF'
+FailAt 9999
+C:Wait 6
+Run >NIL: C:WifiStub SERVE
+C:Wait 2
+Run >NIL: C:NetWireless DEVICE=wifistub.device
+C:Wait 2
+Run >NIL: C:NetWirelessPrefs DEVICE=wifistub.device
+C:Wait 20
+C:NetWirelessPrefs DEVICE=wifistub.device STATUS >DH0:nwstatus.txt
+GetEnv WiFi >>DH0:nwstatus.txt
+C:WinClick "Wi-Fi" 4 TIMES 0 >DH0:netwireless.txt
+C:wbgrab TO DH0:netwireless.pfs >>DH0:netwireless.txt
+C:WinClick "Wi-Fi" 4 >NIL:
+C:Wait 2
+C:WinClick "Join a" 7 TIMES 0 >DH0:netwireless-join.txt
+C:wbgrab TO DH0:netwireless-1.pfs >NIL:
 Echo >DH0:.done "$RC"
 EOF
         ;;

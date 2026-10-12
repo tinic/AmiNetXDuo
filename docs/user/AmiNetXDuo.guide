@@ -1187,6 +1187,8 @@
     NetSetup          write the configuration files from a Shell
     NetPrefs          edit interfaces and boot policy from Workbench
     NetMeter          addresses and live rates in a small Workbench window
+    NetWirelessPrefs  Wi-Fi networks in range, joining one, link state
+    NetWireless       Wi-Fi state and signal as an AppIcon and in ENV:WiFi
     CheckNetConfig    read the configuration files back and report faults
     NetShutdown       stop the network and the programs using it
     RemoveNetInterface  remove one interface from the stack
@@ -3302,6 +3304,100 @@
   again in the same place once Workbench is back. Without it, close
   NetMeter before changing the screen mode.
 
+  NetWirelessPrefs is the Wi-Fi window. It lists the networks in range,
+  strongest first, with signal bars and a padlock for a network that asks
+  for a key (on Kickstart 3.0 and later; 2.04 shows the same as text), and
+  shows the network the unit is connected to. Join writes the network to
+  ENVARC:Sys/Wireless.prefs and ENV:Sys/Wireless.prefs, above every other
+  network there, and restarts WirelessManager with the DEVICE and UNIT of
+  DEVS:NetInterfaces/wifipi; the window then waits up to 30 seconds for
+  the connection. Disconnect stops WirelessManager. WirelessManager joins
+  the network and holds the keys; NetWirelessPrefs only writes its file.
+  The file is edited from the copy in ENV:, or ENVARC: when ENV: has none;
+  comments, other networks and keys not shown in the window are kept as
+  they are, and a file that cannot be read is not written. The Known
+  button is for a later release.
+
+  The passphrase is not stored. Join derives the WPA key from passphrase
+  and network name and stores it as psk=<64 hex digits>, which also
+  removes the derivation from every start of WirelessManager. The
+  derivation takes about 70 seconds on a 7 MHz 68000 and about 11 seconds
+  on a 14 MHz 68020; the window shows its progress and Cancel stops it.
+  A passphrase has 8 to 63 characters; 64 hex digits are taken as the key
+  itself. "Hidden network" adds scan_ssid=1, for a network that does not
+  announce its name. WEP, WPA3-only and Enterprise networks are listed and
+  cannot be joined: WirelessManager 1.5 does not support them.
+
+  The Wi-Fi unit is DEVICE and UNIT as given, or of the interface named by
+  INTERFACE. With neither, it is the first interface file whose DEVICE is
+  a Wi-Fi driver (anxwifipi.device for the Pi, prism2.device for PC Card
+  and PCI cards), DEVS:NetInterfaces/wifipi first; with none,
+  anxwifipi.device unit 0. On a self-contained installation the
+  interface files in AmiNetXDuo:Devs/NetInterfaces are the ones read, as
+  the stack reads them. prism2.device reports the access point and not
+  the network's name: the window shows "Connected" and the AppIcon "Wi-Fi"
+  for the network there. prism2.device 2.9 says when the card is
+  associated and keyed, and a join counts only then; an older one says
+  neither until it changes, so the link reads "Online" until then and a
+  join counts only on a new access point. DEVICE,
+  UNIT, INTERFACE and WM (the WirelessManager command, C:WirelessManager by
+  default) are also ToolTypes, and arguments win over the icon. Project >
+  Snapshot keeps the window's position in the icon as LEFT and TOP.
+  Scanning needs Kickstart 3.0 or later.
+
+  From a Shell:
+
+      NetWirelessPrefs LIST           networks in range
+      NetWirelessPrefs STATUS         connected network and signal
+      NetWirelessPrefs JOIN=<name> PASSPHRASE=<text> [HIDDEN]
+                                      join as the window does; without
+                                      PASSPHRASE, an open network
+
+  STATUS returns 0 when connected and 5 when not. JOIN returns 0 when
+  connected, 5 when not connected after 30 seconds, and 10 when the file
+  or WirelessManager failed. On Kickstart 2.04 the unit cannot report which
+  network it joined, so any connection counts. A passphrase given in a
+  Shell is visible in that Shell's history. SETUP opens the window for the
+  installer: it returns 0 after Join has written the file, 5 when the
+  window was closed or another NetWirelessPrefs is running, 10 when there
+  is no Wi-Fi unit, and 20 when the window could not open. SETUP does not
+  restart WirelessManager.
+
+  NetWireless is the Wi-Fi commodity. It shows the link as an AppIcon:
+  one to four bars by signal (from -55, -66 and -77 dBm), bar outlines
+  while not connected, dotted outlines when the unit is offline, crossed
+  out with no Wi-Fi unit, and a '!' when the unit does not answer; the
+  label is the network's name (on Kickstart 3.0 and later; "Wi-Fi" before). It also adds "Wi-Fi..." to Workbench's
+  Tools menu and keeps the state in the variable ENV:WiFi, for example
+  "Home 3/4", which a Workbench 3.2 title bar shows with %e WiFi. A
+  double-click on the icon, the menu item, the hotkey and Exchange's Show
+  open NetWirelessPrefs.
+
+  The unit reports connects and disconnects as events; the signal is read
+  every INTERVAL seconds only while connected, or while a reading has
+  failed, and nothing is read while not connected. A unit that reports no
+  events is read every INTERVAL seconds. A changed picture replaces the
+  AppIcon; on Workbench 3.5 and later it keeps the place it was dragged
+  to, before that it returns to a free place on the desktop.
+
+  ToolTypes, also Shell arguments:
+
+      CX_PRIORITY=0         commodity priority
+      CX_POPKEY=ctrl alt w  the hotkey
+      CX_POPUP=NO           YES opens NetWirelessPrefs at start
+      DEVICE, UNIT          the Wi-Fi unit, else as NetWirelessPrefs finds it
+      INTERFACE=wifipi      the interface file DEVICE and UNIT come from
+      INTERVAL=5            seconds between signal readings
+      APPICON=YES           NO: no AppIcon
+      APPMENU=YES           NO: no Tools menu item
+      ENVVAR=WiFi           the variable; an empty name ("" from a
+                            Shell): none
+      QUIET                 with no Wi-Fi unit, end at once
+
+  Without commodities.library there is no hotkey and no Exchange entry;
+  without Workbench there is no AppIcon and no menu item; the variable is
+  kept either way. Ctrl-C and Exchange's Remove end it.
+
   @{b}Drivers@{ub}
 
       DEVS:<something>.device         the card's SANA-II driver, which
@@ -3316,6 +3412,37 @@
 
   The Installer offers to put all four here. Nothing reads one until an
   interface file names it.
+
+  @{b}Wi-Fi@{ub}
+
+      C:WirelessManager               the supplicant that joins the
+                                      Wi-Fi network for
+                                      anxwifipi.device
+      ENVARC:Sys/Wireless.prefs       the network name and passphrase,
+                                      in wpa_supplicant's format
+      WirelessManager-LICENSE         its licence, in the AmiNetXDuo
+                                      drawer
+      S:AmiNetXDuo-WiFi               the Wi-Fi files the Installer
+                                      created; executing it removes
+                                      them
+
+  The Installer adds these when the Pi Wi-Fi is selected, at every user
+  level; WirelessManager goes into the installation's own drawer in that
+  layout. Its window asks for the network name and passphrase; the
+  passphrase appears as asterisks and does not reach the installation
+  log. A WirelessManager or Wireless.prefs the Installer did not create
+  is kept as it is.
+
+  S:Network-Startup starts the Wi-Fi only when ENV:Sys/Wireless.prefs
+  exists: WirelessManager first, then the interface, which waits at most
+  30 seconds for an address; DHCP continues after the boot goes on. With
+  the Pi Ethernet as well, both start, the Ethernet first with
+  PRIORITY=10, so the default route stays on the cable; the micro stack
+  starts the Ethernet only. Where WirelessManager is set up on the
+  machine already -- a copy or a Wireless.prefs the Installer did not
+  create, or a mention in S:User-Startup, S:Startup-Sequence or
+  SYS:WBStartup -- the lines that would start a second copy are written
+  commented out.
 
 @endnode
 
@@ -3347,6 +3474,13 @@
   SANA-II is Commodore's network driver standard. Drivers for a card
   are the work of their own authors and are not part of this
   distribution.
+
+  WirelessManager is Neil Cafferkey's supplicant for SANA-II wireless
+  drivers, from Aminet's driver/net/prism2v2, distributed unmodified. It
+  is based on wpa_supplicant and is under wpa_supplicant's three-clause
+  BSD licence: Copyright (c) 2003-2010 Jouni Malinen and contributors,
+  (c) 2011-2025 Neil Cafferkey. The licence text is installed with it as
+  WirelessManager-LICENSE in the AmiNetXDuo drawer.
 
   Thanks to Rondoval on the English Amiga Board for a detailed external
   review of the SANA-II extension design. His criticism prompted the move

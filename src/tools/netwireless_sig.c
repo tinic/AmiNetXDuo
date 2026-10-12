@@ -158,6 +158,16 @@ void nw_ssid_text(const unsigned char *ssid, int len, char *out)
     out[i] = '\0';
 }
 
+int nw_bars_held(long dbm, int shown)
+{
+    int up = nw_bars(dbm - 3), down = nw_bars(dbm + 3);
+
+    if (shown < 1) return nw_bars(dbm);
+    if (up > shown) return up;
+    if (down < shown) return down;
+    return shown;
+}
+
 void nw_bar_rect(int i, int w, int h, int *x0, int *y0, int *x1, int *y1)
 {
     int gap = w / 13 > 0 ? w / 13 : 1;

@@ -106,6 +106,14 @@
 (set S_CICON (if (> (strlen SRCDIR) 0)
                  (tackon SRCDIR "C.info") "C.info"))
 
+; WirelessManager and its licence, in a drawer of their own: C/ is copied
+; wholesale, and these are copied only when the Pi Wi-Fi is selected.
+(set S_WIRELESS (if (> (strlen SRCDIR) 0) (tackon SRCDIR "Wireless") "Wireless"))
+(set S_WM    (tackon S_WIRELESS "WirelessManager"))
+(set S_WMLIC (tackon S_WIRELESS "WirelessManager-LICENSE"))
+(set S_INSTWIFI (if (> (strlen SRCDIR) 0)
+                    (tackon SRCDIR "InstallWiFi") "InstallWiFi"))
+
 ; --------------------------------------------------------------------------
 ; Help texts.  Every ask.../copy... statement is required by the Installer to
 ; carry both a (prompt) and a (help); a missing one is a script error at the
@@ -334,8 +342,10 @@
        "Ethernet in it, for a PiStorm32 running Emu68 1.1 alpha.1 or newer "
        "(DEVICE=anxgenet.device, UNIT=0).  anxwifipi.device is the third: the "
        "Pi 4's own Wi-Fi, for the same machines (DEVICE=anxwifipi.device, "
-       "UNIT=0; it needs the Wi-Fi firmware Emu68 puts in DEVS:Firmware and "
-       "a supplicant such as Aminet's WirelessManager to join a network).  "
+       "UNIT=0; it needs the Wi-Fi firmware in DEVS:Firmware, which the "
+       "installer adds when it is missing, and "
+       "WirelessManager to join a network, which the installer puts in C: "
+       "when the Pi Wi-Fi is selected).  "
        "anxzz9000.device is the fourth: the MNT ZZ9000's Ethernet, used when "
        "MNT's ZZ9000Net.device is not on the disk (DEVICE=anxzz9000.device, "
        "UNIT=0).\n\n"
@@ -355,6 +365,38 @@
        "already there exactly as they are.\n\n"
        "An existing driver is renamed to .old rather than being deleted, so "
        "the previous copy can be put back by hand."))
+
+(set H_WIFI
+  (cat "WirelessManager joins the Wi-Fi network for anxwifipi.device.  It "
+       "reads the network from ENV:Sys/Wireless.prefs, which AmigaOS copies "
+       "from ENVARC:Sys/Wireless.prefs at every boot.\n\n"
+       "InstallWiFi asks for the network name (SSID) and the WPA or WPA2 "
+       "passphrase in a window of its own and writes them in "
+       "wpa_supplicant's format.  The passphrase appears as asterisks and "
+       "is not written to the installation log.  An empty passphrase "
+       "selects an open network.  Skip writes no file, and the Wi-Fi "
+       "interface does not start until ENVARC:Sys/Wireless.prefs exists.\n\n"
+       "The window appears only when the Pi Wi-Fi is selected and there is "
+       "no Wireless.prefs.  An existing one is never replaced.  The Manual "
+       "in Aminet's driver/net/prism2v2 describes the file, including hidden "
+       "networks, WEP and several networks in one file."))
+
+(set H_WM
+  (cat "WirelessManager is Neil Cafferkey's supplicant for SANA-II wireless "
+       "drivers, from Aminet's driver/net/prism2v2, unmodified.  It joins the "
+       "network named in ENV:Sys/Wireless.prefs and keeps the connection.  "
+       "S:Network-Startup starts it before the Wi-Fi interface.\n\n"
+       "A WirelessManager that this installer did not put on the machine, in "
+       "C:, SYS:C or this installation's own drawer, is kept as it is.  "
+       "S:Network-Startup then leaves the lines that start WirelessManager "
+       "commented out, so that two copies do not share one radio.  The same "
+       "applies when a Wireless.prefs that this installer did not write "
+       "exists, or when S:User-Startup, S:Startup-Sequence or SYS:WBStartup "
+       "names WirelessManager.\n\n"
+       "It is based on wpa_supplicant and is distributed under wpa_supplicant's "
+       "three-clause BSD licence, Copyright (c) 2003-2010 Jouni Malinen and "
+       "contributors, (c) 2011-2025 Neil Cafferkey.  The licence is installed "
+       "in the AmiNetXDuo drawer as WirelessManager-LICENSE."))
 
 (set H_REPLACELIB
   (cat "There is already a bsdsocket.library on this machine.  It belongs to "
@@ -710,6 +752,9 @@
             )
             (if WARN_DRIVER
               (message (F_NODEV DEV_NAME) (help H_CARD))))))))
+
+  ; WirelessManager opens the driver the Wi-Fi interface file names.
+  (if (= CARD_INDEX 11) (set WIFI_DEV DEV_WRITE))
 )
 
 ; ==========================================================================
@@ -784,6 +829,13 @@
            "Nothing was changed."))
 (if (NOT (exists S_ANXWIFIPI (noreq)))
     (abort "This archive has no Devs/Networks/anxwifipi.device.\n\n"
+           "The download is incomplete, or was unpacked with a tool that "
+           "dropped the subdrawers.\n\n"
+           "Nothing was changed."))
+(if (NOT (AND (AND (exists S_WM (noreq)) (exists S_WMLIC (noreq)))
+              (exists S_INSTWIFI (noreq))))
+    (abort "This archive has no Wireless/WirelessManager, its licence or "
+           "InstallWiFi.\n\n"
            "The download is incomplete, or was unpacked with a tool that "
            "dropped the subdrawers.\n\n"
            "Nothing was changed."))
@@ -1415,6 +1467,75 @@
 (set PCM_OTHER_DEV "mycard.device")
 (set PCM 0)
 
+; The Pi Wi-Fi.  WIFI_SEL: it is selected, or a kept definition names
+; anxwifipi.device.  WIFI_PRIMARY: it is the interface S:Network-Startup
+; starts first.  WIFI_START: S:Network-Startup starts it too, after the
+; primary -- every profile but micro, which brings up one interface.
+; WIFI_DEV is what its interface file names.
+(set WIFI_SEL 0)
+(set WIFI_PRIMARY 0)
+(set WIFI_START 0)
+(set WIFI_IF "wifipi")
+(set WIFI_DEV W_ANXWIFIPI)
+(set WIFI_UNIT 0)
+(set WIFI_TMP "T:AmiNetXDuo-Wireless.prefs")
+(set WIFI_NEW_PREFS 0)
+(set WIFI_HAVE_PREFS
+  (if (OR (exists "ENVARC:Sys/Wireless.prefs" (noreq))
+          (exists "ENV:Sys/Wireless.prefs" (noreq))) 1 0))
+
+; WHOSE WirelessManager AND WHOSE Wireless.prefs.  S:AmiNetXDuo-WiFi is the
+; record of the Wi-Fi files this installer created -- a script of Delete
+; lines, which is also how they are removed again -- so a reinstall can tell
+; its own copy from one the user had.  A WirelessManager that is not ours is
+; looked for in C:, SYS:C and this layout's own C; it is never replaced, and
+; with it, or with a Wireless.prefs that is not ours, or with WirelessManager
+; named in the startup files or WBStartup, S:Network-Startup does not start
+; another one: Status recognises a running copy only by its exact command
+; name, and two supplicants on one radio fight over it.
+(set D_WM (tackon D_C "WirelessManager"))
+(set WM_REC (if DRAWER_LAYOUT "AmiNetXDuo:C/WirelessManager" "C:WirelessManager"))
+; What finds WM_REC's line in the record.  No volume name the drawer layout
+; may not have assigned yet: Search given one never returned.
+(set WM_REC_KEY (if DRAWER_LAYOUT "C/WirelessManager QUIET"
+                    "Delete C:WirelessManager QUIET"))
+(set WIFI_REC "S:AmiNetXDuo-WiFi")
+(set WM_OURS 0)
+(set PREFS_OURS 0)
+(if (exists WIFI_REC (noreq))
+  (
+    (if (= 0 (run ("Search >NIL: FROM %s SEARCH \"%s\" QUIET"
+                   WIFI_REC WM_REC_KEY)
+                  (quiet) (safe)))
+        (set WM_OURS 1))
+    (if (= 0 (run ("Search >NIL: FROM %s SEARCH ENVARC:Sys/Wireless.prefs QUIET"
+                   WIFI_REC)
+                  (quiet) (safe)))
+        (set PREFS_OURS 1))
+  ))
+(set HAVE_C_WM    (if (exists "C:WirelessManager" (noreq)) 1 0))
+(set HAVE_SYSC_WM (if (exists "SYS:C/WirelessManager" (noreq)) 1 0))
+(set HAVE_D_WM    (if (exists D_WM (noreq)) 1 0))
+(if DRAWER_LAYOUT
+    (set WM_USER (if (OR HAVE_SYSC_WM
+                         (OR (AND HAVE_C_WM (= HAVE_D_WM 0))
+                             (AND HAVE_D_WM (= WM_OURS 0)))) 1 0))
+    (set WM_USER (if (AND (OR HAVE_C_WM HAVE_SYSC_WM) (= WM_OURS 0)) 1 0)))
+(set PREFS_USER (if (AND WIFI_HAVE_PREFS (= PREFS_OURS 0)) 1 0))
+(set WM_ELSEWHERE 0)
+(set WM_SCAN_N 0)
+(while (set WM_SCAN (select WM_SCAN_N "S:User-Startup" "S:Startup-Sequence"
+                                      "SYS:WBStartup" ""))
+  (
+    (if (exists WM_SCAN (noreq))
+        (if (= 0 (run ("Search >NIL: FROM %s SEARCH WirelessManager QUIET"
+                       WM_SCAN)
+                      (quiet) (safe)))
+            (set WM_ELSEWHERE 1)))
+    (set WM_SCAN_N (+ WM_SCAN_N 1))
+  ))
+(set WM_LIVE (if (OR WM_USER (OR PREFS_USER WM_ELSEWHERE)) 0 1))
+
 (if (= KEEP_OLD 0)
   (
     ; Ten families fit Installer 2.17's standard page.  Fourteen individual
@@ -1677,6 +1798,85 @@
         (help    H_DHCP)
         (choices "Yes, use DHCP" "No, I will type them")
         (default 1)))
+
+    ; --- the Wi-Fi ---------------------------------------------------
+    (set WIFI_SEL (if (> (bitand CARD_MASK 2048) 0) 1 0))
+    (set WIFI_PRIMARY (if (= PRIMARY_INDEX 11) 1 0))
+    (if WIFI_PRIMARY
+      (
+        (set WIFI_IF IFNAME)
+        (set WIFI_UNIT DEVUNIT)
+      ))
+  ))
+
+; A kept configuration is recognised by what its definitions open: the
+; definition the startup names (OLD_IF), or the one this installer calls
+; wifipi, when its DEVICE= names anxwifipi.device.  WirelessManager is given
+; this layout's path for it, or the bare name the file uses.  The search
+; strings carry no volume name: on a drawer reinstall before a reboot the
+; AmiNetXDuo: assign does not exist yet, and Search given "AmiNetXDuo:..."
+; never returned (Amiberry, Workbench 3.1).
+(if KEEP_OLD
+  (
+    (set WIFI_NAME_N 0)
+    (while (AND (= WIFI_SEL 0)
+                (<> (set WIFI_NAME (select WIFI_NAME_N OLD_IF "wifipi" "")) ""))
+      (
+        (set KEPT_IF (tackon D_IFDIR WIFI_NAME))
+        (if (exists KEPT_IF (noreq))
+          (
+            (if (= 0 (run ("Search >NIL: FROM \"%s\" SEARCH Networks/anxwifipi.device QUIET"
+                           KEPT_IF)
+                          (quiet) (safe)))
+              (
+                (set WIFI_SEL 1)
+                (set WIFI_DEV W_ANXWIFIPI)
+              )
+              (if (= 0 (run ("Search >NIL: FROM \"%s\" SEARCH DEVICE=anxwifipi.device QUIET"
+                             KEPT_IF)
+                            (quiet) (safe)))
+                (
+                  (set WIFI_SEL 1)
+                  (set WIFI_DEV "anxwifipi.device")
+                )))
+            (if WIFI_SEL (set WIFI_IF WIFI_NAME))
+          ))
+        (set WIFI_NAME_N (+ WIFI_NAME_N 1))
+      ))
+  ))
+(if (AND KEEP_OLD WIFI_SEL)
+    (set WIFI_PRIMARY (if (= OLD_IF WIFI_IF) 1 0)))
+(set WIFI_START (if (AND WIFI_SEL (OR WIFI_PRIMARY (<> MINPICK 2))) 1 0))
+
+; --- the Wi-Fi network ---------------------------------------------------
+;
+; At every user level: a Pi on Emu68 is found without a question, and Wi-Fi
+; with no network named cannot join.  A window of InstallWiFi's own, because
+; Installer logs every askstring answer and the passphrase must not reach the
+; log.  It writes to T: here, before anything on the disk is changed; the
+; file goes to ENVARC:Sys with the rest of the configuration.
+(if (AND WIFI_SEL (= WIFI_HAVE_PREFS 0))
+  (
+    (if (exists WIFI_TMP (noreq))
+        (delete WIFI_TMP
+                (prompt "Removing a leftover T:AmiNetXDuo-Wireless.prefs")
+                (help   H_WIFI)
+                (optional "force" "nofail")))
+    ; Not in a pretend run: the passphrase would sit in T: for nothing.
+    (if (= @pretend 0)
+      (
+        (set WIFI_RC (run ("\"%s\" TO %s" S_INSTWIFI WIFI_TMP)
+                          (prompt "Asking for the Wi-Fi network")
+                          (help   H_WIFI)
+                          (safe)))
+        (if (>= WIFI_RC 20)
+            (message "The Wi-Fi window could not be opened, so no Wi-Fi "
+                     "network is set.  ENVARC:Sys/Wireless.prefs can be "
+                     "written later with a text editor; the Manual in "
+                     "Aminet's driver/net/prism2v2 describes it."
+                     (help H_WIFI)))
+        (set WIFI_NEW_PREFS (if (exists WIFI_TMP (noreq)) 1 0))
+      ))
   ))
 
 ; --- the manual addresses ------------------------------------------------
@@ -2099,11 +2299,11 @@
     (set dev_source S_ANXWIFIPI)
     (set dev_prompt (cat "Installing anxwifipi.device into DEVS:Networks\n\n"
                          "The Raspberry Pi 4's own Wi-Fi, for a PiStorm32 "
-                         "running Emu68.  It needs the Wi-Fi firmware Emu68 "
-                         "installs in DEVS:Firmware, and a supplicant such as "
-                         "WirelessManager (Aminet driver/net/prism2v2) to join "
-                         "a network.  Nothing uses it until an interface file "
-                         "names it."))
+                         "running Emu68.  It needs the Wi-Fi firmware in "
+                         "DEVS:Firmware, and WirelessManager, "
+                         "installed in C: when the Pi Wi-Fi is selected, to "
+                         "join a network.  Nothing uses it until an interface "
+                         "file names it."))
     (P_install_device)
   ))
 
@@ -2127,12 +2327,13 @@
 ; --- the Pi Wi-Fi firmware ------------------------------------------------
 ;
 ; anxwifipi.device loads its chip's firmware from DEVS:Firmware, where the
-; Emu68 Imager puts it.  For the Pi Wi-Fi, every file of the archive's
+; Emu68 Imager puts it.  For the Pi Wi-Fi (WIFI_SEL: selected, or a kept
+; definition names anxwifipi.device), every file of the archive's
 ; Devs/Firmware that DEVS:Firmware does not have goes there, the licences
 ; and WHENCE included.  A file already there is kept: it may be a newer
 ; firmware the user put in.  So is the .clm_blob of a .bin already there:
 ; the two are one build.
-(if (> (bitand CARD_MASK 2048) 0)
+(if WIFI_SEL
   (
     (set D_FIRMWARE (tackon D_DEVS "Firmware"))
     (makedir D_FIRMWARE
@@ -2400,6 +2601,20 @@
       (noposition)
       (optional "force")))
 
+; WirelessManager, for the Pi Wi-Fi only, and never over one the user had
+; (WM_USER): that one may be the version another Wi-Fi driver on this machine
+; was set up with.  Over our own copy, a plain copy: nothing of anybody
+; else's is replaced, so nothing is staged.
+(if (AND WIFI_SEL (= WM_USER 0))
+        (copyfiles
+          (prompt "Installing WirelessManager into C:\n\n"
+                  "It joins the Wi-Fi network for anxwifipi.device.")
+          (help   H_WM)
+          (source S_WM)
+          (dest   D_C)
+          (optional "force")))
+(set WM_OURS (if (OR WM_OURS (AND WIFI_SEL (= WM_USER 0))) 1 0))
+
 ; ssh and scp went into C: with the copies above.  ssh used to need its own step and a
 ; pattern that kept ssh.000, ssh.020 and ssh.060 out of the wholesale copy,
 ; because Dropbear comes from clients/ rather than the CMake tree and was built
@@ -2485,6 +2700,11 @@
     (append ("UNIT=%ld\n" DEVUNIT))
     (append (if USEDHCP "CONFIGURE=DHCP\n" "CONFIGURE=STATIC\n"))
     (append (if WANTMDNS "MDNS=YES\n" "MDNS=NO\n"))
+    (append (if IF_PRIORITY
+                (cat "; PRIORITY=10 puts this interface's routes ahead of the\n"
+                     "; Wi-Fi's, which starts too.\n"
+                     "PRIORITY=10\n")
+                ""))
     (append (if USEDHCP
                 (cat ";ADDRESS=192.168.1.10\n;NETMASK=255.255.255.0\n")
                 (cat "ADDRESS=" IPADDR "\n" "NETMASK=" IPMASK "\n")))
@@ -2498,7 +2718,11 @@
 
     (set PRIMARY_IF IFNAME)
     (set PRIMARY_DHCP USEDHCP)
+    ; The cable over the air when both start: the primary's default route
+    ; wins.  Only the primary carries it.
+    (set IF_PRIORITY (if (AND WIFI_START (= WIFI_PRIMARY 0)) 1 0))
     (P_write_interface)
+    (set IF_PRIORITY 0)
 
     ; Write every other checked device as a DHCP definition, but leave IFNAME
     ; on the deterministic primary afterwards: S:Network-Startup deliberately
@@ -2568,6 +2792,76 @@
       (append "hostname " HOSTNAME "\n")
       (safe))
   ))
+
+; --- the Wi-Fi network, for WirelessManager ------------------------------
+;
+; What InstallWiFi wrote to T: in section 4, into WirelessManager's place.
+; ENVARC: is what survives a reboot; ENV: gets the same file now, because
+; the startup lines read ENV:.  Then the record of what is ours.
+(if WIFI_NEW_PREFS
+  (
+    (makedir "ENVARC:Sys"
+      (prompt "Creating ENVARC:Sys")
+      (help   @makedir-help))
+    (copyfiles
+      (prompt "Installing ENVARC:Sys/Wireless.prefs")
+      (help   H_WIFI)
+      (source WIFI_TMP)
+      (dest   "ENVARC:Sys")
+      (newname "Wireless.prefs"))
+    (makedir "ENV:Sys"
+      (prompt "Creating ENV:Sys")
+      (help   @makedir-help))
+    (copyfiles
+      (prompt "Copying Wireless.prefs to ENV:Sys")
+      (help   H_WIFI)
+      (source WIFI_TMP)
+      (dest   "ENV:Sys")
+      (newname "Wireless.prefs")
+      (optional "nofail"))
+    (delete WIFI_TMP
+            (prompt "Removing T:AmiNetXDuo-Wireless.prefs")
+            (help   H_WIFI)
+            (optional "force" "nofail"))
+    (set PREFS_OURS 1)
+  ))
+
+; Not in a pretend run, which created nothing to record.
+(if (AND (= @pretend 0) (OR WM_OURS PREFS_OURS))
+    (textfile
+      (prompt "Writing S:AmiNetXDuo-WiFi")
+      (help   "The Wi-Fi files this installer created, and only those.  A "
+              "later installation reads it to tell them from files the user "
+              "had, and executing it removes them.")
+      (dest   WIFI_REC)
+      (append "; S:AmiNetXDuo-WiFi -- written by the AmiNetXDuo installer.\n")
+      (append ";\n")
+      (append "; The Wi-Fi files the installer created, and only those.\n")
+      (append "; Execute this file to remove them, then delete it.\n")
+      (append "FailAt 21\n")
+      (append (if WM_OURS (cat "Delete " WM_REC " QUIET\n") ""))
+      (append (if PREFS_OURS
+                  "Delete ENVARC:Sys/Wireless.prefs ENV:Sys/Wireless.prefs QUIET\n"
+                  ""))
+      (safe)))
+
+; A kept Ethernet definition with the Wi-Fi starting beside it, in a
+; S:Network-Startup written on this run, gets the PRIORITY=10 a new one is
+; written with, unless a live line already sets PRIORITY.  InstallWiFi does
+; it: Search cannot tell ";PRIORITY=0", as the example files carry it, from
+; a setting, and that left such a file without one.
+(if (AND (AND KEEP_OLD (= KEEP_NETSTART 0))
+         (AND DO_STARTUP (AND WIFI_START (= WIFI_PRIMARY 0))))
+  (if (= @pretend 0)
+    (
+      (set KEPT_IF (tackon D_IFDIR OLD_IF))
+      (if (<> 0 (run ("\"%s\" PRIORITY \"%s\"" S_INSTWIFI KEPT_IF)
+                     (prompt ("Adding PRIORITY=10 to %s, ahead of the Wi-Fi" KEPT_IF))
+                     (help   H_WIFI)
+                     (safe)))
+          (message ("%s could not be given PRIORITY=10.  Add the line by hand to keep the default route on the cable." KEPT_IF)
+                   (help H_WIFI)))
+    )))
 
 ; A KEPT FILE FOLLOWS THE ASSIGN TOO.  One written before the drawer named
 ; its drivers through AmiNetXDuo: says DEVICE=SYS:AmiNetXDuo/Devs/Networks/...
@@ -2755,6 +3049,18 @@
       (newname "Terminal.info")
       (optional "nofail")))
 
+; WirelessManager's licence goes with every copy of the binary, and with
+; the binary's selection: the Pi Wi-Fi.  Installed here even when an
+; existing C:WirelessManager was kept, because the archive's copy is what
+; this drawer documents.
+(if WIFI_SEL
+    (copyfiles
+      (prompt "Installing the WirelessManager licence")
+      (help   H_WM)
+      (source S_WMLIC)
+      (dest   DOCDIR)
+      (optional "nofail")))
+
 ; ssh (Dropbear's dbclient) and scp ride into C: with the other network commands
 ; above -- the argv/stack shim gives them a real argv[] and their own stack,
 ; so they no longer need the separate drawer and the `stack 200000`
@@ -2887,6 +3193,66 @@
     (set NS_SNTP
       ("Run >NIL: <NIL: %ssntp %s QUIET\n" C_PREFIX NTP_SERVER)))
 
+; THE WI-FI IN S:Network-Startup.  Started only when ENV:Sys/Wireless.prefs
+; exists, which is also what WirelessManager needs: WirelessManager first,
+; so it is joining before DHCP asks, then the interface with the 30 second
+; wait; without the file neither starts and nothing waits.  Status finds a
+; copy already running under the same command name, and then none is
+; started.  Run's `+' continues onto the next line in the background CLI, so
+; the larger stack is that CLI's alone.  With WM_LIVE off the lines that
+; start WirelessManager are written commented out (see WM_USER).
+;
+; When the Wi-Fi is not the primary it starts after it, the primary having
+; PRIORITY=10.  Micro brings up one interface, so there the block is written
+; commented out after the primary, for whoever wants to swap.
+(set WM_CMD (if WM_USER "C:WirelessManager" (cat C_PREFIX "WirelessManager")))
+(set WIFI_TIMEOUT 30)
+(set WM_PFX (if WM_LIVE "" ";"))
+(set WIFI_LINES
+  (cat "If EXISTS ENV:Sys/Wireless.prefs\n"
+       "  " WM_PFX "Status >NIL: COMMAND=" WM_CMD "\n"
+       "  " WM_PFX "If WARN\n"
+       "  " WM_PFX "  Run >NIL: <NIL: Stack 32768 +\n"
+       "  " WM_PFX "  " WM_CMD (" DEVICE=%s UNIT=%ld\n" WIFI_DEV WIFI_UNIT)
+       "  " WM_PFX "EndIf\n"
+       "  " C_PREFIX "AddNetInterface DEVS:NetInterfaces/" WIFI_IF
+       (" QUIET TIMEOUT=%ld\n" WIFI_TIMEOUT)
+       "EndIf\n"))
+(set WIFI_NOTE
+  (cat ";\n"
+       "; Wi-Fi: with ENV:Sys/Wireless.prefs, WirelessManager joins that\n"
+       "; network, then the interface asks for an address and waits at most\n"
+       "; " ("%ld" WIFI_TIMEOUT) " seconds; DHCP goes on asking after the boot continues.\n"
+       "; Without the file the Wi-Fi does not start.  Status recognises a\n"
+       "; WirelessManager already running only under this exact command name.\n"
+       (if WM_LIVE ""
+           (cat ";\n"
+                "; WirelessManager is set up on this machine outside this file,\n"
+                "; so the lines that would start it are commented out: two\n"
+                "; copies must not share the radio.  Remove those semicolons if\n"
+                "; nothing else starts it.\n"))))
+(set NS_WIFI "")
+(set NS_WIFI_LATER "")
+(if WIFI_START
+    (set NS_WIFI (cat WIFI_NOTE WIFI_LINES))
+    (if WIFI_SEL
+        (set NS_WIFI_LATER
+          (cat ";\n"
+               "; The Pi Wi-Fi is defined as " WIFI_IF " and is not started: this\n"
+               "; stack brings up one interface.  To use the Wi-Fi instead,\n"
+               "; comment out the line above and remove the first semicolon\n"
+               "; from each line below.\n"
+               ";\n"
+               ";If EXISTS ENV:Sys/Wireless.prefs\n"
+               ";  Status >NIL: COMMAND=" WM_CMD "\n"
+               ";  If WARN\n"
+               ";    Run >NIL: <NIL: Stack 32768 +\n"
+               ";    " WM_CMD (" DEVICE=%s UNIT=%ld\n" WIFI_DEV WIFI_UNIT)
+               ";  EndIf\n"
+               ";  " C_PREFIX "AddNetInterface DEVS:NetInterfaces/" WIFI_IF
+               (" QUIET TIMEOUT=%ld\n" WIFI_TIMEOUT)
+               ";EndIf\n"))))
+
 (if (AND DO_STARTUP (= KEEP_NETSTART 0))
   (
     (if (exists "S:Network-Startup" (noreq))
@@ -2939,8 +3305,13 @@
       (append "; what came up.  A boot that FAILS prints why either way.\n")
       (append NS_DRAWER_NOTE)
       (append "\n")
-      (append C_PREFIX "AddNetInterface DEVS:NetInterfaces/" START_IF " QUIET\n")
-      (append NS_SNTP))
+      (append (if (AND WIFI_START WIFI_PRIMARY)
+                  ""
+                  (cat C_PREFIX "AddNetInterface DEVS:NetInterfaces/" START_IF
+                       " QUIET\n")))
+      (append NS_WIFI)
+      (append NS_SNTP)
+      (append NS_WIFI_LATER))
   ))
 
 (if DO_STARTUP
