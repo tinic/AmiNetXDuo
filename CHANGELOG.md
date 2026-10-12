@@ -7,6 +7,10 @@ Add new entries under `Unreleased`; published release sections are history.
 
 - Installer: NetWirelessPrefs lists the Wi-Fi networks in range to join.
 
+- Installer: a Prism2 PCMCIA card gets WirelessManager and its Wi-Fi network, as the Pi Wi-Fi does.
+
+- NetWireless and NetWirelessPrefs have Workbench icons.
+
 - Installer: the Pi Wi-Fi firmware and its licences ship in Devs/Firmware;
   the files DEVS:Firmware lacks are copied when the Pi Wi-Fi is selected.
 

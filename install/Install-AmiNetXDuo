@@ -907,8 +907,11 @@
 (if (OR (exists "DEVS:etherlink3.device" (noreq))
         (exists "DEVS:Networks/etherlink3.device" (noreq)))
     (set PCM_DEFAULT 1))
-(if (OR (exists "DEVS:prism2.device" (noreq))
-        (exists "DEVS:Networks/prism2.device" (noreq)))
+; prism2.device beside etherlink3.device says nothing about the card: the
+; EtherLink default stays, and the card's own ID below decides.
+(if (AND (= PCM_DEFAULT 0)
+         (OR (exists "DEVS:prism2.device" (noreq))
+             (exists "DEVS:Networks/prism2.device" (noreq))))
     (set PCM_DEFAULT 4))
 
 
@@ -996,13 +999,14 @@
 (set PROBE_CMD ("\"%s\" CARD pcmcia" S_NETPROBE))
 (if (= 0 (run PROBE_CMD (quiet) (safe)))
   (set CARD_DEFAULT (bitor CARD_DEFAULT 1024)))
+; An NE2000 card's ID selects it too, over a driver-based default.
 (set PROBE_N 0)
 (while (set PROBE_CARD
-         (select PROBE_N "3c589" "3ccfem556" "3cxem556" ""))
+         (select PROBE_N "cnet" "3c589" "3ccfem556" "3cxem556" ""))
   (
     (set PROBE_CMD ("\"%s\" CARD %s" S_NETPROBE PROBE_CARD))
     (if (= 0 (run PROBE_CMD (quiet) (safe)))
-      (set PCM_DEFAULT (+ PROBE_N 1)))
+      (set PCM_DEFAULT PROBE_N))
     (set PROBE_N (+ PROBE_N 1))
   ))
 (set PROBE_CMD ("\"%s\" CARD uae" S_NETPROBE))
@@ -1476,12 +1480,14 @@
 (set PCM_OTHER_DEV "mycard.device")
 (set PCM 0)
 
-; The Wi-Fi: the Pi Wi-Fi, or a Prism2 PCMCIA card without it.  WIFI_SEL:
-; it is selected, or a kept definition names anxwifipi.device.  WIFI_PRIMARY: it is the interface S:Network-Startup
+; The Wi-Fi: the Pi Wi-Fi, or a Prism2 PCMCIA card without it (WIFI_PRISM).
+; WIFI_SEL: it is selected, or a kept definition names anxwifipi.device or
+; prism2.device.  WIFI_PRIMARY: it is the interface S:Network-Startup
 ; starts first.  WIFI_START: S:Network-Startup starts it too, after the
 ; primary -- every profile but micro, which brings up one interface.
 ; WIFI_DEV is what its interface file names.
 (set WIFI_SEL 0)
+(set WIFI_PRISM 0)
 (set WIFI_PRIMARY 0)
 (set WIFI_START 0)
 (set WIFI_IF "wifipi")
@@ -1723,6 +1729,16 @@
     (until (> (bitand CARD_MASK (shiftleft 1 PRIMARY_INDEX)) 0)
       (set PRIMARY_INDEX (+ PRIMARY_INDEX 1)))
 
+    ; One Wi-Fi at a time: a Prism2 card that is the primary interface is
+    ; the Wi-Fi, and the Pi Wi-Fi is not set up beside it.
+    (if (AND (= PRIMARY_INDEX 10) (= PCM 4) (> (bitand CARD_MASK 2048) 0))
+      (
+        (message "The Prism2 card is the Wi-Fi, so the Pi Wi-Fi is not set "
+                 "up as well: WirelessManager serves one Wi-Fi device."
+                 (help H_WM))
+        (set CARD_MASK (bitand CARD_MASK (bitnot 2048)))
+      ))
+
     (set WARN_DRIVER 1)
     (set CARD_INDEX 0)
     (while (< CARD_INDEX 14)
@@ -1815,6 +1831,7 @@
     (if (AND (= WIFI_SEL 0) (> (bitand CARD_MASK 1024) 0) (= PCM 4))
       (
         (set WIFI_SEL 1)
+        (set WIFI_PRISM 1)
         (set WIFI_IF "pcmcia")
         (set WIFI_PRIMARY (if (= PRIMARY_INDEX 10) 1 0))
       ))
@@ -1836,7 +1853,7 @@
   (
     (set WIFI_NAME_N 0)
     (while (AND (= WIFI_SEL 0)
-                (<> (set WIFI_NAME (select WIFI_NAME_N OLD_IF "wifipi" "")) ""))
+                (<> (set WIFI_NAME (select WIFI_NAME_N OLD_IF "wifipi" "pcmcia" "")) ""))
       (
         (set KEPT_IF (tackon D_IFDIR WIFI_NAME))
         (if (exists KEPT_IF (noreq))
@@ -1854,7 +1871,20 @@
                 (
                   (set WIFI_SEL 1)
                   (set WIFI_DEV "anxwifipi.device")
-                )))
+                )
+                ; A kept Prism2 card: DEVS:Networks or DEVS:, as it is named.
+                (if (= 0 (run ("Search >NIL: FROM \"%s\" SEARCH prism2.device QUIET"
+                               KEPT_IF)
+                              (quiet) (safe)))
+                  (
+                    (set WIFI_SEL 1)
+                    (set WIFI_PRISM 1)
+                    (set WIFI_DEV
+                      (if (= 0 (run ("Search >NIL: FROM \"%s\" SEARCH Networks/prism2.device QUIET"
+                                     KEPT_IF)
+                                    (quiet) (safe)))
+                          "DEVS:Networks/prism2.device" "prism2.device"))
+                  ))))
             (if WIFI_SEL (set WIFI_IF WIFI_NAME))
           ))
         (set WIFI_NAME_N (+ WIFI_NAME_N 1))
@@ -1885,8 +1915,9 @@
     (set WIFI_RC 5)
     (if (AND (= @pretend 0) (exists S_NWPREFS (noreq)))
         (set WIFI_RC (run ("\"%s\" SETUP DEVICE=\"%s\" UNIT=%ld TO %s"
-                           S_NWPREFS
-                           (if (= WIFI_DEV W_ANXWIFIPI) S_ANXWIFIPI WIFI_DEV)
+                           (expandpath S_NWPREFS)
+                           (if (= WIFI_DEV W_ANXWIFIPI)
+                               (expandpath S_ANXWIFIPI) WIFI_DEV)
                            WIFI_UNIT WIFI_TMP)
                           (prompt "Looking for Wi-Fi networks")
                           (help   H_WIFI)
@@ -2627,7 +2658,7 @@
 (if (AND WIFI_SEL (= WM_USER 0))
         (copyfiles
           (prompt "Installing WirelessManager into C:\n\n"
-                  "It joins the Wi-Fi network for anxwifipi.device.")
+                  "It joins the Wi-Fi network for the Wi-Fi device.")
           (help   H_WM)
           (source S_WM)
           (dest   D_C)
@@ -3227,23 +3258,35 @@
 (set WM_CMD (if WM_USER "C:WirelessManager" (cat C_PREFIX "WirelessManager")))
 (set WIFI_TIMEOUT 30)
 (set WM_PFX (if WM_LIVE "" ";"))
-(set WIFI_LINES
+; A Prism2 card as the primary interface starts without Wireless.prefs as
+; well (an open network needs none): only WirelessManager waits for it.
+(set WIFI_WM_LINES
   (cat "If EXISTS ENV:Sys/Wireless.prefs\n"
        "  " WM_PFX "Status >NIL: COMMAND=" WM_CMD "\n"
        "  " WM_PFX "If WARN\n"
        "  " WM_PFX "  Run >NIL: <NIL: Stack 32768 +\n"
        "  " WM_PFX "  " WM_CMD (" DEVICE=%s UNIT=%ld\n" WIFI_DEV WIFI_UNIT)
-       "  " WM_PFX "EndIf\n"
-       "  " C_PREFIX "AddNetInterface DEVS:NetInterfaces/" WIFI_IF
-       (" QUIET TIMEOUT=%ld\n" WIFI_TIMEOUT)
-       "EndIf\n"))
+       "  " WM_PFX "EndIf\n"))
+(set WIFI_LINES
+  (if (AND WIFI_PRISM WIFI_PRIMARY)
+      (cat WIFI_WM_LINES
+           "EndIf\n"
+           C_PREFIX "AddNetInterface DEVS:NetInterfaces/" WIFI_IF
+           (" QUIET TIMEOUT=%ld\n" WIFI_TIMEOUT))
+      (cat WIFI_WM_LINES
+           "  " C_PREFIX "AddNetInterface DEVS:NetInterfaces/" WIFI_IF
+           (" QUIET TIMEOUT=%ld\n" WIFI_TIMEOUT)
+           "EndIf\n")))
 (set WIFI_NOTE
   (cat ";\n"
        "; Wi-Fi: with ENV:Sys/Wireless.prefs, WirelessManager joins that\n"
        "; network, then the interface asks for an address and waits at most\n"
        "; " ("%ld" WIFI_TIMEOUT) " seconds; DHCP goes on asking after the boot continues.\n"
-       "; Without the file the Wi-Fi does not start.  Status recognises a\n"
-       "; WirelessManager already running only under this exact command name.\n"
+       (if (AND WIFI_PRISM WIFI_PRIMARY)
+           "; Without the file the card starts alone, for an open network.\n"
+           "; Without the file the Wi-Fi does not start.\n")
+       "; Status recognises a WirelessManager already running only under\n"
+       "; this exact command name.\n"
        (if WM_LIVE ""
            (cat ";\n"
                 "; WirelessManager is set up on this machine outside this file,\n"

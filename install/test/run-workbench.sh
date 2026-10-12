@@ -14,7 +14,7 @@
 #                                 [-m core|driver|probe|minimal]
 #                                 [-C] [-M] [-V] [-I] [-z] [-W]
 #                                 [-s yes|invalid]
-#                                 [-w join|keep|keepit|keepitlive|keepitfw|userstart|userwm|prism2]
+#                                 [-w join|keep|keepit|keepitlive|keepitfw|userstart|userwm|prism2|prism2pi|prism2keep]
 #                                 [-f roadshow-leave|roadshow-replace|
 #                                     amitcpng-leave|amitcpng-replace]
 #
@@ -59,8 +59,17 @@
 #   prism2    without -e: Cafferkey's prism2.device staged in DEVS:Networks
 #             selects PCMCIA "Prism2 wireless" beside the card, with no PC
 #             Card in the slot.  NetWirelessPrefs SETUP cannot open it, the
-#             Installer falls back to InstallWiFi (answered), and
+#             Installer falls back to InstallWiFi (answered), no Pi firmware
+#             is installed, and
 #             WirelessManager is started for prism2.device after the card.
+#   prism2pi  with -e wifi: the Pi Wi-Fi AND the Prism2 card are selected and
+#             the card is the primary interface (eth0).  One Wi-Fi at a
+#             time: the card is the Wi-Fi, the Pi Wi-Fi is not set up (no
+#             wifipi file, no firmware); the card starts outside the
+#             Wireless.prefs guard, WirelessManager inside it.
+#   prism2keep  prism2 with -R: run 1 answers, its S:Network-Startup is
+#             deleted, run 2 takes "Keep it" and must write the Wi-Fi block
+#             for prism2.device from the kept pcmcia definition.
 # Without -w, an install that selects no Wi-Fi must leave none of it behind.
 # -a takes an archive as given; without it a release-only defect cannot show.
 # -e replaces the throw-away archive's InstallNetProbe with a fixture naming
@@ -382,18 +391,19 @@ fi
 
 if [ -n "$WIFI_MODE" ]; then
     case "$WIFI_MODE" in
-        join|keep|keepit|keepitlive|keepitfw|userstart|userwm|prism2) ;;
+        join|keep|keepit|keepitlive|keepitfw|userstart|userwm|prism2|prism2pi|prism2keep) ;;
         *) echo "unknown Wi-Fi mode: $WIFI_MODE" >&2; exit 2 ;;
     esac
     case "$WIFI_MODE:$EMU68_FIXTURE" in
-        prism2:) ;;
-        prism2:*) echo "-w prism2 takes no -e: the Pi Wi-Fi would win" >&2
-                  exit 2 ;;
+        prism2:|prism2keep:|prism2pi:wifi) ;;
+        prism2pi:*) echo "-w prism2pi needs -e wifi" >&2; exit 2 ;;
+        prism2*:*) echo "-w $WIFI_MODE takes no -e: the Pi Wi-Fi would win" >&2
+                   exit 2 ;;
         *:wifi|*:both) ;;
         *) echo "-w needs -e wifi or -e both: only then is the Pi Wi-Fi selected" >&2
            exit 2 ;;
     esac
-    if { [ "$WIFI_MODE" = keepit ] || [ "$WIFI_MODE" = keepitlive ] || [ "$WIFI_MODE" = keepitfw ]; } && [ "$RERUN" != 1 ]; then
+    if { [ "$WIFI_MODE" = keepit ] || [ "$WIFI_MODE" = keepitlive ] || [ "$WIFI_MODE" = keepitfw ] || [ "$WIFI_MODE" = prism2keep ]; } && [ "$RERUN" != 1 ]; then
         echo "-w keepit needs -R: it is the Keep it reinstall" >&2
         exit 2
     fi
@@ -947,13 +957,22 @@ WIFI_SEL=0
 case "$EMU68_FIXTURE" in wifi|both) WIFI_SEL=1 ;; esac
 WIFI_IFNAME=wifipi
 WIFI_DRIVER=anxwifipi.device
+PRISM2=0
+case "$WIFI_MODE" in prism2|prism2pi|prism2keep) PRISM2=1 ;; esac
 # -w prism2: the PC Card beside the board, so started after it.
-if [ "$WIFI_MODE" = prism2 ]; then
+if [ "$WIFI_MODE" = prism2 ] || [ "$WIFI_MODE" = prism2keep ]; then
     WIFI_SEL=1
     WIFI_IFNAME=pcmcia
     WIFI_DRIVER=prism2.device
     EXPECTED_SECOND_IF=pcmcia
     EXPECTED_SECOND_DEVICE=prism2.device
+fi
+# -w prism2pi: the card is the primary interface and the Wi-Fi.
+if [ "$WIFI_MODE" = prism2pi ]; then
+    WIFI_IFNAME=eth0
+    WIFI_DRIVER=prism2.device
+    EXPECTED_IF=eth0
+    EXPECTED_AUTO_DEVICE=prism2.device
 fi
 WIFI_PRIMARY=0
 [ "$EMU68_FIXTURE" = wifi ] && WIFI_PRIMARY=1
@@ -966,10 +985,13 @@ CMD_PFX=C:
 WIFI_DEVICE=DEVS:Networks/$WIFI_DRIVER
 if [ "$DRAWER" = 1 ]; then
     CMD_PFX=AmiNetXDuo:C/
-    [ "$WIFI_MODE" = prism2 ] ||
+    [ "$PRISM2" = 1 ] ||
         WIFI_DEVICE=AmiNetXDuo:Devs/Networks/anxwifipi.device
 fi
 WIFI_AN_LINE="  ${CMD_PFX}AddNetInterface DEVS:NetInterfaces/$WIFI_IFNAME QUIET TIMEOUT=$WIFI_TIMEOUT"
+# A Prism2 card as the primary starts outside the guard, after it.
+[ "$WIFI_MODE" = prism2pi ] &&
+    WIFI_AN_LINE="${CMD_PFX}AddNetInterface DEVS:NetInterfaces/$WIFI_IFNAME QUIET TIMEOUT=$WIFI_TIMEOUT"
 if [ "$WIFI_PRIMARY" = 1 ]; then
     EXPECTED_AN_LINE="$WIFI_AN_LINE"
 else
@@ -991,7 +1013,7 @@ WIFI_ANSWERED=0
 WM_EXPECT_LIVE=1
 WM_USER_FIXTURE=0
 case "$WIFI_MODE" in
-    join|keepit|keepitlive|keepitfw|userwm|prism2) WIFI_ANSWERED=1 ;;
+    join|keepit|keepitlive|keepitfw|userwm|prism2|prism2pi|prism2keep) WIFI_ANSWERED=1 ;;
 esac
 case "$WIFI_MODE" in
     keep|userstart|userwm) WM_EXPECT_LIVE=0 ;;
@@ -1003,7 +1025,7 @@ if [ "$WIFI_ANSWERED" = 1 ]; then
     ANSWER_LINES+=("1|WIFI|$WIFI_TEST_SSID|$WIFI_TEST_PASS")
 fi
 case "$WIFI_MODE" in
-    keepit|keepitlive) ANSWER_LINES+=("1|DROPSTARTUP|-") ;;
+    keepit|keepitlive|prism2keep) ANSWER_LINES+=("1|DROPSTARTUP|-") ;;
     # keepitfw: run 2 meets an empty DEVS:Firmware with only the kept
     # anxwifipi definition to say the Pi Wi-Fi is there.
     keepitfw) ANSWER_LINES+=("1|DROPSTARTUP|-" "1|DROPFIRMWARE|-") ;;
@@ -1097,7 +1119,8 @@ for ((answer_run = 1; answer_run <= DRIVE_RUNS; answer_run++)); do
     # -w keepit deletes run 1's file between the runs, so run 2 writes one
     # and asks, as a first install would.
     if [ "$answer_run" -gt 1 ] && [ "$RECONFIGURE" = "0" ] &&
-       [ "$WIFI_MODE" != keepit ] && [ "$WIFI_MODE" != keepitlive ] && [ "$WIFI_MODE" != keepitfw ]; then
+       [ "$WIFI_MODE" != keepit ] && [ "$WIFI_MODE" != keepitlive ] && [ "$WIFI_MODE" != keepitfw ] &&
+       [ "$WIFI_MODE" != prism2keep ]; then
         ANSWER_LINES+=("$answer_run|ABSENT|Yes, set the clock")
     elif [ -n "$SNTP_MODE" ]; then
         ANSWER_LINES+=("$answer_run|BOOL|Yes, set the clock")
@@ -1188,8 +1211,8 @@ if [ "$MANUAL_CARD" = 0 ]; then
         }
     fi
 fi
-# -w prism2: the real prism2.device, and no PC Card for it.
-if [ "$WIFI_MODE" = prism2 ]; then
+# -w prism2*: the real prism2.device, and no PC Card for it.
+if [ "$PRISM2" = 1 ]; then
     _prism2="${AMIGA_ASSETS:-$HOME/amiga-assets}/devs/prism2.device"
     [ -f "$_prism2" ] || { echo "!! no $_prism2" >&2; exit 2; }
     mkdir -p "$HD/Devs/Networks"
@@ -1202,7 +1225,8 @@ fi
 # rest, the .bin's missing .clm_blob included (the driver needs one).  -e
 # both starts with no DEVS:Firmware at all.
 FW_KEPT="brcmfmac43455-sdio.txt cyfmac43455-sdio.bin"
-if [ "$EMU68_FIXTURE" = wifi ] && [ "$WIFI_MODE" = keepitfw ]; then
+if [ "$EMU68_FIXTURE" = wifi ] &&
+   { [ "$WIFI_MODE" = keepitfw ] || [ "$WIFI_MODE" = prism2pi ]; }; then
     FW_KEPT=""
 elif [ "$EMU68_FIXTURE" = wifi ]; then
     mkdir -p "$HD/Devs/Firmware"
@@ -2491,7 +2515,10 @@ fi
 _fw_src="$UNPACK/AmiNetXDuo/Devs/Firmware"
 _fw_sys=$(amiga_path Devs/Firmware 2>/dev/null || true)
 _fw_dir=$(amiga_path "${INST}Devs/Firmware" 2>/dev/null || true)
-case "$EMU68_FIXTURE" in
+# -w prism2pi: the Pi Wi-Fi is selected but not set up, so no firmware.
+_fw_fixture=$EMU68_FIXTURE
+[ "$WIFI_MODE" = prism2pi ] && _fw_fixture=""
+case "$_fw_fixture" in
     wifi|both)
         _fw_bad=0
         _fw_n=0
@@ -2523,7 +2550,7 @@ case "$EMU68_FIXTURE" in
             fail=1
         fi ;;
 esac
-if [ -n "$EMU68_FIXTURE" ] &&
+if [ -n "$EMU68_FIXTURE" ] && [ "$WIFI_MODE" != prism2pi ] &&
    amiga_path "${INST}Devs/NetInterfaces/eth0" >/dev/null 2>&1; then
     echo "!! Emu68 auto-detection also left a spurious eth0 definition"
     fail=1
@@ -2550,7 +2577,8 @@ if [ "$DRIVE_RUNS" != "1" ]; then
         else
             echo "  ok      reconfigure replaced startup and preserved its .old"
         fi
-    elif [ "$WIFI_MODE" = keepit ] || [ "$WIFI_MODE" = keepitlive ] || [ "$WIFI_MODE" = keepitfw ]; then
+    elif [ "$WIFI_MODE" = keepit ] || [ "$WIFI_MODE" = keepitlive ] || [ "$WIFI_MODE" = keepitfw ] ||
+         [ "$WIFI_MODE" = prism2keep ]; then
         # installdrive deleted run 1's file; Keep it with no S:Network-Startup
         # writes a new one, and the Wi-Fi block below must be in it.
         if [ -z "$NS_FILE" ]; then
@@ -2828,14 +2856,23 @@ else
          "wifi_record=$([ -n "$WREC_REAL" ] && echo present || echo absent)" \
          "wifi_startup_live_lines=$WM_NS_LIVE"
 fi
-# -w prism2: the Pi Wi-Fi firmware belongs to the Pi only.
-if [ "$WIFI_MODE" = prism2 ]; then
-    _fw=$(find "$HD" -ipath '*/devs/firmware/*' -iname 'brcmfmac*' 2>/dev/null | head -3)
+# -w prism2*: the Pi Wi-Fi firmware belongs to the Pi only.
+if [ "$PRISM2" = 1 ]; then
+    # DEVS:Firmware of the machine, not the unpacked archive's Devs/Firmware.
+    _fw=$(find "$HD" -maxdepth 3 -ipath "$HD/devs/firmware/*" -iname 'brcmfmac*' 2>/dev/null | head -3)
     echo "wifi_pi_firmware=$([ -n "$_fw" ] && echo installed || echo absent)"
     if [ -n "$_fw" ]; then
         wifi_bad "a Prism2 card installed the Pi Wi-Fi firmware: $_fw"
     else
         echo "  ok      no Pi Wi-Fi firmware (brcmfmac) for a Prism2 card"
+    fi
+fi
+# -w prism2pi: one Wi-Fi at a time, so no Pi Wi-Fi definition either.
+if [ "$WIFI_MODE" = prism2pi ]; then
+    if amiga_path "${INST}Devs/NetInterfaces/wifipi" >/dev/null 2>&1; then
+        wifi_bad "the Pi Wi-Fi was set up beside the Prism2 card"
+    else
+        echo "  ok      the Prism2 card is the only Wi-Fi: no wifipi definition"
     fi
 fi
 [ "$WIFI_OK" = 1 ] || fail=1

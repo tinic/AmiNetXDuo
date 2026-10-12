@@ -497,7 +497,6 @@ def main(argv):
             stack=8192),
     }
 
-
     for name, blob in icons.items():
         if args.style == "glow" and not (
                 name in GLOW_PENDING and not os.path.exists(os.path.join(

@@ -13,7 +13,10 @@
 # tests/tools/wifistub.c's unit with the NetWireless AppIcon beside it, then
 # its join form and the Known networks window, as netwireless.pfs,
 # netwireless-1.pfs and netwireless-2.pfs; then, with ENVARC: alone, moves
-# Home below Cafe there and saves (known_envarc).
+# Home below Cafe there and saves (known_envarc).  -s icons leaves the
+# release tree's C drawer out on Workbench (DH0:.backdrop), opens it with a
+# double-click and grabs its icons as icons.pfs; the tree is AMINETXDUO_DIST,
+# build/dist/AmiNetXDuo by default (dist/make-dist.sh).
 #
 # SPDX-License-Identifier: MIT
 
@@ -359,11 +362,31 @@ Type ENV:Sys/Wireless.prefs >>DH0:known-envarc.txt
 Echo >DH0:.done "$RC"
 EOF
         ;;
+    icons)
+        # C.info is snapped at 62,146 (layout-icons.py): its middle.
+        cat <<'EOF'
+FailAt 9999
+C:Wait 6
+C:WinClick "Workbench" X 90 Y 153 TIMES 2 >DH0:icons.txt
+C:Wait 4
+C:wbgrab TO DH0:icons.pfs >>DH0:icons.txt
+Echo >DH0:.done "$RC"
+EOF
+        ;;
     *)
         say error "unknown sequence: $1"
         exit 2
         ;;
     esac
+}
+
+# The release tree's C drawer, left out on the Workbench window.
+stage_icons() {
+    local dist="${AMINETXDUO_DIST:-$ROOT/build/dist/AmiNetXDuo}"
+    [ -f "$dist/C.info" ] || { say error "no $dist/C.info (dist/make-dist.sh)"; exit 2; }
+    mkdir -p "$HD/AmiNetXDuo"
+    cp -R "$dist/C" "$dist/C.info" "$HD/AmiNetXDuo/"
+    printf ':AmiNetXDuo/C\n' > "$HD/.backdrop"
 }
 
 # ------------------------------------------------------------- the emulator --
@@ -449,6 +472,7 @@ FAILED=0
 
 for seq in "${SEQUENCES[@]}"; do
     stage
+    [ "$seq" = icons ] && stage_icons
     startup_with "$(tail_for "$seq")"
     boot "$seq"
 
