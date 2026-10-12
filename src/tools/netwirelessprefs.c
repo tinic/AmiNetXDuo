@@ -181,7 +181,7 @@ static struct
     BOOL        changed;
     struct List list;
     struct Node node[NW_NETS_MAX];
-    char        name[NW_NETS_MAX][NW_SSID_MAX + 12];
+    char        name[NW_NETS_MAX][NW_SSID_MAX + 16];
 } kn;
 
 static ULONG nw_len(const char *s)
@@ -467,11 +467,12 @@ static const char *nw_save_network(const UBYTE *ssid, LONG ssid_len,
     e.fields = f;
     e.nfields = (int)k;
 
-    out = (char *)AllocVec(NW_FILE_MAX + 512, MEMF_ANY);
+    /* No larger than the next read accepts. */
+    out = (char *)AllocVec(NW_FILE_MAX, MEMF_ANY);
     if (out == NULL)
         why = "Not enough memory.";
     else if (!nw_prefs_write(old != NULL ? old : "", old_len, nets, (int)count,
-                             &e, 1, out, NW_FILE_MAX + 512, &new_len))
+                             &e, 1, out, NW_FILE_MAX - 1, &new_len))
         why = "Wireless.prefs would be too large.";
     else
     {
@@ -1258,14 +1259,30 @@ static VOID nw_known_fill(VOID)
         char            *t = kn.name[i];
 
         if (n->ssid_len >= 0) nw_ssid_text(n->ssid, n->ssid_len, t);
-        else tool_copy_string(t, NW_SSID_MAX + 12, "?");
-        if (n->scan_ssid) nw_append(t, NW_SSID_MAX + 12, " (hidden)");
-        if (n->disabled) nw_append(t, NW_SSID_MAX + 12, " (off)");
+        else tool_copy_string(t, NW_SSID_MAX + 16, "?");
+        if (n->scan_ssid) nw_append(t, NW_SSID_MAX + 16, " (hidden)");
+        if (n->disabled) nw_append(t, NW_SSID_MAX + 16, " (off)");
         kn.node[i].ln_Name = t;
         AddTail(&kn.list, &kn.node[i]);
     }
-    nw_set(nw.known.win, NW_K_LIST, GTLV_Labels, (ULONG)&kn.list);
-    nw_set(nw.known.win, NW_K_LIST, GTLV_Selected, kn.sel >= 0 ? (ULONG)kn.sel : ~0UL);
+    {
+        /* The selection kept in sight: GTLV_MakeVisible from V39, the top
+           row moved before that. */
+        struct TagItem t[4];
+
+        t[0].ti_Tag = GTLV_Labels;   t[0].ti_Data = (ULONG)&kn.list;
+        t[1].ti_Tag = GTLV_Selected; t[1].ti_Data = kn.sel >= 0 ? (ULONG)kn.sel : ~0UL;
+        t[2].ti_Tag = TAG_DONE;
+        if (kn.sel >= 0)
+        {
+            t[2].ti_Tag = GadToolsBase->lib_Version >= 39 ? GTLV_MakeVisible : GTLV_Top;
+            t[2].ti_Data = GadToolsBase->lib_Version >= 39 || kn.sel < NW_LIST_ROWS
+                           ? (ULONG)(GadToolsBase->lib_Version >= 39 ? kn.sel : 0)
+                           : (ULONG)(kn.sel - NW_LIST_ROWS + 1);
+            t[3].ti_Tag = TAG_DONE;
+        }
+        GT_SetGadgetAttrsA(nw.g[NW_K_LIST], nw.known.win, NULL, t);
+    }
     nw_set(nw.known.win, NW_K_UP, GA_Disabled, kn.sel <= 0);
     nw_set(nw.known.win, NW_K_DOWN, GA_Disabled, kn.sel < 0 || kn.sel + 1 >= kn.shown);
     nw_set(nw.known.win, NW_K_REMOVE, GA_Disabled, kn.sel < 0);
@@ -1380,20 +1397,48 @@ static VOID nw_known_store(BOOL save)
     BOOL               ok = FALSE;
     const char        *why;
 
+    /* Nothing moved or removed: nothing written, nothing restarted. */
+    if (!kn.changed)
+    {
+        nw_close_known();
+        return;
+    }
+    /* A Join since this window opened changed the file: keep that. */
+    {
+        ULONG now_len;
+        BOOL  missing;
+        char *now = nw_read(nw_prefs_env, &now_len, &missing);
+        BOOL  same = (now == NULL && kn.text == NULL) ||
+                     (now != NULL && kn.text != NULL && now_len == kn.len);
+        ULONG i;
+
+        for (i = 0; same && now != NULL && i < now_len; i++)
+            if (now[i] != kn.text[i]) same = FALSE;
+        if (now != NULL) FreeVec(now);
+        if (!same)
+        {
+            nw_requester("Wireless.prefs changed since this window opened, "
+                         "so it was not written. Open Known networks again.");
+            nw_close_known();
+            return;
+        }
+    }
     n = nw_prefs_order_edits(kn.nets, (int)kn.count, kn.order, (int)kn.shown,
                              e, f, prio);
-    out = (char *)AllocVec(kn.len + 64UL * NW_NETS_MAX + 1, MEMF_ANY);
+    out = (char *)AllocVec(NW_FILE_MAX, MEMF_ANY);
     if (out != NULL &&
         nw_prefs_write(kn.text != NULL ? kn.text : "", kn.len, kn.nets, (int)kn.count,
-                       e, n, out, kn.len + 64UL * NW_NETS_MAX, &len))
+                       e, n, out, NW_FILE_MAX - 1, &len))
     {
-        nw_make_dir("ENV:Sys");
-        ok = nw_write(nw_prefs_env, out, (ULONG)len);
-        if (ok && save)
+        /* ENVARC: first, as a join writes them. */
+        ok = TRUE;
+        if (save)
         {
             nw_make_dir("ENVARC:Sys");
             ok = nw_write(nw_prefs_envarc, out, (ULONG)len);
         }
+        nw_make_dir("ENV:Sys");
+        ok = ok && nw_write(nw_prefs_env, out, (ULONG)len);
     }
     if (out != NULL) FreeVec(out);
     if (!ok)
@@ -1465,7 +1510,7 @@ static VOID nw_gadget_up(const struct IntuiMessage *m)
         case NW_J_CANCEL: nw_cancel_join(); break;
         case NW_M_KNOWN:  nw_open_known(); break;
         case NW_K_LIST:
-            kn.sel = (LONG)code;
+            kn.sel = (LONG)code < kn.shown ? (LONG)code : -1;
             nw_known_fill();
             break;
         case NW_K_UP:     if (kn.sel > 0) nw_known_move(kn.sel - 1); break;

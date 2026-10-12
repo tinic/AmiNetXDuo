@@ -333,7 +333,10 @@ static void test_order(void)
 
     /* Unchanged order: priorities 4..1 replace 5,1,1,0 where they differ. */
     k = nw_prefs_order_edits(n, c, order, 4, e, f, prio);
-    check(k == 4 && strcmp(f[0].value, "3") == 0, "every block renumbered");
+    check(k == 4 && strcmp(f[0].value, "3") == 0 && e[1].index == 1 &&
+          strcmp(f[1].value, "4") == 0 && e[2].index == 2 &&
+          strcmp(f[2].value, "1") == 0 && e[3].index == 3 &&
+          strcmp(f[3].value, "2") == 0, "every block renumbered");
     check(nw_prefs_write(text, sizeof(text) - 1, n, c, e, k, out, sizeof(out), &len),
           "renumbered write fits");
     out[len] = '\0';
@@ -351,6 +354,25 @@ static void test_order(void)
     check(strstr(out, "ssid=\"c\"\n priority=3") != NULL &&
           strstr(out, "ssid=\"b\"\n priority=2") != NULL &&
           strstr(out, "ssid=\"d\"\n priority=1") != NULL, "new order stored");
+
+    /* Everything removed: the file without its blocks. */
+    k = nw_prefs_order_edits(n, c, order, 0, e, f, prio);
+    check(k == 4 && e[0].remove && e[3].remove &&
+          nw_prefs_write(text, sizeof(text) - 1, n, c, e, k, out, sizeof(out), &len) &&
+          len == 0, "every block removed");
+
+    /* Negative priorities sort below zero, and a block with no ssid= is
+       ordered like any other. */
+    {
+        static const char neg[] =
+            "network={\n priority=-2\n}\nnetwork={\n ssid=\"z\"\n priority=-1\n}\n";
+        NwNetwork m[2];
+        int       mc = nw_prefs_parse(neg, sizeof(neg) - 1, m, 2);
+
+        nw_prefs_order(m, mc, order);
+        check(mc == 2 && m[0].ssid_len == -1 && order[0] == 1 && order[1] == 0,
+              "-1 above -2");
+    }
 
     /* A list already in priority order with distinct values: no edits. */
     {
