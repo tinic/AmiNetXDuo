@@ -4,7 +4,8 @@
  *
  * NAME is resolved as a configured interface first, then as a driver name
  * matched against the DEVICE and UNIT of every configured interface. TIMEOUT 0
- * waits for as long as it takes. Online starts the network; Offline never does.
+ * waits for as long as it takes; Online's default is ONLINE_TIMEOUT, Offline's
+ * is 0. Online starts the network; Offline never does.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -31,6 +32,11 @@ enum
     ARG_TIMEOUT,
     ARG_COUNT
 };
+
+/* Seconds for link-up and the DHCP lease together when TIMEOUT is not given.
+   Unbounded, a Wi-Fi unit that never gets a lease left Online silent forever
+   (A1200, wifipi); half a minute is what a DHCP exchange is given elsewhere. */
+#define ONLINE_TIMEOUT      30UL
 
 /* As many interface files as the drawer is scanned for. */
 #define ONOFF_MAX_FILES     16
@@ -321,6 +327,8 @@ static LONG live_index(struct Library *base, const char *name, BOOL *online)
 static LONG wait_for_live_state(struct Library *base, const char *name,
                                 BOOL want_up, ToolWait *wait)
 {
+    BOOL said = FALSE;
+
     for (;;)
     {
         BOOL now = FALSE;
@@ -332,9 +340,27 @@ static LONG wait_for_live_state(struct Library *base, const char *name,
         if (now == want_up)
             return 1;
 
+        if (want_up && !said)
+        {
+            tool_printf("%s: waiting for link\n", (LONG)name);
+            said = TRUE;
+        }
+
         if (!tool_wait_second(wait))
             return 0;
     }
+}
+
+/* tool_wait_dhcp_bound(), saying so first when the lease is not there yet. */
+static BOOL wait_for_live_dhcp(struct Library *base, const char *name,
+                               UWORD index, ToolWait *wait, ULONG *addr_out)
+{
+    LONG state = tool_netstatus_dhcp_state(base, index, addr_out);
+
+    if (state >= 0 && state != NETSTATUS_DHCP_BOUND)
+        tool_printf("%s: waiting for DHCP lease\n", (LONG)name);
+
+    return tool_wait_dhcp_bound(base, index, wait, addr_out);
 }
 
 static VOID report_live_online(struct Library *base, const char *name,
@@ -474,13 +500,11 @@ static LONG switch_live(const char *name, const AmiIfConfig *ifc, BOOL up,
         ULONG addr = 0;
 
         if (ifc != NULL && ifc->iptype == AMI_IPTYPE_DHCP &&
-            !tool_wait_dhcp_bound(base, (UWORD)index, &wait, &addr))
+            !wait_for_live_dhcp(base, name, (UWORD)index, &wait, &addr))
         {
             if (!wait.broken)
             {
-                tool_error("%s: no DHCP lease after %lu s",
-                           (LONG)name, wait.elapsed);
-                tool_explain_dhcp(name);
+                tool_explain_dhcp_waiting(name, wait.elapsed);
                 rc = RETURN_WARN;
             }
         }
@@ -510,8 +534,11 @@ static LONG switch_live(const char *name, const AmiIfConfig *ifc, BOOL up,
  * waits for as long as it takes. FALSE means the shared time ran out, or
  * wait->broken says Ctrl-C was pressed.
  */
-static BOOL wait_for_state(LONG index, BOOL want_up, ToolWait *wait)
+static BOOL wait_for_state(const char *name, LONG index, BOOL want_up,
+                           ToolWait *wait)
 {
+    BOOL said = FALSE;
+
     for (;;)
     {
         BOOL now = netstack_interface_is_up((UWORD)index) ? TRUE : FALSE;
@@ -519,15 +546,23 @@ static BOOL wait_for_state(LONG index, BOOL want_up, ToolWait *wait)
         if (now == want_up)
             return TRUE;
 
+        if (want_up && !said)
+        {
+            tool_printf("%s: waiting for link\n", (LONG)name);
+            said = TRUE;
+        }
+
         if (!tool_wait_second(wait))
             return FALSE;
     }
 }
 
 #ifndef TOOL_OFFLINE
-static BOOL wait_for_linked_dhcp(UWORD index, ToolWait *wait,
-                                 ULONG *addr_out)
+static BOOL wait_for_linked_dhcp(const char *name, UWORD index,
+                                 ToolWait *wait, ULONG *addr_out)
 {
+    BOOL said = FALSE;
+
     for (;;)
     {
         if (netstack_interface_dhcp_state(index) == AMI_DHCP_BOUND)
@@ -538,6 +573,12 @@ static BOOL wait_for_linked_dhcp(UWORD index, ToolWait *wait,
                             ? ip->nx_ip_interface[index].nx_interface_ip_address
                             : 0;
             return TRUE;
+        }
+
+        if (!said)
+        {
+            tool_printf("%s: waiting for DHCP lease\n", (LONG)name);
+            said = TRUE;
         }
 
         if (!tool_wait_second(wait))
@@ -605,7 +646,13 @@ int main(int argc, char **argv)
     {
         tool_fault(IoErr());
         tool_usage("<interface or driver> [UNIT <n>] [TIMEOUT <secs>]",
-                   "eth0, or the driver it uses, for example a2065.device.");
+#ifdef TOOL_OFFLINE
+                   "eth0, or the driver it uses, for example a2065.device."
+#else
+                   "eth0, or the driver it uses, for example a2065.device.\n"
+                   "  TIMEOUT: default 30; 0 waits indefinitely."
+#endif
+                   );
         return RETURN_ERROR;
     }
 
@@ -626,8 +673,13 @@ int main(int argc, char **argv)
     given    = tool_basename((const char *)args[ARG_NAME]);
     had_unit = (args[ARG_UNIT] != 0) ? TRUE : FALSE;
     unit     = had_unit ? (ULONG)*(const LONG *)args[ARG_UNIT] : 0UL;
+#ifdef TOOL_OFFLINE
     timeout  = (args[ARG_TIMEOUT] != 0)
                    ? (ULONG)*(const LONG *)args[ARG_TIMEOUT] : 0UL;
+#else
+    timeout  = (args[ARG_TIMEOUT] != 0)
+                   ? (ULONG)*(const LONG *)args[ARG_TIMEOUT] : ONLINE_TIMEOUT;
+#endif
     tool_wait_init(&wait, timeout);
 
     /* Resolve NAME: interface first, then driver. */
@@ -815,7 +867,7 @@ int main(int argc, char **argv)
         return RETURN_FAIL;
     }
 
-    if (!wait_for_state(index, FALSE, &wait) && !wait.broken)
+    if (!wait_for_state(name, index, FALSE, &wait) && !wait.broken)
     {
         tool_error("%s: still up after %lu s",
                    (LONG)name, wait.elapsed);
@@ -848,7 +900,7 @@ int main(int argc, char **argv)
         }
     }
 
-    if (!wait_for_state(index, TRUE, &wait) && !wait.broken)
+    if (!wait_for_state(name, index, TRUE, &wait) && !wait.broken)
     {
         tool_error("%s: still down after %lu s",
                    (LONG)name, wait.elapsed);
@@ -861,13 +913,11 @@ int main(int argc, char **argv)
         ULONG addr = 0;
 
         if (ifc.iptype == AMI_IPTYPE_DHCP &&
-            !wait_for_linked_dhcp((UWORD)index, &wait, &addr))
+            !wait_for_linked_dhcp(name, (UWORD)index, &wait, &addr))
         {
             if (!wait.broken)
             {
-                tool_error("%s: no DHCP lease after %lu s",
-                           (LONG)name, wait.elapsed);
-                tool_explain_dhcp(name);
+                tool_explain_dhcp_waiting(name, wait.elapsed);
                 FreeArgs(rda);
                 return RETURN_WARN;
             }
