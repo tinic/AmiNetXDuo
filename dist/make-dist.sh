@@ -672,69 +672,28 @@ chmod 644 "$TREE/Wireless/WirelessManager-LICENSE"
 python3 "$ROOT/tools/pcmcia-drivers.py" --stage "$TREE"
 
 # codesets.library, built from third_party/libcodesets (LGPL-2.1) by
-# src/codesets/.  Its licence and where its source is go with it; the
+# src/codesets/.  A pointer to its source goes with it; the
 # Installer puts it in LIBS: on 3.0 and up when none there is as new.  The
 # Charsets drawer upstream ships beside it does not come: 108 KB of optional
 # tables, and the codesets every program here needs are built in.
 CS_LIB="$CMD_BUILD/src/codesets/codesets.library"
 need "$CS_LIB"
-need "$ROOT/third_party/libcodesets/COPYING"
 CS_COMMIT=$(git -C "$ROOT" rev-parse HEAD:third_party/libcodesets)
 mkdir -p "$TREE/Codesets"
 cp "$CS_LIB" "$TREE/Codesets/codesets.library"
-cp "$ROOT/third_party/libcodesets/COPYING" "$TREE/Codesets/COPYING"
-# The complete corresponding source goes IN the archive (LGPL-2.1 section 4),
-# not only a URL: the pinned libcodesets tree, every file of ours the build
-# reads, and the exact compile and link lines with the toolchain pin.
-CS_SRCNAME="codesets-src-$(printf '%s' "$CS_COMMIT" | cut -c1-12)"
-CS_STAGE=$(mktemp -d)
-mkdir -p "$CS_STAGE/$CS_SRCNAME/libcodesets" "$CS_STAGE/$CS_SRCNAME/aminetxduo/include/aminetxduo" \
-         "$CS_STAGE/$CS_SRCNAME/aminetxduo/cmake" "$TREE/Codesets/Sources"
-git -C "$ROOT/third_party/libcodesets" archive --format=tar "$CS_COMMIT" \
-    src include Makefile COPYING | tar -xf - -C "$CS_STAGE/$CS_SRCNAME/libcodesets"
-cp -R "$ROOT/src/codesets" "$CS_STAGE/$CS_SRCNAME/aminetxduo/codesets"
-cp "$ROOT/include/aminetxduo/asm_main.h" "$CS_STAGE/$CS_SRCNAME/aminetxduo/include/aminetxduo/"
-cp "$ROOT/cmake/toolchain-m68k-amigaos.cmake" "$CS_STAGE/$CS_SRCNAME/aminetxduo/cmake/"
-CS_DIR="$CMD_BUILD/src/codesets/CMakeFiles/codesets_library.dir"
-need "$CS_DIR/flags.make"
-need "$CS_DIR/link.txt"
-CS_CC=$(awk '{print $1; exit}' "$CS_DIR/link.txt")
-{
-    echo "codesets.library as AmiNetXDuo ships it: libcodesets $CS_COMMIT"
-    echo "built by aminetxduo/codesets/CMakeLists.txt."
-    echo
-    echo "Toolchain: $(basename "$(dirname "$(dirname "$CS_CC")")") ($("$CS_CC" -dumpversion 2>/dev/null || echo unknown)),"
-    echo "the pin tools/fetch-toolchain.sh installs for this release."
-    echo
-    echo "Every file in libcodesets/src (see the CMakeLists for the list),"
-    echo "then aminetxduo/codesets/cs_libc.c, compiled with:"
-    grep -v '^#' "$CS_DIR/flags.make" | grep -v '^$'
-    echo
-    echo "Linked with:"
-    cat "$CS_DIR/link.txt"
-} | sed -e "s|$ROOT/third_party/libcodesets|libcodesets|g" \
-        -e "s|$CMD_BUILD|build|g" -e "s|$ROOT/src/codesets|aminetxduo/codesets|g" \
-        -e "s|$ROOT|aminetxduo|g" > "$CS_STAGE/$CS_SRCNAME/BUILD"
-tar -C "$CS_STAGE" -cf - "$CS_SRCNAME" | gzip -9n > "$TREE/Codesets/Sources/$CS_SRCNAME.tar.gz"
-rm -rf "$CS_STAGE"
-
 cat > "$TREE/Codesets/SOURCE" <<EOF
 codesets.library is free software under the GNU Lesser General Public
-Licence 2.1, in COPYING beside this file.
+Licence 2.1.
 
-Its complete corresponding source is beside this file:
+Its source is part of the AmiNetXDuo source at the commit below:
+libcodesets pinned as third_party/libcodesets, and src/codesets, which
+builds it.
 
-  Sources/$CS_SRCNAME.tar.gz
-
-libcodesets at the commit below, the files that build it here, and the
-exact compile and link lines.
-
-Source:  https://github.com/jens-maus/libcodesets/tree/$CS_COMMIT
-Build:   https://github.com/tinic/AmiNetXDuo/tree/$(git -C "$ROOT" rev-parse HEAD)/src/codesets
+Source:  https://github.com/tinic/AmiNetXDuo/tree/$(git -C "$ROOT" rev-parse HEAD)
+Upstream: https://github.com/jens-maus/libcodesets/tree/$CS_COMMIT
 EOF
 chmod 755 "$TREE/Codesets/codesets.library"
-chmod 644 "$TREE/Codesets/COPYING" "$TREE/Codesets/SOURCE" \
-          "$TREE/Codesets/Sources/$CS_SRCNAME.tar.gz"
+chmod 644 "$TREE/Codesets/SOURCE"
 
 cp "$ROOT/dist/ReadMe" "$TREE/ReadMe"
 cp "$INSTALL/Document.info" "$TREE/ReadMe.info"
