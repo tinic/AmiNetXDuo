@@ -1,0 +1,6 @@
+# Preserve the exact bytes of pinned third-party distributions and notices.
+third_party/pcmcia/** -text
+# Original CRLF S-record firmware is an opaque vendor payload.
+third_party/pcmcia/Firmware/* binary
+# Original manuals and licence texts retain their vendor whitespace.
+third_party/pcmcia/Docs/* whitespace=-blank-at-eol,-blank-at-eof
