@@ -187,7 +187,27 @@ static LONG bsd_packet_append_iov(NX_PACKET *packet, BsdIovCursor *cur,
         if (chunk > want - done)
             chunk = want - done;
 
-        status = nx_packet_data_append(packet, src, chunk, pool, wait);
+        /* The private, single-buffer packet needs no tail walk or allocation.
+           Keep the native routine in instrumented builds so its events and
+           debug provenance still describe the append. */
+#if !defined(TX_ENABLE_EVENT_TRACE) && !defined(NX_ENABLE_PACKET_DEBUG_INFO)
+#ifndef NX_DISABLE_PACKET_CHAIN
+        if (packet->nx_packet_next == NX_NULL &&
+            packet->nx_packet_last == NX_NULL &&
+#else
+        if (
+#endif
+            chunk <= (ULONG)(packet->nx_packet_data_end -
+                             packet->nx_packet_append_ptr))
+        {
+            memcpy(packet->nx_packet_append_ptr, src, chunk);
+            packet->nx_packet_append_ptr += chunk;
+            packet->nx_packet_length += chunk;
+            status = NX_SUCCESS;
+        }
+        else
+#endif
+            status = nx_packet_data_append(packet, src, chunk, pool, wait);
         if (status != NX_SUCCESS)
         {
             if (why != NULL)

@@ -87,6 +87,7 @@ typedef struct HPacket
     NX_PACKET   nx;
     BOOL        in_use;
     BOOL        released;
+    UBYTE       data[256];
 } HPacket;
 
 #define h_len(p)    ((p)->nx.nx_packet_length)
@@ -111,6 +112,9 @@ static struct
     unsigned    alloc_planned, allocs;
 
     /* nx_packet_data_append() */
+    ULONG       packet_room;        /* real buffer capacity for fast append */
+    BOOL        packet_chain;
+    ULONG       append_calls;
     UINT        append_status;
     ULONG       appended;           /* bytes accepted across all calls       */
     UBYTE       wire[256];          /* and the bytes themselves, in order    */
@@ -585,7 +589,7 @@ ULONG bsd_cork_room(const AmiSocket *sock)
 { (VOID)sock; h_cork_unreachable("bsd_cork_room"); return 0; }
 VOID  bsd_tcp_send_fin(AmiSocket *sock)
 { (VOID)sock; h_cork_unreachable("bsd_tcp_send_fin"); }
-VOID  bsd_bcopy(CONST_APTR src, APTR dst, ULONG size)
+VOID bsd_bcopy(CONST_APTR src, APTR dst, ULONG size)
 { (VOID)src; (VOID)dst; (VOID)size; h_cork_unreachable("bsd_bcopy"); }
 #ifdef AMINETXDUO_TCP_CORK_FASTPATH
 /* The fast path's lock and tick: it declines before either on a socket that
@@ -656,6 +660,12 @@ UINT _nxe_packet_allocate(NX_PACKET_POOL *pool_ptr, NX_PACKET **packet_ptr,
         {
             memset(&h_pkt[i], 0, sizeof(h_pkt[i]));
             h_pkt[i].in_use = TRUE;
+            h_pkt[i].nx.nx_packet_data_start = h_pkt[i].data;
+            h_pkt[i].nx.nx_packet_prepend_ptr = h_pkt[i].data;
+            h_pkt[i].nx.nx_packet_append_ptr = h_pkt[i].data;
+            h_pkt[i].nx.nx_packet_data_end = h_pkt[i].data + h.packet_room;
+            if (h.packet_chain)
+                h_pkt[i].nx.nx_packet_next = &h_pkt[H_PKTS - 1].nx;
             *packet_ptr     = &h_pkt[i].nx;
 
             return NX_SUCCESS;
@@ -674,6 +684,7 @@ UINT _nxe_packet_data_append(NX_PACKET *packet_ptr, VOID *data_start,
     (VOID)pool_ptr;
     (VOID)wait_option;
 
+    h.append_calls++;
     if (h.append_status != NX_SUCCESS)
         return h.append_status;
 
@@ -1250,6 +1261,46 @@ static void t_iov_coalesce(void)
  * The segmentation: a send longer than the MSS becomes several packets, and
  * every byte still arrives once and in order.
  */
+static void t_append_buffer_shapes(void)
+{
+    struct iovec iov[2] = { { "abc", 3 }, { "defgh", 5 } };
+    struct msghdr m;
+    memset(&m, 0, sizeof(m));
+    m.msg_iov = iov;
+    m.msg_iovlen = 2;
+    h_reset();
+    (VOID)h_tcp(0);
+    h.packet_room = 8;
+    CHECK(bsd_sendmsg(0, &m, 0, &h_base) == 8, "direct scatter append sends all bytes");
+    CHECK(h.append_calls == 0,
+          "both contiguous runs bypass general append, including an exact fit");
+    CHECK(h_len(&h_pkt[0]) == 8 &&
+          h_pkt[0].nx.nx_packet_append_ptr == h_pkt[0].data + 8 &&
+          memcmp(h_pkt[0].data, "abcdefgh", 8) == 0 && h_pkt[0].data[8] == 0,
+          "direct append updates bytes, length and tail without crossing capacity");
+
+    h_reset();
+    (VOID)h_tcp(0);
+    h.packet_room = 7;
+    h.append_status = NX_NO_PACKET;
+    h.alloc_plan[0] = NX_SUCCESS;
+    h.alloc_plan[1] = NX_NO_PACKET;
+    h.alloc_planned = 2;
+    CHECK(bsd_sendmsg(0, &m, 0, &h_base) == 3,
+          "allocation failure after a direct run credits only the accepted bytes");
+    CHECK(h.append_calls == 1 && h.sent_bytes == 3 &&
+          h_len(&h_pkt[0]) == 3 && memcmp(h_pkt[0].data, "abc", 3) == 0,
+          "the run that cannot fit retains native append and partial-send handling");
+
+    h_reset();
+    (VOID)h_tcp(0);
+    h.packet_room = 8;
+    h.packet_chain = TRUE;
+    CHECK(bsd_sendmsg(0, &m, 0, &h_base) == 8 &&
+          h.append_calls == 2,
+          "chained packets always retain native append");
+}
+
 static void t_mss_segmentation(void)
 {
     char buf[24];
@@ -1941,6 +1992,7 @@ int main(void)
 #endif
     t_iov_total();
     t_iov_coalesce();
+    t_append_buffer_shapes();
     t_mss_segmentation();
     t_mss_peek_guard();
     t_short_write_is_credited();

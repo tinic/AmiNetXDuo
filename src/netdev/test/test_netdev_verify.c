@@ -366,6 +366,31 @@ static void test_tx_checksum(void)
     expect("TX TCP offload is not used unless it was negotiated",
            netdev_tx_csum4(frame, len, ANXD_S2_TXF_UDP, &offset) == 0);
 
+    offset = 0xffffu;
+    expect("short TCP frame refuses without changing the output",
+           netdev_tx_csum4(frame, 53, ANXD_S2_TXF_TCP, &offset) == 0 &&
+           offset == 0xffffu);
+    ip[32] = 0x40;
+    expect("short TCP header is refused", netdev_tx_csum4(
+               frame, len, ANXD_S2_TXF_TCP, &offset) == 0);
+    ip[32] = 0x50;
+    ip[6] = 0x40;                       /* DF is allowed */
+    expect("TX TCP with DF and padding still uses the fixed offset",
+           netdev_tx_csum4(frame, 80, ANXD_S2_TXF_TCP, &offset) ==
+               ANXD_S2_TXF_TCP && offset == 50);
+    ip[7] = 1;
+    expect("fragment offset is refused", netdev_tx_csum4(
+               frame, len, ANXD_S2_TXF_TCP, &offset) == 0);
+    len = (UWORD)(14 + make_ipv4_tcp(ip));
+    memmove(ip + 24, ip + 20, len - 34);
+    memset(ip + 20, 0, 4);
+    ip[0] = 0x46;
+    ip[3] += 4;
+    len += 4;
+    expect("TCP with IPv4 options retains the parsed offset",
+           netdev_tx_csum4(frame, len, ANXD_S2_TXF_TCP, &offset) ==
+               ANXD_S2_TXF_TCP && offset == 54);
+
     len = (UWORD)(14 + make_ipv4_udp(ip));
     expect("TX UDP checksum field is located from the parsed IHL",
            netdev_tx_csum4(frame, len, ANXD_S2_TXF_UDP, &offset) ==

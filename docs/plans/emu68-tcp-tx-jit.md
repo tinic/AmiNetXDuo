@@ -72,3 +72,73 @@ not from the unrelated nearest public symbol.
 Small annotated ARM samples, build/test logs and the linked-image manifest
 are retained in `/Users/turo/ai/evidence/emu68-tx-jit/`. No new harness or
 runtime environment is added to either repository.
+
+## Follow-up: append and checksum setup
+
+Based on the TX branch at `df8511eb`, using the same linked build profile and
+existing Pi Emu68 emission tools. No harness changes are required. NetX Duo
+remains pinned at `fb53e83e`; these changes belong in AmiNetXDuo's integration.
+
+| Selected ARM work | Before | After |
+| --- | ---: | ---: |
+| Single-buffer append around the copy | 102 | 54 |
+| Common GENET IPv4/TCP checksum checks | 136 | 85 |
+| TCP pseudo-header reads, sum and folding | 46–59 | 40 |
+
+These are counts from selected emitted slices, with context-dependent CCR
+expansion. They exclude copy bodies and JIT unit exits. They are not a cycle
+profile or a throughput prediction. The previous A1200 A/B results apply to
+`df8511eb`, not this follow-up.
+
+### Single-buffer append
+
+`bsd_packet_append_iov()` copies directly when there is no packet chain or tail
+and the current buffer has enough capacity for the entire contiguous iovec run.
+It updates the append pointer and packet length, then advances the cursor as
+before. The copy uses the same `memcpy` hook as NetX's native append. The native
+routine handles insufficient capacity, chains, event tracing and packet debug
+builds, preserving allocation errors and partial-send credit.
+
+The candidate's selected slices are guest `0x10009b56..0x10009b5c`,
+`0x10009bc0..0x10009bc6`, `0x10009bc6..0x10009bd4`,
+`0x10009bd4..0x10009be2`, and `0x10009be2..0x10009bf2`.
+They total 54 ARM instructions, including guards and copy-call setup. The
+previous selected native append slices totalled 102. The surrounding iovec
+iteration remains; the native append call and its frame are skipped.
+
+### Checksum setup
+
+The driver recognizes a normal 20-byte IPv4 TCP header and validates its total
+length, fragment flags/offset, negotiated offload capability and TCP header
+length before publishing the fixed checksum offset. IPv4 options, UDP and
+other shapes retain the general parser. Parser arithmetic uses full-width
+values, reducing partial-register work.
+
+The selected common driver slices at `0x1000529e..0x100052c2`,
+`0x10005392..0x1000539a`, and `0x100053a0..0x100053da` total 85 ARM instructions.
+The old 136-instruction selection excluded the final offset bound; the new
+selection includes constant output preparation, and its validated fixed offsets
+make that bound unnecessary.
+
+The SANA-II pseudo-header helper uses explicit network-word loads on 68020+
+(which permit odd addresses), with byte reads on 68000 builds and other hosts.
+GCC kept expanding the aligned C form into byte sequences, so the target load
+is a small inline-assembly operation with a packed alias-safe memory operand.
+Four address words plus protocol and IPv4 TCP length fit in 19 bits; two fixed
+carry folds replace the branch-dependent folding sequence. The complete
+preparation at `0x1002f592..0x1002f5dc` emits 40 ARM instructions, compared with
+46, 57 or 59 in the old selection depending on carries.
+
+### Verification
+
+Eight existing native CTest targets pass: SANA-II copy, real NetX checksum copy,
+TX, driver entry, netdev verification, TCP cork send, packet extraction and trace
+extraction. Existing 32-bit fixtures pass 133 transfer, 509 cork and 530 fast-cork
+checks. Added cases cover exact buffer fit across iovecs, allocation refusal after
+a direct append, chains, IPv4 options, DF versus fragments, short TCP headers,
+odd-address pseudo headers and a carry requiring a second fold.
+
+Both linked-binary PC-relative checks pass with zero mismatches or unscanned
+branches. All requested final Emu68 dumps succeed. Compact annotated evidence
+and image hashes are retained in `/Users/turo/ai/evidence/emu68-tx-followup`.
+No hardware throughput result is claimed for these changes.
