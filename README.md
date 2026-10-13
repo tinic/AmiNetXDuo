@@ -45,6 +45,14 @@ The archive carries four stacks. The installer asks which one to put on.
 | Micro | all of that, plus `getaddrinfo`/`getnameinfo`, ancillary data, out-of-band TCP and less-used administration calls; carries one interface and no route or address-allocation calls. DHCP, the classic resolver and raw sockets work | 243 KB |
 | Fat | nothing; the full stack, drivers and commands compiled for speed for a 68020 or better | Full + 120 KB |
 
+<img src="docs/images/a500-kickstart204-micro.png" alt="AmiNetXDuo micro running on an emulated 68000 A500 with Kickstart 2.04 and 512 KB chip plus 512 KB trapdoor RAM" width="640">
+
+The micro stack running on a **1 MB A500: 512 KB chip RAM + 512 KB trapdoor
+RAM**, with a 68000, Kickstart 2.04 (37.175) and Workbench 2.04. This Copperline
+session uses an emulated A2065 with SLIRP/NAT. The screenshot shows a DHCP
+lease, successful Internet pings and the available memory with NetMeter open.
+Installation used our private experimental Installer.
+
 ### Network cards
 
 Any SANA-II driver works. The archive also brings its own:
