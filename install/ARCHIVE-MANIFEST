@@ -134,6 +134,15 @@ AmiNetXDuo/Terminal.info            | installed     | always    | (source S_TERM
 AmiNetXDuo/Wireless/WirelessManager | installed     | always    | (source S_WM)
 AmiNetXDuo/Wireless/WirelessManager-LICENSE | installed | always | (source S_WMLIC)
 
+# ------------------------------------------------------- codesets.library --
+#
+# LIBS: on 3.0 and up, only when what is there is older or absent; its
+# licence and source pointer go to the AmiNetXDuo drawer every time.
+
+AmiNetXDuo/Codesets/codesets.library | installed   | always    | (source CS_SRC)
+AmiNetXDuo/Codesets/COPYING         | installed     | always    | (source (tackon S_CODESETS "COPYING"))
+AmiNetXDuo/Codesets/SOURCE          | installed     | always    | (source (tackon S_CODESETS "SOURCE"))
+
 # --------------------------------------------------------- the Developer --
 
 # External drivers are copied only for their selected card. Complete GPL
