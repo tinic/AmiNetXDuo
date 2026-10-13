@@ -28,7 +28,11 @@ if(CMAKE_CROSSCOMPILING)
         "${CS_SRC}" "${CMAKE_SOURCE_DIR}/third_party/libcodesets/include"
         "${CMAKE_CURRENT_SOURCE_DIR}")
     target_compile_definitions(codesets_library PRIVATE __amigaos3__)
-    target_compile_options(codesets_library PRIVATE -fno-lto
+    # -mregparm=0: upstream passes arguments on the stack -- libinit.c's
+    # stackswap_call asm and the qsort()/bsearch() callbacks -- and the tree's
+    # -mregparm=3 put them in registers, so the first OpenLibrary(), which
+    # runs LibInit through stackswap_call on ramlib's small stack, crashed.
+    target_compile_options(codesets_library PRIVATE -fno-lto -mregparm=0
         -include "${CMAKE_CURRENT_SOURCE_DIR}/cs_libc.h")
     # saveds is a -fbaserel attribute; upstream's SDI headers ask for it and
     # this build has no base-relative data.
