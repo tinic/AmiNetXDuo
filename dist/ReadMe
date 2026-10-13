@@ -55,8 +55,8 @@ This machine needs:
      used.
   *  A network card, and the SANA-II driver for that card.  The driver is a
      file whose name ends in ".device", and it came with the card.  Put the
-     driver in DEVS: before the installation, except for supported Prism2
-     and Xircom cards: their drivers are included. The installer then finds it
+     driver in DEVS: before the installation, except for supported Xircom
+     cards: their driver is included. The installer then finds it
      and pre-selects the card.
 
 The installer offers these cards by name, and writes the driver each one
@@ -71,12 +71,12 @@ uses:
      Individual Computers X-Surf 100 . x-surf-100.device
      PCMCIA NE2000 or CNet . . . . . . cnet.device
      PCMCIA 3Com EtherLink III 3C589 . etherlink3.device
-     PCMCIA Prism2 wireless  . . . . . prism2.device
      PCMCIA Xircom Ethernet  . . . . . xircomce2.device
      UAE (emulators) . . . . . . . . . uaenet.device
 
 Any other SANA-II driver works too.  The last menu entry of the installer
-takes the name of the driver.
+takes the name of the driver. PCMCIA Wi-Fi drivers and card firmware
+must be installed separately; configure their interface and supplicant by hand.
 
 The archive also carries three SANA-II drivers: anxnet.device for the classic
 cards above (and the X-Surf 500 and supported Megahertz/3Com LAN+modem cards),
@@ -469,13 +469,12 @@ MIT, with these exceptions, each confined to the files it names:
      Wireless/WirelessManager-LICENSE, installed as WirelessManager-LICENSE
      in the AmiNetXDuo drawer.
 
-  *  The unmodified prism2.device, xircomce2.device and pccard.library are
+  *  The unmodified xircomce2.device and pccard.library are
      Neil Cafferkey's, under GPL-2.0-or-later. Complete corresponding source
      and build files are included offline in PCMCIA/Sources/; the standalone
      pccard archive supplies the library source missing from the driver
      archives. The original GPL/LGPL notices and manuals are retained.
-     Hermes firmware has separate AT&T/Lucent/Agere redistribution terms,
-     reproduced in PCMCIA/Docs/Hermes-LICENSE. These files are independently
+     These files are independently
      loaded, not linked into the stack. Only missing runtime files for the
      selected card are installed; existing copies are preserved. Installed
      notices and manuals are in AmiNetXDuo/PCMCIA. Source archives stay with
