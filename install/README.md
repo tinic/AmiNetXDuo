@@ -135,11 +135,21 @@ Three properties of the tool shape the whole script.
 anything, and `(message ...)` prints nothing.** Novice mode therefore works only
 if every default is independently correct. That is why network devices are
 auto-detected from Emu68's device tree, Zorro Autoconfig, PCMCIA identity
-tuples and UAE's resident device, with known drivers in `DEVS:` and
+tuples and emulator drivers in Exec's device/resident lists, with known drivers in `DEVS:` and
 `DEVS:Networks` only as a fallback. The address mode defaults to DHCP. It is
 also why no validation loop can depend on a `(message)` to make progress. At
 level 0 that loop spins forever behind a blank screen. Each loop is satisfied
 unconditionally when `@user-level` is 0.
+
+The emulator choice checks `uaenet.device`, `amithlon1_net.device` and
+`powerne2k.device`, preferring a ROM or registered driver over a disk-only
+fallback. Driver resolution preserves an existing disk path so a disk-loaded
+driver can still be found after reboot. With neither disk location present,
+it checks Exec for every selected driver, including an **Other driver**
+answer, and uses the bare device name. Discovery never opens the device. Amiberry, WinUAE and
+FS-UAE use the UAE path where enabled; Copperline's emulated A2065 follows
+ordinary Autoconfig discovery. An emulator offering only a host-backed
+`bsdsocket.library` has no SANA-II interface for this installer to select.
 
 **`(startup)` replaces the `;BEGIN AmiNetXDuo` .. `;END AmiNetXDuo` block in
 `S:User-Startup` and leaves every other application's lines alone.** That is

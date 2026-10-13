@@ -137,6 +137,8 @@
        "Zorro cards and Emu68 devices found in hardware are checked already. "
        "Installed drivers are used only as a fallback.  Check or clear any "
        "entry before proceeding.\n\n"
+       "Emulator network drivers supplied in ROM need no file in DEVS:.  "
+       "They are detected in Exec and used by their bare device name.\n\n"
        "The AmigaNet is Hydra Systems' card and its driver is hydra.device; "
        "the LAN Rover is ASDG's and its driver is eb920.device.  The board "
        "and the file are not named the same thing.\n\n"
@@ -732,6 +734,8 @@
 (procedure P_dev_path
   (set dev_write   dev_name)
   (set dev_present 0)
+  ; A registered driver may have been loaded from DEVS:Networks. Preserve
+  ; its disk path for the next boot, when it may not yet be in DeviceList.
   (if (exists (cat "DEVS:" dev_name) (noreq))
       (set dev_present 1)
       (if (exists (cat "DEVS:Networks/" dev_name) (noreq))
@@ -739,6 +743,14 @@
             (set dev_write   (cat "DEVS:Networks/" dev_name))
             (set dev_present 1)
           )))
+  ; ROM-injected and registered drivers can also exist without a disk file.
+  ; Keep the bare name only then. Reject quotes in an Other-driver answer
+  ; before constructing the helper command.
+  (if (AND (= dev_present 0) (NOT (patmatch "#?\"#?" dev_name)))
+    (
+      (set PROBE_CMD ("\"%s\" DEVICE \"%s\"" S_NETPROBE dev_name))
+      (if (= 0 (run PROBE_CMD (quiet) (safe))) (set dev_present 1))
+    ))
 )
 
 ; CARD_INDEX is the position in the askoptions page below.  One table assigns
@@ -752,7 +764,7 @@
       "x-surf-500.device" "a2065.device" "ariadne.device"
       "ariadne_ii.device" "hydra.device" "eb920.device"
       "x-surf.device" "cnet.device" "anxwifipi.device"
-      "uaenet.device" CUSTOM_DEV))
+      EMU_DEV CUSTOM_DEV))
   ; Emu68 1.0.x with Emu68's own driver installed (GENET_LEGACY, section 3).
   (if (AND (= CARD_INDEX 0) GENET_LEGACY)
     (set DEV_NAME "genet.device"))
@@ -765,6 +777,8 @@
       "genet" "zz9000" "xsurf100" "xsurf500" "a2065" "ariadne"
       "ariadne2" "amiganet" "lanrover" "xsurf" "pcmcia" "wifipi"
       "uaenet" "netother"))
+  (if (AND (= CARD_INDEX 12) (NOT (= EMU_DEV "uaenet.device")))
+    (set DEFAULT_IF "emulator"))
 
   (if (= CARD_INDEX 10)
     (
@@ -936,6 +950,9 @@
 (set CARD_DEFAULT   0)
 (set DET_N     0)
 (set PCM_DEFAULT 0)
+(set EMU_DEV "uaenet.device")
+(set EMU_FOUND 0)
+(set EMU_FILE_DEV "")
 
 ; Do not put anxgenet.device or anxwifipi.device in this file fallback.  This
 ; installer places both in DEVS:Networks on every machine, so their presence
@@ -966,6 +983,31 @@
             (select DET_N 2 4 8 16 32 64 128 256 512 1024 4096
                           1024 1024 1024)))))
     (set DET_N (+ DET_N 1))
+  ))
+
+; UAE derivatives share uaenet.device; Amithlon has its own names. Prefer
+; a live Exec driver over a disk-only fallback, including stale UAE files.
+; The generic DEVICE probe also handles other ROM drivers entered manually.
+(set EMU_N 0)
+(while (set EMU_TRY (select EMU_N
+          "uaenet.device" "amithlon1_net.device" "powerne2k.device" ""))
+  (
+    (set PROBE_CMD ("\"%s\" DEVICE \"%s\"" S_NETPROBE EMU_TRY))
+    (if (AND (= EMU_FOUND 0) (= 0 (run PROBE_CMD (quiet) (safe))))
+      (
+        (set EMU_DEV EMU_TRY)
+        (set EMU_FOUND 1)
+      ))
+    (if (AND (= (strlen EMU_FILE_DEV) 0)
+             (OR (exists (cat "DEVS:" EMU_TRY) (noreq))
+                 (exists (cat "DEVS:Networks/" EMU_TRY) (noreq))))
+      (set EMU_FILE_DEV EMU_TRY))
+    (set EMU_N (+ EMU_N 1))
+  ))
+(if (> (strlen EMU_FILE_DEV) 0)
+  (
+    (set DRIVER_DEFAULT (bitor DRIVER_DEFAULT 4096))
+    (if (= EMU_FOUND 0) (set EMU_DEV EMU_FILE_DEV))
   ))
 
 (if (OR (exists "DEVS:etherlink3.device" (noreq))
@@ -1082,8 +1124,7 @@
       ))
     (set PROBE_N (+ PROBE_N 1))
   ))
-(set PROBE_CMD ("\"%s\" CARD uae" S_NETPROBE))
-(if (= 0 (run PROBE_CMD (quiet) (safe)))
+(if EMU_FOUND
   (set CARD_DEFAULT (bitor CARD_DEFAULT 4096)))
 (if (AND AUTO_GENET (OR (NOT GENET_OLD) GENET_LEGACY))
   (set CARD_DEFAULT (bitor CARD_DEFAULT 1)))
@@ -1756,7 +1797,7 @@
           "LAN Rover"
           "X-Surf"
           "PCMCIA"
-          "UAE"
+          "Emulator network"
           "Other driver")
         (default CATEGORY_DEFAULT)))
       (if (= CATEGORY_MASK 0)

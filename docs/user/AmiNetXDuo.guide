@@ -163,6 +163,15 @@
   @{"CheckNetDevice" link CHECKNETDEVICE}. Under an emulator,
   uaenet.device or an emulated A2065 is the usual choice.
 
+  The installer detects uaenet.device and Amithlon's amithlon1_net.device
+  or powerne2k.device. A driver supplied in ROM, or already registered with
+  Exec, needs no file in DEVS:; its bare name is written to the interface.
+  This also works for a driver entered through Other driver. WinUAE,
+  Amiberry and FS-UAE use the UAE driver where enabled; Copperline's A2065
+  is detected like a physical card. Enable a SANA-II device or supported
+  emulated network card in the emulator settings. Host bsdsocket.library
+  emulation alone does not provide a network device to AmiNetXDuo.
+
   For an X-Surf 100, see
   @{"X-Surf 100 and flow control" link XSURF100FLOW} before tuning TCP.
 
