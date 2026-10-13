@@ -8,9 +8,12 @@
  */
 
 #include <exec/types.h>
+#include <exec/memory.h>
 #include <dos/dos.h>
 #include <dos/rdargs.h>
 #include <proto/dos.h>
+#include <proto/exec.h>
+#include <string.h>
 
 #ifndef FIXTURE_GENET
 #define FIXTURE_GENET 0
@@ -27,6 +30,9 @@
 #ifndef FIXTURE_FAIL
 #define FIXTURE_FAIL 0
 #endif
+#ifndef FIXTURE_CARD
+#define FIXTURE_CARD ""
+#endif
 
 enum
 {
@@ -35,12 +41,13 @@ enum
     ARG_GENETOK,
     ARG_WIFIPI,
     ARG_CARD,
+    ARG_MEMORY,
     ARG_COUNT
 };
 
 int main(int argc, char **argv)
 {
-    static const char template[] = "EMU68/S,GENET/S,GENETOK/S,WIFIPI/S,CARD/K";
+    static const char template[] = "EMU68/S,GENET/S,GENETOK/S,WIFIPI/S,CARD/K,MEMORY/N/K";
     LONG           args[ARG_COUNT] = { 0 };
     struct RDArgs *rda;
     LONG           result = RETURN_WARN;
@@ -57,13 +64,26 @@ int main(int argc, char **argv)
         return RETURN_ERROR;
     if ((args[ARG_EMU68] != 0) + (args[ARG_GENET] != 0) +
         (args[ARG_GENETOK] != 0) + (args[ARG_WIFIPI] != 0) +
-        (args[ARG_CARD] != 0) != 1)
+        (args[ARG_CARD] != 0) + (args[ARG_MEMORY] != 0) != 1)
     {
         FreeArgs(rda);
         return RETURN_ERROR;
     }
 
-    if (args[ARG_EMU68] != 0)
+    if (args[ARG_MEMORY] != 0)
+    {
+        LONG wanted = *(const LONG *)args[ARG_MEMORY];
+        ULONG total = AvailMem(MEMF_TOTAL);
+        if (total <= 0xffff0000UL)
+            total = (total + 65535UL) & ~65535UL;
+        result = wanted <= 0 ? RETURN_ERROR :
+                 total >= (ULONG)wanted ? RETURN_OK : RETURN_WARN;
+    }
+    else if (args[ARG_CARD] != 0)
+        result = strcmp((const char *)args[ARG_CARD], FIXTURE_CARD) == 0 ||
+                 (strcmp((const char *)args[ARG_CARD], "pcmcia") == 0 &&
+                  FIXTURE_CARD[0] != '\0') ? RETURN_OK : RETURN_WARN;
+    else if (args[ARG_EMU68] != 0)
         result = (FIXTURE_GENET || FIXTURE_WIFI) ? RETURN_OK : RETURN_WARN;
     else if (args[ARG_GENET] != 0)
         result = FIXTURE_GENET ? RETURN_OK : RETURN_WARN;

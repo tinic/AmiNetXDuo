@@ -542,7 +542,8 @@ fi
 # source as everything else rather than shipping whatever the source tree last
 # had in it.
 sed -e "s/^(set VERSION_STR \".*\")/(set VERSION_STR \"$VERSION\")/" \
-    "$INSTALL/Install-AmiNetXDuo" > "$TREE/Install-AmiNetXDuo"
+    "$INSTALL/Install-AmiNetXDuo" | python3 "$INSTALL/tools/packscript.py" \
+    > "$TREE/Install-AmiNetXDuo"
 grep -q "(set VERSION_STR \"$VERSION\")" "$TREE/Install-AmiNetXDuo" || {
     echo "the Installer script has no VERSION_STR line to stamp" >&2
     exit 2
@@ -660,6 +661,10 @@ cp "$WM_SRC/WirelessManager" "$TREE/Wireless/WirelessManager"
 cp "$WM_SRC/LICENSE"         "$TREE/Wireless/WirelessManager-LICENSE"
 chmod 755 "$TREE/Wireless/WirelessManager"
 chmod 644 "$TREE/Wireless/WirelessManager-LICENSE"
+
+# Optional external PCMCIA drivers. Fail closed if any binary, license or
+# corresponding source archive is missing/changed; never fetch during packing.
+python3 "$ROOT/tools/pcmcia-drivers.py" --stage "$TREE"
 
 cp "$ROOT/dist/ReadMe" "$TREE/ReadMe"
 cp "$INSTALL/Document.info" "$TREE/ReadMe.info"

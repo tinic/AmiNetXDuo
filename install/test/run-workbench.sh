@@ -100,7 +100,7 @@
 #                the record stay
 # -P replaces the throw-away archive's InstallNetProbe with one that exits
 # RETURN_FAIL for every query (fail) or with a file that is not a program
-# (broken): the Installer must fall back to the full stack and the driver
+# (broken): the Installer must fall back to the minimal stack and the driver
 # files, never to fat.
 # -p fat on a 68000/68010 model (AMINETXDUO_MODEL=A600) picks fat, requires
 # the refusal and the re-asked page, then picks the full stack there.
@@ -2325,7 +2325,19 @@ echo "============================================================"
 echo "  1/2  Workbench 3.1 boots, then installs the archive ($LEVEL)"
 echo "============================================================"
 
+# Record the actual guest's installed-memory tier before the Installer runs.
+# This also covers PCMCIA rigs whose fast RAM is deliberately below 8 MB.
 startup_with 'FailAt 9999
+Echo >DH0:default-stack.txt minimal
+"'"$UNPACK_AMIGA/AmiNetXDuo/InstallNetProbe"'" MEMORY 8388608
+If VAL $RC EQ 0
+  Echo >DH0:default-stack.txt full
+Else
+  "'"$UNPACK_AMIGA/AmiNetXDuo/InstallNetProbe"'" MEMORY 2162688
+  If VAL $RC EQ 5
+    Echo >DH0:default-stack.txt micro
+  EndIf
+EndIf
 C:installdrive >DH0:install-console.txt
 Echo >DH0:.done "$RC"'
 
@@ -2718,13 +2730,12 @@ else
 fi
 
 case "$PICK" in
-""|full)      WANT_STACK=full ;;
+""|drawer)   WANT_STACK=$(tr -d '\r\n' < "$HD/default-stack.txt") ;;
+full)         WANT_STACK=full ;;
 minimal)      WANT_STACK=minimal ;;
 micro)        WANT_STACK=micro ;;
 fat)          WANT_STACK=fat ;;
-# -p drawer answers the LAYOUT page, not the stack page, so the stack page
-# takes its own default and that default is the full stack.
-drawer)       WANT_STACK=full ;;
+# The drawer layout also takes the memory-based default above.
 esac
 case "$TRANSITION" in
     full-minimal) WANT_STACK=minimal ;;
@@ -2735,7 +2746,7 @@ esac
 [ "$FAT_REFUSED" = 0 ] || WANT_STACK=full
 # On Emu68 the Installer preselects fat when the archive has it and the CPU is
 # a 68020 or newer (Install-AmiNetXDuo, AUTO_EMU68).
-if [ -z "$PICK" ] && [ -z "$TRANSITION" ] && [ -n "$EMU68_FIXTURE" ] &&
+if [ "$WANT_STACK" = full ] && [ -z "$PICK" ] && [ -z "$TRANSITION" ] && [ -n "$EMU68_FIXTURE" ] &&
    [ -f "$UNPACK/AmiNetXDuo/Libs/fat/bsdsocket.library" ]; then
     case "$MODEL" in
         A500*|A600*|A1000*|A2000*) ;;

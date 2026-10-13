@@ -1,0 +1,218 @@
+@database "xircomce2.device Manual"
+@$VER: "xircomce2.device Manual" 1.1 (21.12.2024)
+@author "Neil Cafferkey"
+@(c) "Neil Cafferkey"
+
+Copyright (C) 2024 Neil Cafferkey
+
+This manual is free software; you can redistribute it and/or
+modify it under the terms of the GNU General Public License
+as published by the Free Software Foundation; either version 2
+of the License, or (at your option) any later version.
+
+This manual is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this manual; if not, write to the Free Software
+Foundation, Inc., 59 Temple Place - Suite 330, Boston,
+MA 02111-1307, USA.
+
+
+@node "main" "xircomce2.device Manual"
+
+  @{b}@{u}xircomce2.device 1.1@{uu}@{ub} - A Xircom CreditCard Ethernet PC Card driver
+
+
+    @{"Introduction" link "intro"}
+
+    @{"Installation and Usage" link "install"}
+
+    @{"Author and Legal Information" link "author-legal"}
+
+    @{"History" link "history"}
+
+@endnode
+
+
+@node "intro" "Introduction"
+
+@{u}@{b}Introduction@{ub}@{uu}
+
+xircomce2.device is a SANA-II network driver for Xircom CreditCard Ethernet
+PC Cards. These are sold by several companies under a variety of model
+names; see below for (probable) compatibility.
+
+Both 10 and 100 Mbps link speeds are supported, but achievable throughput is
+approximately the same for each link speed, even with a fast CPU.
+Autonegotiation of link speed and duplex mode are supported for cards that
+have this feature.
+
+@{u}@{b}Card Compatibility@{ub}@{uu}
+
+The table below shows compatibility information for all known 16-bit
+Ethernet and Ethernet/modem cards that have a Xircom chipset.
+
+@{b}@{u}Company@{uu}		@{u}Model@{uu}		@{u}Works@{uu}	@{u}Notes@{uu}@{ub}
+
+@{b}Accton@{ub}		EN2226		Maybe
+
+@{b}Compaq@{ub}		335511-001	Yes
+		335511-003	Maybe
+
+@{b}Intel@{ub}		MBLA1600	Maybe
+		MBLA1656	Maybe
+
+@{b}NEC@{ub}		PS-CE2-10BC	Maybe
+
+@{b}Xircom@{ub}		CE10		No	Older chipset
+		CEM-10		No	Older chipset
+		CEM-10BT	No	Older chipset
+		CE-10/A		No	Older chipset
+		CEM2		No	Older chipset
+		PS-CE2-10	Yes
+		PS-CEM28	No	Freezes system
+		PS-CEM33	No	Freezes system
+		CE3-10BC	Maybe
+		CE3-10BT	Maybe
+		CE3-10/100	Yes
+		CE3B-100	Yes
+		CE3B-100BTX	Yes
+		RE-10BT		Maybe	Type III card
+		XE2000		Yes	Type III card
+		RE-100		Yes	Type III card
+		RE-100BTX	Yes	Type III card
+		CEM56-100	Yes
+		REM56G-10BC	Yes	Type III card
+		REM56G-10BT	Yes	Type III card
+		REM56G-100BC	Yes	Type III card
+		REM56G-100BTX	Yes	Type III card
+		XEM5600		Yes	Type III card
+		R2E-100BTX	Maybe	Type III card
+		CFE-10		No	CF card with NE2000 chipset
+
+In summary, the most suitable cards are those with model codes beginning
+with CEM56 or CE3. Cards that have @{i}Yes@{ui} in the Works column above have been
+tested with at least one A600 and A1200 motherboard revision.
+
+Cards that have @{i}Maybe@{ui} in the Works column are very likely to work. Please
+send a note if you test one of them so that the table can be updated.
+
+Cards noted as Type III above will not fit into an A600 or A1200 desktop
+case. They may fit in a tower system, although some right-angle adapters
+only accommodate them with a very tight fit.
+
+@endnode
+
+
+@node "install" "Installation and Usage"
+
+@{u}@{b}Requirements@{ub}@{uu}
+
+xircomce2.device needs an A600 or A1200 and OS 2.05 or greater.
+
+@{u}@{b}Installation@{ub}@{uu}
+
+To install xircomce2.device, run the 'Install' script. In your networking
+software, set the SANA-II device name to @{b}networks/xircomce2.device@{ub} and the
+unit number to @{b}0@{ub}.
+
+@{u}@{b}Cable types@{ub}@{uu}
+
+Although some Xircom cards support @{"10base2" link "cable"} cabling, xircomce2.device
+only supports @{"10baseT/100baseTX" link "cable"} cabling.
+
+@{u}@{b}Multifunction cards@{ub}@{uu}
+
+Although xircomce2.device works with some multifunction Ethernet/modem
+cards, only one of these functions can be used at a time. This is due to
+limitations in AmigaOS's card.resource. It is also uncertain if AmigaOS PC
+Card serial/modem drivers will work with the modem function.
+
+@{u}@{b}A1200 hardware bug@{ub}@{uu}
+
+The A1200 (but not the A600) has a hardware bug that sometimes prevents a
+card being reset. There are both software and hardware remedies for this
+problem. The software solution is to use CardReset (util/boot/CardReset.lha
+on Aminet) and CardPatch (util/boot/CardPatch.lha on Aminet). There are
+several different types of hardware fixes, some of which may be available
+commercially. Without using one of these solutions, you may experience
+erratic behaviour with PC Cards.
+
+@{u}@{b}Dongles@{ub}@{uu}
+
+With the original dongle for your card, link and activity LEDs should work.
+The link LED indicates when a connection has been established with the link
+partner, e.g. your network switch or router. It glows green for a 10 Mbps
+connection and orange for a 100 Mbps connection. The activity LED glows when
+network traffic is flowing.
+
+Older Xircom dongles bundled with 10 Mbps cards also work at 100 Mbps with
+10/100 Mbps cards, but the link LED will not function when a 100 Mbps link
+is established. Also note that the LEDs on compatible third-party dongles
+may not function.
+
+If you have trouble establishing a network link, make sure that you are
+using a compatible dongle. Although several types of dongle may fit the
+connector on the card perfectly, this does not mean that they are
+necessarily compatible with the card.
+
+Even some Xircom dongles are fussy about which cards they work with. E.g.
+the "170-0458-003 A" dongle does not work with all cards.
+
+@{u}@{b}Problems@{ub}@{uu}
+
+With some A1200 motherboards, hot insertion or removal of a PC Card may
+cause the system to reset.
+
+Miami will cause the system to hang if the card is removed while online.
+Re-insertion won't help.
+
+@endnode
+
+
+@node "author-legal" "Author and Legal Information"
+
+@{u}@{b}Author and Legal Information@{ub}@{uu}
+
+xircomce2.device and pccard.library were written by Neil Cafferkey.
+
+Please send bug reports, suggestions, and any other correspondence to
+the following address.
+
+E-mail: neil@ncafferkey.net
+
+xircomce2.device and pccard.library are released under the terms of the
+@{"GNU General Public Licence" link "GPL/MAIN"}. See the individual source files for copyright
+information.
+
+The full pccard.library archive, which includes the source code and
+developer files, is available on Aminet as "util/libs/pccard.lha".
+
+All trademarks are owned by their owners.
+
+@endnode
+
+
+@node "history" "History"
+
+@{u}@{b}History@{ub}@{uu}
+
+@{b}V1.1 (December 2024)@{ub}
+
+  - First release.
+
+@endnode
+
+
+@node "cable" "Cable Types"
+
+10baseT: Twisted Pair (TP) cabling with RJ45 connectors.
+
+10base2: Thin coaxial cable with BNC connectors.
+
+@endnode
+
+

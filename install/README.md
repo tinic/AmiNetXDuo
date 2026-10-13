@@ -94,6 +94,26 @@ icons are separate formats and are not part of this GlowIcon set.
 
 ## The script
 
+The default profile uses installed RAM (Exec `MEMF_TOTAL`), including memory
+currently allocated: micro through 2 MiB, minimal below 8 MiB, full from
+8 MiB, or fat on Emu68 from 8 MiB. Intermediate and Expert can override it.
+The memory probe rounds boot reservations to the next 64 KiB. A failed query
+recommends minimal; it never selects fat from a failed probe.
+
+Packaging removes comments and indentation with `tools/packscript.py` to
+reduce Installer's input buffer. It checks that every token and its line
+number remain identical; the readable script remains here. On 1 MiB rigs,
+`installdrive.c` can use `DRIVE_INSTALL_STACK=12000UL` instead of the
+conservative 40000-byte test stack. Workbench 3.2 itself requires 2 MiB;
+test 1 MiB configurations with Kickstart/Workbench 3.1.
+
+`PCMCIA/` carries unmodified Prism2/Xircom drivers, pccard.library, original
+source archives and their redistribution notices. `tools/pcmcia-drivers.py`
+checks pinned bytes before staging. Run `python3 install/test/test_pcmcia_package.py`
+to check that missing or altered notices/source fail closed. Existing external
+files are retained; uninstall compares installer-added files against its saved
+copies and preserves files a user subsequently changes.
+
 Written for Commodore's Installer, whose language is documented in
 `installer.doc` (Commodore, 9 February 1993) and implemented in the Installer
 2.17 sources. Where the two disagree, the sources win. `compile.c`'s symbol
