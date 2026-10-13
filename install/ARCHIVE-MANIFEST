@@ -75,7 +75,8 @@ AmiNetXDuo/Install-AmiNetXDuo       | not-installed | always    | The installer 
 AmiNetXDuo/Install-AmiNetXDuo.info  | not-installed | always    | Its icon, whose default tool is Installer.  Same reason.
 AmiNetXDuo/Uninstall-AmiNetXDuo     | installed     | always    | (source S_UNINSTALL)
 AmiNetXDuo/Uninstall-AmiNetXDuo.info | installed    | always    | (source S_UNINSTALLICON)
-AmiNetXDuo/Installer                | installed     | always    | (source S_INSTALLER) Modified low-memory Installer 2.17; SHA-256 c99b79f4506e547545dde81df435ac1782e8a49674bf4a6814aacdc720bd3111, checked before staging.
+# Modified Installer 2.17; make-dist checks SHA-256 c99b79f4506e547545dde81df435ac1782e8a49674bf4a6814aacdc720bd3111 before staging.
+AmiNetXDuo/Installer                | installed     | always    | (source S_INSTALLER)
 AmiNetXDuo/InstallSameFile          | not-installed | always    | The Installer's file-identity primitive.  It uses dos.library SameLock to distinguish this drawer's library from a byte-identical system copy, runs before anything is written, and has no use after installation.
 AmiNetXDuo/Flavours/*               | not-installed | always    | One key=value manifest per stack the Installer offers: build flags, CPU floor, and every file with its size and sha256.  It describes the download for whoever checks it, and has no use on the machine.
 AmiNetXDuo/InstallNetProbe          | not-installed | always    | Read-only network-device discovery for the Installer.  It inspects Emu68's device tree, Zorro Autoconfig, PCMCIA identity tuples and UAE's resident device without opening a network device, and has no use after installation.
