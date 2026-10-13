@@ -11,6 +11,12 @@ are history.
   windows, through codesets.library when installed and ISO-8859-1
   otherwise. Server window titles set the console title. CHARSET selects
   another local character set.
+- Installer includes codesets.library 6.22 with its licence and source,
+  and installs it on Workbench 3.0 or newer when no newer copy is
+  installed.
+- httpd uses UTF-8 for WebDAV names, the browser Shell, plain-text
+  replies and the clipboard, converting to the system character set.
+  Non-ASCII file names list and open correctly in WebDAV clients.
 - CheckNetDevice reports the card in the A600/A1200 PCMCIA slot, its
   identification and matching driver, or "No card".
 - Installer detects ROM and registered network drivers, including
