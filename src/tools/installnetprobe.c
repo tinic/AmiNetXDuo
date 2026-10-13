@@ -30,6 +30,7 @@
 #include "aminetxduo/version.h"
 #include "../netdev/netdev_dtree.h"
 #include "netprobe_card.h"
+#include "netprobe_memory.h"
 
 const char *const tool_name = "InstallNetProbe";
 
@@ -389,7 +390,7 @@ int main(int argc, char **argv)
     if (args[ARG_MEMORY] != 0)
     {
         LONG wanted = *(const LONG *)args[ARG_MEMORY];
-        ULONG total = AvailMem(MEMF_TOTAL);
+        ULONG total = netprobe_memory_total();
 
         /* Exec excludes its memory headers and the low Chip RAM reserved at
            boot. Round to the next 64 KiB so a fitted 8 MiB is still 8 MiB.

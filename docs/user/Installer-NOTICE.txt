@@ -1,0 +1,41 @@
+Modified Installer 2.17
+=======================
+
+This is a customized build of Installer 2.17, not Commodore Installer 43.3.
+It is a separate program and is not covered by AmiNetXDuo's MIT licence.
+Original source notices include:
+
+  By Talin. (c) 1990 Sylvan Technical Arts
+  (C) Copyright 1991-93 Commodore-Amiga,Inc. All Rights Reserved
+
+Source provenance:
+  https://github.com/Arquivotheca/amiga-os-src
+  Branch: 3.1
+  Tree: b78c1ada537615c6eda889ad97b4ccd51ff4a178
+  Directory: os-source/v42/src/workbench/utilities/installer
+
+This source mirror is identified for provenance; it is not an additional
+licence grant. Original notices remain in the maintained source copy.
+
+Memory changes:
+  - Allocate 12-byte syntax-tree nodes in blocks of 256 and recycle nodes.
+  - Release the script input and token-history buffers after successful parsing.
+  - Drain tracked allocations before GCC runtime teardown.
+  - Adapt SAS/C declarations and register callbacks to GCC/NDK, and align
+    catalog strings containing word-length prefixes for the 68000.
+
+Build: GCC 16.2.0b m68k-amigaos and vasmm68k_mot, 68000 stack ABI.
+Compiler flags: -m68000 -Os -std=gnu89 -funsigned-char
+                -fno-strict-aliasing -DONLY2_0
+Modified compile.c: -DPRIVATE_NODE_ARENA -DPRIVATE_PARSE_RELEASE
+Link libraries: -lamiga -ldebug; final binary stripped with m68k-amigaos-strip.
+Use a 16,384-byte stack from a Shell, or the supplied installation icons.
+
+Binary SHA-256:
+  c99b79f4506e547545dde81df435ac1782e8a49674bf4a6814aacdc720bd3111
+
+Measured on a 68000 A500, Kickstart/Workbench 2.04, 512 KiB chip plus
+512 KiB trapdoor RAM, normal Workbench desktop and the complete monolithic
+AmiNetXDuo script: 302,784 bytes free at the welcome page, compared with
+42,560 bytes using Installer 43.3. Same-source memory changes save 171,280
+bytes. Installation, cancellation and malformed-script cleanup were checked.

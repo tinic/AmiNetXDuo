@@ -14,6 +14,7 @@
 #include <proto/dos.h>
 #include <proto/exec.h>
 #include <string.h>
+#include "../../src/tools/netprobe_memory.h"
 
 #ifndef FIXTURE_GENET
 #define FIXTURE_GENET 0
@@ -73,7 +74,7 @@ int main(int argc, char **argv)
     if (args[ARG_MEMORY] != 0)
     {
         LONG wanted = *(const LONG *)args[ARG_MEMORY];
-        ULONG total = AvailMem(MEMF_TOTAL);
+        ULONG total = netprobe_memory_total();
         if (total <= 0xffff0000UL)
             total = (total + 65535UL) & ~65535UL;
         result = wanted <= 0 ? RETURN_ERROR :

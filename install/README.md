@@ -7,8 +7,8 @@ distribution archive.
 ```
 Install-AmiNetXDuo          the Installer script
 Install-AmiNetXDuo.info     its icon: project, default tool "Installer"
-Installer                   Commodore's Installer, bundled so an install
-                            needs nothing else on the machine
+Installer                   modified Installer 2.17, with lower-memory
+                            parsing and 68000 / Kickstart 2.04 support
 AmiNetXDuo.info             drawer icon
 Drawer.info Document.info   generic icons for Docs/, Examples/, ReadMe
 Guide.info                  icon for AmiNetXDuo.guide, default tool "MultiView"
@@ -94,9 +94,11 @@ icons are separate formats and are not part of this GlowIcon set.
 
 ## The script
 
-The default profile uses installed RAM (Exec `MEMF_TOTAL`), including memory
+The default profile uses installed RAM, including memory
 currently allocated: micro through 2 MiB, minimal below 8 MiB, full from
 8 MiB, or fat on Emu68 from 8 MiB. Intermediate and Expert can override it.
+Exec V39+ provides `MEMF_TOTAL`; Kickstart 2.04/2.05 use the managed memory
+header ranges under `Forbid()` instead, since their Exec ignores that flag.
 The memory probe rounds boot reservations to the next 64 KiB. A failed query
 recommends minimal; it never selects fat from a failed probe.
 

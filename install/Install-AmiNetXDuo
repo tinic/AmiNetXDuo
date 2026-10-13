@@ -281,8 +281,8 @@
        "which opens bsdsocket.library gets the built-in loopback, but no card "
        "is opened and there is no route to an external network.\n\n"
        "The default is no for the micro stack or a machine with 4 MB of "
-       "installed RAM or less, leaving memory available until you need the "
-       "network. Intermediate and Expert can choose automatic startup.\n\n"
+       "installed RAM or less, leaving memory available until networking "
+       "is needed. Intermediate and Expert can choose automatic startup.\n\n"
        "For an installation in its own drawer, the managed block first "
        "assigns AmiNetXDuo: to the drawer and ADDs its Libs, C and Devs to "
        "LIBS:, C: and DEVS:, after everything already there, the way AmiTCP "
@@ -506,7 +506,9 @@
 
 (set F_START_NO
   (cat "It does not start by itself.  To start it:\n\n"
-       "    %sAddNetInterface DEVS:NetInterfaces/%s\n"))
+       "    %sAddNetInterface DEVS:NetInterfaces/%s\n\n"
+       "For an installation in its own drawer, reboot first to make "
+       "the AmiNetXDuo: assign available. The network stays offline."))
 
 (set F_START_KEPT
   (cat "The existing S:Network-Startup is unchanged and still runs at boot.  "

@@ -449,10 +449,10 @@ def main(argv):
                 "APPNAME=AmiNetXDuo",
                 "MINUSER=NOVICE",
                 "DEFUSER=AVERAGE",
-                "(The Installer needs a 10000 byte stack; this icon asks",
-                " for it.  From a Shell, type \"Stack 10000\" first.)",
+                "(The Installer uses a 16384 byte stack; this icon asks",
+                " for it.  From a Shell, type \"Stack 16384\" first.)",
             ],
-            stack=10000),
+            stack=16384),
         # The same Installer project, pointed at the script that removes
         # AmiNetXDuo again; it is installed into the AmiNetXDuo drawer.
         "Uninstall-AmiNetXDuo.info": diskobject(
@@ -464,7 +464,7 @@ def main(argv):
                 "MINUSER=NOVICE",
                 "DEFUSER=AVERAGE",
             ],
-            stack=10000),
+            stack=16384),
         "AmiNetXDuo.info": diskobject(
             drawer_icon(), WBDRAWER, drawer=True, window=(10, 12, 620, 236)),
         "Drawer.info": diskobject(

@@ -7,6 +7,7 @@ SPDX-License-Identifier: MIT
 import importlib.util
 from pathlib import Path
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -58,6 +59,64 @@ class InstallerPackingTests(unittest.TestCase):
             self.assertEqual(packed.count("\n"), source.count("\n"))
         finally:
             sys.path.pop(0)
+
+
+class InstalledMemoryTests(unittest.TestCase):
+    def test_exec_version_and_allocations_do_not_change_installed_ram(self):
+        # Compile the shipping helper against a small Exec model. V37/V38
+        # ignore MEMF_TOTAL, so calling AvailMem there must fail this test.
+        with tempfile.TemporaryDirectory(prefix="memory-probe-test-", dir=ROOT / "build") as directory:
+            directory = Path(directory)
+            for header in ("exec/execbase.h", "exec/memory.h", "proto/exec.h"):
+                path = directory / header
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("")
+            source = directory / "test.c"
+            source.write_text(r'''
+#include <assert.h>
+#include <stddef.h>
+#include <stdint.h>
+typedef uintptr_t ULONG;
+struct Node { struct Node *ln_Succ; };
+struct MemHeader { struct Node mh_Node; void *mh_Lower, *mh_Upper; ULONG mh_Free; };
+struct ExecBase {
+    struct { unsigned lib_Version; } LibNode;
+    struct { struct Node *lh_Head; } MemList;
+};
+#define MEMF_TOTAL (1UL << 19)
+struct ExecBase base, *SysBase = &base;
+static unsigned depth, queries;
+static void Forbid(void) { assert(depth == 0); ++depth; }
+static void Permit(void) { assert(depth == 1); --depth; }
+static ULONG AvailMem(ULONG flags) {
+    assert(base.LibNode.lib_Version >= 39 && flags == MEMF_TOTAL && depth == 0);
+    ++queries;
+    return 12UL * 1024 * 1024;
+}
+#include "netprobe_memory.h"
+int main(void) {
+    struct Node tail = { NULL };
+    struct MemHeader fast = { { &tail }, (void *)0x200000, (void *)0x980000, 0 };
+    struct MemHeader chip = { { &fast.mh_Node }, (void *)0x1000, (void *)0x80000, 0 };
+    base.MemList.lh_Head = &chip.mh_Node;
+    for (unsigned version = 37; version <= 40; ++version) {
+        base.LibNode.lib_Version = version;
+        queries = 0;
+        ULONG expected = version < 39 ? 8UL * 1024 * 1024 - 4096 : 12UL * 1024 * 1024;
+        assert(netprobe_memory_total() == expected);
+        chip.mh_Free = 64;
+        fast.mh_Free = 1024;
+        assert(netprobe_memory_total() == expected);
+        assert(depth == 0 && queries == (version < 39 ? 0U : 2U));
+    }
+    return 0;
+}
+''')
+            program = directory / "test"
+            subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror",
+                            "-I" + str(directory), "-I" + str(ROOT / "src/tools"),
+                            str(source), "-o", str(program)], check=True)
+            subprocess.run([str(program)], check=True)
 
 
 if __name__ == "__main__":

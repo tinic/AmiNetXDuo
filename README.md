@@ -51,7 +51,7 @@ The micro stack running on a **1 MB A500: 512 KB chip RAM + 512 KB trapdoor
 RAM**, with a 68000, Kickstart 2.04 (37.175) and Workbench 2.04. This Copperline
 session uses an emulated A2065 with SLIRP/NAT. The screenshot shows a DHCP
 lease, successful Internet pings and the available memory with NetMeter open.
-Installation used our private experimental Installer.
+Installation used the modified Installer bundled with the archive.
 
 ### Network cards
 
@@ -158,7 +158,7 @@ unpack it, and run `Install-AmiNetXDuo`. It asks:
 
 | Question | Default |
 |---|---|
-| Which stack: Everything, Minimal, Micro, Fat | Everything; Fat under Emu68 |
+| Which stack: Everything, Minimal, Micro, Fat | Micro through 2 MB, Minimal below 8 MB, Everything from 8 MB; Fat under Emu68 from 8 MB |
 | Into the system (`LIBS:`, `C:`, `DEVS:`), or into its own drawer, added last to those assigns; refused if `LIBS:` already has a `bsdsocket.library` (Intermediate and Expert) | into the system |
 | Where the `AmiNetXDuo` drawer of documentation and examples goes (Expert, and a new drawer installation) | `SYS:` |
 | Which card; the interface name at Expert | the cards found |
@@ -366,6 +366,7 @@ MIT, with these exceptions, each confined to the files it names:
 | ThreadX and NetX Duo | MIT (Microsoft and the Eclipse ThreadX contributors). Both are maintained forks, pinned by the submodules; [`docs/UPSTREAMING.md`](docs/UPSTREAMING.md) records their divergence and upstreaming plan | `third_party/threadx`, `third_party/netxduo` |
 | The NE2000 core of `anxnet.device` | BSD-2-Clause, adapted from NetBSD's `dp8390` driver | `src/netdev/dp8390.c`, `ne2000.c`, `ed.c`, `netdev_mcaf.c` |
 | `ssh` and `scp` | Dropbear's MIT-style licence | `third_party/dropbear`, `clients/dropbear` |
+| The bundled Installer | Original Commodore-Amiga and Sylvan Technical Arts copyrights retained; modified Installer 2.17, separate from the stack's MIT licence | `install/Installer`; provenance and original notices in `docs/user/Installer-NOTICE.txt` |
 | The `/files` text editor | CodeMirror 6 and its support packages, MIT | bundled into `src/tools/web/files.html`; notice in `src/tools/web/vendor/codemirror` |
 | The CA root set | MPL 2.0, Mozilla's, file-scoped | `DEVS:Internet/certificates`, from `third_party/cacert` |
 | `WirelessManager` | wpa_supplicant's three-clause BSD licence, Copyright (c) 2003-2010 Jouni Malinen and contributors, (c) 2011-2025 Neil Cafferkey. The unmodified binary from Aminet [`driver/net/prism2v2`](https://aminet.net/package/driver/net/prism2v2); its notice ships beside it and is installed as `WirelessManager-LICENSE` | `third_party/wirelessmanager` |
