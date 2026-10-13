@@ -28,7 +28,6 @@ def inventory(root=ROOT):
     tools.update(re.findall(r'cp\s+"[^"\n]+/([\w-]+)"\s+"\$TREE/[^"\n]+/"', text))
     tools.discard('certificates')
     tools.discard('WirelessManager-LICENSE')
-    tools.discard('COPYING')  # codesets.library's licence.
     tools.discard('Install-AmiNetXDuo')  # Installer script, not an executable.
     tools.discard('Uninstall-AmiNetXDuo')
     tools.discard('LICENSE')

@@ -2968,8 +2968,7 @@
   (set REC_F (tackon (tackon DOCDIR "PCMCIA") "README")) (P_rec_ours)
   (set RT_SELF 1)
   (set RT_SRC S_PCMDOCS) (set RT_DST (tackon DOCDIR "PCMCIA")) (P_rec_tree)
-  ; codesets.library's licence and source pointer, the same way.
-  (set REC_F (tackon (tackon DOCDIR "Codesets") "COPYING")) (P_rec_ours)
+  ; codesets.library's source pointer, the same way.
   (set REC_F (tackon (tackon DOCDIR "Codesets") "SOURCE")) (P_rec_ours)
   (set REC_F (tackon DOCDIR "Codesets")) (P_rec_ours)
   ; The drawer's own files, by name.
@@ -3553,7 +3552,6 @@
     )
   ))
 (makedir (tackon DOCDIR "Codesets") (help @makedir-help))
-(copyfiles (source (tackon S_CODESETS "COPYING")) (dest (tackon DOCDIR "Codesets")))
 (copyfiles (source (tackon S_CODESETS "SOURCE")) (dest (tackon DOCDIR "Codesets")))
 
 ; --- tls.library, if this archive has one --------------------------------

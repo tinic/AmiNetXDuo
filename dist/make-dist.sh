@@ -672,20 +672,18 @@ chmod 644 "$TREE/Wireless/WirelessManager-LICENSE"
 python3 "$ROOT/tools/pcmcia-drivers.py" --stage "$TREE"
 
 # codesets.library, built from third_party/libcodesets (LGPL-2.1) by
-# src/codesets/.  Its licence and a pointer to its source go with it; the
+# src/codesets/.  A pointer to its source goes with it; the
 # Installer puts it in LIBS: on 3.0 and up when none there is as new.  The
 # Charsets drawer upstream ships beside it does not come: 108 KB of optional
 # tables, and the codesets every program here needs are built in.
 CS_LIB="$CMD_BUILD/src/codesets/codesets.library"
 need "$CS_LIB"
-need "$ROOT/third_party/libcodesets/COPYING"
 CS_COMMIT=$(git -C "$ROOT" rev-parse HEAD:third_party/libcodesets)
 mkdir -p "$TREE/Codesets"
 cp "$CS_LIB" "$TREE/Codesets/codesets.library"
-cp "$ROOT/third_party/libcodesets/COPYING" "$TREE/Codesets/COPYING"
 cat > "$TREE/Codesets/SOURCE" <<EOF
 codesets.library is free software under the GNU Lesser General Public
-Licence 2.1, in COPYING beside this file.
+Licence 2.1.
 
 Its source is part of the AmiNetXDuo source at the commit below:
 libcodesets pinned as third_party/libcodesets, and src/codesets, which
@@ -695,7 +693,7 @@ Source:  https://github.com/tinic/AmiNetXDuo/tree/$(git -C "$ROOT" rev-parse HEA
 Upstream: https://github.com/jens-maus/libcodesets/tree/$CS_COMMIT
 EOF
 chmod 755 "$TREE/Codesets/codesets.library"
-chmod 644 "$TREE/Codesets/COPYING" "$TREE/Codesets/SOURCE"
+chmod 644 "$TREE/Codesets/SOURCE"
 
 cp "$ROOT/dist/ReadMe" "$TREE/ReadMe"
 cp "$INSTALL/Document.info" "$TREE/ReadMe.info"
