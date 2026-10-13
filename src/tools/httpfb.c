@@ -9,6 +9,7 @@
 #include "httprtg.h"
 #include "httpzz.h"
 #include "clipftxt.h"
+#include "httppath.h"          /* the codeset names use, for the clipboard */
 
 #include "aminetxduo/rfb_encode.h"
 #include "aminetxduo/rfb_words.h"
@@ -2156,7 +2157,8 @@ static VOID fb_ask_resync(VOID)
  * WaitSelect() has the bit (http_fb_sigmask()).  This end's own writes are
  * recognised by their clip ID and not sent back.
  *
- * Text only, ISO-8859-1 on the Amiga and UTF-8 in the browser (clipftxt.c).
+ * Text only, the machine's codeset on the Amiga and UTF-8 in the browser
+ * (clipftxt.c).
  * A session without clipboard.device keeps working without it.
  */
 #define FB_CLIP_MAX         (32UL * 1024UL)
@@ -2259,7 +2261,7 @@ static VOID fb_clip_start(VOID)
         fb_clip_hooked = TRUE;
 }
 
-/* `n` bytes of ISO-8859-1 onto the clipboard as one FTXT. */
+/* `n` bytes of local text onto the clipboard as one FTXT. */
 static BOOL fb_clip_write(const UBYTE *text, ULONG n)
 {
     struct IOClipReq *r = fb_clip_req;
@@ -2333,8 +2335,9 @@ static ULONG fb_clip_read(VOID)
 /* A `cp`: onto the clipboard, then Right-Amiga V into the active window. */
 static VOID fb_take_paste(VOID)
 {
-    ULONG n = clip_utf8_to_latin1(fb_clip, (uint32_t)fb_clip_n, fb_clip,
-                                  (uint32_t)FB_CLIP_MAX);
+    ULONG n = clip_utf8_to_local(http_path_get_codeset(), fb_clip,
+                                 (uint32_t)fb_clip_n, fb_clip,
+                                 (uint32_t)FB_CLIP_MAX);
 
     if (n == 0 || !fb_clip_write(fb_clip, n))
         return;
@@ -2359,8 +2362,8 @@ static BOOL fb_clip_word(VOID)
         return FALSE;
 
     fb_tx[10] = 'c'; fb_tx[11] = 'b'; fb_tx[12] = ' ';
-    len = clip_latin1_to_utf8(fb_clip, (uint32_t)n, &fb_tx[13],
-                              (uint32_t)(fb_tx_cap - 13UL));
+    len = clip_local_to_utf8(http_path_get_codeset(), fb_clip, (uint32_t)n,
+                             &fb_tx[13], (uint32_t)(fb_tx_cap - 13UL));
     fb_frame_payload(HTTP_WS_EV_TEXT, 3UL + len);
     return TRUE;
 }

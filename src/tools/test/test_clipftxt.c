@@ -36,8 +36,8 @@ static void expect(int cond, const char *what)
 
 static uint32_t to_latin(const char *s, uint8_t *out, uint32_t cap)
 {
-    return clip_utf8_to_latin1((const uint8_t *)s, (uint32_t)strlen(s), out,
-                               cap);
+    return clip_utf8_to_local(NULL, (const uint8_t *)s, (uint32_t)strlen(s),
+                              out, cap);
 }
 
 static void t_to_latin1(void)
@@ -60,14 +60,14 @@ static void t_to_latin1(void)
     n = to_latin("\x80y", o, sizeof(o));
     expect_bytes(o, n, "?y", "a stray continuation byte");
     n = to_latin("\xC1\x81", o, sizeof(o));
-    expect_bytes(o, n, "?", "an overlong A");
+    expect_bytes(o, n, "??", "an overlong A: a bad lead, a stray byte");
     n = to_latin("abcdef", o, 3);
     expect_bytes(o, n, "abc", "cut to the buffer");
 
     {
         char buf[] = "line\r\n\xC3\xA9t\xC3\xA9";
-        n = clip_utf8_to_latin1((uint8_t *)buf, (uint32_t)strlen(buf),
-                                (uint8_t *)buf, sizeof(buf));
+        n = clip_utf8_to_local(NULL, (uint8_t *)buf, (uint32_t)strlen(buf),
+                               (uint8_t *)buf, sizeof(buf));
         expect_bytes((uint8_t *)buf, n, "line\n\xE9t\xE9", "in place");
     }
 }
@@ -77,9 +77,9 @@ static void t_to_utf8(void)
     uint8_t  o[16];
     uint32_t n;
 
-    n = clip_latin1_to_utf8((const uint8_t *)"a\xFC" "b", 3, o, sizeof(o));
+    n = clip_local_to_utf8(NULL, (const uint8_t *)"a\xFC" "b", 3, o, sizeof(o));
     expect_bytes(o, n, "a\xC3\xBC" "b", "a Latin-1 letter widens to two bytes");
-    n = clip_latin1_to_utf8((const uint8_t *)"a\xFC", 2, o, 2);
+    n = clip_local_to_utf8(NULL, (const uint8_t *)"a\xFC", 2, o, 2);
     expect_bytes(o, n, "a", "never half a character");
 }
 

@@ -79,7 +79,7 @@ async function fixture(options = {}) {
       let marker = "";
       onFrames(socket, (op, data) => {
         assert.equal(op, 2);
-        const s = data.toString("latin1");
+        const s = data.toString("utf8");
         received.push(s);
         const start = s.match(/Echo "(ANXD[A-F0-9]+) BEGIN"/);
         if (start) {

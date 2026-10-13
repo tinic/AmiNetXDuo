@@ -472,6 +472,8 @@ aminetxduo_add_tool(tool_httpd   httpd    SOURCES httpd.c httpdate.c httpfs.c ht
                                           httpxml.c httpws.c
                                           httpsha1.c httpterm.c httpfb.c clipftxt.c
                                           httprtg.c httpzz.c
+                                          "${CMAKE_SOURCE_DIR}/src/common/textconv.c"
+                                          "${CMAKE_SOURCE_DIR}/src/common/textconv_cs.c"
                                           toolsock.c toolbudget.c
                                           iperfcore.c iperfwire.c
                                           "${AMINETXDUO_NETXDUO}/crypto_libraries/src/nx_crypto_sha1.c"
@@ -758,8 +760,9 @@ endif()
 # that always says yes reads exactly like one that works, as does a resolver
 # that turns "about.html" into a host name.
 #
-#   cc -std=c11 -Wall -Wextra -Isrc/tools \
-#      src/tools/test/test_httppath.c src/tools/httppath.c -o test_httppath
+#   cc -std=c11 -Wall -Wextra -Isrc/tools -Iinclude \
+#      src/tools/test/test_httppath.c src/tools/httppath.c \
+#      src/common/textconv.c -o test_httppath
 #   cc -std=c11 -Wall -Wextra -Isrc/tools \
 #      src/tools/test/test_httpif.c src/tools/httpif.c -o test_httpif
 #   cc -std=c11 -Wall -Wextra -Isrc/tools \
@@ -771,10 +774,12 @@ endif()
 if(NOT CMAKE_CROSSCOMPILING)
     add_executable(test_httppath
         test/test_httppath.c
-        httppath.c)
+        httppath.c
+        "${CMAKE_SOURCE_DIR}/src/common/textconv.c")
 
     target_include_directories(test_httppath PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}")
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/include")
 
     target_compile_options(test_httppath PRIVATE -Wall -Wextra)
     set_target_properties(test_httppath PROPERTIES C_STANDARD 11)
@@ -850,10 +855,12 @@ if(NOT CMAKE_CROSSCOMPILING)
     add_executable(test_httplock
         test/test_httplock.c
         httplock.c
-        httppath.c)
+        httppath.c
+        "${CMAKE_SOURCE_DIR}/src/common/textconv.c")
 
     target_include_directories(test_httplock PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}")
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/include")
 
     target_compile_options(test_httplock PRIVATE -Wall -Wextra)
     set_target_properties(test_httplock PROPERTIES C_STANDARD 11)
@@ -894,10 +901,12 @@ if(NOT CMAKE_CROSSCOMPILING)
     add_executable(test_httpxml
         test/test_httpxml.c
         httpxml.c
-        httppath.c)
+        httppath.c
+        "${CMAKE_SOURCE_DIR}/src/common/textconv.c")
 
     target_include_directories(test_httpxml PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}")
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/include")
 
     target_compile_options(test_httpxml PRIVATE -Wall -Wextra)
     set_target_properties(test_httpxml PROPERTIES C_STANDARD 11)
@@ -935,9 +944,11 @@ if(NOT CMAKE_CROSSCOMPILING)
     # and the FORM FTXT it writes and reads.
     add_executable(test_clipftxt
         test/test_clipftxt.c
-        clipftxt.c)
+        clipftxt.c
+        "${CMAKE_SOURCE_DIR}/src/common/textconv.c")
     target_include_directories(test_clipftxt PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}")
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/include")
     target_compile_options(test_clipftxt PRIVATE -Wall -Wextra)
     set_target_properties(test_clipftxt PROPERTIES C_STANDARD 11)
 

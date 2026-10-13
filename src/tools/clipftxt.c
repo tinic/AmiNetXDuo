@@ -5,81 +5,50 @@
  */
 
 #include "clipftxt.h"
+#include "aminetxduo/textconv.h"
 
-uint32_t clip_utf8_to_latin1(const uint8_t *in, uint32_t n,
-                             uint8_t *out, uint32_t cap)
+uint32_t clip_utf8_to_local(const struct txt_codeset *cs, const uint8_t *in,
+                            uint32_t n, uint8_t *out, uint32_t cap)
 {
-    uint32_t i = 0, o = 0;
+    /* No look-alike text: out may be in, so one character, one byte. */
+    txt_codeset plain = { cs != NULL ? cs->upper : NULL, NULL, NULL };
+    txt_dec     d = { 0, 0, 0, 1 };
+    uint32_t    i = 0, o = 0;
 
-    while (i < n && o < cap)
+    while (i < n && o + 1u < cap + 1u)
     {
-        uint8_t  c = in[i];
-        uint32_t cp, need, k;
+        uint8_t c = in[i];
+        uint8_t tmp[TXT_CHAR_MAX];
+        size_t  k, m;
 
         if (c == '\r')
         {
+            m = txt_dec_flush(&d, tmp);
+            if (o + m + 1u > cap)
+                break;
+            for (k = 0; k < m; k++)
+                out[o++] = tmp[k];
             out[o++] = '\n';
             i += (i + 1 < n && in[i + 1] == '\n') ? 2u : 1u;
             continue;
         }
-        if (c < 0x80u)
-        {
-            out[o++] = c;
-            i++;
-            continue;
-        }
 
-        if ((c & 0xE0u) == 0xC0u)      { cp = c & 0x1Fu; need = 1; }
-        else if ((c & 0xF0u) == 0xE0u) { cp = c & 0x0Fu; need = 2; }
-        else if ((c & 0xF8u) == 0xF0u) { cp = c & 0x07u; need = 3; }
-        else
-        {
-            out[o++] = '?';             /* a stray continuation byte */
-            i++;
-            continue;
-        }
-
-        for (k = 1; k <= need; k++)
-        {
-            if (i + k >= n || (in[i + k] & 0xC0u) != 0x80u)
-                break;
-            cp = (cp << 6) | (in[i + k] & 0x3Fu);
-        }
-        if (k <= need)
-        {
-            out[o++] = '?';             /* cut short */
-            i += k;
-            continue;
-        }
-        out[o++] = (cp <= 0xFFu && !(need == 1 && cp < 0x80u)) ? (uint8_t)cp
-                                                               : (uint8_t)'?';
-        i += need + 1u;
+        m = txt_dec_byte(&d, &plain, c, tmp);
+        if (o + m > cap)
+            break;
+        for (k = 0; k < m; k++)
+            out[o++] = tmp[k];
+        i++;
     }
+    if (i == n && o < cap)
+        o += (uint32_t)txt_dec_flush(&d, &out[o]);
     return o;
 }
 
-uint32_t clip_latin1_to_utf8(const uint8_t *in, uint32_t n,
-                             uint8_t *out, uint32_t cap)
+uint32_t clip_local_to_utf8(const struct txt_codeset *cs, const uint8_t *in,
+                            uint32_t n, uint8_t *out, uint32_t cap)
 {
-    uint32_t i, o = 0;
-
-    for (i = 0; i < n; i++)
-    {
-        uint8_t c = in[i];
-
-        if (c < 0x80u)
-        {
-            if (o + 1 > cap) break;
-            out[o++] = c;
-        }
-        else
-        {
-            if (o + 2 > cap) break;
-            out[o++] = (uint8_t)(0xC0u | (c >> 6));
-            out[o++] = (uint8_t)(0x80u | (c & 0x3Fu));
-        }
-    }
-    return o;
+    return (uint32_t)txt_local_to_utf8_str(cs, in, n, out, cap, NULL);
 }
 
 static void put32(uint8_t *p, uint32_t v)

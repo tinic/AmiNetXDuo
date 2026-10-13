@@ -21,6 +21,7 @@
 #include "httpxml.h"
 #include "iperfcore.h"
 #include "aminetxduo/version.h"
+#include "aminetxduo/textconv.h"
 
 const char *const tool_name = "httpd";
 
@@ -363,7 +364,8 @@ static HttpConn *httpd_conn;
    only because exactly one request is parsed and one answer produced per pass:
    the connections interleave between passes, never inside one. */
 static char httpd_scratch[HTTPD_CHUNK_MAX];
-static char httpd_escape[(HTTP_URL_MAX + HTTP_NAME_MAX + 2) * 3];
+/* x6: an escaped byte is three, and a local byte can be two of UTF-8. */
+static char httpd_escape[(HTTP_URL_MAX + HTTP_NAME_MAX + 2) * 6];
 /* The request-body read buffer, static for the reason above and large for
    the reason at HTTPD_BODY_BUF.  Filled and drained inside one
    httpd_readable() pass, so it shares the "one request per pass" safety. */
@@ -1889,7 +1891,7 @@ static ULONG httpd_propfind_entry(HttpConn *c, const char *href, const char *nam
     httpd_rfc1123(secs, modified);
     httpd_iso8601(secs, created);
 
-    (VOID)http_xml_escape(name, httpd_text, sizeof(httpd_text));
+    (VOID)http_xml_escape_name(name, httpd_text, sizeof(httpd_text));
 
     ok = hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
                    "<D:response><D:href>");
@@ -2036,7 +2038,7 @@ static ULONG httpd_index_entry(const char *href, const char *name,
     ULONG used = 0;
     BOOL  ok;
 
-    (VOID)http_xml_escape(name, httpd_text, sizeof(httpd_text));
+    (VOID)http_xml_escape_name(name, httpd_text, sizeof(httpd_text));
 
     ok = hs_append(httpd_scratch, sizeof(httpd_scratch), &used, "<li><a href=\"");
     ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used, href);
@@ -2580,7 +2582,7 @@ static VOID httpd_do_get(HttpConn *c)
             ULONG used = 0;
             BOOL  ok;
 
-            (VOID)http_xml_escape(c->path.url, httpd_text, sizeof(httpd_text));
+            (VOID)http_xml_escape_name(c->path.url, httpd_text, sizeof(httpd_text));
 
             ok = hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
                            "<html><head><title>");
@@ -2605,7 +2607,7 @@ static VOID httpd_do_get(HttpConn *c)
                         "GET /files: browser file manager.\n");
                 if (ok && httpd_term_page[0] != '\0')
                     ok = hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
-                        "GET /shell: browser Shell; WS /shell: binary Latin-1 I/O, "
+                        "GET /shell: browser Shell; WS /shell: binary UTF-8 I/O, "
                         "text break/eof. Send Echo \"TOKEN RC=$RC\" after a command "
                         "to delimit output and return code. ?session=0|1 "
                         "selects a Shell (default 0); reconnect within 5 min.\n");
@@ -2854,7 +2856,7 @@ static VOID httpd_do_files(HttpConn *c)
     {
         httpd_begin(c, 405);
         httpd_header(c, "Allow", "GET, HEAD");
-        httpd_body_text(c, "text/plain; charset=iso-8859-1",
+        httpd_body_text(c, "text/plain; charset=utf-8",
                         "The file manager answers GET.\r\n");
         return;
     }
@@ -2917,7 +2919,7 @@ static VOID httpd_do_terminal(HttpConn *c)
     {
         httpd_begin(c, 405);
         httpd_header(c, "Allow", "GET, HEAD");
-        httpd_body_text(c, "text/plain; charset=iso-8859-1",
+        httpd_body_text(c, "text/plain; charset=utf-8",
                         "The terminal answers GET.\r\n");
         return;
     }
@@ -2943,7 +2945,7 @@ static VOID httpd_do_terminal(HttpConn *c)
     {
         httpd_begin(c, 426);
         httpd_header(c, "Sec-WebSocket-Version", "13");
-        httpd_body_text(c, "text/plain; charset=iso-8859-1",
+        httpd_body_text(c, "text/plain; charset=utf-8",
                         "This server speaks WebSocket version 13.\r\n");
         return;
     }
@@ -2970,7 +2972,7 @@ static VOID httpd_do_terminal(HttpConn *c)
     {
         httpd_begin(c, 503);
         httpd_header(c, "Retry-After", "1");
-        httpd_body_text(c, "text/plain; charset=iso-8859-1",
+        httpd_body_text(c, "text/plain; charset=utf-8",
                         "Terminal released.\r\n");
         return;
     }
@@ -2984,7 +2986,7 @@ static VOID httpd_do_terminal(HttpConn *c)
             {
                 httpd_begin(c, 503);
                 httpd_header(c, "Retry-After", "5");
-                httpd_body_text(c, "text/plain; charset=iso-8859-1",
+                httpd_body_text(c, "text/plain; charset=utf-8",
                                 "Terminal in use.\r\n");
                 return;
             }
@@ -3005,7 +3007,7 @@ static VOID httpd_do_terminal(HttpConn *c)
     {
         httpd_begin(c, 503);
         httpd_header(c, "Retry-After", "1");
-        httpd_body_text(c, "text/plain; charset=iso-8859-1",
+        httpd_body_text(c, "text/plain; charset=utf-8",
                         "Previous Shell stopping.\r\n");
         return;
     }
@@ -3085,7 +3087,7 @@ static VOID httpd_do_console(HttpConn *c)
     {
         httpd_begin(c, 405);
         httpd_header(c, "Allow", "GET, HEAD");
-        httpd_body_text(c, "text/plain; charset=iso-8859-1",
+        httpd_body_text(c, "text/plain; charset=utf-8",
                         "The console answers GET.\r\n");
         return;
     }
@@ -3107,7 +3109,7 @@ static VOID httpd_do_console(HttpConn *c)
     {
         httpd_begin(c, 426);
         httpd_header(c, "Sec-WebSocket-Version", "13");
-        httpd_body_text(c, "text/plain; charset=iso-8859-1",
+        httpd_body_text(c, "text/plain; charset=utf-8",
                         "This server speaks WebSocket version 13.\r\n");
         return;
     }
@@ -3124,7 +3126,7 @@ static VOID httpd_do_console(HttpConn *c)
 
         httpd_begin(c, 503);
         httpd_header(c, "Retry-After", took ? "1" : "5");
-        httpd_body_text(c, "text/plain; charset=iso-8859-1",
+        httpd_body_text(c, "text/plain; charset=utf-8",
                         took ? "Console released.\r\n"
                              : "Console in use.\r\n");
         return;
@@ -3536,8 +3538,14 @@ static BOOL httpd_resolve_dest(HttpConn *c)
             httpd_log(c, "refused destination \"%s\": %s", (LONG)c->head.dest_url,
                       (LONG)http_path_error(why));
 
-        httpd_error(c, 403,
-                    "destination refused");
+        if (why == HTTP_PATH_BAD_UTF8)
+            httpd_error(c, 400, "the destination is not UTF-8");
+        else if (why == HTTP_PATH_UNMAPPABLE)
+            httpd_error(c, 409,
+                        "the name has a character this machine cannot store");
+        else
+            httpd_error(c, 403,
+                        "destination refused");
         return FALSE;
     }
 
@@ -4211,7 +4219,26 @@ static BOOL httpd_parse(HttpConn *c, ULONG headlen)
             httpd_log(c, "refused \"%s\": %s", (LONG)httpd_target,
                       (LONG)http_path_error(why));
 
-        /* 403 rather than 404 for every one of them: whether the path exists is
+        /* A name that is not UTF-8 is a bad request, and one the codeset
+           cannot hold names no file here: nothing to probe in either. */
+        if (why == HTTP_PATH_BAD_UTF8)
+        {
+            httpd_error(c, 400, "the path is not UTF-8");
+            return FALSE;
+        }
+        if (why == HTTP_PATH_UNMAPPABLE)
+        {
+            BOOL makes = (c->method != NULL &&
+                          (c->method->id == HTTPD_M_PUT ||
+                           c->method->id == HTTPD_M_MKCOL ||
+                           c->method->id == HTTPD_M_LOCK)) ? TRUE : FALSE;
+
+            httpd_error(c, makes ? 409 : 404,
+                        "the name has a character this machine cannot store");
+            return FALSE;
+        }
+
+        /* 403 rather than 404 for every other one: whether the path exists is
            exactly what a caller probing for an escape wants told. */
         httpd_error(c, 403, "path refused");
         return FALSE;
@@ -6151,6 +6178,14 @@ int main(int argc, char **argv)
                         (LONG)sw, (LONG)sh, (LONG)sd);
     }
 
+    /* Names on the wire are UTF-8; the disk has the machine's codeset.
+       Opened here, after the last failure path, and closed below. */
+    {
+        int flags;
+
+        http_path_codeset(txt_codeset_open(NULL, &flags));
+    }
+
     (VOID)Flush(Output());
 
     httpd_serve(lsock);
@@ -6170,6 +6205,9 @@ int main(int argc, char **argv)
     ami_free(httpd_conn);
     ami_free(httpd_info);
     ami_free(httpd_fib2);
+
+    http_path_codeset(NULL);
+    txt_codeset_close();
 
     (VOID)tool_sock_close(httpd_sb, lsock);
     CloseLibrary(httpd_sb);

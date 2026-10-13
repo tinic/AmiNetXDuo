@@ -6,6 +6,7 @@
 #include "httpterm.h"
 #include "httpterm_owner.h"
 #include "httpterm_complete.h"
+#include "httppath.h"           /* the machine's codeset */
 
 #include <dos/dostags.h>
 #include <dos/dosasl.h>
@@ -2125,12 +2126,25 @@ static VOID sock_sink(void *ctx, HttpWsEvent ev, const UBYTE *data,
     switch (ev)
     {
         case HTTP_WS_EV_BINARY:
+        {
+            /* UTF-8 to the machine's codeset, a sequence kept across frames.
+               No look-alike text: one character is at most one byte, and
+               U+009B (csiTo8Bit) stays the CSI byte. */
+            const txt_codeset *cs = http_path_get_codeset();
+            txt_codeset        plain = { cs != NULL ? cs->upper : NULL,
+                                         NULL, NULL };
+            uint8_t            b[TXT_CHAR_MAX];
+
             for (i = 0; i < len; i++)
             {
-                if (t->pend_n < (UWORD)sizeof(t->pend))
-                    t->pend[t->pend_n++] = data[i];
+                size_t k, m = txt_dec_byte(&t->dec, &plain, data[i], b);
+
+                for (k = 0; k < m; k++)
+                    if (t->pend_n < (UWORD)sizeof(t->pend))
+                        t->pend[t->pend_n++] = b[k];
             }
             break;
+        }
 
         case HTTP_WS_EV_TEXT:
             for (i = 0; i < len; i++)
@@ -2143,6 +2157,14 @@ static VOID sock_sink(void *ctx, HttpWsEvent ev, const UBYTE *data,
 
             if (final)
             {
+                const txt_codeset *cs = http_path_get_codeset();
+                txt_codeset        plain = { cs != NULL ? cs->upper : NULL,
+                                             NULL, NULL };
+
+                /* UTF-8 to the codeset, in place: never longer. */
+                t->word_n = (UBYTE)txt_utf8_to_local(&plain,
+                                (const uint8_t *)t->word, t->word_n,
+                                (uint8_t *)t->word, t->word_n);
                 t->word[t->word_n] = '\0';
                 if (!t->word_over)
                     sock_word(t->word);
@@ -2275,6 +2297,8 @@ VOID http_term_sock_begin(HttpTermSock *t, struct Library *sb, LONG sock,
     t->progress = now;
 
     http_ws_reset(&t->in);
+    t->dec.need = 0;
+    t->dec.c1   = 1;
 
     sock_feed_first(t);
 }
@@ -2432,10 +2456,16 @@ BOOL http_term_sock_write(HttpTermSock *t, ULONG now)
                 unsigned long hn;
                 unsigned long i;
 
-                while (word[n] != '\0' && 10UL + n < t->out_size)
+                /* A text frame is UTF-8; a completion carries file names. */
                 {
-                    t->out[10 + n] = (UBYTE)word[n];
-                    n++;
+                    const UBYTE *w = (const UBYTE *)word;
+                    size_t       wl = 0;
+
+                    while (w[wl] != '\0')
+                        wl++;
+                    n = (unsigned long)txt_local_to_utf8_str(
+                            http_path_get_codeset(), w, wl, &t->out[10],
+                            t->out_size - 10UL, NULL);
                 }
 
                 hn = http_ws_head(head, sizeof(head), HTTP_WS_EV_TEXT, n, 1);
@@ -2457,7 +2487,18 @@ BOOL http_term_sock_write(HttpTermSock *t, ULONG now)
         }
 
         {
-            LONG n = http_term_read(&t->out[10], (LONG)(t->out_size - 10UL));
+            /* The Shell's codeset out as UTF-8.  Read into the last third
+               and widen forwards: a byte is at most three, so the writer
+               never reaches what is still to be read. */
+            ULONG room = t->out_size - 10UL;
+            ULONG want = room / 3UL;
+            UBYTE *src = &t->out[10UL + room - want];
+            LONG  n    = http_term_read(src, (LONG)want);
+
+            if (n > 0)
+                n = (LONG)txt_local_to_utf8_str(http_path_get_codeset(), src,
+                                                (size_t)n, &t->out[10], room,
+                                                NULL);
 
             if (n > 0)
             {

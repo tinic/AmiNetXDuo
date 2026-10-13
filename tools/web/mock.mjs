@@ -154,10 +154,9 @@ function frame(op, payload) {
   return Buffer.concat([head, payload]);
 }
 
-function latin1(s) {
-  const b = Buffer.alloc(s.length);
-  for (let i = 0; i < s.length; i++) b[i] = s.charCodeAt(i) & 0xff;
-  return b;
+/* httpd sends the Shell's output as UTF-8. */
+function utf8(s) {
+  return Buffer.from(s, "utf8");
 }
 
 const server = createServer((req, res) => {
@@ -183,7 +182,7 @@ server.on("upgrade", (req, sock) => {
              createHash("sha1").update(key + GUID).digest("base64") + "\r\n\r\n");
 
   const shell = makeShell(
-    (text) => sock.write(frame(0x2, latin1(text))),
+    (text) => sock.write(frame(0x2, utf8(text))),
     (code, why) => {
       const b = Buffer.alloc(2 + why.length);
       b.writeUInt16BE(code);
@@ -213,7 +212,7 @@ server.on("upgrade", (req, sock) => {
       buf = buf.subarray(at + n);
 
       if (op === 0x2) shell.keys(payload);
-      else if (op === 0x1) shell.word(payload.toString("latin1"));
+      else if (op === 0x1) shell.word(payload.toString("utf8"));
       else if (op === 0x9) sock.write(frame(0xa, payload));
       else if (op === 0x8) { shell.stop(); sock.end(); }
     }

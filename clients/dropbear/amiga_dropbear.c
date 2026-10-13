@@ -13,7 +13,6 @@
 #include <intuition/intuition.h> /* struct Window, for the OSC title */
 #define INTUITION_BASE_NAME cs_IntuitionBase
 #include <proto/intuition.h>
-#include <inline/macros.h>       /* LP1/LP2 for codesets.library */
 /* BEFORE <proto/bsdsocket.h>, and the order is load-bearing: the NDK's inline
    header defines gethostid(), getdtablesize() and gethostname() as function-
    like macros, which turn the declarations of the same three in <sys/unistd.h>
@@ -1058,7 +1057,7 @@ typedef struct
 } ConReader;
 
 static ConReader   *con_reader;
-static sshcs_codeset cs_set;              /* the local codeset, see cs_init() */
+static const txt_codeset *cs_set;         /* the local codeset, see cs_init() */
 static BYTE         con_data_bit = -1;
 static BYTE         con_done_bit = -1;
 static volatile int con_intr;             /* a local Ctrl-C to feed the remote */
@@ -1120,7 +1119,7 @@ static void con_child(void)
         else if ((UBYTE)c >= 0x80 && cs_in_on())
         {
             uint8_t u[3];
-            size_t  k, m = sshcs_local_to_utf8(&cs_set, (uint8_t)c, u);
+            size_t  k, m = txt_local_to_utf8(cs_set, (uint8_t)c, u);
 
             for (k = 0; k < m; k++)
                 con_ring_put(cr, u[k]);
@@ -1307,83 +1306,14 @@ static int con_write(int fd, const void *buf, size_t len)
 #define CS_OSC       2
 #define CS_ERR       4                    /* fd 2 is a console too          */
 
-#define CS_TAG(n)            (0xfec901f4UL + (n))   /* libraries/codesets.h */
-#define CSA_SourceLen        CS_TAG(1)
-#define CSA_Source           CS_TAG(2)
-#define CSA_FallbackToDefault CS_TAG(12)
-#define CSA_DestCodeset      CS_TAG(13)
-#define CSA_MapForeignChars  CS_TAG(28)
-
-/* libraries/codesets.h, 6.x: public and read-only. */
-struct cs_single { UBYTE code; UBYTE utf8[8]; ULONG ucs4; };
-struct cs_codeset
-{
-    struct MinNode   node;
-    char            *name, *alt_name, *characterization;
-    LONG             read_only;
-    struct cs_single table[256];
-};
-
-static struct Library *CodesetsBase;
-#define CodesetsFreeA(obj, attrs) \
-    LP2NR(0x5a, CodesetsFreeA, APTR, obj, a0, struct TagItem *, attrs, a1, \
-    , CodesetsBase)
-#define CodesetsFindA(name, attrs) \
-    LP2(0x66, struct cs_codeset *, CodesetsFindA, CONST_STRPTR, name, a0, \
-    struct TagItem *, attrs, a1, , CodesetsBase)
-#define CodesetsUTF8ToStrA(attrs) \
-    LP1(0x78, STRPTR, CodesetsUTF8ToStrA, struct TagItem *, attrs, a0, \
-    , CodesetsBase)
-
 static struct IntuitionBase *cs_IntuitionBase;
 static int                cs_mode = -1;
 static const char        *cs_name;          /* CHARSET=, or NULL           */
-static struct cs_codeset *cs_cs;
-static uint16_t           cs_upper[128];
 static sshcs_out          cs_out[2];        /* fd 1, fd 2                  */
 static uint8_t            cs_osc_buf[SSHCS_TITLE_MAX];
 static UBYTE              cs_title[100];    /* what the window shows       */
 static struct Window     *cs_win;
 static UBYTE             *cs_old_title;
-
-/* A code point the codeset has no byte for: codesets' look-alike text.  No
-   CSA_Dest: 6.22 frees a caller's buffer when the mapping expands a
-   character, so the library allocates and CodesetsFreeA() returns it. */
-static size_t cs_foreign(void *ctx, uint32_t cp, uint8_t *out, size_t cap)
-{
-    UBYTE          u[4];
-    ULONG          n;
-    STRPTR         str;
-    size_t         k = 0;
-    struct TagItem tags[5];
-
-    (void)ctx;
-    if (cp < 0x800)
-        u[0] = (UBYTE)(0xC0 | (cp >> 6)), u[1] = (UBYTE)(0x80 | (cp & 0x3F)), n = 2;
-    else if (cp < 0x10000)
-        u[0] = (UBYTE)(0xE0 | (cp >> 12)), u[1] = (UBYTE)(0x80 | ((cp >> 6) & 0x3F)),
-        u[2] = (UBYTE)(0x80 | (cp & 0x3F)), n = 3;
-    else
-        u[0] = (UBYTE)(0xF0 | (cp >> 18)), u[1] = (UBYTE)(0x80 | ((cp >> 12) & 0x3F)),
-        u[2] = (UBYTE)(0x80 | ((cp >> 6) & 0x3F)), u[3] = (UBYTE)(0x80 | (cp & 0x3F)), n = 4;
-
-    tags[0].ti_Tag = CSA_Source;          tags[0].ti_Data = (ULONG)u;
-    tags[1].ti_Tag = CSA_SourceLen;       tags[1].ti_Data = n;
-    tags[2].ti_Tag = CSA_DestCodeset;     tags[2].ti_Data = (ULONG)cs_cs;
-    tags[3].ti_Tag = CSA_MapForeignChars; tags[3].ti_Data = TRUE;
-    tags[4].ti_Tag = TAG_END;             tags[4].ti_Data = 0;
-
-    str = CodesetsUTF8ToStrA(tags);
-    if (str == NULL)
-        return 0;
-    while (k < cap && str[k] != '\0')
-    {
-        out[k] = (uint8_t)str[k];
-        k++;
-    }
-    CodesetsFreeA(str, NULL);
-    return k;
-}
 
 static void cs_close(void)
 {
@@ -1393,63 +1323,15 @@ static void cs_close(void)
     if (cs_IntuitionBase != NULL)
         CloseLibrary((struct Library *)cs_IntuitionBase);
     cs_IntuitionBase = NULL;
-    if (CodesetsBase != NULL)
-        CloseLibrary(CodesetsBase);
-    CodesetsBase = NULL;
+    txt_codeset_close();
 }
 
-/* ASCII case-insensitive: whether a starts with prefix, or equals it. */
+/* ASCII case-insensitive: whether a starts with prefix. */
 static int cs_name_prefix(const char *a, const char *prefix)
 {
     while (*prefix != '\0' && ((*a ^ *prefix) & ~0x20) == 0)
         a++, prefix++;
     return *prefix == '\0';
-}
-
-static int cs_name_is(const char *a, const char *b)
-{
-    return cs_name_prefix(a, b) && a[strlen(b)] == '\0';
-}
-
-/* The local codeset from codesets.library, when it opens. */
-static void cs_open_codesets(void)
-{
-    struct TagItem tags[2];
-    int            i;
-
-    CodesetsBase = OpenLibrary((CONST_STRPTR)"codesets.library", 6);
-    if (CodesetsBase == NULL)
-        return;
-
-    tags[0].ti_Tag = CSA_FallbackToDefault; tags[0].ti_Data = FALSE;
-    tags[1].ti_Tag = TAG_END;               tags[1].ti_Data = 0;
-    if (cs_name != NULL)
-    {
-        cs_cs = CodesetsFindA((CONST_STRPTR)cs_name, tags);
-        if (cs_cs == NULL)
-            fprintf(stderr, "ssh: no codeset %s, using the system's\n", cs_name);
-    }
-    if (cs_cs == NULL)
-        cs_cs = CodesetsFindA(NULL, NULL);
-    if (cs_cs == NULL || cs_cs->name == NULL)
-    {
-        cs_cs = NULL;
-        return;
-    }
-    if (cs_name_is(cs_cs->name, "UTF-8"))
-    {
-        cs_mode &= ~CS_CONVERT;           /* already what the server sends */
-        return;
-    }
-
-    for (i = 0; i < 128; i++)
-    {
-        const struct cs_single *e = &cs_cs->table[0x80 + i];
-
-        cs_upper[i] = (e->code == 0x80 + i && e->ucs4 < 0x10000) ? (uint16_t)e->ucs4 : 0;
-    }
-    cs_set.upper   = cs_upper;
-    cs_set.foreign = cs_foreign;
 }
 
 /* OSC 0 and 2: the console window's title, put back at exit. */
@@ -1474,7 +1356,7 @@ static void cs_set_title(void *ctx, const uint8_t *utf8, size_t len)
     if (cu->cu_Window != cs_win)
         return;
 
-    n = sshcs_utf8_to_local(&cs_set, utf8, len, cs_title, sizeof(cs_title) - 1);
+    n = sshcs_utf8_to_local(cs_set, utf8, len, cs_title, sizeof(cs_title) - 1);
     cs_title[n] = '\0';
     SetWindowTitles(cs_win, cs_title, (UBYTE *)~0);
 }
@@ -1501,12 +1383,20 @@ static void cs_init(void)
     if (err != (BPTR)0 && IsInteractive(err))
         cs_mode |= CS_ERR;
     if (cs_mode & CS_CONVERT)
-        cs_open_codesets();
+    {
+        int flags;
+
+        cs_set = txt_codeset_open(cs_name, &flags);
+        if (flags & TXT_CS_UNKNOWN)
+            fprintf(stderr, "ssh: no codeset %s, using the system's\n", cs_name);
+        if (flags & TXT_CS_UTF8)
+            cs_mode &= ~CS_CONVERT;       /* already what the server sends */
+    }
     atexit(cs_close);
 
     for (i = 0; i < 2; i++)
     {
-        cs_out[i].cs      = &cs_set;
+        cs_out[i].cs      = cs_set;
         cs_out[i].convert = (cs_mode & CS_CONVERT) != 0;
     }
     cs_out[0].osc       = 1;
@@ -1561,7 +1451,7 @@ static int cs_read(void *buf, size_t len)
     if (n <= 0)
         return n;
     for (i = 0; i < (size_t)n; i++)
-        o += sshcs_local_to_utf8(&cs_set, tmp[i], out + o);
+        o += txt_local_to_utf8(cs_set, tmp[i], out + o);
     return (int)o;
 }
 

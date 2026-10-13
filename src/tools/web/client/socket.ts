@@ -12,7 +12,7 @@
  * It lives here rather than in either page's wire because it was written
  * once, for the terminal, and the second reader of it should not be a copy.
  * Everything ABOVE this line differs between the two: the terminal turns
- * binary frames into Latin-1 text, and the console hands the ArrayBuffer to a
+ * binary frames into UTF-8 text, and the console hands the ArrayBuffer to a
  * decoder untouched, which is the one thing they must not share.
  *
  * SPDX-License-Identifier: MIT

@@ -2,16 +2,32 @@
  * httppath, request target to AmigaOS path.  See httppath.h for what this
  * is defending against and why it is its own file.
  *
- * Includes nothing, deliberately.  This translation unit is compiled twice:
- * once for m68k as part of the server, and once natively by
+ * Includes nothing of the AmigaOS, deliberately.  This translation unit is
+ * compiled twice: once for m68k as part of the server, and once natively by
  * src/tools/test/test_httppath.c, which is the only reason the checks below
  * can be asserted on rather than reasoned about.  A single #include of
  * tools.h would end that, because tools.h reaches tx_api.h and proto/dos.h.
+ * aminetxduo/textconv.h is plain C and keeps that.
  *
  * SPDX-License-Identifier: MIT
  */
 
 #include "httppath.h"
+#include "aminetxduo/textconv.h"
+
+/* Names are UTF-8 on the wire and this codeset on the disk; NULL is
+   ISO-8859-1. */
+static const txt_codeset *hp_cs;
+
+void http_path_codeset(const struct txt_codeset *cs)
+{
+    hp_cs = cs;
+}
+
+const struct txt_codeset *http_path_get_codeset(void)
+{
+    return hp_cs;
+}
 
 /* ------------------------------------------------------------- the small --- */
 
@@ -191,6 +207,17 @@ static HttpPathResult hp_decode(const char *target, char *out,
             return HTTP_PATH_TOO_LONG;
 
         out[n++] = (char)c;
+    }
+
+    /* The bytes are UTF-8; the disk has the local codeset.  Exactly or not
+       at all: a look-alike would be some other file.  In place, because the
+       local form is never longer, and so as not to deepen the If: ladder. */
+    switch (txt_utf8_to_local_exact(hp_cs, (const uint8_t *)out, n,
+                                    (uint8_t *)out, n, &n))
+    {
+        case TXT_OK:          break;
+        case TXT_UNMAPPABLE:  return HTTP_PATH_UNMAPPABLE;
+        default:              return HTTP_PATH_BAD_UTF8;
     }
 
     out[n] = '\0';
@@ -509,6 +536,8 @@ const char *http_path_error(HttpPathResult why)
         case HTTP_PATH_NOT_VOLUME:   return "not a mounted volume";
         case HTTP_PATH_TOO_LONG:     return "too long";
         case HTTP_PATH_TOO_DEEP:     return "too many directories";
+        case HTTP_PATH_BAD_UTF8:     return "not UTF-8";
+        case HTTP_PATH_UNMAPPABLE:   return "a character the codeset lacks";
     }
 
     return "refused";
@@ -690,11 +719,20 @@ unsigned long http_url_escape(const char *path, char *out, unsigned long outlen)
         }
         else
         {
-            if (n + 3UL >= outlen)
+            uint8_t u[3];
+            size_t  k, m = 1;
+
+            u[0] = (uint8_t)c;
+            if (c >= 0x80)
+                m = txt_local_to_utf8(hp_cs, (uint8_t)c, u);   /* UTF-8 */
+            if (n + 3UL * m >= outlen)
                 goto full;
-            out[n++] = '%';
-            out[n++] = hex[(c >> 4) & 15];
-            out[n++] = hex[c & 15];
+            for (k = 0; k < m; k++)
+            {
+                out[n++] = '%';
+                out[n++] = hex[(u[k] >> 4) & 15];
+                out[n++] = hex[u[k] & 15];
+            }
         }
     }
 
@@ -706,7 +744,8 @@ full:
     return 0;
 }
 
-unsigned long http_xml_escape(const char *text, char *out, unsigned long outlen)
+static unsigned long hp_xml_escape(const char *text, char *out,
+                                   unsigned long outlen, int local)
 {
     unsigned long n = 0;
 
@@ -737,6 +776,16 @@ unsigned long http_xml_escape(const char *text, char *out, unsigned long outlen)
             for (k = 0; k < replen; k++)
                 out[n++] = rep[k];
         }
+        else if (local && c >= 0x80)
+        {
+            uint8_t u[3];
+            size_t  k, m = txt_local_to_utf8(hp_cs, (uint8_t)c, u);
+
+            if (n + m >= outlen)
+                goto full;
+            for (k = 0; k < m; k++)
+                out[n++] = (char)u[k];
+        }
         else
         {
             if (n + 1UL >= outlen)
@@ -751,6 +800,17 @@ unsigned long http_xml_escape(const char *text, char *out, unsigned long outlen)
 full:
     out[0] = '\0';
     return 0;
+}
+
+unsigned long http_xml_escape(const char *text, char *out, unsigned long outlen)
+{
+    return hp_xml_escape(text, out, outlen, 0);
+}
+
+unsigned long http_xml_escape_name(const char *name, char *out,
+                                   unsigned long outlen)
+{
+    return hp_xml_escape(name, out, outlen, 1);
 }
 
 /* --------------------------------------------------------------- content --- */

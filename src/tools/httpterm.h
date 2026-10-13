@@ -11,6 +11,7 @@
 #define AMINETXDUO_HTTPTERM_H
 
 #include "tools.h"
+#include "aminetxduo/textconv.h"
 
 /* A small, fixed number: slot 0 is the historical /shell, slot 1 permits a
    separate automation Shell. Only a started slot allocates rings and a port. */
@@ -150,6 +151,7 @@ typedef struct HttpTermSock
     LONG            sock;
 
     HttpWsIn        in;
+    txt_dec         dec;            /* keystrokes arrive as UTF-8           */
 
     UBYTE           pend[HTTP_TERM_PEND];
     UWORD           pend_n;
