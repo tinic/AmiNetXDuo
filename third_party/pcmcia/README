@@ -5,7 +5,6 @@ These are unmodified, independently loaded SANA-II drivers by Neil Cafferkey.
 They are not linked into AmiNetXDuo. Only a selected card's missing driver
 and pccard.library are installed; existing copies are preserved.
 
-  prism2.device 2.9: Prism II / Hermes wireless PCMCIA and CF cards
   xircomce2.device 1.1: supported Xircom CreditCard Ethernet PCMCIA cards
   pccard.library 2.2: shared PCMCIA CIS parser
 
@@ -14,21 +13,14 @@ files are GPL-2.0-only and some developer headers have LGPL terms; their
 original notices and both license texts are retained in the source archive.
 WirelessManager has its separate BSD license in Wireless/.
 
-The Hermes firmware has separate AT&T/Lucent/Agere redistribution terms,
-reproduced verbatim from the Prism2 manual in Docs/Hermes-LICENSE. Keep that
-notice with the firmware. Read Docs/Prism2.guide for card-specific firmware,
-encryption and router compatibility; installing this driver does not update
-a Prism II card's on-card firmware.
-
 Corresponding source, build files and original notices are supplied IN THIS
 DISTRIBUTION, in PCMCIA/Sources/, as the complete original upstream archives:
 
-  prism2v2.lha  https://aminet.net/driver/net/prism2v2.lha
   xircomce2.lha https://aminet.net/driver/net/xircomce2.lha
   pccard.lha    https://aminet.net/util/libs/pccard.lha
 
-The standalone pccard archive is necessary: the two driver archives include
-its binary but not its source. Its binary matches both driver archives.
+The standalone pccard archive is necessary: the Xircom driver archive includes
+its binary but not its source. Its binary matches the driver archive.
 This is GPL source distribution with the binaries, not a written offer or
 a requirement that recipients obtain source from a website.
 

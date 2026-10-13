@@ -3475,6 +3475,10 @@
 
   @{b}Wi-Fi@{ub}
 
+  PCMCIA Wi-Fi drivers and Hermes firmware are not supplied or set up by
+  the Installer. Install these separately and configure their interface
+  and supplicant manually. The automatic Wi-Fi setup below is for Pi Wi-Fi.
+
       C:WirelessManager               the supplicant that joins the
                                       Wi-Fi network for
                                       anxwifipi.device
@@ -3486,8 +3490,8 @@
                                       created; executing it removes
                                       them
 
-  The Installer adds these when the Pi Wi-Fi, or a Prism2 PCMCIA card
-  without it, is selected, at every user level; WirelessManager goes into
+  The Installer adds these when the Pi Wi-Fi is selected, at every
+  user level; WirelessManager goes into
   the installation's own drawer in that layout. NetWirelessPrefs SETUP
   lists the networks in range first, and Join there writes the file. When
   it cannot open the device or is closed without a join, a window asks for

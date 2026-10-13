@@ -15,7 +15,6 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 VENDOR = ROOT / "third_party/pcmcia"
 URLS = {
-    "prism2v2.lha": "https://aminet.net/driver/net/prism2v2.lha",
     "xircomce2.lha": "https://aminet.net/driver/net/xircomce2.lha",
     "pccard.lha": "https://aminet.net/util/libs/pccard.lha",
 }
@@ -24,9 +23,8 @@ URLS = {
 def verify():
     manifest = json.loads((VENDOR / "SHA256.json").read_text())
     required = {
-        "prism2.device", "xircomce2.device", "pccard.library",
-        "Firmware/HermesI", "Firmware/HermesII", "Docs/Hermes-LICENSE",
-        "Docs/GPL", "Docs/LGPL", "Docs/Prism2.guide", "Docs/Xircom.guide",
+        "xircomce2.device", "pccard.library",
+        "Docs/GPL", "Docs/LGPL", "Docs/Xircom.guide",
         "Docs/PCCard.guide", *("Sources/" + name for name in URLS),
     }
     if not required.issubset(manifest):

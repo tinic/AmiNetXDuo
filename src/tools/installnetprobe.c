@@ -272,9 +272,8 @@ static BOOL pcmcia_identity(NetprobeCis *cis)
         handle.cah_CardNode.ln_Name = NULL;
         if ((probe_card_status() & CARD_STATUSF_CCDET) == 0)
             return FALSE;
-        /* prism2.device's card: a wireless card whose CIS need not say so,
-           so never an NE2000 here.  The driver file's Prism2 default stands
-           and the PCMCIA type page is drawn. */
+        /* A user-installed wireless driver may own a card whose CIS does
+           not state wireless. Never propose a wired driver for that card. */
         if (owner_is(owner, "prism2.device"))
             return FALSE;
         return (BOOL)netprobe_cis_walk(attr_read, NULL, PC_ATTR_CIS_BYTES,
@@ -319,8 +318,6 @@ static BOOL pcmcia_card_present(const char *name)
     kind = netprobe_pc_kind(&cis);
     if (same(name, "pcmcia"))
         return (BOOL)(kind != NETPROBE_PC_NONE);
-    if (same(name, "prism2"))
-        return (BOOL)(kind == NETPROBE_PC_PRISM2);
     if (same(name, "xircom"))
         return (BOOL)(kind == NETPROBE_PC_XIRCOM);
     if (same(name, "cnet"))
@@ -432,7 +429,7 @@ int main(int argc, char **argv)
         if (same(card, "pcmcia") || same(card, "cnet") ||
             same(card, "3c589") ||
             same(card, "3ccfem556") || same(card, "3cxem556") ||
-            same(card, "prism2") || same(card, "xircom"))
+            same(card, "xircom"))
             present = pcmcia_card_present(card);
         else if (same(card, "uae"))
             present = netprobe_device_present("uaenet.device");

@@ -116,7 +116,10 @@ number remain identical; the readable script remains here. On 1 MiB rigs,
 conservative 40000-byte test stack. Workbench 3.2 itself requires 2 MiB;
 test 1 MiB configurations with Kickstart/Workbench 3.1.
 
-`PCMCIA/` carries unmodified Prism2/Xircom drivers, pccard.library, original
+PCMCIA Wi-Fi is a manual installation: Prism2/Hermes drivers and firmware
+are not bundled or configured. Pi Wi-Fi keeps its automatic setup.
+
+`PCMCIA/` carries the unmodified Xircom driver, pccard.library, original
 source archives and their redistribution notices. `tools/pcmcia-drivers.py`
 checks pinned bytes before staging. Run `python3 install/test/test_pcmcia_package.py`
 to check that missing or altered notices/source fail closed. Existing external

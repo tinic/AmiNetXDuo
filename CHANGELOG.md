@@ -5,6 +5,7 @@ Add new entries under `Unreleased`; published release sections are history.
 
 ## Unreleased
 
+- Installer: remove Prism2/Hermes PCMCIA Wi-Fi selection and bundled driver, firmware and source payload. Pi Wi-Fi and wired PCMCIA support remain; third-party Wi-Fi can be configured manually.
 - Installer: recognize ROM and registered network drivers without requiring
   a DEVS: file. Detect uaenet.device and Amithlon's network drivers; preserve
   the bare device name in the interface definition.
@@ -20,8 +21,8 @@ Add new entries under `Unreleased`; published release sections are history.
 - Release packaging omits Installer source comments and indentation, keeping
   its tokens and diagnostic line numbers unchanged while reducing the input
   buffer needed on small machines.
-- Installer: include unmodified Prism2 and Xircom PCMCIA drivers, their
-  shared pccard.library, manuals, licence notices and complete source
+- Installer: include the unmodified Xircom PCMCIA driver and
+  pccard.library, manuals, licence notices and complete source
   archives. Install missing files for the selected card and preserve
   existing user-installed copies.
 
@@ -50,7 +51,6 @@ Add new entries under `Unreleased`; published release sections are history.
 
 - Installer: NetWirelessPrefs lists the Wi-Fi networks in range to join.
 
-- Installer: a Prism2 PCMCIA card gets WirelessManager and its Wi-Fi network, as the Pi Wi-Fi does.
 
 - NetWireless and NetWirelessPrefs have Workbench icons.
 
