@@ -180,8 +180,11 @@ def tool_cases(tool, spec, root=ROOT):
                     # argument fits a standard 512-character Shell line;
                     # keep this focused case beside the 2 KB stress case.
                     add('short-path:' + name, line({name: 'x' * 104}))
+                # The quoted value names RAM:, which every guest has. A volume
+                # that is not mounted puts up "Please insert volume", the
+                # AmigaDOS answer to a typed path; nobody answers it here.
                 for tag, bad in [('empty', ''), ('invalid', 'not-a-value'), ('long', 'x' * 2048),
-                                 ('quoted', 'x * " / : =')]:
+                                 ('quoted', 'RAM:x * " / : =')]:
                     add(tag + ':' + name, line({name: bad}))
                 add('missing-value:' + name, line(omit=name, raw=name), syntax_mode)
                 if 'N' in mods:
