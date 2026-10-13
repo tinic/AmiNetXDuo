@@ -1237,7 +1237,7 @@
     fetch             download an http: or https: address
     nc                open a connection and pipe data through it
     telnet            log in to another machine
-    ssh               the same, encrypted
+    @{"ssh             " link SSH}  the same, encrypted
     scp               copy files over ssh, either direction, recursive
     tftp              the small file transfer protocol
     iperf             measure throughput against an iperf server, or
@@ -1842,7 +1842,7 @@
 @node HOST "host"
 @toc COMMANDS
 @prev PING
-@next CHECKNETDEVICE
+@next SSH
 
                                 @{b}host@{ub}
 
@@ -1902,9 +1902,48 @@
 @endnode
 
 
-@node CHECKNETDEVICE "CheckNetDevice"
+@node SSH "ssh"
 @toc COMMANDS
 @prev HOST
+@next CHECKNETDEVICE
+
+                                @{b}ssh@{ub}
+
+      ssh [options] [user@]host [command] CHARSET/K
+
+  Logs in to another machine over an encrypted connection, or runs one
+  command there. The options are those of the Dropbear client.
+
+  @{b}Characters@{ub}
+
+  When both input and output are a console window, ssh converts the
+  server's UTF-8 text to the character set of the system and converts
+  typed characters back to UTF-8. With codesets.library 6 or later in
+  LIBS:, the system character set is the one codesets.library reports,
+  and characters with no equivalent are shown as similar ASCII text.
+  Without codesets.library, and on Kickstart 2.04, the character set is
+  ISO-8859-1 and characters with no equivalent are shown as "?".
+
+  When input or output is redirected, the data passes unchanged.
+
+  @{b}CHARSET@{ub}  The local character set by name, for example
+           CHARSET=ISO-8859-2. It replaces the system character set and
+           has an effect only with codesets.library. It goes before
+           the command, if there is one.
+
+  @{b}Window title@{ub}
+
+  When output is a console window, ssh removes operating system
+  command sequences (ESC ]) from the server's output. Sequences 0 and 2
+  set the title of the window. The original title returns when ssh
+  ends.
+
+@endnode
+
+
+@node CHECKNETDEVICE "CheckNetDevice"
+@toc COMMANDS
+@prev SSH
 @next STATUSREPORT
 
                           @{b}CheckNetDevice@{ub}

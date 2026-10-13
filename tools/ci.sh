@@ -502,7 +502,9 @@ host_test_targets() { # builddir
 #      563 with NetWirelessPrefs' font layout and hidden passphrase.
 #      565 with application_memory: the port arena allocation and the
 #      link-time library override, one per arena size.
-HOST_TESTS_EXPECTED=565
+#      566 with ssh_console_text: the ssh client's UTF-8 conversion and OSC
+#      filter (all hosts).
+HOST_TESTS_EXPECTED=566
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,

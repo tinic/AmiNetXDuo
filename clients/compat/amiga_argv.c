@@ -324,6 +324,7 @@ int __wrap_main(int argc_ignored, char **argv_ignored)
     }
 
     argv_vec[argc] = NULL;
+    argc           = amiga_client_argv_filter(argc, argv_vec);
     argv_argc      = argc;
 
     /*
