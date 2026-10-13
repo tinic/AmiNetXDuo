@@ -58,6 +58,10 @@ int vasprintf(char **result, const char *format, va_list args);
 int           amiga_client_exit_returns(void);
 unsigned long amiga_client_stack_size(void);
 
+/* A third knob: the client may take its own Amiga keywords out of argv before
+   main() sees it.  Returns the new argc; argv[argc] is NULL after. */
+int           amiga_client_argv_filter(int argc, char **argv);
+
 /* Not ours: newlib's libc.a defines clearenv() (lib_a-environ.o) but never
    declares it, <stdlib.h> puts it behind a visibility guard this toolchain
    does not set.  Declared here rather than defined, because defining it is a

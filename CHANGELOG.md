@@ -7,6 +7,10 @@ are history.
 
 ## Unreleased
 
+- ssh converts between UTF-8 and the system character set in console
+  windows, through codesets.library when installed and ISO-8859-1
+  otherwise. Server window titles set the console title. CHARSET selects
+  another local character set.
 - CheckNetDevice reports the card in the A600/A1200 PCMCIA slot, its
   identification and matching driver, or "No card".
 - Installer detects ROM and registered network drivers, including

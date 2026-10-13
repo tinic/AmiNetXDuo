@@ -10,6 +10,10 @@
 #include <devices/conunit.h>    /* struct ConUnit, cu_XMax/cu_YMax */
 #include <proto/exec.h>
 #include <proto/dos.h>
+#include <intuition/intuition.h> /* struct Window, for the OSC title */
+#define INTUITION_BASE_NAME cs_IntuitionBase
+#include <proto/intuition.h>
+#include <inline/macros.h>       /* LP1/LP2 for codesets.library */
 /* BEFORE <proto/bsdsocket.h>, and the order is load-bearing: the NDK's inline
    header defines gethostid(), getdtablesize() and gethostname() as function-
    like macros, which turn the declarations of the same three in <sys/unistd.h>
@@ -110,6 +114,7 @@ static LONG nx_socketbasetaglist(APTR tags)            { return SocketBaseTagLis
 #include <dos/dostags.h>
 
 #include "amiga_stdio.h"
+#include "sshcs.h"
 
 
 /* ------------------------------------------------------ the descriptor map */
@@ -557,6 +562,13 @@ static int con_active(void);
 static int con_read(void *buf, size_t len);
 static int con_write(int fd, const void *buf, size_t len);
 
+/* Console text conversion and the OSC filter; see "console text" below. */
+static int cs_out_on(int fd);
+static int cs_in_on(void);
+static int cs_write(int fd, const void *buf, size_t len);
+static int cs_read(void *buf, size_t len);
+static int cs_put(int fd, const void *buf, size_t len);
+
 static struct amiga_stdio_override *amiga_stdio_descriptor(void)
 {
     struct Task *task = FindTask(NULL);
@@ -786,6 +798,9 @@ _ssize_t __wrap_read(int fd, void *buf, size_t len)
     if (IS_PIPE(fd))
         return pipe_read(fd, buf, len);
 
+    if (fd == 0 && cs_in_on())
+        return cs_read(buf, len);
+
     return amiga_raw_read(fd, buf, len);
 }
 
@@ -810,6 +825,15 @@ _ssize_t __wrap_write(int fd, const void *buf, size_t len)
     if (fd == 1 && amiga_stdio_pipe(fd) != NULL)
         return amiga_raw_write(fd, buf, len);
 
+    if ((fd == 1 || fd == 2) && cs_out_on(fd))
+        return cs_write(fd, buf, len);
+
+    return cs_put(fd, buf, len);
+}
+
+/* fd 1/2 to wherever they go, after any conversion. */
+static int cs_put(int fd, const void *buf, size_t len)
+{
     /* The client's own console output (prompts, messages) before an interactive
        session is up: give it the CR the Amiga console needs.  Once the session
        runs, the server's byte stream (already CRLF) passes straight through. */
@@ -1034,6 +1058,7 @@ typedef struct
 } ConReader;
 
 static ConReader   *con_reader;
+static sshcs_codeset cs_set;              /* the local codeset, see cs_init() */
 static BYTE         con_data_bit = -1;
 static BYTE         con_done_bit = -1;
 static volatile int con_intr;             /* a local Ctrl-C to feed the remote */
@@ -1092,6 +1117,14 @@ static void con_child(void)
             con_ring_put(cr, 0x1B);
             con_ring_put(cr, (UBYTE)'[');
         }
+        else if ((UBYTE)c >= 0x80 && cs_in_on())
+        {
+            uint8_t u[3];
+            size_t  k, m = sshcs_local_to_utf8(&cs_set, (uint8_t)c, u);
+
+            for (k = 0; k < m; k++)
+                con_ring_put(cr, u[k]);
+        }
         else
         {
             con_ring_put(cr, (UBYTE)c);
@@ -1129,6 +1162,8 @@ static void con_reader_start(BPTR handle)
     cr = (ConReader *)AllocMem(sizeof(*cr), MEMF_PUBLIC | MEMF_CLEAR);
     if (cr == NULL)
         goto fail;
+
+    (void)cs_in_on();                          /* the child reads cs_set as is */
 
     cr->cr_Handle  = handle;
     cr->cr_Parent  = FindTask(NULL);
@@ -1257,6 +1292,319 @@ static int con_write(int fd, const void *buf, size_t len)
         con_wr_prev[fd] = prev;
 
     return (int)len;
+}
+
+/* ----------------------------------------------------------- console text */
+
+/* Only between consoles: the server's UTF-8 becomes the local codeset when
+   stdin AND stdout are consoles, and OSC sequences leave the stream when
+   stdout is one.  Anything redirected passes byte for byte.
+
+   codesets.library (v6, 3.0 and up) is optional: when it opens, the system's
+   codeset or CHARSET=, with its look-alike text for the rest; otherwise
+   ISO-8859-1 and '?'. */
+#define CS_CONVERT   1
+#define CS_OSC       2
+#define CS_ERR       4                    /* fd 2 is a console too          */
+
+#define CS_TAG(n)            (0xfec901f4UL + (n))   /* libraries/codesets.h */
+#define CSA_SourceLen        CS_TAG(1)
+#define CSA_Source           CS_TAG(2)
+#define CSA_FallbackToDefault CS_TAG(12)
+#define CSA_DestCodeset      CS_TAG(13)
+#define CSA_MapForeignChars  CS_TAG(28)
+
+/* libraries/codesets.h, 6.x: public and read-only. */
+struct cs_single { UBYTE code; UBYTE utf8[8]; ULONG ucs4; };
+struct cs_codeset
+{
+    struct MinNode   node;
+    char            *name, *alt_name, *characterization;
+    LONG             read_only;
+    struct cs_single table[256];
+};
+
+static struct Library *CodesetsBase;
+#define CodesetsFreeA(obj, attrs) \
+    LP2NR(0x5a, CodesetsFreeA, APTR, obj, a0, struct TagItem *, attrs, a1, \
+    , CodesetsBase)
+#define CodesetsFindA(name, attrs) \
+    LP2(0x66, struct cs_codeset *, CodesetsFindA, CONST_STRPTR, name, a0, \
+    struct TagItem *, attrs, a1, , CodesetsBase)
+#define CodesetsUTF8ToStrA(attrs) \
+    LP1(0x78, STRPTR, CodesetsUTF8ToStrA, struct TagItem *, attrs, a0, \
+    , CodesetsBase)
+
+static struct IntuitionBase *cs_IntuitionBase;
+static int                cs_mode = -1;
+static const char        *cs_name;          /* CHARSET=, or NULL           */
+static struct cs_codeset *cs_cs;
+static uint16_t           cs_upper[128];
+static sshcs_out          cs_out[2];        /* fd 1, fd 2                  */
+static uint8_t            cs_osc_buf[SSHCS_TITLE_MAX];
+static UBYTE              cs_title[100];    /* what the window shows       */
+static struct Window     *cs_win;
+static UBYTE             *cs_old_title;
+
+/* A code point the codeset has no byte for: codesets' look-alike text.  No
+   CSA_Dest: 6.22 frees a caller's buffer when the mapping expands a
+   character, so the library allocates and CodesetsFreeA() returns it. */
+static size_t cs_foreign(void *ctx, uint32_t cp, uint8_t *out, size_t cap)
+{
+    UBYTE          u[4];
+    ULONG          n;
+    STRPTR         str;
+    size_t         k = 0;
+    struct TagItem tags[5];
+
+    (void)ctx;
+    if (cp < 0x800)
+        u[0] = (UBYTE)(0xC0 | (cp >> 6)), u[1] = (UBYTE)(0x80 | (cp & 0x3F)), n = 2;
+    else if (cp < 0x10000)
+        u[0] = (UBYTE)(0xE0 | (cp >> 12)), u[1] = (UBYTE)(0x80 | ((cp >> 6) & 0x3F)),
+        u[2] = (UBYTE)(0x80 | (cp & 0x3F)), n = 3;
+    else
+        u[0] = (UBYTE)(0xF0 | (cp >> 18)), u[1] = (UBYTE)(0x80 | ((cp >> 12) & 0x3F)),
+        u[2] = (UBYTE)(0x80 | ((cp >> 6) & 0x3F)), u[3] = (UBYTE)(0x80 | (cp & 0x3F)), n = 4;
+
+    tags[0].ti_Tag = CSA_Source;          tags[0].ti_Data = (ULONG)u;
+    tags[1].ti_Tag = CSA_SourceLen;       tags[1].ti_Data = n;
+    tags[2].ti_Tag = CSA_DestCodeset;     tags[2].ti_Data = (ULONG)cs_cs;
+    tags[3].ti_Tag = CSA_MapForeignChars; tags[3].ti_Data = TRUE;
+    tags[4].ti_Tag = TAG_END;             tags[4].ti_Data = 0;
+
+    str = CodesetsUTF8ToStrA(tags);
+    if (str == NULL)
+        return 0;
+    while (k < cap && str[k] != '\0')
+    {
+        out[k] = (uint8_t)str[k];
+        k++;
+    }
+    CodesetsFreeA(str, NULL);
+    return k;
+}
+
+static void cs_close(void)
+{
+    if (cs_win != NULL)
+        SetWindowTitles(cs_win, cs_old_title, (UBYTE *)~0);
+    cs_win = NULL;
+    if (cs_IntuitionBase != NULL)
+        CloseLibrary((struct Library *)cs_IntuitionBase);
+    cs_IntuitionBase = NULL;
+    if (CodesetsBase != NULL)
+        CloseLibrary(CodesetsBase);
+    CodesetsBase = NULL;
+}
+
+/* ASCII case-insensitive: whether a starts with prefix, or equals it. */
+static int cs_name_prefix(const char *a, const char *prefix)
+{
+    while (*prefix != '\0' && ((*a ^ *prefix) & ~0x20) == 0)
+        a++, prefix++;
+    return *prefix == '\0';
+}
+
+static int cs_name_is(const char *a, const char *b)
+{
+    return cs_name_prefix(a, b) && a[strlen(b)] == '\0';
+}
+
+/* The local codeset from codesets.library, when it opens. */
+static void cs_open_codesets(void)
+{
+    struct TagItem tags[2];
+    int            i;
+
+    CodesetsBase = OpenLibrary((CONST_STRPTR)"codesets.library", 6);
+    if (CodesetsBase == NULL)
+        return;
+
+    tags[0].ti_Tag = CSA_FallbackToDefault; tags[0].ti_Data = FALSE;
+    tags[1].ti_Tag = TAG_END;               tags[1].ti_Data = 0;
+    if (cs_name != NULL)
+    {
+        cs_cs = CodesetsFindA((CONST_STRPTR)cs_name, tags);
+        if (cs_cs == NULL)
+            fprintf(stderr, "ssh: no codeset %s, using the system's\n", cs_name);
+    }
+    if (cs_cs == NULL)
+        cs_cs = CodesetsFindA(NULL, NULL);
+    if (cs_cs == NULL || cs_cs->name == NULL)
+    {
+        cs_cs = NULL;
+        return;
+    }
+    if (cs_name_is(cs_cs->name, "UTF-8"))
+    {
+        cs_mode &= ~CS_CONVERT;           /* already what the server sends */
+        return;
+    }
+
+    for (i = 0; i < 128; i++)
+    {
+        const struct cs_single *e = &cs_cs->table[0x80 + i];
+
+        cs_upper[i] = (e->code == 0x80 + i && e->ucs4 < 0x10000) ? (uint16_t)e->ucs4 : 0;
+    }
+    cs_set.upper   = cs_upper;
+    cs_set.foreign = cs_foreign;
+}
+
+/* OSC 0 and 2: the console window's title, put back at exit. */
+static void cs_set_title(void *ctx, const uint8_t *utf8, size_t len)
+{
+    struct ConUnit *cu = con_active() ? con_unit : con_get_unit();
+    size_t          n;
+
+    (void)ctx;
+    if (cu == NULL || cu->cu_Window == NULL)
+        return;
+    if (cs_IntuitionBase == NULL)
+        cs_IntuitionBase = (struct IntuitionBase *)
+            OpenLibrary((CONST_STRPTR)"intuition.library", 33);
+    if (cs_IntuitionBase == NULL)
+        return;
+    if (cs_win == NULL)
+    {
+        cs_win       = cu->cu_Window;
+        cs_old_title = cs_win->Title;
+    }
+    if (cu->cu_Window != cs_win)
+        return;
+
+    n = sshcs_utf8_to_local(&cs_set, utf8, len, cs_title, sizeof(cs_title) - 1);
+    cs_title[n] = '\0';
+    SetWindowTitles(cs_win, cs_title, (UBYTE *)~0);
+}
+
+static void cs_init(void)
+{
+    BPTR in, out, err;
+    int  i;
+
+    if (cs_mode >= 0)
+        return;
+    cs_mode = 0;
+    if (amiga_stdio_hosted())
+        return;                            /* scp's byte stream */
+
+    in  = Input();
+    out = Output();
+    err = amiga_error_handle();
+    if (out == (BPTR)0 || !IsInteractive(out))
+        return;
+    cs_mode = CS_OSC;
+    if (in != (BPTR)0 && IsInteractive(in))
+        cs_mode |= CS_CONVERT;
+    if (err != (BPTR)0 && IsInteractive(err))
+        cs_mode |= CS_ERR;
+    if (cs_mode & CS_CONVERT)
+        cs_open_codesets();
+    atexit(cs_close);
+
+    for (i = 0; i < 2; i++)
+    {
+        cs_out[i].cs      = &cs_set;
+        cs_out[i].convert = (cs_mode & CS_CONVERT) != 0;
+    }
+    cs_out[0].osc       = 1;
+    cs_out[0].title_buf = cs_osc_buf;
+    cs_out[0].title     = cs_set_title;
+}
+
+static int cs_out_on(int fd)
+{
+    cs_init();
+    if (fd == 1)
+        return (cs_mode & CS_OSC) != 0;
+    return (cs_mode & (CS_CONVERT | CS_ERR)) == (CS_CONVERT | CS_ERR);
+}
+
+static int cs_in_on(void)
+{
+    cs_init();
+    return (cs_mode & CS_CONVERT) != 0;
+}
+
+static int cs_write(int fd, const void *buf, size_t len)
+{
+    const uint8_t *in = (const uint8_t *)buf;
+    uint8_t        out[128];
+    size_t         used, n;
+
+    while (len > 0)
+    {
+        n = sshcs_out_run(&cs_out[fd - 1], in, len, out, sizeof(out), &used);
+        if (n > 0 && cs_put(fd, out, n) < 0)
+            return -1;
+        in  += used;
+        len -= used;
+    }
+    return (int)(in - (const uint8_t *)buf);
+}
+
+/* A cooked console line: a third of len, so every byte has room to grow. */
+static int cs_read(void *buf, size_t len)
+{
+    uint8_t  tmp[64];
+    uint8_t *out = (uint8_t *)buf;
+    size_t   want = len / 3, i, o = 0;
+    int      n;
+
+    if (want == 0)
+        return amiga_raw_read(0, buf, len);
+    if (want > sizeof(tmp))
+        want = sizeof(tmp);
+    n = amiga_raw_read(0, tmp, want);
+    if (n <= 0)
+        return n;
+    for (i = 0; i < (size_t)n; i++)
+        o += sshcs_local_to_utf8(&cs_set, tmp[i], out + o);
+    return (int)o;
+}
+
+/* CHARSET=<name> overrides the local codeset.  It is an Amiga keyword among
+   Dropbear's options, so it is taken out of argv before Dropbear sees it;
+   only up to the host's command, so a remote command keeps its own words. */
+int amiga_client_argv_filter(int argc, char **argv)
+{
+    static const char takes_value[] = "piLRoBJlQWKIMcmb";   /* cli-runopts.c */
+    int  i, j, o = 1, host = 0, rest = 0;
+
+    for (i = 1; i < argc; i++)
+    {
+        const char *a = argv[i];
+
+        if (!rest && a[0] != '-' && cs_name_prefix(a, "CHARSET="))
+        {
+            if (a[8] != '\0')
+                cs_name = a + 8;
+            continue;
+        }
+        argv[o++] = argv[i];
+        if (rest)
+            continue;
+        if (a[0] != '-')
+        {
+            if (host)
+                rest = 1;
+            host = 1;
+            continue;
+        }
+        /* Flags run together; the first that takes a value takes the rest
+           of the word, or the next one. */
+        for (j = 1; a[j] != '\0'; j++)
+            if (strchr(takes_value, a[j]) != NULL)
+            {
+                if (a[j + 1] == '\0' && i + 1 < argc)
+                    argv[o++] = argv[++i];
+                break;
+            }
+    }
+    argv[o] = NULL;
+    return o;
 }
 
 

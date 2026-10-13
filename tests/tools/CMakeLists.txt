@@ -34,6 +34,15 @@ if(NOT CMAKE_CROSSCOMPILING)
         -include "${CMAKE_CURRENT_SOURCE_DIR}/host/tool_ifdev_host.h"
         -Wall -Wextra -Werror)
     add_test(NAME tool_ifdev COMMAND test_tool_ifdev_host)
+
+    # The ssh client's UTF-8 conversion and OSC filter, pure C.
+    add_executable(test_sshcs_host
+        host/test_sshcs_host.c
+        "${CMAKE_SOURCE_DIR}/clients/dropbear/sshcs.c")
+    target_include_directories(test_sshcs_host PRIVATE
+        "${CMAKE_SOURCE_DIR}/clients/dropbear")
+    target_compile_options(test_sshcs_host PRIVATE -Wall -Wextra -Werror)
+    add_test(NAME ssh_console_text COMMAND test_sshcs_host)
 endif()
 
 # CardGrab is the second owner of the PCMCIA socket that the lab has never
