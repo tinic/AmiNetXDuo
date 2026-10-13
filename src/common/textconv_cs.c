@@ -50,7 +50,7 @@ static txt_codeset        tc_set;           /* upper NULL: ISO-8859-1 */
 /* A code point the codeset has no byte for: codesets' look-alike text.  No
    CSA_Dest: 6.22 frees a caller's buffer when the mapping expands a
    character, so the library allocates and CodesetsFreeA() returns it. */
-static size_t tc_foreign(void *ctx, uint32_t cp, uint8_t *out, size_t cap)
+static TXT_STDARGS size_t tc_foreign(void *ctx, uint32_t cp, uint8_t *out, size_t cap)
 {
     UBYTE          u[4];
     ULONG          n;

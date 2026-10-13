@@ -25,10 +25,22 @@
  * ISO-8859-1.  foreign() is asked for a code point no byte has (codesets'
  * look-alike text); NULL, or 0 back, is '?'.
  */
+/* foreign() is pinned to the stack like every shared function-pointer type
+   (tools/check-call-abi.py); __stdargs on a GCC for AmigaOS, nothing on a
+   host compiler, which passes on the stack already. */
+#if defined(__GNUC__) && defined(__stdargs)
+#define TXT_STDARGS __stdargs
+#else
+#define TXT_STDARGS
+#endif
+
+typedef TXT_STDARGS size_t (*txt_foreign_fn)(void *ctx, uint32_t cp,
+                                             uint8_t *out, size_t cap);
+
 typedef struct txt_codeset
 {
     const uint16_t *upper;
-    size_t        (*foreign)(void *ctx, uint32_t cp, uint8_t *out, size_t cap);
+    txt_foreign_fn  foreign;
     void           *ctx;
 } txt_codeset;
 
