@@ -11,6 +11,7 @@
  * Exit status is RETURN_OK when the requested feature is present and
  * RETURN_WARN when it is not.  Bad arguments are RETURN_ERROR.
  * MEMORY checks installed RAM, including allocations, against a byte count.
+ * DEVICE checks an exact Exec device/resident name without opening it.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -31,13 +32,14 @@
 #include "../netdev/netdev_dtree.h"
 #include "netprobe_card.h"
 #include "netprobe_memory.h"
+#include "netprobe_device.h"
 
 const char *const tool_name = "InstallNetProbe";
 
 static const char version_tag[] __attribute__((used)) =
     TOOL_VERSTAG("InstallNetProbe");
 
-#define TEMPLATE "EMU68/S,GENET/S,GENETOK/S,WIFIPI/S,CARD/K,MEMORY/N/K"
+#define TEMPLATE "EMU68/S,GENET/S,GENETOK/S,WIFIPI/S,CARD/K,MEMORY/N/K,DEVICE/K"
 
 enum
 {
@@ -47,6 +49,7 @@ enum
     ARG_WIFIPI,
     ARG_CARD,
     ARG_MEMORY,
+    ARG_DEVICE,
     ARG_COUNT
 };
 
@@ -381,13 +384,16 @@ int main(int argc, char **argv)
         return RETURN_ERROR;
     if ((args[ARG_EMU68] != 0) + (args[ARG_GENET] != 0) +
         (args[ARG_GENETOK] != 0) + (args[ARG_WIFIPI] != 0) +
-        (args[ARG_CARD] != 0) + (args[ARG_MEMORY] != 0) != 1)
+        (args[ARG_CARD] != 0) + (args[ARG_MEMORY] != 0) +
+        (args[ARG_DEVICE] != 0) != 1)
     {
         FreeArgs(rda);
         return RETURN_ERROR;
     }
 
-    if (args[ARG_MEMORY] != 0)
+    if (args[ARG_DEVICE] != 0)
+        present = netprobe_device_present((const char *)args[ARG_DEVICE]);
+    else if (args[ARG_MEMORY] != 0)
     {
         LONG wanted = *(const LONG *)args[ARG_MEMORY];
         ULONG total = netprobe_memory_total();
@@ -429,8 +435,7 @@ int main(int argc, char **argv)
             same(card, "prism2") || same(card, "xircom"))
             present = pcmcia_card_present(card);
         else if (same(card, "uae"))
-            present = (BOOL)(FindResident((CONST_STRPTR)"uaenet.device") !=
-                             NULL);
+            present = netprobe_device_present("uaenet.device");
         else
             present = classic_card_present(card);
     }

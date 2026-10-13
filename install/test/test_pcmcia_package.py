@@ -119,5 +119,71 @@ int main(void) {
             subprocess.run([str(program)], check=True)
 
 
+class ResidentDeviceTests(unittest.TestCase):
+    def test_rom_registered_and_absent_devices(self):
+        with tempfile.TemporaryDirectory(prefix="resident-probe-test-", dir=ROOT / "build") as directory:
+            directory = Path(directory)
+            for header in ("exec/execbase.h", "exec/resident.h", "proto/exec.h"):
+                path = directory / header
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("")
+            source = directory / "test.c"
+            source.write_text(r'''
+#include <assert.h>
+#include <stddef.h>
+#include <string.h>
+typedef int BOOL;
+typedef const char *CONST_STRPTR;
+#define FALSE 0
+struct List { const char *name; };
+struct ExecBase { struct List DeviceList; };
+struct Resident { unsigned char rt_Type; };
+#define NT_DEVICE 3
+#define NT_LIBRARY 9
+struct ExecBase base, *SysBase = &base;
+static unsigned depth;
+static const char *rom_name;
+static struct Resident rom;
+static void Forbid(void) { assert(depth == 0); ++depth; }
+static void Permit(void) { assert(depth == 1); --depth; }
+static void *FindName(struct List *list, CONST_STRPTR name) {
+    assert(depth == 1 && list == &base.DeviceList);
+    return list->name && strcmp(list->name, name) == 0 ? list : NULL;
+}
+static struct Resident *FindResident(CONST_STRPTR name) {
+    assert(depth == 1);
+    return rom_name && strcmp(rom_name, name) == 0 ? &rom : NULL;
+}
+#include "netprobe_device.h"
+int main(void) {
+    const char *names[] = { "uaenet.device", "amithlon1_net.device",
+                           "powerne2k.device", "anothernet.device" };
+    assert(!netprobe_device_present(NULL));
+    assert(!netprobe_device_present(""));
+    for (unsigned i = 0; i < sizeof(names) / sizeof(names[0]); ++i) {
+        rom_name = names[i];
+        rom.rt_Type = NT_DEVICE;
+        assert(netprobe_device_present(names[i]));
+        assert(!netprobe_device_present("missing.device"));
+        rom.rt_Type = NT_LIBRARY;
+        assert(!netprobe_device_present(names[i]));
+        rom_name = NULL;
+        base.DeviceList.name = names[i];
+        assert(netprobe_device_present(names[i]));
+        assert(!netprobe_device_present("missing.device"));
+        base.DeviceList.name = NULL;
+        assert(!netprobe_device_present(names[i]));
+        assert(depth == 0);
+    }
+    return 0;
+}
+''')
+            program = directory / "test"
+            subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror",
+                            "-I" + str(directory), "-I" + str(ROOT / "src/tools"),
+                            str(source), "-o", str(program)], check=True)
+            subprocess.run([str(program)], check=True)
+
+
 if __name__ == "__main__":
     unittest.main()

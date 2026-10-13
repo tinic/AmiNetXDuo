@@ -5,6 +5,9 @@ Add new entries under `Unreleased`; published release sections are history.
 
 ## Unreleased
 
+- Installer: recognize ROM and registered network drivers without requiring
+  a DEVS: file. Detect uaenet.device and Amithlon's network drivers; preserve
+  the bare device name in the interface definition.
 - Bundle the modified Installer 2.17 with lower-memory parsing, tested on
   a 68000 A500 with Kickstart/Workbench 2.04 and 512 KB chip + 512 KB
   trapdoor RAM. The complete unsegmented script is retained.
