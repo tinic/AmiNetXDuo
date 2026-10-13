@@ -280,6 +280,9 @@
        "Type AddNetInterface by hand when you want one.  A network program "
        "which opens bsdsocket.library gets the built-in loopback, but no card "
        "is opened and there is no route to an external network.\n\n"
+       "The default is no for the micro stack or a machine with 4 MB of "
+       "installed RAM or less, leaving memory available until you need the "
+       "network. Intermediate and Expert can choose automatic startup.\n\n"
        "For an installation in its own drawer, the managed block first "
        "assigns AmiNetXDuo: to the drawer and ADDs its Libs, C and Devs to "
        "LIBS:, C: and DEVS:, after everything already there, the way AmiTCP "
@@ -2186,16 +2189,20 @@
 
 ; --- start the network at boot? ------------------------------------------
 
-; Yes for everybody but an Expert who says otherwise: a network that does not
-; start is not what an installation is run for.
-(set DO_STARTUP 1)
-(if (= @user-level 2)
-  (set DO_STARTUP
-    (askbool
-      (prompt "Start the network automatically when this Amiga boots?")
-      (help    H_STARTUP)
-      (choices "Yes, at boot" "No, I will do it")
-      (default 1))))
+; Keep scarce RAM available until networking is needed. MEMORY includes used
+; RAM and rounds Exec's boot reservation back up to the installed tier.
+; The threshold is one byte above 4 MiB: exactly 4 MiB defaults to manual.
+; A failed probe also defaults to manual. Micro does so at every RAM size.
+(set STARTUP_DEFAULT 0)
+(if (AND (<> MINPICK 2)
+         (= 0 (run ("\"%s\" MEMORY 4194305" S_NETPROBE) (quiet) (safe))))
+    (set STARTUP_DEFAULT 1))
+(set DO_STARTUP
+  (askbool
+    (prompt "Start the network automatically when this Amiga boots?")
+    (help    H_STARTUP)
+    (choices "Yes, at boot" "No, I will do it")
+    (default STARTUP_DEFAULT)))
 
 ; KEEP CONFIGURATION MEANS KEEP ITS BOOT POLICY TOO.  S:Network-Startup is a
 ; user-editable configuration file in both Roadshow and AmiTCP_NG.  Replacing

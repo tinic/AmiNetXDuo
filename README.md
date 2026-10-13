@@ -165,7 +165,7 @@ unpack it, and run `Install-AmiNetXDuo`. It asks:
 | Answer to `<hostname>.local` on the network (Expert) | yes on a 68020 or newer, no on a 68000 or 68010 |
 | DHCP, or a fixed address, netmask and gateway | DHCP |
 | The machine's name (Expert) | `amiga-` and the card's last three address octets |
-| Start the network at boot (Expert) | yes |
+| Start the network at boot (Intermediate and Expert) | no for Micro or machines with 4 MB RAM or less; yes otherwise |
 | Start `httpd` at boot, exposing mounted volumes with a browser file manager and Shell; the port at Expert | no, 80 |
 | Set the clock at boot, and from which server (Expert) | yes, `pool.ntp.org` |
 

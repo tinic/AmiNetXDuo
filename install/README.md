@@ -100,6 +100,13 @@ currently allocated: micro through 2 MiB, minimal below 8 MiB, full from
 The memory probe rounds boot reservations to the next 64 KiB. A failed query
 recommends minimal; it never selects fat from a failed probe.
 
+Network startup defaults to manual for micro, regardless of RAM, and for every
+profile on machines with at most 4 MiB of installed RAM. A failed memory probe
+also defaults to manual. Intermediate and Expert can enable automatic startup;
+Novice takes the recommendation. Manual startup skips both bringing the network
+up at the end of installation and adding its boot command. The final page gives
+the `AddNetInterface` command to start the configured interface when needed.
+
 Packaging removes comments and indentation with `tools/packscript.py` to
 reduce Installer's input buffer. It checks that every token and its line
 number remain identical; the readable script remains here. On 1 MiB rigs,
