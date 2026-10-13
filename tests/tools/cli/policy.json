@@ -1,0 +1,795 @@
+{
+  "AddNetInterface": {
+    "binary": "src/tools/AddNetInterface",
+    "parser": "readargs",
+    "source": "src/tools/addnetinterface.c",
+    "values": {
+      "INTERFACE": "eth0",
+      "QUIET": true,
+      "TIMEOUT": "1"
+    }
+  },
+  "AddNetRoute": {
+    "binary": "src/tools/AddNetRoute",
+    "parser": "readargs",
+    "source": "src/tools/addnetroute.c",
+    "template_index": 1,
+    "values": {
+      "DEFAULT": "127.0.0.1",
+      "DST": "198.51.100.0/24",
+      "HOSTDST": "198.51.100.1",
+      "NETDST": "198.51.100.0",
+      "QUIET": true,
+      "VIA": "127.0.0.1"
+    }
+  },
+  "CheckNetConfig": {
+    "binary": "src/tools/CheckNetConfig",
+    "parser": "readargs",
+    "source": "src/tools/checknetconfig.c",
+    "values": {
+      "QUIET": true,
+      "VERBOSE": true
+    }
+  },
+  "CheckNetDevice": {
+    "binary": "src/tools/CheckNetDevice",
+    "parser": "readargs",
+    "source": "src/tools/checknetdevice.c",
+    "values": {
+      "DEVICE": "missing.device",
+      "NOLOAD": true,
+      "RAW": true
+    }
+  },
+  "ConfigureNetInterface": {
+    "binary": "src/tools/ConfigureNetInterface",
+    "parser": "readargs",
+    "source": "src/tools/configurenetinterface.c",
+    "values": {
+      "ADDRESS": "10.77.0.2",
+      "ADDRESS6": "2001:db8::1",
+      "CONFIGURE": "DHCP",
+      "CONFIGURE6": "AUTO",
+      "DOWN": true,
+      "GATEWAY": "NONE",
+      "GATEWAY6": "NONE",
+      "INTERFACE": "eth0",
+      "MDNS": "NO",
+      "MTU": "1500",
+      "NETMASK": "255.255.255.0",
+      "OFFLINE": true,
+      "ONLINE": true,
+      "PRIORITY": "1",
+      "QUIET": true,
+      "RELEASE": true,
+      "TIMEOUT": "1",
+      "UP": true
+    }
+  },
+  "CreateAmiNetXDuoStatusReport": {
+    "binary": "src/tools/CreateAmiNetXDuoStatusReport",
+    "parser": "readargs",
+    "source": "src/tools/statusreport.c",
+    "values": {
+      "ADDRESSES": true,
+      "NOFILE": true,
+      "TO": "RAM:cli-case"
+    }
+  },
+  "DeleteNetRoute": {
+    "binary": "src/tools/DeleteNetRoute",
+    "parser": "readargs",
+    "source": "src/tools/addnetroute.c",
+    "values": {
+      "DEFAULT": "127.0.0.1",
+      "DST": "198.51.100.0/24",
+      "QUIET": true
+    }
+  },
+  "GetNetStatus": {
+    "binary": "src/tools/GetNetStatus",
+    "parser": "readargs",
+    "source": "src/tools/getnetstatus.c",
+    "values": {
+      "CHECK": "INTERFACES",
+      "QUIET": true,
+      "VERSION": true
+    }
+  },
+  "InstallNetProbe": {
+    "binary": "src/tools/InstallNetProbe",
+    "parser": "readargs",
+    "source": "src/tools/installnetprobe.c",
+    "values": {
+      "CARD": "cli-missing",
+      "DEVICE": "missing.device",
+      "EMU68": true,
+      "GENET": true,
+      "GENETOK": true,
+      "MEMORY": "1048576",
+      "WIFIPI": true
+    }
+  },
+  "InstallSameFile": {
+    "binary": "src/tools/InstallSameFile",
+    "parser": "readargs",
+    "source": "src/tools/installsamefile.c",
+    "values": {
+      "BYTES": true,
+      "DEVICES": true,
+      "DRAWER": true,
+      "FIRST": "RAM:cli-input",
+      "HOSTLINE": true,
+      "MARK": true,
+      "SECOND": "RAM:cli-input"
+    }
+  },
+  "InstallWiFi": {
+    "binary": "src/tools/InstallWiFi",
+    "interrupt_options": ["TO"],
+    "parser": "readargs",
+    "source": "src/tools/installwifi.c",
+    "values": {
+      "PRIORITY": "cli-ssid",
+      "TO": "RAM:cli-wireless.prefs"
+    }
+  },
+  "Installer": {
+    "binary": "@Installer",
+    "mode": "interrupt",
+    "parser": "installer",
+    "template": "SCRIPT/A,APPNAME/K,MINUSER/K,DEFUSER/K,LOGFILE/K,NOPRETEND/S,NOLOG/S",
+    "values": {
+      "APPNAME": "CLI test",
+      "DEFUSER": "novice",
+      "LOGFILE": "RAM:cli-install.log",
+      "MINUSER": "novice",
+      "NOLOG": true,
+      "NOPRETEND": true,
+      "SCRIPT": "RAM:cli-script"
+    },
+    "binary_sha256": "c99b79f4506e547545dde81df435ac1782e8a49674bf4a6814aacdc720bd3111"
+  },
+  "NetCapture": {
+    "binary": "src/tools/NetCapture",
+    "mode": "interrupt",
+    "parser": "readargs",
+    "source": "src/tools/netcapture.c",
+    "values": {
+      "BLEN": "4096",
+      "COUNT": "1",
+      "HOST": "127.0.0.1",
+      "IFACE": "eth0",
+      "NOT": true,
+      "OUT": "RAM:cli-case",
+      "PORT": "1",
+      "PROTO": "tcp",
+      "QUIET": true,
+      "SECONDS": "1",
+      "SIZE": "4096",
+      "SNAP": "128"
+    }
+  },
+  "NetDevStats": {
+    "binary": "src/tools/NetDevStats",
+    "parser": "readargs",
+    "source": "src/tools/netdevstats.c",
+    "values": {
+      "CARD": "cli-missing",
+      "DEVICE": "missing.device",
+      "UNIT": "1"
+    }
+  },
+  "NetMeter": {
+    "binary": "src/tools/NetMeter",
+    "mode": "interrupt",
+    "parser": "readargs",
+    "source": "src/tools/netmeter.c",
+    "values": {
+      "HEIGHT": "1",
+      "LEFT": "1",
+      "TOP": "1",
+      "WIDTH": "1"
+    }
+  },
+  "NetPrefs": {
+    "binary": "src/tools/NetPrefs",
+    "parser": "none",
+    "source": "src/tools/netprefs.c",
+    "values": {},
+    "mode": "interrupt"
+  },
+  "NetSetup": {
+    "base": {
+      "DEVICE": "missing.device",
+      "DHCP": true,
+      "NAME": "clisetup",
+      "NOONLINE": true
+    },
+    "binary": "src/tools/NetSetup",
+    "parser": "readargs",
+    "source": "src/tools/netsetup.c",
+    "values": {
+      "ADDRESS": "10.77.0.2",
+      "DEVICE": "missing.device",
+      "DHCP": true,
+      "DNS": "127.0.0.1",
+      "FORCE": true,
+      "GATEWAY": "10.77.0.1",
+      "IPV6": "AUTO",
+      "NAME": "clisetup",
+      "NETMASK": "255.255.255.0",
+      "NOONLINE": true,
+      "ONLINE": true,
+      "QUIET": true,
+      "UNIT": "1"
+    }
+  },
+  "NetShutdown": {
+    "binary": "src/tools/NetShutdown",
+    "parser": "readargs",
+    "source": "src/tools/netshutdown.c",
+    "values": {
+      "QUIET": true,
+      "TIMEOUT": "1"
+    }
+  },
+  "NetTrace": {
+    "base": {
+      "HOST": "127.0.0.1",
+      "PORT": "1"
+    },
+    "binary": "src/tools/NetTrace",
+    "mode": "interrupt",
+    "parser": "readargs",
+    "source": "src/tools/nettrace.c",
+    "values": {
+      "BLEN": "4096",
+      "BYTES": "1",
+      "HOST": "127.0.0.1",
+      "IFACE": "eth0",
+      "LOOPBACK": true,
+      "NOCAPTURE": true,
+      "OUT": "RAM:cli.pcap",
+      "PATH": "/",
+      "PORT": "1",
+      "SNAP": "128",
+      "WIRE": true
+    }
+  },
+  "NetWireless": {
+    "binary": "src/tools/NetWireless",
+    "mode": "interrupt",
+    "parser": "readargs",
+    "source": "src/tools/netwireless.c",
+    "values": {
+      "APPICON": "NO",
+      "APPMENU": "NO",
+      "CX_POPKEY": "control alt w",
+      "CX_POPUP": "NO",
+      "CX_PRIORITY": "1",
+      "DEVICE": "missing.device",
+      "ENVVAR": "CLIWiFi",
+      "INTERFACE": "eth0",
+      "INTERVAL": "1",
+      "QUIET": true,
+      "UNIT": "1"
+    }
+  },
+  "NetWirelessPrefs": {
+    "base": {
+      "DEVICE": "missing.device"
+    },
+    "binary": "src/tools/NetWirelessPrefs",
+    "mode": "interrupt",
+    "parser": "readargs",
+    "source": "src/tools/netwirelessprefs.c",
+    "values": {
+      "DEVICE": "missing.device",
+      "DISCONNECT": true,
+      "HIDDEN": true,
+      "INTERFACE": "eth0",
+      "JOIN": "cli-ssid",
+      "LIST": true,
+      "PASSPHRASE": "cli-passphrase",
+      "SETUP": true,
+      "STATUS": true,
+      "TO": "RAM:cli-case",
+      "UNIT": "1",
+      "WM": "RAM:missing-WirelessManager"
+    }
+  },
+  "Offline": {
+    "binary": "src/tools/Offline",
+    "parser": "readargs",
+    "source": "src/tools/onoff.c",
+    "values": {
+      "NAME": "127.0.0.1",
+      "TIMEOUT": "1",
+      "UNIT": "1"
+    }
+  },
+  "Online": {
+    "binary": "src/tools/Online",
+    "parser": "readargs",
+    "source": "src/tools/onoff.c",
+    "values": {
+      "NAME": "127.0.0.1",
+      "TIMEOUT": "1",
+      "UNIT": "1"
+    }
+  },
+  "Profile": {
+    "binary": "tools/profiler/Profile",
+    "source": "tools/profiler/profile.c",
+    "parser": "readargs",
+    "mode": "interrupt",
+    "base": {
+      "COMMAND": "SYS:c/CliControl",
+      "SAMPLES": "16"
+    },
+    "values": {
+      "RATE": "100",
+      "SAMPLES": "16",
+      "CHANNEL": "1",
+      "STACK": "4096",
+      "OUT": "RAM:cli-profile",
+      "FOLDED": "RAM:cli-folded",
+      "TOP": "5",
+      "WATCH": "missing.library/0/16",
+      "WATCHMAX": "16",
+      "QUIET": true,
+      "COMMAND": "SYS:c/CliControl"
+    }
+  },
+  "RemoveNetInterface": {
+    "binary": "src/tools/RemoveNetInterface",
+    "parser": "readargs",
+    "source": "src/tools/removenetinterface.c",
+    "values": {
+      "FORCE": true,
+      "INTERFACE": "eth0",
+      "QUIET": true
+    }
+  },
+  "ShowNetServices": {
+    "binary": "src/tools/ShowNetServices",
+    "mode": "interrupt",
+    "parser": "readargs",
+    "source": "src/tools/shownetservices.c",
+    "values": {
+      "ALL": true,
+      "QUIET": true,
+      "SECONDS": "1",
+      "TXT": true,
+      "TYPE": "_http._tcp"
+    }
+  },
+  "ShowNetStatus": {
+    "binary": "src/tools/ShowNetStatus",
+    "mode": "interrupt",
+    "parser": "readargs",
+    "source": "src/tools/shownetstatus.c",
+    "values": {
+      "ALL": true,
+      "ARPCACHE": true,
+      "DNS": true,
+      "EVENTS": true,
+      "ICMP": true,
+      "IGMP": true,
+      "INTERFACE": "eth0",
+      "INTERFACES": true,
+      "IP": true,
+      "MB": true,
+      "MR": true,
+      "NAMES": true,
+      "QUIET": true,
+      "REPEAT": true,
+      "ROUTES": true,
+      "RT": true,
+      "TCP": true,
+      "TCPSOCKETS": true,
+      "UDP": true,
+      "UDPSOCKETS": true,
+      "USERS": true
+    }
+  },
+  "WirelessManager": {
+    "binary": "@WirelessManager",
+    "source": "third_party/wirelessmanager/WirelessManager",
+    "binary_sha256": "4f6227d1d48959cfe914359b35d9a39c2f99ad3a9ab91a1de558faa78d9a5b0c",
+    "parser": "vendored-readargs",
+    "template": "DEVICE/A,UNIT/K/N,CONFIG/K,VERBOSE/S",
+    "mode": "interrupt",
+    "values": {
+      "DEVICE": "missing.device",
+      "UNIT": "0",
+      "CONFIG": "RAM:cli-wireless.prefs",
+      "VERBOSE": true
+    }
+  },
+  "arp": {
+    "binary": "src/tools/arp",
+    "parser": "readargs",
+    "source": "src/tools/arp.c",
+    "values": {
+      "ADDRESS": "127.0.0.1",
+      "DELETE": true,
+      "QUIET": true,
+      "SET": "02:11:22:33:44:55",
+      "STATS": true,
+      "UNIT": "1"
+    }
+  },
+  "fetch": {
+    "base": {
+      "TIMEOUT": "1"
+    },
+    "binary": "src/tools/fetch",
+    "mode": "interrupt",
+    "parser": "readargs",
+    "source": "src/tools/fetch.c",
+    "values": {
+      "HEADERS": true,
+      "IPV4": true,
+      "IPV6": true,
+      "NOVERIFY": true,
+      "QUIET": true,
+      "TIMEOUT": "1",
+      "TO": "RAM:cli-case",
+      "URL": "http://127.0.0.1:1/"
+    }
+  },
+  "host": {
+    "binary": "src/tools/host",
+    "mode": "interrupt",
+    "parser": "readargs",
+    "source": "src/tools/host.c",
+    "values": {
+      "IPV4": true,
+      "IPV6": true,
+      "NAME": "localhost",
+      "TIMEOUT": "1"
+    }
+  },
+  "hostname": {
+    "binary": "src/tools/hostname",
+    "parser": "readargs",
+    "source": "src/tools/hostname.c",
+    "values": {
+      "NAME": "cli-amiga",
+      "QUIET": true
+    }
+  },
+  "httpd": {
+    "base": {
+      "PORT": "8088",
+      "ROOT": "RAM:"
+    },
+    "binary": "src/tools/httpd",
+    "mode": "interrupt",
+    "parser": "readargs",
+    "source": "src/tools/httpd.c",
+    "values": {
+      "ADDRESS": "127.0.0.1",
+      "CONNECTIONS": "1",
+      "CONSOLE": true,
+      "CONSOLEPAGE": "RAM:cli-case",
+      "FILEPAGE": "RAM:cli-case",
+      "FILES": true,
+      "PAGE": "RAM:cli-case",
+      "PORT": "8088",
+      "ROOT": "RAM:",
+      "TERMINAL": true,
+      "TIMEOUT": "1",
+      "TRACE": true,
+      "VERBOSE": true
+    }
+  },
+  "iperf": {
+    "base": {
+      "HOST": "127.0.0.1",
+      "TIME": "1"
+    },
+    "binary": "src/tools/iperf",
+    "mode": "interrupt",
+    "parser": "readargs",
+    "source": "src/tools/iperf.c",
+    "values": {
+      "BANDWIDTH": "1024",
+      "HELP": true,
+      "HOST": "127.0.0.1",
+      "IPV4": true,
+      "IPV6": true,
+      "LENGTH": "128",
+      "PORT": "1",
+      "QUIET": true,
+      "SERVER": "127.0.0.1",
+      "SIZE": "128",
+      "TIME": "1",
+      "UDP": true
+    }
+  },
+  "nc": {
+    "base": {
+      "HOST": "127.0.0.1",
+      "PORT": "1"
+    },
+    "binary": "src/tools/nc",
+    "mode": "interrupt",
+    "parser": "readargs",
+    "source": "src/tools/nc.c",
+    "values": {
+      "CRLF": true,
+      "HALFCLOSE": true,
+      "HOST": "127.0.0.1",
+      "IPV4": true,
+      "IPV6": true,
+      "KEEP": true,
+      "LISTEN": true,
+      "LOCALPORT": "1",
+      "PORT": "1",
+      "SCAN": true,
+      "TIMEOUT": "1",
+      "UDP": true,
+      "VERBOSE": true
+    }
+  },
+  "netstat": {
+    "binary": "src/tools/netstat",
+    "parser": "readargs",
+    "source": "src/tools/netstat.c",
+    "values": {
+      "ALL": true,
+      "HEALTH": true,
+      "INTERFACES": true,
+      "ROUTES": true,
+      "STATS": true
+    }
+  },
+  "nslookup": {
+    "binary": "src/tools/nslookup",
+    "mode": "interrupt",
+    "parser": "readargs",
+    "source": "src/tools/nslookup.c",
+    "values": {
+      "NAME": "localhost",
+      "SERVER": "127.0.0.1",
+      "TIMEOUT": "1",
+      "TYPE": "A"
+    }
+  },
+  "ping": {
+    "base": {
+      "-c": "1",
+      "-t": "1"
+    },
+    "binary": "src/tools/ping",
+    "mode": "interrupt",
+    "parser": "readargs",
+    "source": "src/tools/ping.c",
+    "values": {
+      "-c": "1",
+      "-i": "1",
+      "-l": "1",
+      "-n": true,
+      "-o": true,
+      "-q": true,
+      "-s": "32",
+      "-t": "1",
+      "BELL": true,
+      "HOST": "127.0.0.1",
+      "IPV4": true,
+      "IPV6": true
+    }
+  },
+  "profspin": {
+    "binary": "tools/profiler/profspin",
+    "source": "tools/profiler/profspin.c",
+    "parser": "readargs",
+    "mode": "exit",
+    "base": {
+      "SCALE": "1"
+    },
+    "values": {
+      "RANGES": "RAM:cli-ranges",
+      "SCALE": "1",
+      "AUDIO": "0"
+    },
+    "seconds": 120
+  },
+  "scp": {
+    "allowed": [
+      0,
+      1,
+      5,
+      10,
+      20
+    ],
+    "base_args": "RAM:cli-input RAM:cli-output",
+    "binary": "@scp",
+    "help": "-h",
+    "mode": "interrupt",
+    "parser": "scp",
+    "source": "third_party/dropbear/src/scp.c",
+    "values": {
+      "1": null,
+      "2": null,
+      "4": null,
+      "6": null,
+      "B": null,
+      "C": null,
+      "F": "RAM:missing.config",
+      "P": "1",
+      "S": "SYS:c/ssh",
+      "T": null,
+      "c": "aes128-ctr",
+      "d": null,
+      "f": null,
+      "i": "RAM:missing.key",
+      "l": "1",
+      "o": "BatchMode=yes",
+      "p": null,
+      "q": null,
+      "r": null,
+      "t": null,
+      "v": null
+    }
+  },
+  "scp-runner": {
+    "allowed": [
+      20
+    ],
+    "binary": "@scp-runner",
+    "parser": "none",
+    "source": "clients/dropbear/amiga_scp_runner.c"
+  },
+  "sntp": {
+    "base": {
+      "SHOW": true,
+      "TIMEOUT": "1"
+    },
+    "binary": "src/tools/sntp",
+    "mode": "interrupt",
+    "parser": "readargs",
+    "source": "src/tools/sntp.c",
+    "values": {
+      "IPV4": true,
+      "IPV6": true,
+      "QUIET": true,
+      "SERVER": "127.0.0.1",
+      "SHOW": true,
+      "TIMEOUT": "1"
+    }
+  },
+  "ssh": {
+    "allowed": [
+      0,
+      1,
+      5,
+      10,
+      20
+    ],
+    "base_args": "127.0.0.1",
+    "binary": "@ssh",
+    "extended": {
+      "BatchMode": "yes",
+      "BindAddress": "127.0.0.1",
+      "Compression": "yes",
+      "DisableTrivialAuth": "yes",
+      "ExitOnForwardFailure": "yes",
+      "ForwardAgent": "yes",
+      "GatewayPorts": "yes",
+      "IdentityFile": "RAM:missing.key",
+      "PasswordAuthentication": "yes",
+      "Port": "1",
+      "ProxyCommand": "RAM:missing.command",
+      "ServerAliveInterval": "1",
+      "StrictHostKeyChecking": "yes",
+      "UseSyslog": "yes"
+    },
+    "help": "-h",
+    "mode": "interrupt",
+    "parser": "ssh",
+    "source": "third_party/dropbear/src/cli-runopts.c",
+    "values": {
+      "A": null,
+      "B": "127.0.0.1:1",
+      "D": null,
+      "F": null,
+      "I": "1",
+      "J": "RAM:missing.command",
+      "K": "1",
+      "L": "127.0.0.1:1:127.0.0.1:1",
+      "M": "1",
+      "N": null,
+      "Q": "help",
+      "R": "1:127.0.0.1:1",
+      "T": null,
+      "V": null,
+      "W": "65536",
+      "b": "127.0.0.1",
+      "c": "help",
+      "e": null,
+      "f": null,
+      "g": null,
+      "h": null,
+      "i": "RAM:missing.key",
+      "l": "cli",
+      "m": "help",
+      "o": "BatchMode=yes",
+      "p": "1",
+      "q": null,
+      "s": null,
+      "t": null,
+      "u": null,
+      "v": null,
+      "y": null,
+      "z": null
+    }
+  },
+  "telnet": {
+    "binary": "src/tools/telnet",
+    "mode": "interrupt",
+    "parser": "readargs",
+    "source": "src/tools/telnet.c",
+    "values": {
+      "DEBUG": true,
+      "HOST": "127.0.0.1",
+      "IPV4": true,
+      "IPV6": true,
+      "PORT": "1",
+      "QUIET": true
+    }
+  },
+  "tftp": {
+    "binary": "src/tools/tftp",
+    "mode": "interrupt",
+    "parser": "readargs",
+    "source": "src/tools/tftp.c",
+    "values": {
+      "AS": "RAM:cli-case",
+      "GET": "cli-input",
+      "HOST": "127.0.0.1",
+      "IPV4": true,
+      "IPV6": true,
+      "PORT": "1",
+      "PUT": "RAM:cli-input",
+      "QUIET": true,
+      "TIMEOUT": "1"
+    }
+  },
+  "traceroute": {
+    "binary": "src/tools/traceroute",
+    "mode": "interrupt",
+    "parser": "readargs",
+    "source": "src/tools/traceroute.c",
+    "values": {
+      "HOST": "127.0.0.1",
+      "IPV4": true,
+      "IPV6": true,
+      "MAXTTL": "1",
+      "NUMERIC": true,
+      "PACKETSIZE": "32",
+      "QUERIES": "1",
+      "TOS": "1",
+      "VERBOSE": true,
+      "WAIT": "1"
+    }
+  },
+  "whois": {
+    "binary": "src/tools/whois",
+    "mode": "interrupt",
+    "parser": "readargs",
+    "source": "src/tools/whois.c",
+    "values": {
+      "FOLLOW": true,
+      "IPV4": true,
+      "IPV6": true,
+      "PORT": "1",
+      "QUERY": "example.invalid",
+      "SERVER": "127.0.0.1"
+    }
+  }
+}

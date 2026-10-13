@@ -1716,4 +1716,9 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except (OSError, struct.error, ValueError) as error:
+        # Missing/unreadable files and malformed binary records are input
+        # errors. Keep tracebacks for programmer defects, not rejected inputs.
+        die(str(error))
