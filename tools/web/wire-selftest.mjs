@@ -85,10 +85,11 @@ class FakeWebSocket {
     this.onmessage = null;
     this.onclose = null;
     this.onerror = null;
+    this.sent = [];
     FakeWebSocket.instances.push(this);
   }
 
-  send(_data) {}
+  send(data) { this.sent.push(data); }
   close(_code, _reason) { this.readyState = FakeWebSocket.CLOSED; }
 }
 
@@ -176,6 +177,24 @@ const last = () => FakeWebSocket.instances[FakeWebSocket.instances.length - 1];
   ok("open_socket_is_not_reupgraded",
      FakeWebSocket.instances.length === count,
      "grew by " + (FakeWebSocket.instances.length - count));
+}
+
+/* UTF-8 both ways: a character split across frames arrives whole, U+009B
+   is still CSI, and raw-mode keys go out as UTF-8 with the 8-bit CSI. */
+{
+  let text = "";
+  const w = new M.Wire({ onText(s) { text += s; }, onWord() {}, onState() {} });
+  w.connect();
+  const s = last();
+  open(s);
+  const frame = (...b) => ({ data: new Uint8Array(b).buffer });
+  s.onmessage(frame(0x42, 0xC3));
+  s.onmessage(frame(0xBC, 0xC2, 0x9B, 0x31, 0x6D));
+  ok("utf8_output_split_and_csi", text === "B\u00FC\u001B[1m", JSON.stringify(text));
+  w.keys("\u00E9");
+  w.keys("\u001B[A", true);
+  const hex = s.sent.map((d) => Array.from(d).join(",")).join(" ");
+  ok("utf8_keys_and_raw_csi", hex === "195,169 194,155,65", hex);
 }
 
 if (failures) {

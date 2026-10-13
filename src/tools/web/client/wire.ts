@@ -5,39 +5,15 @@
  */
 
 /*
- * Latin-1 both ways, and not by accident.
- *
- * AmigaDOS output is Latin-1.  Handing it to a UTF-8 decoder turns every
- * accented character in a filename into a replacement glyph, and there is no
- * way to tell afterwards which byte it was.  A byte is a character here.
- *
- * The other direction drops anything above 255 rather than encoding it as a
- * pair: an AmigaDOS Shell has no code for it, and two bytes on the wire is
- * two characters it would act on.
+ * UTF-8 both ways.  httpd converts between the Shell's codeset and UTF-8,
+ * so an accented file name arrives as the character it is, and C1 controls
+ * travel as U+0080-U+009F: 0x9B is still CSI below.  The decoder is a
+ * stream, because a character can end in the next frame.
  */
-export function fromLatin1(buf: ArrayBuffer): string {
-  const b = new Uint8Array(buf);
-  let s = "";
+const encoder = new TextEncoder();
 
-  /* Chunked because String.fromCharCode.apply blows the argument limit on a
-     big paste of output, and a per-byte += is measurably slower on the sizes
-     Type of a real file produces. */
-  for (let i = 0; i < b.length; i += 4096) {
-    s += String.fromCharCode.apply(null, Array.from(b.subarray(i, i + 4096)));
-  }
-
-  return s;
-}
-
-export function toLatin1(text: string): Uint8Array {
-  const b: number[] = [];
-
-  for (let i = 0; i < text.length; i++) {
-    const c = text.charCodeAt(i);
-    if (c < 256) b.push(c);
-  }
-
-  return new Uint8Array(b);
+export function toUtf8(text: string): Uint8Array {
+  return encoder.encode(text);
 }
 
 /*
@@ -59,9 +35,9 @@ export function toLatin1(text: string): Uint8Array {
  *   rather than as a bug report, and it costs one indexOf on a string that
  *   almost never contains it.
  *
- * Safe to do a frame at a time: 0x9B is a single byte, so unlike a multi-byte
- * sequence it can never be split across two arrivals.  And nothing is lost --
- * 0x80..0x9F are controls in Latin-1 and no printable character lives there.
+ * Safe to do a frame at a time: the decoder hands over whole characters, and
+ * U+009B is one.  And nothing is lost -- U+0080..U+009F are controls and no
+ * printable character lives there.
  */
 const CSI8 = /\u009B/g;
 
@@ -109,6 +85,7 @@ export interface WireHandlers {
 export class Wire {
   private ws: WebSocket | null = null;
   private readonly h: WireHandlers;
+  private decoder = new TextDecoder("utf-8");
 
   /* A successful open has happened for this page's terminal buffer.  Drives
      `?fresh=1`: sent only before the FIRST open, so a same-page reconnect
@@ -154,6 +131,7 @@ export class Wire {
     const ws = new WebSocket(scheme + location.host + location.pathname + suffix);
     ws.binaryType = "arraybuffer";
     this.ws = ws;
+    this.decoder = new TextDecoder("utf-8");
 
     this.h.onState("connecting", "");
 
@@ -180,7 +158,8 @@ export class Wire {
         this.h.onWord(e.data);
         return;
       }
-      this.h.onText(csiTo7Bit(fromLatin1(e.data as ArrayBuffer)));
+      this.h.onText(csiTo7Bit(this.decoder.decode(e.data as ArrayBuffer,
+                                                  { stream: true })));
     };
 
     /*
@@ -220,7 +199,7 @@ export class Wire {
    * the session and this class owns the socket, not the session.
    */
   keys(text: string, raw = false): void {
-    if (this.open) this.ws!.send(toLatin1(raw ? csiTo8Bit(text) : text));
+    if (this.open) this.ws!.send(toUtf8(raw ? csiTo8Bit(text) : text));
   }
 
   /*

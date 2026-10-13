@@ -91,15 +91,14 @@ export function markerLine(text, marker, kind) {
   return null;
 }
 
-function latin1(text) {
+/* /shell carries UTF-8; httpd converts to the Shell's codeset, and a
+   character that codeset lacks arrives as "?". */
+function commandBytes(text) {
   if (/[\x00-\x1f\x7f-\x9f]/.test(text)) {
     throw new Error("command must be one printable line");
   }
-  for (const ch of text) if (ch.codePointAt(0) > 255) {
-    throw new Error("command must be Latin-1, as the AmigaDOS Shell is");
-  }
   if (text.length > 512) throw new Error("command is too long (512 characters maximum)");
-  return Buffer.from(text, "latin1");
+  return Buffer.from(text, "utf8");
 }
 
 function withoutTerminalEcho(text, command, marker) {
@@ -123,7 +122,7 @@ export async function runCommand(base, command, options = {}) {
   const maxOutput = options.maxOutput ?? 1024 * 1024;
   const session = options.session ?? 1;
   if (session !== 0 && session !== 1) throw new Error("session must be 0 or 1");
-  const bytes = latin1(command);
+  const bytes = commandBytes(command);
   if (bytes.length === 0) throw new Error("command is empty");
   const marker = "ANXD" + randomBytes(12).toString("hex").toUpperCase();
   const ws = await openSocket(socketUrl(base, "/shell", `?session=${session}`), Math.min(ms, 10000));
@@ -139,8 +138,8 @@ export async function runCommand(base, command, options = {}) {
         ws.addEventListener("message", async (event) => {
           if (typeof event.data === "string" || finished) return;
           const chunk = event.data instanceof ArrayBuffer
-            ? Buffer.from(event.data).toString("latin1")
-            : Buffer.from(await event.data.arrayBuffer()).toString("latin1");
+            ? Buffer.from(event.data).toString("utf8")
+            : Buffer.from(await event.data.arrayBuffer()).toString("utf8");
           stream += chunk.replace(/\r\n/g, "\n");
           if (stream.length > maxOutput + 8192) {
             oversized = true;
@@ -151,7 +150,7 @@ export async function runCommand(base, command, options = {}) {
             begin = markerLine(stream, marker, "begin");
             if (begin !== null) {
               ws.send(bytes);
-              ws.send(Buffer.from("\nEcho \"" + marker + " RC=$RC\"\n", "latin1"));
+              ws.send(Buffer.from("\nEcho \"" + marker + " RC=$RC\"\n", "utf8"));
             }
           }
           if (begin !== null) {
@@ -169,7 +168,7 @@ export async function runCommand(base, command, options = {}) {
         });
         ws.addEventListener("close", () => reject(new Error("Shell closed before its completion marker")), { once: true });
         ws.addEventListener("error", () => reject(new Error("Shell WebSocket failed")), { once: true });
-        ws.send(Buffer.from(`FailAt 9999\nEcho "${marker} BEGIN"\n`, "latin1"));
+        ws.send(Buffer.from(`FailAt 9999\nEcho "${marker} BEGIN"\n`, "utf8"));
       }),
       timeout(ms, "Shell command"),
     ]);

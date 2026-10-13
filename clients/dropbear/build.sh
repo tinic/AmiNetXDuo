@@ -141,7 +141,8 @@ echo "  CC amiga_dropbear.c"
 AMI_CFLAGS="$REPRO_CFLAGS $AMIGA_CLIENT_ARCH $AMIGA_CLIENT_OPT -fomit-frame-pointer -I$ROOT/include -I$AMIGA_NDK"
 SHIM_OBJS=("$SHIM_O")
 for c in "$ROOT/src/common/ami_random.c" "$ROOT/src/common/compat.c" \
-         "$ROOT/src/common/ami_diag.c" "$ROOT/clients/dropbear/sshcs.c"; do
+         "$ROOT/src/common/ami_diag.c" "$ROOT/clients/dropbear/sshcs.c" \
+         "$ROOT/src/common/textconv.c" "$ROOT/src/common/textconv_cs.c"; do
     o="$CLIENT_OBJ/db-$(basename "${c%.c}").o"
     echo "  CC $(basename "$c")"
     "$AMIGA_GCC" $AMI_CFLAGS $AMIGA_CLIENT_SHIM_WARN -Wall -c -o "$o" "$c"

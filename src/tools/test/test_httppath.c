@@ -4,13 +4,15 @@
  * up and the containment test. The AmigaOS case is the one no ported Unix
  * server has: a colon makes everything before it a device or an assign.
  *
- *   cc -std=c11 -Wall -Wextra -Isrc/tools \
- *      src/tools/test/test_httppath.c src/tools/httppath.c -o test_httppath
+ *   cc -std=c11 -Wall -Wextra -Isrc/tools -Iinclude \
+ *      src/tools/test/test_httppath.c src/tools/httppath.c \
+ *      src/common/textconv.c -o test_httppath
  *
  * SPDX-License-Identifier: MIT
  */
 
 #include "httppath.h"
+#include "aminetxduo/textconv.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -922,6 +924,95 @@ static void test_escaping(void)
     }
 }
 
+/* ------------------------------------------------------- WebDAV names --- */
+
+/* Names are UTF-8 on the wire and the local codeset on the disk. */
+static void test_utf8_names(void)
+{
+    static uint16_t latin2[128];
+    txt_codeset     cs = { latin2, NULL, NULL, 0 };
+    HttpPath        out;
+    char            esc[256];
+
+    printf("WebDAV names, UTF-8 on the wire\n");
+
+    CHECK_STR(resolved("Work:", "/B%C3%BCcher/caf%C3%A9"), "Work:B\xFC" "cher/caf\xE9");
+    CHECK(http_path_resolve("Work:", "/B%C3%BCcher", &out) == HTTP_PATH_OK);
+    CHECK_STR(out.url, "/B\xFC" "cher");
+    CHECK_STR(out.name, "B\xFC" "cher");
+    CHECK_STR(resolved("Work:", "/B\xC3\xBC" "cher"), "Work:B\xFC" "cher");
+
+    /* Latin-1 escapes are not UTF-8: 400, never a guess. */
+    CHECK(refused("/B%FCcher") == HTTP_PATH_BAD_UTF8);
+    CHECK(refused("/a%C3") == HTTP_PATH_BAD_UTF8);
+    CHECK(refused("/%C0%AE%C0%AE/x") == HTTP_PATH_BAD_UTF8);   /* overlong .. */
+    CHECK(refused("/%ED%A0%80") == HTTP_PATH_BAD_UTF8);        /* surrogate   */
+
+    /* A character the codeset lacks names no file here. */
+    CHECK(refused("/%E2%82%AC") == HTTP_PATH_UNMAPPABLE);
+
+    /* The checks still read the decoded bytes. */
+    CHECK(refused("/%2E%2E/x") == HTTP_PATH_PARENT);
+    CHECK(refused("/a/%2e%2e") == HTTP_PATH_PARENT);
+    CHECK(refused("/%C3%A9/%2E%2E") == HTTP_PATH_PARENT);
+
+    /* And back out: B%C3%BCcher, not B%FCcher. */
+    CHECK(http_url_escape("/B\xFC" "cher", esc, sizeof(esc)) > 0);
+    CHECK_STR(esc, "/B%C3%BC" "cher");
+    CHECK(http_xml_escape_name("caf\xE9 & co", esc, sizeof(esc)) > 0);
+    CHECK_STR(esc, "caf\xC3\xA9 &amp; co");
+    CHECK(http_xml_escape("\xC3\xA9", esc, sizeof(esc)) > 0);
+    CHECK_STR(esc, "\xC3\xA9");                 /* UTF-8 already: as is */
+    CHECK_STR(url_of(0, "Work:", "Work:B\xFC" "cher/x"), "/B%C3%BC" "cher/x");
+
+    /* 0x9B, legal in an AmigaOS name, goes as U+009B and comes back. */
+    CHECK(http_url_escape("/a\x9B", esc, sizeof(esc)) > 0);
+    CHECK_STR(esc, "/a%C2%9B");
+    CHECK_STR(resolved("Work:", esc), "Work:a\x9B");
+
+    /* Another codeset: e caron is 0xEC in ISO-8859-2. */
+    latin2[0xEC - 0x80] = 0x011B;
+    http_path_codeset(&cs);
+    CHECK_STR(resolved("Work:", "/%C4%9B"), "Work:\xEC");
+    CHECK(refused("/%C3%BC") == HTTP_PATH_UNMAPPABLE);
+    CHECK(http_url_escape("/\xEC", esc, sizeof(esc)) > 0);
+    CHECK_STR(esc, "/%C4%9B");
+
+    /* A UTF-8 system codeset: identity both ways, still validated. */
+    {
+        txt_codeset u8 = { NULL, NULL, NULL, 1 };
+
+        http_path_codeset(&u8);
+        CHECK_STR(resolved("Work:", "/B%C3%BC" "cher"), "Work:B\xC3\xBC" "cher");
+        CHECK_STR(resolved("Work:", "/%E2%82%AC"), "Work:\xE2\x82\xAC");
+        CHECK(refused("/%C3%28") == HTTP_PATH_BAD_UTF8);
+        CHECK(refused("/%2E%2E/x") == HTTP_PATH_PARENT);
+        CHECK(http_url_escape("/B\xC3\xBC" "cher", esc, sizeof(esc)) > 0);
+        CHECK_STR(esc, "/B%C3%BC" "cher");
+        CHECK(http_xml_escape_name("B\xC3\xBC" "cher", esc, sizeof(esc)) > 0);
+        CHECK_STR(esc, "B\xC3\xBC" "cher");
+    }
+    /* The longest href httpd builds, every byte a three-byte character:
+       nine escaped bytes each, which httpd_escape is sized for.  Short of
+       that, refused whole rather than cut. */
+    {
+        static uint16_t euro[128];
+        static char     big[HTTP_URL_MAX + HTTP_NAME_MAX + 2];
+        static char     wide[(HTTP_URL_MAX + HTTP_NAME_MAX + 2) * 9];
+        static char     narrow[(HTTP_URL_MAX + HTTP_NAME_MAX + 2) * 6];
+        txt_codeset     cs3 = { euro, NULL, NULL, 0 };
+
+        euro[0xA4 - 0x80] = 0x20AC;
+        memset(big, 0xA4, sizeof(big) - 1);
+        big[sizeof(big) - 1] = '\0';
+        http_path_codeset(&cs3);
+        CHECK(http_url_escape(big, wide, sizeof(wide)) == (sizeof(big) - 1) * 9);
+        CHECK(strncmp(wide, "%E2%82%AC", 9) == 0);
+        CHECK(http_url_escape(big, narrow, sizeof(narrow)) == 0);
+    }
+    http_path_codeset(NULL);
+}
+
 static void test_content_type(void)
 {
     static const unsigned char startup[] =
@@ -971,6 +1062,7 @@ int main(void)
     test_within();
     test_path_url();
     test_escaping();
+    test_utf8_names();
     test_content_type();
 
     printf("\n%d checks, %d failure(s)\n", checks, failures);

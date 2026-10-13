@@ -26,7 +26,9 @@ typedef enum HttpPathResult
     HTTP_PATH_BACKSLASH,        /* a '\', a separator to the client     */
     HTTP_PATH_NOT_VOLUME,       /* first segment is not a mounted volume */
     HTTP_PATH_TOO_LONG,
-    HTTP_PATH_TOO_DEEP
+    HTTP_PATH_TOO_DEEP,
+    HTTP_PATH_BAD_UTF8,         /* the decoded bytes are not UTF-8         */
+    HTTP_PATH_UNMAPPABLE        /* a character the local codeset lacks    */
 } HttpPathResult;
 
 typedef struct HttpPath
@@ -37,6 +39,12 @@ typedef struct HttpPath
     int  segments;              /* 0 means the document root itself       */
     int  trailing_slash;        /* the client wrote it as a collection    */
 } HttpPath;
+
+/* Targets are percent-encoded UTF-8; path, url and name come back in the
+   local codeset, set here (NULL, the default, is ISO-8859-1). */
+struct txt_codeset;
+void http_path_codeset(const struct txt_codeset *cs);
+const struct txt_codeset *http_path_get_codeset(void);
 
 HttpPathResult http_path_resolve(const char *root, const char *target,
                                  HttpPath *out);
@@ -73,10 +81,14 @@ unsigned long http_path_url(int volumes, const char *root, const char *path,
                             char *scratch, unsigned long scratchlen,
                             char *out, unsigned long outlen);
 
+/* A local-codeset path to percent-encoded UTF-8. */
 unsigned long http_url_escape(const char *path, char *out, unsigned long outlen);
 
-/* &, < and > for XML text.  Same contract. */
+/* &, < and > for XML text.  Same contract.  _name takes a local-codeset name
+   and writes UTF-8; the plain one passes bytes (text that is UTF-8 already). */
 unsigned long http_xml_escape(const char *text, char *out, unsigned long outlen);
+unsigned long http_xml_escape_name(const char *name, char *out,
+                                   unsigned long outlen);
 
 void http_utf8_trim(char *text);
 

@@ -20,90 +20,6 @@ enum
     ST_STR_ESC          /* ESC inside the string                     */
 };
 
-/* A byte the console can show as text: never 0x80-0x9F (0x9B is its CSI),
-   never a control code. */
-static uint8_t printable(uint8_t b)
-{
-    return (b < 0x20u || b == 0x7Fu || (b >= 0x80u && b <= 0x9Fu)) ? '?' : b;
-}
-
-/* One code point >= 0x80 to the local codeset. */
-static size_t map(const sshcs_codeset *cs, uint32_t cp, uint8_t *out)
-{
-    size_t i, n;
-
-    if (cs == NULL || cs->upper == NULL)
-    {
-        if (cp >= 0xA0u && cp <= 0xFFu)
-        {
-            out[0] = (uint8_t)cp;
-            return 1;
-        }
-    }
-    else
-    {
-        for (i = 0x20; i < 0x80; i++)   /* bytes 0xA0-0xFF only */
-            if (cs->upper[i] == cp)
-            {
-                out[0] = (uint8_t)(0x80u + i);
-                return 1;
-            }
-    }
-
-    if (cs != NULL && cs->foreign != NULL)
-    {
-        n = cs->foreign(cs->ctx, cp, out, SSHCS_CHAR_MAX);
-        if (n > SSHCS_CHAR_MAX)
-            n = SSHCS_CHAR_MAX;
-        for (i = 0; i < n; i++)
-            out[i] = printable(out[i]);
-        if (n > 0)
-            return n;
-    }
-
-    out[0] = '?';
-    return 1;
-}
-
-/* One byte of UTF-8; at most 2 bytes out, or SSHCS_CHAR_MAX on a completed
-   character. */
-static size_t decode(sshcs_out *s, uint8_t b, uint8_t *out)
-{
-    static const uint32_t least[4] = { 0, 0x80u, 0x800u, 0x10000u };
-    size_t o = 0;
-
-    if (s->need > 0)
-    {
-        if ((b & 0xC0u) == 0x80u)
-        {
-            s->cp = (s->cp << 6) | (b & 0x3Fu);
-            if (--s->need > 0)
-                return 0;
-            if (s->cp < least[s->len - 1] || s->cp > 0x10FFFFu
-                || (s->cp >= 0xD800u && s->cp <= 0xDFFFu))
-            {
-                out[0] = '?';
-                return 1;
-            }
-            return map(s->cs, s->cp, out);
-        }
-        s->need = 0;                       /* cut short */
-        out[o++] = '?';
-    }
-
-    if (b < 0x80u)
-        out[o++] = b;
-    else if (b >= 0xC2u && b <= 0xDFu)
-        s->cp = b & 0x1Fu, s->need = 1, s->len = 2;
-    else if (b >= 0xE0u && b <= 0xEFu)
-        s->cp = b & 0x0Fu, s->need = 2, s->len = 3;
-    else if (b >= 0xF0u && b <= 0xF4u)
-        s->cp = b & 0x07u, s->need = 3, s->len = 4;
-    else
-        out[o++] = '?';
-    return o;
-}
-
 static size_t emit(sshcs_out *s, uint8_t b, uint8_t *out)
 {
     if (!s->convert)
@@ -111,7 +27,7 @@ static size_t emit(sshcs_out *s, uint8_t b, uint8_t *out)
         out[0] = b;
         return 1;
     }
-    return decode(s, b, out);
+    return txt_dec_byte(&s->dec, s->cs, b, out);
 }
 
 static void osc_end(sshcs_out *s)
@@ -144,11 +60,8 @@ size_t sshcs_out_run(sshcs_out *s, const uint8_t *in, size_t n,
                 o += emit(s, b, out + o);
                 break;
             }
-            if (s->convert && s->need > 0)  /* ESC cuts a sequence short */
-            {
-                s->need = 0;
-                out[o++] = '?';
-            }
+            if (s->convert)                 /* ESC cuts a sequence short */
+                o += txt_dec_flush(&s->dec, out + o);
             s->state = ST_ESC;
             break;
 
@@ -224,56 +137,13 @@ size_t sshcs_out_run(sshcs_out *s, const uint8_t *in, size_t n,
     return o;
 }
 
-size_t sshcs_utf8_to_local(const sshcs_codeset *cs, const uint8_t *in,
+size_t sshcs_utf8_to_local(const txt_codeset *cs, const uint8_t *in,
                            size_t n, uint8_t *out, size_t cap)
 {
-    sshcs_out s = { 0 };
-    uint8_t   tmp[SSHCS_CHAR_MAX];
-    size_t    i, k, m, o = 0;
+    size_t i, o = txt_utf8_to_local(cs, in, n, out, cap);
 
-    s.cs      = cs;
-    s.convert = 1;
-
-    for (i = 0; i <= n; i++)
-    {
-        if (i < n)
-            m = decode(&s, in[i], tmp);
-        else if (s.need > 0)
-            tmp[0] = '?', m = 1;            /* unfinished at the end */
-        else
-            break;
-        if (m > cap - o)
-            break;
-        for (k = 0; k < m; k++)
-            out[o++] = printable(tmp[k]);
-    }
+    for (i = 0; i < o; i++)
+        if (out[i] < 0x20u || out[i] == 0x7Fu || (out[i] >= 0x80u && out[i] <= 0x9Fu))
+            out[i] = '?';
     return o;
-}
-
-size_t sshcs_local_to_utf8(const sshcs_codeset *cs, uint8_t b, uint8_t out[3])
-{
-    uint32_t cp = b;
-
-    if (b < 0x80u)
-    {
-        out[0] = b;
-        return 1;
-    }
-    if (cs != NULL && cs->upper != NULL)
-        cp = cs->upper[b - 0x80u];
-    if (cp == 0)
-    {
-        out[0] = '?';
-        return 1;
-    }
-    if (cp < 0x800u)
-    {
-        out[0] = (uint8_t)(0xC0u | (cp >> 6));
-        out[1] = (uint8_t)(0x80u | (cp & 0x3Fu));
-        return 2;
-    }
-    out[0] = (uint8_t)(0xE0u | (cp >> 12));
-    out[1] = (uint8_t)(0x80u | ((cp >> 6) & 0x3Fu));
-    out[2] = (uint8_t)(0x80u | (cp & 0x3Fu));
-    return 3;
 }

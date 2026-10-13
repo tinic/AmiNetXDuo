@@ -1046,6 +1046,11 @@
   http://<this machine>/shell. The file manager follows the browser's
   light or dark appearance setting.
 
+  File names travel as UTF-8 and are stored in the system character set:
+  the one codesets.library reports when it is installed, otherwise
+  ISO-8859-1. A request for a name with a character that set does not
+  have is refused. The Shell page converts its text the same way.
+
   To expose only one drawer deliberately, give it before the port. For
   example, httpd Work:Public 8080 -F keeps / inside Work:Public instead of
   constructing the mounted-volume root.
@@ -2215,8 +2220,9 @@
   computer's clipboard. A browser lets a page do that only inside a
   click, because the console is plain http://; served over https or from
   localhost, it is copied without the click. Text only, up to 32 KB at a
-  time. This machine's clipboard is ISO-8859-1, so a character it has no
-  code for, such as the euro sign, arrives as a question mark.
+  time. The clipboard holds text in the system character set, so a
+  character that set has no code for, such as the euro sign in
+  ISO-8859-1, arrives as a question mark.
 
   @{b}One viewer at a time@{ub}
 

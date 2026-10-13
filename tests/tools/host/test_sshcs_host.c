@@ -71,7 +71,7 @@ static int no_c1(const uint8_t *p, size_t n)
 
 static uint8_t tbuf[SSHCS_TITLE_MAX];
 
-static void reset(sshcs_out *s, const sshcs_codeset *cs, int convert, int osc)
+static void reset(sshcs_out *s, const txt_codeset *cs, int convert, int osc)
 {
     memset(s, 0, sizeof(*s));
     s->cs        = cs;
@@ -105,8 +105,8 @@ static size_t foreign_e(void *ctx, uint32_t cp, uint8_t *out, size_t cap)
 
 int main(void)
 {
-    static const sshcs_codeset latin1 = { NULL, NULL, NULL };
-    sshcs_codeset latin2 = { latin2_upper, foreign_e, NULL };
+    static const txt_codeset latin1 = { NULL, NULL, NULL, 0 };
+    txt_codeset latin2 = { latin2_upper, foreign_e, NULL, 0 };
     sshcs_out s;
     uint8_t   out[512];
     size_t    n, step;
@@ -213,13 +213,13 @@ int main(void)
     CHECK(n == 0, "a character that does not fit is not split");
 
     /* Keystrokes. */
-    n = sshcs_local_to_utf8(&latin1, 0xE4, out);
+    n = txt_local_to_utf8(&latin1, 0xE4, out);
     CHECK(n == 2 && out[0] == 0xC3 && out[1] == 0xA4, "a-umlaut to UTF-8");
-    n = sshcs_local_to_utf8(&latin2, 0xEC, out);
+    n = txt_local_to_utf8(&latin2, 0xEC, out);
     CHECK(n == 2 && out[0] == 0xC4 && out[1] == 0x9B, "e caron to UTF-8");
-    n = sshcs_local_to_utf8(&latin2, 0xE4, out);
+    n = txt_local_to_utf8(&latin2, 0xE4, out);
     CHECK(n == 1 && out[0] == '?', "an unmapped byte is '?'");
-    n = sshcs_local_to_utf8(&latin2, 'q', out);
+    n = txt_local_to_utf8(&latin2, 'q', out);
     CHECK(n == 1 && out[0] == 'q', "ASCII unchanged");
 
     if (failures == 0)

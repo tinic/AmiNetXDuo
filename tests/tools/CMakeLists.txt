@@ -38,9 +38,11 @@ if(NOT CMAKE_CROSSCOMPILING)
     # The ssh client's UTF-8 conversion and OSC filter, pure C.
     add_executable(test_sshcs_host
         host/test_sshcs_host.c
-        "${CMAKE_SOURCE_DIR}/clients/dropbear/sshcs.c")
+        "${CMAKE_SOURCE_DIR}/clients/dropbear/sshcs.c"
+        "${CMAKE_SOURCE_DIR}/src/common/textconv.c")
     target_include_directories(test_sshcs_host PRIVATE
-        "${CMAKE_SOURCE_DIR}/clients/dropbear")
+        "${CMAKE_SOURCE_DIR}/clients/dropbear"
+        "${CMAKE_SOURCE_DIR}/include")
     target_compile_options(test_sshcs_host PRIVATE -Wall -Wextra -Werror)
     add_test(NAME ssh_console_text COMMAND test_sshcs_host)
 endif()

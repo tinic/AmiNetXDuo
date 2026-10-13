@@ -1,7 +1,7 @@
 /*
  * Text on the Amiga clipboard and text in a browser.  The clipboard holds IFF:
- * a FORM FTXT with CHRS chunks of ISO-8859-1, lines ending in LF.  A browser
- * has UTF-8, often with CRLF.  These convert between the two and build and
+ * a FORM FTXT with CHRS chunks in the machine's codeset, lines ending in LF.
+ * A browser has UTF-8, often with CRLF.  These convert between the two and build and
  * read the IFF; clipboard.device itself is the caller's (httpfb.c).  No
  * AmigaOS calls, so src/tools/test/test_clipftxt.c runs it on the build host.
  *
@@ -16,17 +16,21 @@
 /* FORM, size, FTXT, CHRS, size. */
 #define CLIP_FTXT_HEADER    20u
 
-/*
- * UTF-8 to ISO-8859-1, at most `cap` bytes out.  CRLF and a lone CR become LF;
- * a character above U+00FF and a malformed sequence become '?'.  `out` may be
- * `in`: the result is never longer than what it was made from.
- */
-uint32_t clip_utf8_to_latin1(const uint8_t *in, uint32_t n,
-                             uint8_t *out, uint32_t cap);
+struct txt_codeset;              /* aminetxduo/textconv.h; NULL is ISO-8859-1 */
 
-/* ISO-8859-1 to UTF-8, at most `cap` bytes out, never splitting a character. */
-uint32_t clip_latin1_to_utf8(const uint8_t *in, uint32_t n,
-                             uint8_t *out, uint32_t cap);
+/*
+ * UTF-8 to the local codeset, at most `cap` bytes out.  CRLF and a lone CR
+ * become LF; a character the codeset lacks and a malformed sequence become
+ * '?'.  `out` may be `in`: the result is never longer than what it was made
+ * from.
+ */
+uint32_t clip_utf8_to_local(const struct txt_codeset *cs, const uint8_t *in,
+                            uint32_t n, uint8_t *out, uint32_t cap);
+
+/* The local codeset to UTF-8, at most `cap` bytes out, never splitting a
+   character. */
+uint32_t clip_local_to_utf8(const struct txt_codeset *cs, const uint8_t *in,
+                            uint32_t n, uint8_t *out, uint32_t cap);
 
 /* The 20-byte header for `n` bytes of text; the caller writes the text after
    it, and one zero byte when `n` is odd. */

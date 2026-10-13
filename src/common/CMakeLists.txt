@@ -48,6 +48,12 @@ if(NOT CMAKE_CROSSCOMPILING)
     include(CTest)
     add_test(NAME event_ring COMMAND test_events)
 
+    # Local codeset <-> UTF-8, shared by ssh and httpd: plain C, no AmigaOS.
+    add_executable(test_textconv test/test_textconv.c textconv.c)
+    target_include_directories(test_textconv PRIVATE "${CMAKE_SOURCE_DIR}/include")
+    target_compile_options(test_textconv PRIVATE -Wall -Wextra -Werror)
+    add_test(NAME text_codeset COMMAND test_textconv)
+
     # The entropy pool and its hash DRBG.  ami_random.c:24 asks for this
     # outright -- "FIPS 180-4, self-contained: no libc, no nx_crypto.
     # Re-check against the published vectors in a host harness after ANY edit
