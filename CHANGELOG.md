@@ -7,9 +7,6 @@ are history.
 
 ## Unreleased
 
-- Installer: Prism2/Hermes Wi-Fi is no longer offered or bundled. Pi Wi-Fi
-  and wired PCMCIA remain supported; third-party Wi-Fi can be configured
-  manually.
 - CheckNetDevice reports the card in the A600/A1200 PCMCIA slot, its
   identification and matching driver, or "No card".
 - Installer detects ROM and registered network drivers, including
