@@ -1,0 +1,34 @@
+Library baseline: duplicate interface-cap reload/check block, after open-window calculation.
+
+68k 1005984e: moveal a2@(52),a3  [1 ARM instructions]
+  015c: ldur	w16, [x15, #52]
+
+68k 10059852: tstl a3  [3 ARM instructions]
+  0160: cmn	wzr, w16
+  0164: cset	w9, eq	// eq = none
+  0168: bfi	w8, w9, #2, #1
+
+68k 10059854: beqs 5986a <__nx_tcp_socket_state_data_check+0x4c2>  [2 ARM instructions]
+  016c: tbnz	w8, #2, 0x33c
+  0170: add	w18, w18, #0xe
+
+68k 10059856: movel a3@(72),d2  [1 ARM instructions]
+  0174: ldur	w21, [x16, #72]
+
+68k 1005985a: moveal d2,a0  [1 ARM instructions]
+  0178: mov	w13, w21
+
+68k 1005985c: subql #1,a0  [1 ARM instructions]
+  017c: sub	w13, w13, #0x1
+
+68k 1005985e: moveq #-3,d5  [1 ARM instructions]
+  0180: mov	w24, #0xfffffffd            	// #-3
+
+68k 10059860: cmpl a0,d5  [3 ARM instructions]
+  0184: cmp	w24, w13
+  0188: cset	w4, cc	// cc = lo, ul, last
+  018c: bfi	w8, w4, #1, #1
+
+68k 10059862: bcss 5986a <__nx_tcp_socket_state_data_check+0x4c2>  [2 ARM instructions]
+  0190: tbnz	w8, #1, 0x354
+  0194: add	w18, w18, #0xe

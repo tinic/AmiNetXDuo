@@ -1,0 +1,53 @@
+
+68k 10056976: movel a5@(72),d0  [1 ARM instructions]
+  0000: ldur	w19, [x27, #72]
+
+68k 1005697a: subql #3,d0  [4 ARM instructions]
+  0004: subs	w19, w19, #0x3
+  0008: umov	w6, v19.h[5]
+  000c: cset	w7, cc	// cc = lo, ul, last
+  0010: bfi	w6, w7, #4, #1
+
+68k 1005697c: moveq #8,d1  [1 ARM instructions]
+  0014: mov	w20, #0x8                   	// #8
+
+68k 1005697e: cmpl d0,d1  [4 ARM instructions]
+  0018: cmp	w20, w19
+  001c: mrs	x9, nzcv
+  0020: eor	w9, w9, #0x20000000
+  0024: bfxil	w6, w9, #28, #4
+
+68k 10056980: bcsw 5773e <__nx_tcp_socket_packet_process+0xfa8>  [2 ARM instructions]
+  0028: tbnz	w6, #1, 0x74
+  002c: add	w18, w18, #0xe
+
+68k 10056984: movew %pc@(5698c <__nx_tcp_socket_packet_process+0x1f6>,d0:l:2),d0  [9 ARM instructions]
+  0030: add	w11, w18, #0x8
+  0034: add	w4, w11, w19, lsl #1
+  0038: ldrsh	w10, [x4]
+  003c: cmn	wzr, w10
+  0040: bfxil	w19, w10, #0, #16
+  0044: and	w6, w6, #0xfffffff0
+  0048: cset	w5, le
+  004c: cinc	w5, w5, mi	// mi = first
+  0050: bfi	w6, w5, #2, #2
+
+68k 10056988: jmp %pc@(5698c <__nx_tcp_socket_packet_process+0x1f6>,d0:w)  [3 ARM instructions]
+  0054: add	w8, w18, #0x8
+  0058: sxth	w9, w19
+  005c: add	w18, w8, w9
+
+68k 00000000: UNIT EXIT  [5 ARM instructions]
+  0060: mov	x0, v20.d[0]
+  0064: mov	v19.h[5], w6
+  0068: add	x0, x0, #0x7
+  006c: mov	v20.d[0], x0
+  0070: ret
+
+68k 00000000: UNIT EXIT  [6 ARM instructions]
+  0074: add	w18, w18, #0xdc8
+  0078: mov	x0, v20.d[0]
+  007c: mov	v19.h[5], w6
+  0080: add	x0, x0, #0x5
+  0084: mov	v20.d[0], x0
+  0088: ret

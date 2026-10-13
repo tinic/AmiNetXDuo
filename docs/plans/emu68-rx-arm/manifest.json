@@ -1,0 +1,43 @@
+{
+  "emitter_revision": "d9059de8ec5be48e5599d64f83506f59715aa1ab",
+  "netxduo_base": "2d871dca099603e76487bd14fdabeacdc223b89e",
+  "stack_base": "dd1cb22c6d681d99e2f18672b2fbfdf8d1e69b70",
+  "pi": "Raspberry Pi 4 Model B Rev 1.5, Cortex-A72, AArch64 Linux",
+  "guest_executed": false,
+  "flags": "-O2 -m68020-60 -mregparm=3 -flto",
+  "sources": {
+    "third_party/netxduo/common/src/nx_tcp_socket_packet_process.c": "6f6ab5d41f0ab7201499d202a01033b2426a77b1c549f1fd253acf8b066dffe3",
+    "third_party/netxduo/common/src/nx_tcp_socket_state_data_check.c": "cb0093f5fd66092db8d6fff9dbda35aa050d4c3ffd61f47714a47c0ec128f2d4",
+    "port/threadx-amiga/src/tx_thread_interrupt_control.c": "24b9a9c1886279300060a9192fc3f80836a3321fc248c5a33e9b3c8452577ff8",
+    "tests/netstack/host/test_tcp_rxflood_host.c": "f805451e9d991f09c017853eeae7595ef394e9ccee28dc9ea89359d7bda80cf9"
+  },
+  "images": {
+    "before-library": "328ad69fbbbce9c47a9fd6bdb9bc858d6150f2feb0d0d61867ddf8f34f61e399",
+    "before-tcpprof": "bc906f5d9b254e76ae510378eb0372dbfa27167394a61f418aacf39fdceb2ce0",
+    "after-library": "2cc4ee4c6dcccfaa0954277cc8fc9ac4144138c983ce52be5919cff34b092a27",
+    "after-tcpprof": "e73e4f136a3250a96318a59aa9cdd987f51130966bdcddad2c1728f2d6044387"
+  },
+  "units": {
+    "cfg-integrated-before-library": {
+      "count": 589,
+      "failed": 0
+    },
+    "cfg-integrated-before-tcpprof": {
+      "count": 820,
+      "failed": 0
+    },
+    "cfg-integrated-after-library": {
+      "count": 371,
+      "failed": 0
+    },
+    "cfg-integrated-after-tcpprof": {
+      "count": 850,
+      "failed": 0
+    },
+    "cfg-integrated-after-data": {
+      "count": 207,
+      "failed": 0
+    }
+  },
+  "netxduo_after": "65862f46e51f9a4534981e2c8f87692ad8749446"
+}

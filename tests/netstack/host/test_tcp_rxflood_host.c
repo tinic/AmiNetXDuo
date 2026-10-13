@@ -22,6 +22,11 @@ ULONG _tx_time_get(VOID)
 
 static unsigned long h_checks;
 static unsigned long h_failures;
+static UINT h_ack_next_state;
+static UINT h_established_calls;
+static UINT h_transmit_calls;
+static UINT h_fin_wait2_calls;
+static UINT h_urgent_calls;
 
 static void h_check(int ok, const char *what)
 {
@@ -66,7 +71,11 @@ VOID _nx_tcp_socket_connection_reset(NX_TCP_SOCKET *socket_ptr)
 UINT _nx_tcp_socket_state_ack_check(NX_TCP_SOCKET *socket_ptr,
                                     NX_TCP_HEADER *header_ptr)
 {
-    (void)socket_ptr; (void)header_ptr;
+    (void)header_ptr;
+    if (h_ack_next_state)
+    {
+        socket_ptr -> nx_tcp_socket_state = h_ack_next_state;
+    }
     return NX_TRUE;
 }
 
@@ -79,6 +88,7 @@ VOID _nx_tcp_socket_state_closing(NX_TCP_SOCKET *socket_ptr,
 VOID _nx_tcp_socket_state_established(NX_TCP_SOCKET *socket_ptr)
 {
     (void)socket_ptr;
+    h_established_calls++;
 }
 
 VOID _nx_tcp_socket_state_fin_wait1(NX_TCP_SOCKET *socket_ptr)
@@ -89,6 +99,7 @@ VOID _nx_tcp_socket_state_fin_wait1(NX_TCP_SOCKET *socket_ptr)
 VOID _nx_tcp_socket_state_fin_wait2(NX_TCP_SOCKET *socket_ptr)
 {
     (void)socket_ptr;
+    h_fin_wait2_calls++;
 }
 
 VOID _nx_tcp_socket_state_last_ack(NX_TCP_SOCKET *socket_ptr,
@@ -113,6 +124,7 @@ VOID _nx_tcp_socket_state_syn_sent(NX_TCP_SOCKET *socket_ptr,
 VOID _nx_tcp_socket_state_transmit_check(NX_TCP_SOCKET *socket_ptr)
 {
     (void)socket_ptr;
+    h_transmit_calls++;
 }
 
 UINT _tx_mutex_get(TX_MUTEX *mutex_ptr, ULONG wait_option)
@@ -216,6 +228,11 @@ static void h_fixture(void)
     h_now            = 1000;
     h_pkt_next       = 0;
     h_pool_available = H_POOL_TOTAL;
+    h_ack_next_state = 0;
+    h_established_calls = 0;
+    h_transmit_calls = 0;
+    h_fin_wait2_calls = 0;
+    h_urgent_calls = 0;
 
     memset(&h_pool, 0, sizeof(h_pool));
     h_pool.nx_packet_pool_total     = H_POOL_TOTAL;
@@ -468,6 +485,62 @@ static void aggregate_covering_window_is_accepted(void)
             "a segment beginning at the receive window's right edge was accepted");
 }
 
+static VOID h_urgent(NX_TCP_SOCKET *socket_ptr)
+{
+    h_check(socket_ptr == &h_sock, "urgent callback received the wrong socket");
+    h_urgent_calls++;
+}
+
+/* ACK processing may change the state before dispatch.  Exercise both the
+   established path and the shared urgent/packet-release tail after that change. */
+static void dispatch_observes_ack_state_changes(void)
+{
+    static const UINT next_states[] = {
+        NX_TCP_ESTABLISHED, NX_TCP_CLOSE_WAIT, NX_TCP_FIN_WAIT_2
+    };
+    UINT i;
+
+    for (i = 0; i < sizeof(next_states) / sizeof(next_states[0]); i++)
+    {
+        NX_PACKET *p = &h_pkt[0];
+        NX_TCP_HEADER *hdr = (NX_TCP_HEADER *)h_pkt_buf[0];
+        ULONG available;
+        UINT receives_data = next_states[i] != NX_TCP_CLOSE_WAIT;
+
+        h_fixture();
+        h_ack_next_state = next_states[i];
+        h_sock.nx_tcp_urgent_data_callback = h_urgent;
+        memset(p, 0, sizeof(*p));
+        memset(h_pkt_buf[0], 0, H_BUF);
+        p -> nx_packet_data_start = h_pkt_buf[0];
+        p -> nx_packet_data_end = h_pkt_buf[0] + H_BUF;
+        p -> nx_packet_prepend_ptr = h_pkt_buf[0];
+        p -> nx_packet_append_ptr = h_pkt_buf[0] + sizeof(*hdr) + 1;
+        p -> nx_packet_length = sizeof(*hdr) + 1;
+        p -> nx_packet_pool_owner = &h_pool;
+        hdr -> nx_tcp_header_word_0 = (80UL << NX_SHIFT_BY_16) | 40000UL;
+        hdr -> nx_tcp_sequence_number = H_ISN_RX;
+        hdr -> nx_tcp_header_word_3 = NX_TCP_HEADER_SIZE | NX_TCP_ACK_BIT | NX_TCP_URG_BIT;
+        available = --h_pool_available;
+
+        _nx_tcp_socket_packet_process(&h_sock, p);
+
+        h_check(h_sock.nx_tcp_socket_state == next_states[i],
+                "dispatch ignored the state left by ACK processing");
+        h_check(h_established_calls == (next_states[i] == NX_TCP_ESTABLISHED),
+                "established handler ran for the wrong state");
+        h_check(h_transmit_calls == (next_states[i] != NX_TCP_FIN_WAIT_2),
+                "transmit checks changed during state dispatch");
+        h_check(h_fin_wait2_calls == (next_states[i] == NX_TCP_FIN_WAIT_2),
+                "FIN-WAIT-2 handler ran for the wrong state");
+        h_check(h_sock.nx_tcp_socket_receive_queue_count == receives_data,
+                "state dispatch changed packet queue ownership");
+        h_check(h_pool_available == available + !receives_data,
+                "state dispatch changed the packet-release tail");
+        h_check(h_urgent_calls == 1, "state dispatch skipped the urgent callback tail");
+    }
+}
+
 int main(void)
 {
     _nx_tcp_fast_timer_rate     = (NX_IP_PERIODIC_RATE + (NX_TCP_FAST_TIMER_RATE - 1)) / NX_TCP_FAST_TIMER_RATE;
@@ -486,6 +559,7 @@ int main(void)
     sub_mss_flood();
     full_mss_not_starved();
     aggregate_covering_window_is_accepted();
+    dispatch_observes_ack_state_changes();
 
     printf("%lu checks, %lu failures, %s\n",
            h_checks, h_failures, (h_failures == 0UL) ? "PASS" : "FAIL");

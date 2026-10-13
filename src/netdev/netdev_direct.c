@@ -164,10 +164,10 @@ UBYTE *netdev_rx_claim(APTR arg, const UBYTE *hdr, UWORD frame_len,
             return NULL;
         {
             UBYTE *lh = dst - NETDEV_HDR_LEN;
-            UWORD  i;
 
-            for (i = 0; i < NETDEV_HDR_LEN; i++)
-                lh[i] = hdr[i];
+            /* A fixed-size copy lets the 68020 build emit three long moves
+               and one word move, without the byte loop's per-byte DBF. */
+            __builtin_memcpy(lh, hdr, NETDEV_HDR_LEN);
         }
         /* The one per-frame field a batch request does carry, from the
            claim to its completion: the payload length RxFilled() reports. */
@@ -216,10 +216,8 @@ UBYTE *netdev_rx_claim(APTR arg, const UBYTE *hdr, UWORD frame_len,
     if (cand->op_RxLinkHdr)
     {
         UBYTE *lh = dst - NETDEV_HDR_LEN;
-        UWORD  i;
 
-        for (i = 0; i < NETDEV_HDR_LEN; i++)
-            lh[i] = hdr[i];
+        __builtin_memcpy(lh, hdr, NETDEV_HDR_LEN);
     }
 
     direct_addr6(io->ios2_DstAddr, hdr);
