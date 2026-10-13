@@ -1,6 +1,6 @@
 /*
- * InstallNetProbe's PC Card decision (netprobe_card.c), over the identity
- * tuples of real cards.
+ * InstallNetProbe's PC Card decision and CheckNetDevice's slot report
+ * (netprobe_card.c), over the identity tuples of real cards.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -8,16 +8,25 @@
 #include "netprobe_card.h"
 
 #include <stdio.h>
+#include <string.h>
 
 static unsigned long checks;
 static unsigned long failures;
 
 /* A 3C589's primary chain as attribute memory holds it, CIS byte n at n:
-   DEVICE, a NULL byte, MANFID, FUNCID LAN, FUNCE, END. */
+   DEVICE, a NULL byte, VERS_1, MANFID, FUNCID LAN, FUNCE, END. */
 static const unsigned char el3_cis[] =
 {
     0x01, 0x02, 0xdf, 0xff,
     0x00,
+    0x15, 0x31, 0x04, 0x01,
+    '3', 'C', 'o', 'm', ' ', 'C', 'o', 'r', 'p', 'o', 'r', 'a', 't', 'i',
+    'o', 'n', 0x00,
+    '3', 'C', '5', '8', '9', 0x00,
+    'T', 'P', '/', 'B', 'N', 'C', ' ', 'L', 'A', 'N', ' ', 'C', 'a', 'r',
+    'd', 0x00,
+    '0', '0', '0', '0', '0', '2', 0x00,
+    0xff,
     0x20, 0x04, 0x01, 0x01, 0x89, 0x05,
     0x21, 0x02, 0x06, 0x00,
     0x22, 0x02, 0x01, 0x02,
@@ -27,9 +36,53 @@ static const unsigned char el3_cis[] =
 /* A link running past the end stops the walk. */
 static const unsigned char short_cis[] = { 0x21, 0x08, 0x06 };
 
+/* A CompactFlash disk: VERS_1 with a control byte, FUNCID fixed disk. */
+static const unsigned char cf_cis[] =
+{
+    0x15, 0x0b, 0x04, 0x01, 'S', 'a', 'n', 0x07, 0x00, 'C', 'F', 0x00, 0xff,
+    0x21, 0x02, 0x04, 0x01,
+    0xff
+};
+
+/* A VERS_1 longer than the report keeps. */
+static unsigned char long_cis[2 + 200 + 1];
+
 static uint8_t cis_read(void *ctx, uint32_t n)
 {
     return ((const unsigned char *)ctx)[n];
+}
+
+/* The report as CheckNetDevice prints it, kept for comparison. */
+static char report[1024];
+static unsigned report_used;
+
+static void report_line(void *ctx, const char *text)
+{
+    (void)ctx;
+    printf("  %s\n", text);
+    while (*text != '\0' && report_used + 2 < sizeof(report))
+        report[report_used++] = *text++;
+    report[report_used++] = '\n';
+    report[report_used] = '\0';
+}
+
+static void expect_report(const NetprobeSlot *slot, const char *want,
+                          const char *what)
+{
+    unsigned i;
+
+    report_used = 0;
+    report[0] = '\0';
+    printf("%s:\n", what);
+    netprobe_slot_report(slot, report_line, NULL);
+    checks++;
+    for (i = 0; want[i] != '\0' && want[i] == report[i]; i++)
+        ;
+    if (want[i] != '\0' || report[i] != '\0')
+    {
+        failures++;
+        printf("  FAIL %s report, want:\n%s", what, want);
+    }
 }
 
 static void expect_kind(const NetprobeCis *cis, int want, const char *what)
@@ -111,6 +164,67 @@ int main(void)
         {
             failures++;
             printf("  FAIL a truncated tuple was read\n");
+        }
+    }
+
+    {
+        static NetprobeSlot slot;
+        unsigned            i;
+
+        slot.slot = NETPROBE_SLOT_NONE;
+        expect_report(&slot, "No card.resource; no PCMCIA slot.\n",
+                      "no card.resource");
+        slot.slot = NETPROBE_SLOT_EMPTY;
+        expect_report(&slot, "No card.\n", "empty slot");
+
+        slot.slot = NETPROBE_SLOT_OWNED;
+        strcpy(slot.owner, "anxnet.device");
+        (void)netprobe_cis_walk(cis_read, (void *)el3_cis,
+                                (uint32_t)sizeof(el3_cis), &slot.cis);
+        slot.have_vers1 = (uint8_t)netprobe_cis_vers1(
+            cis_read, (void *)el3_cis, (uint32_t)sizeof(el3_cis),
+            slot.vers1, sizeof(slot.vers1));
+        expect_report(&slot,
+            "Card present, owned by anxnet.device; CIS read from attribute "
+            "memory.\n"
+            "CISTPL_MANFID: manufacturer $0101, product $0589.\n"
+            "CISTPL_VERS_1: \"3Com Corporation\", \"3C589\", "
+            "\"TP/BNC LAN Card\", \"000002\".\n"
+            "CISTPL_FUNCID 6 (LAN).\n"
+            "First CISTPL_FUNCE: type $01, value $02.\n"
+            "Driver: anxnet.device, CARD=3c589.\n", "3C589, owned");
+
+        memset(&slot, 0, sizeof(slot));
+        slot.slot = NETPROBE_SLOT_FREE;
+        (void)netprobe_cis_walk(cis_read, (void *)cf_cis,
+                                (uint32_t)sizeof(cf_cis), &slot.cis);
+        slot.have_vers1 = (uint8_t)netprobe_cis_vers1(
+            cis_read, (void *)cf_cis, (uint32_t)sizeof(cf_cis),
+            slot.vers1, sizeof(slot.vers1));
+        expect_report(&slot,
+            "Card present, slot free; CIS read through card.resource.\n"
+            "No CISTPL_MANFID.\n"
+            "CISTPL_VERS_1: \"San?\", \"CF\".\n"
+            "CISTPL_FUNCID 4 (fixed disk).\n"
+            "No CISTPL_FUNCE.\n"
+            "Driver: none in this archive.\n", "CompactFlash disk, free");
+
+        long_cis[0] = 0x15;
+        long_cis[1] = 200;
+        long_cis[2] = 0x04;
+        long_cis[3] = 0x01;
+        for (i = 4; i < 2 + 200; i++)
+            long_cis[i] = 'x';
+        long_cis[2 + 200] = 0xff;
+        memset(&slot, 0, sizeof(slot));
+        checks++;
+        if (!netprobe_cis_vers1(cis_read, long_cis, (uint32_t)sizeof(long_cis),
+                                slot.vers1, sizeof(slot.vers1)) ||
+            strlen(slot.vers1) != sizeof(slot.vers1) - 1 ||
+            strcmp(slot.vers1 + sizeof(slot.vers1) - 5, "\"...") != 0)
+        {
+            failures++;
+            printf("  FAIL long VERS_1: %s\n", slot.vers1);
         }
     }
 

@@ -5,6 +5,8 @@ Add new entries under `Unreleased`; published release sections are history.
 
 ## Unreleased
 
+- CheckNetDevice: report the PC Card in the A600/A1200 slot (MANFID, VERS_1,
+  FUNCID, FUNCE, matching driver), or "No card", for any card.
 - Installer: recognize ROM and registered network drivers without requiring
   a DEVS: file. Detect uaenet.device and Amithlon's network drivers; preserve
   the bare device name in the interface definition.
