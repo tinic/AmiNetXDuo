@@ -32,7 +32,7 @@ def shard_rows(rows, index, count):
     return [row for row in rows if (int(row['id'][1:]) // 2) % count == index]
 
 
-def verdict(rows, text, run_rc, fatal=False):
+def verdict(rows, text, run_rc, fatal=False, rebooted=False):
     """Strict, per-id transcript accounting (also exercised by host negatives)."""
     events = {}
     done = False
@@ -75,7 +75,9 @@ def verdict(rows, text, run_rc, fatal=False):
     for row in rows:
         seq = events.get(row['id'], [])
         reason = None
-        if fatal and (not interrupted_guest or row['id'] == active):
+        if rebooted and (not interrupted_guest or row['id'] == active):
+            reason = 'guest reboot while child was active'
+        elif fatal and (not interrupted_guest or row['id'] == active):
             reason = 'fatal emulator/guest exception in batch'
         elif bad_journal:
             reason = 'malformed, duplicate or foreign journal'
@@ -216,7 +218,7 @@ def batch(ns, rows, paths, state, ordinal):
     saved.write_text(text)
     logtext = logfile.read_text(errors='replace')
     results = verdict(rows, text, proc.returncode if not watchdog else 124,
-                      rebooted or bool(FATAL.search(logtext)))
+                      bool(FATAL.search(logtext)), rebooted=rebooted)
     for r in results:
         r.update(state=state, batch=ordinal, log=logfile.name, journal=saved.name)
     # Retain bounded final output alongside the failure transcript.

@@ -125,6 +125,9 @@ class VerdictTests(unittest.TestCase):
         # Truncation after a clean END does not qualify as a killed child.
         truncated = text.split('crash\tSTART')[0]
         self.assertFalse(run.verdict(rows, truncated, 124)[0]['passed'])
+        reboot = run.verdict(rows, text.split('crash\tTIMEOUT')[0], 124, rebooted=True)
+        self.assertEqual([r['passed'] for r in reboot], [True, False, False])
+        self.assertEqual(reboot[1]['reason'], 'guest reboot while child was active')
 
     def test_late_failure_does_not_hide_following_case(self):
         rows = [dict(self.rows[0], id=name) for name in ('late', 'next')]
