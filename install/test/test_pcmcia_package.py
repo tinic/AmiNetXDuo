@@ -95,9 +95,9 @@ static ULONG AvailMem(ULONG flags) {
 }
 #include "netprobe_memory.h"
 int main(void) {
-    struct Node tail = { NULL };
-    struct MemHeader fast = { { &tail }, (void *)0x200000, (void *)0x980000, 0 };
-    struct MemHeader chip = { { &fast.mh_Node }, (void *)0x1000, (void *)0x80000, 0 };
+    static struct Node tail = { NULL };
+    static struct MemHeader fast = { { &tail }, (void *)0x200000, (void *)0x980000, 0 };
+    static struct MemHeader chip = { { &fast.mh_Node }, (void *)0x1000, (void *)0x80000, 0 };
     base.MemList.lh_Head = &chip.mh_Node;
     for (unsigned version = 37; version <= 40; ++version) {
         base.LibNode.lib_Version = version;
