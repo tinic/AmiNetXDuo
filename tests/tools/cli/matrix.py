@@ -84,6 +84,8 @@ def validate(root=ROOT, policy=None):
                 raise ValueError('%s options changed: missing=%s stale=%s' %
                                  (tool, sorted(names - set(spec['values'])),
                                   sorted(set(spec['values']) - names)))
+            if set(spec.get('interrupt_options', [])) - names:
+                raise ValueError(tool + ' unknown interrupt option')
         elif spec['parser'] == 'ssh':
             src = (root / spec['source']).read_text()
             body = src.split('void cli_getopts(', 1)[1].split('/* Handle the hostname', 1)[0]
@@ -120,6 +122,8 @@ def tool_cases(tool, spec, root=ROOT):
     syntax_mode = spec.get('mode', 'exit') if parser in ('none', 'installer') else 'exit'
     rows = []
     def add(kind, args, mode=None, allowed=None):
+        if mode is None and set(kind.split(':')[1:]) & set(spec.get('interrupt_options', [])):
+            mode = 'interrupt'
         rows.append(dict(tool=tool, kind=kind, arguments=args,
                          mode=mode or spec.get('mode', 'exit'),
                          allowed=allowed or spec.get('allowed', [0, 5, 10, 20]),

@@ -127,6 +127,7 @@
   },
   "InstallWiFi": {
     "binary": "src/tools/InstallWiFi",
+    "interrupt_options": ["TO"],
     "parser": "readargs",
     "source": "src/tools/installwifi.c",
     "values": {

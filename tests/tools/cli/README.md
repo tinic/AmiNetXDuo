@@ -30,6 +30,8 @@ No tool is silently given the supervisor's larger stack.
 
 Resident and GUI programs are stopped through Ctrl-C, close-window, Escape or
 a Cancel gadget event (both vanilla and raw Escape are supported).
+Only `InstallWiFi TO` uses that program's GUI lifecycle; `PRIORITY` and syntax
+errors still have to exit without help.
 For the pinned Commodore Installer, the suite reuses the button IDs documented
 in `install/test/installdrive.c`; no private button layout is assumed for other
 programs. Startup/error/abort-confirmation requesters are answered within the

@@ -63,6 +63,13 @@ class InventoryTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 matrix.quote(val)
 
+    def test_gui_option_keeps_non_gui_paths_strict(self):
+        spec = self.policy['InstallWiFi']
+        by_kind = {r['kind']: r for r in matrix.tool_cases('InstallWiFi', spec)}
+        self.assertEqual(by_kind['long:TO']['mode'], 'interrupt')
+        self.assertEqual(by_kind['option:PRIORITY']['mode'], 'exit')
+        self.assertEqual(by_kind['unknown']['mode'], 'exit')
+
     def test_shards_cover_each_case_once_with_both_stacks(self):
         original = {r['id'] for r in self.rows}
         shards = [run.shard_rows(self.rows, i, 4) for i in range(4)]
