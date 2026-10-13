@@ -55,6 +55,68 @@ concurrency:
 
 jobs:
 
+  cli-crashes:
+    name: Shipped CLI crashes (${{ matrix.profile }}, 4/8 KB stack)
+    if: >
+      vars.AMINETXDUO_KICKSTART_RUNNER != '' &&
+      (github.event_name != 'workflow_dispatch' || inputs.run_kickstart)
+    runs-on: ${{ vars.AMINETXDUO_KICKSTART_RUNNER }}
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - profile: default
+            model: A600
+            arch: -m68000
+          - profile: fat
+            model: A1200
+            arch: -m68020-60
+    env:
+      AMINETXDUO_KICKSTART: ${{ vars.AMINETXDUO_KICKSTART }}
+      AMINETXDUO_KICKSTART_A600: ${{ vars.AMINETXDUO_KICKSTART_A600 }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Toolchain
+        run: tools/fetch-toolchain.sh
+      - name: Build the shipped commands and clients
+        env:
+          AMINETXDUO_CI_CROSS: ${{ matrix.profile }}
+          AMINETXDUO_CLIENT_ANY: '1'
+          AMIGA_CLIENT_ARCH: ${{ matrix.arch }}
+        run: |
+          tools/ci.sh cross
+          clients/dropbear/build.sh -b build/cli-clients
+      - name: Every CLI option and invalid input on normal Shell stacks
+        env:
+          CLI_PROFILE: ${{ matrix.profile }}
+          CLI_MODEL: ${{ matrix.model }}
+        run: |
+          if [ -f "$HOME/amiga-assets/env.sh" ]; then
+            . "$HOME/amiga-assets/env.sh" >/dev/null
+          fi
+          tests/tools/run-cli-crashes.sh -b "build/ci/$CLI_PROFILE" \
+            --clients build/cli-clients --model "$CLI_MODEL" \
+            --output build/cli-crashes
+      - name: Retain CLI verdicts and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-crashes-${{ matrix.profile }}
+          if-no-files-found: error
+          path: |
+            build/cli-crashes/inputs.json
+            build/cli-crashes/control-inputs.json
+            build/cli-crashes/controls.json
+            build/cli-crashes/results.json
+            build/cli-crashes/junit.xml
+            build/cli-crashes/*.tsv
+            build/cli-crashes/*.log
+            build/cli-crashes/*-output.txt
+
+
   # ------------------------------------------------------------------------
   # THE RUNNER HAS TO BE ALIVE, AND NOTHING WATCHED IT.  This job queues
   # against a self-hosted runner; if that runner's listener dies, the run sits
@@ -898,10 +960,11 @@ jobs:
   gate:
     name: tier report
     runs-on: ubuntu-latest
-    needs: [kickstart]
+    needs: [kickstart, cli-crashes]
     if: always()
     env:
       RESULT: ${{ needs.kickstart.result }}
+      CLI_RESULT: ${{ needs.cli-crashes.result }}
       # true when the tier was asked for: nightly, a tag, or a dispatch that
       # ticked the box.
       EXPECTED: ${{ github.event_name != 'workflow_dispatch' || inputs.run_kickstart }}
@@ -914,7 +977,13 @@ jobs:
             echo "| tier | ROM | expected | result |"
             echo "|---|---|---|---|"
             echo "| Kickstart 3.1 | self-hosted only | $EXPECTED | $RESULT |"
+            echo "| Shipped CLI (default/fat, 4/8 KB) | self-hosted only | $EXPECTED | $CLI_RESULT |"
           } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$EXPECTED" = "true" ] && [ "$CLI_RESULT" != "success" ]; then
+            echo "::error::Native CLI coverage failed or did not run ($CLI_RESULT)."
+            exit 1
+          fi
 
           # WHAT "DID NOT RUN" ACTUALLY LOOKS LIKE, AND IT IS NOT ONLY
           # `skipped`.  `skipped` is AMINETXDUO_KICKSTART_RUNNER unset, which

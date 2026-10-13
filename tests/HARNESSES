@@ -289,3 +289,5 @@ tests/endurance/run-fitz.sh        : manual : bench. hours of Fitz traffic
 tests/soak/run-fitz-soak.sh        : manual : bench. hours of Fitz, Amiga on both ends
 tests/stress/run-fitzstress.sh     : manual : bench, bridged. four-process Fitz stress against a real server
 tests/tls/run-resume.sh            : manual : bench. TLS session resumption, measured
+
+tests/tools/run-cli-crashes.sh : .github/workflows/emulator.yml@nightly : shipped executable inventory, every option/alias, invalid inputs and pairs at actual 4096/8192-byte child stacks; present/missing libraries, default A600 and fat A1200; real hang/crash/return-code controls precede the sweep
