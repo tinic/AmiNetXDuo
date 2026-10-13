@@ -3605,6 +3605,13 @@
   (c) 2011-2025 Neil Cafferkey. The licence text is installed with it as
   WirelessManager-LICENSE in the AmiNetXDuo drawer.
 
+  codesets.library is the work of the codesets.library Open Source Team,
+  built unmodified from github.com/jens-maus/libcodesets and distributed
+  under the GNU Lesser General Public Licence 2.1. The installer puts it
+  in LIBS: on AmigaOS 3.0 and later when no copy there is as new. The
+  licence text and the location of the source are installed in the
+  Codesets drawer of the AmiNetXDuo drawer.
+
   Thanks to Rondoval on the English Amiga Board for a detailed external
   review of the SANA-II extension design. His criticism prompted the move
   of GRO into the stack, relocation of private commands out of the

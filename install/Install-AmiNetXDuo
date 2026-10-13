@@ -118,6 +118,9 @@
 (set S_WMLIC (tackon S_WIRELESS "WirelessManager-LICENSE"))
 (set S_PCMCIA (if (> (strlen SRCDIR) 0) (tackon SRCDIR "PCMCIA") "PCMCIA"))
 (set S_PCMDOCS (tackon S_PCMCIA "Docs"))
+; codesets.library, its licence and its source pointer.
+(set S_CODESETS (if (> (strlen SRCDIR) 0) (tackon SRCDIR "Codesets") "Codesets"))
+(set CS_SRC (tackon S_CODESETS "codesets.library"))
 (set S_INSTWIFI (if (> (strlen SRCDIR) 0)
                     (tackon SRCDIR "InstallWiFi") "InstallWiFi"))
 (set S_NWPREFS (tackon S_C "NetWirelessPrefs"))
@@ -2910,6 +2913,20 @@
           "EndIf\n")) (P_rec_add)))
       (set PC_N (+ PC_N 1))
     ))
+  ; codesets.library, when this installer put it there and it is unchanged;
+  ; Backup's Restore below then puts back the one it replaced.
+  (set CS_MARK (tackon (tackon D_INSTALLED "Codesets") "codesets.library"))
+  (set CS_TARGET (tackon D_LIBS "codesets.library"))
+  (if (exists CS_MARK (noreq))
+    ((set REC_ADD (cat
+      "If EXISTS \"" CS_TARGET "\"\n"
+      "  \"" REC_SF "\" \"" CS_TARGET "\" \"" CS_MARK "\" BYTES\n"
+      "  If WARN\n"
+      "    Echo >>T:AmiNetXDuo-Kept \"" CS_TARGET "\"\n"
+      "  Else\n"
+      "    Delete \"" CS_TARGET "\" QUIET\n"
+      "  EndIf\n"
+      "EndIf\n")) (P_rec_add)))
   ; The .old files.
   (set REC_SUB "Libs")
   (set REC_F D_BSD_OLD) (P_rec_old)
@@ -2951,6 +2968,10 @@
   (set REC_F (tackon (tackon DOCDIR "PCMCIA") "README")) (P_rec_ours)
   (set RT_SELF 1)
   (set RT_SRC S_PCMDOCS) (set RT_DST (tackon DOCDIR "PCMCIA")) (P_rec_tree)
+  ; codesets.library's licence and source pointer, the same way.
+  (set REC_F (tackon (tackon DOCDIR "Codesets") "COPYING")) (P_rec_ours)
+  (set REC_F (tackon (tackon DOCDIR "Codesets") "SOURCE")) (P_rec_ours)
+  (set REC_F (tackon DOCDIR "Codesets")) (P_rec_ours)
   ; The drawer's own files, by name.
   (set RT_SELF 0)
   (set RT_SRC S_DOCS) (set RT_DST DOCDIR) (P_rec_tree)
@@ -3028,11 +3049,36 @@
   ))
 )
 
+; codesets.library goes in on 3.0 and up (it needs 3.0), and only over an
+; older copy or none: a newer one, or a system one at least as new beside a
+; private installation, is kept.  getversion is (version << 16) | revision.
+(set CS_DEST (tackon D_LIBS "codesets.library"))
+(set D_CS_NEW (cat CS_DEST ".new"))
+(set D_CS_OLD (cat CS_DEST ".old"))
+(set CS_DO 0)
+(if (AND (>= OSVER 39) (exists CS_SRC (noreq)))
+  (
+    (set CS_NEW (getversion CS_SRC))
+    (set CS_HAVE 0)
+    (if (exists CS_DEST (noreq)) (set CS_HAVE (getversion CS_DEST)))
+    (if (AND DRAWER_LAYOUT (exists "LIBS:codesets.library" (noreq)))
+        (if (> (getversion "LIBS:codesets.library") CS_HAVE)
+            (set CS_HAVE (getversion "LIBS:codesets.library"))))
+    (if (< CS_HAVE CS_NEW) (set CS_DO 1))
+  ))
+
 ; The libraries, and their .old copies, which the swap deletes: those may
 ; be another stack's own backups.
 (if (= DRAWER_LAYOUT 0)
   (
     (set BK_SUB "Libs")
+    ; An older codesets.library, unless it is this archive's own.
+    (if CS_DO
+      (
+        (set BK_ARCH CS_SRC)
+        (set BK_SRC CS_DEST) (P_backup)
+        (set BK_ARCH "")
+      ))
     (set BK_SRC D_BSD) (P_backup)
     (set BK_SRC D_UG)  (P_backup)
     (set BK_SRC D_TLS) (P_backup)
@@ -3459,6 +3505,56 @@
 (makedir (tackon DOCDIR "PCMCIA") (help @makedir-help))
 (copyfiles (source S_PCMDOCS) (dest (tackon DOCDIR "PCMCIA")) (all))
 (copyfiles (source (tackon S_PCMCIA "README")) (dest (tackon DOCDIR "PCMCIA")))
+
+; codesets.library: the replaced copy is in Backup by now.  The marker in
+; Installed is what Uninstall-AmiNetXDuo removes it by, unchanged only.
+(if CS_DO
+  (
+    (set CS_MARKDIR (tackon D_INSTALLED "Codesets"))
+    (makedir CS_MARKDIR (help @makedir-help))
+    (copyfiles (source CS_SRC) (dest CS_MARKDIR) (optional "force"))
+    (if (NOT (exists (tackon CS_MARKDIR "codesets.library") (noreq)))
+        (abort "The codesets.library installation record could not be written. Nothing further was copied."))
+    (P_write_record)
+    ; Staged, then swapped, as tls.library is: a copy that fails leaves the
+    ; old library at its live name, never a truncated one.
+    (if (exists D_CS_NEW (noreq))
+        (delete D_CS_NEW
+                (prompt "Removing a leftover codesets.library.new")
+                (help @copyfiles-help)
+                (optional "force" "nofail")))
+    (if (exists D_CS_NEW (noreq))
+        (abort (cat "The leftover staging file " D_CS_NEW " could not be "
+                    "removed. Remove it and run the installer again.")))
+    (copyfiles (prompt "Installing codesets.library")
+               (help   @copylib-help)
+               (source CS_SRC) (dest D_LIBS)
+               (newname "codesets.library.new")
+               (optional "force"))
+    (if (exists D_CS_NEW (noreq))
+      (
+        (if (exists D_CS_OLD (noreq))
+            (delete D_CS_OLD
+                    (prompt "Removing the previous codesets.library.old")
+                    (help @copyfiles-help)
+                    (optional "force" "nofail")))
+        (if (exists CS_DEST (noreq))
+            (rename CS_DEST D_CS_OLD
+                    (prompt "Renaming the old codesets.library out of the way")
+                    (help H_REPLACELIB)))
+        (rename D_CS_NEW CS_DEST
+                (prompt "Putting the new codesets.library in place")
+                (help H_REPLACELIB))
+        ; The replaced copy is in Backup; the .old was only the swap's.
+        (if (exists D_CS_OLD (noreq))
+            (delete D_CS_OLD (optional "force" "nofail")))
+      )
+      (abort (cat "Could not copy " D_CS_NEW ". " CS_DEST " is unchanged."))
+    )
+  ))
+(makedir (tackon DOCDIR "Codesets") (help @makedir-help))
+(copyfiles (source (tackon S_CODESETS "COPYING")) (dest (tackon DOCDIR "Codesets")))
+(copyfiles (source (tackon S_CODESETS "SOURCE")) (dest (tackon DOCDIR "Codesets")))
 
 ; --- tls.library, if this archive has one --------------------------------
 ;

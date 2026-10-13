@@ -57,6 +57,7 @@ WATCH = [
     ("D_BSD", "D_BSD_NEW", "D_BSD_OLD", r'"bsdsocket\.library\.new"', "bsdsocket.library"),
     ("D_UG",  "D_UG_NEW",  "D_UG_OLD",  r'"usergroup\.library\.new"', "usergroup.library"),
     ("D_TLS", "D_TLS_NEW", "D_TLS_OLD", r'"tls\.library\.new"',       "tls.library"),
+    ("CS_DEST", "D_CS_NEW", "D_CS_OLD", r'"codesets\.library\.new"', "codesets.library"),
     ("dev_dest", "dev_new", "dev_old",  r'\(cat dev_file "\.new"\)',  "P_install_device"),
 ]
 

@@ -21,3 +21,6 @@
 [submodule "third_party/zz9000-sdk"]
 	path = third_party/zz9000-sdk
 	url = https://github.com/tinic/zz9000-sdk
+[submodule "third_party/libcodesets"]
+	path = third_party/libcodesets
+	url = https://github.com/jens-maus/libcodesets

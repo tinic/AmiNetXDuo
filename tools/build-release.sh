@@ -40,7 +40,7 @@ AMINETXDUO_DIST_NO_BUILD=1 \
 for path in \
     C/ssh C/scp C/scp-runner Installer \
     Docs/AmiNetXDuo.guide Docs/AmiNetXDuo.guide.info \
-    Libs/bsdsocket.library Libs/tls.library \
+    Libs/bsdsocket.library Libs/tls.library Codesets/codesets.library \
     Libs/minimal/bsdsocket.library Libs/micro/bsdsocket.library \
     Libs/fat/bsdsocket.library Libs/fat/tls.library \
     Devs/Networks/micro/anxnet.device Devs/Networks/micro/anxgenet.device \
