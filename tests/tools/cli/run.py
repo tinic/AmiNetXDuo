@@ -168,7 +168,13 @@ def batch(ns, rows, paths, state, ordinal):
                     current_seconds = next((r.get('seconds', 3) for r in rows if r['id'] == last_id), 3)
                 # Bootstrap has its own deadline. Child grace is per case;
                 # add shutdown time and bounded host lag.
-                if time.monotonic() - last_change > (current_seconds + 25 if last_text else 60):
+                latest = text.splitlines()[-1].split('\t') if text else []
+                parked = len(latest) == 5 and latest[1] in ('TIMEOUT', 'UNREPLIED_CLOSE')
+                # Emulated guest ticks can run slower than host wall time,
+                # especially without JIT or on a busy runner. Parked guests
+                # are reaped immediately; absent progress still has a finite
+                # host deadline beyond the guest's own shutdown budget.
+                if parked or time.monotonic() - last_change > ((current_seconds + 10) * 6 + 30 if last_text else 90):
                     watchdog = True
                     proc.terminate()  # amiberry-run's trap reaps its guest.
                     try:
