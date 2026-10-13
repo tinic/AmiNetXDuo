@@ -1,128 +1,70 @@
 # Changelog
 
-User-visible changes, newest first. Internal work is in the git log.
-Add new entries under `Unreleased`; published release sections are history.
+User-visible changes, newest first. Record features, fixes and compatibility
+changes here; work items, test results and implementation details belong in
+issues and the git log. Add entries under `Unreleased`; published sections
+are history.
 
 ## Unreleased
 
-- Installer: remove Prism2/Hermes PCMCIA Wi-Fi selection and bundled driver, firmware and source payload. Pi Wi-Fi and wired PCMCIA support remain; third-party Wi-Fi can be configured manually.
-- CheckNetDevice: report the PC Card in the A600/A1200 slot (MANFID, VERS_1,
-  FUNCID, FUNCE, matching driver), or "No card", for any card.
-- Installer: recognize ROM and registered network drivers without requiring
-  a DEVS: file. Detect uaenet.device and Amithlon's network drivers; preserve
-  the bare device name in the interface definition.
-- Bundle the modified Installer 2.17 with lower-memory parsing, tested on
-  a 68000 A500 with Kickstart/Workbench 2.04 and 512 KB chip + 512 KB
-  trapdoor RAM. The complete unsegmented script is retained.
-- Default micro and all machines with at most 4 MB RAM to manual networking,
-  after installation and at boot. Intermediate and Expert can enable
-  automatic startup.
-- Installer: choose micro by default with up to 2 MB of installed RAM,
-  minimal below 8 MB, and full from 8 MB (fat on PiStorm). Intermediate
-  and Expert can override the recommendation.
-- Release packaging omits Installer source comments and indentation, keeping
-  its tokens and diagnostic line numbers unchanged while reducing the input
-  buffer needed on small machines.
-- Installer: include the unmodified Xircom PCMCIA driver and
-  pccard.library, manuals, licence notices and complete source
-  archives. Install missing files for the selected card and preserve
-  existing user-installed copies.
-
-- Micro's supplied network drivers reserve one hardware unit instead of four,
-  and the installer selects those smaller driver images for the micro profile.
-
-- All library profiles save 32 KiB of runtime RAM by omitting the unused
-  ThreadX application-definition arena. Standalone ThreadX applications keep
-  their default arena.
-
-- Installer: NetWirelessPrefs goes into SYS:Prefs and NetWireless into SYS:Tools/Commodities, or into the drawer; C: carries no icons.
-- Installer: the supplied drivers are always installed; the drawer place, .local names, boot start, httpd port and time server are Expert questions.
-- Installer: a WirelessManager already in C: is started from S:Network-Startup.
-- Installer: the Pi 4 and CM4 Wi-Fi, and a PCMCIA card already in use by a driver, are detected.
-- NetWireless and NetWirelessPrefs show "Wi-Fi off" after Disconnect, not the network that was connected.
-- Installer: a Wi-Fi started after another interface starts in the background, so the boot does not wait for it.
-
-- Installer: a first installation starts the network in the background and the last page states whether it came up.
-- GetNetStatus: another stack's bsdsocket.library in memory returns 10, with or without its port.
-
-- Installer: another stack's libraries, same-named commands and replaced
-  configuration are kept in the AmiNetXDuo drawer's Backup.
-
-- New Uninstall-AmiNetXDuo removes AmiNetXDuo and puts back what it
-  replaced.
-
-- Installer: NetWirelessPrefs lists the Wi-Fi networks in range to join.
-
-
-- NetWireless and NetWirelessPrefs have Workbench icons.
-
-- Installer: an update over AmiNetXDuo no longer asks to replace its own
-  bsdsocket.library or says that its kept configuration is not checked.
-
-- Installer: another stack's network configuration is set up again by
-  default when a device was found; that stack's files are kept in the
-  AmiNetXDuo drawer's Backup, and its pages appear at Novice too.
-
-- Installer: the machine's name defaults to amiga- and the card's last
-  three address octets; only Expert asks for one.
-
-- Installer: setting the clock from pool.ntp.org at boot defaults to yes;
-  only Expert asks for the server.
-
-- Installer: answering .local names defaults to yes on a 68020 or newer.
-
-- Installer: the Pi Wi-Fi firmware and its licences ship in Devs/Firmware;
-  the files DEVS:Firmware lacks are copied when the Pi Wi-Fi is selected.
-
-- NetWirelessPrefs: Known networks window, to reorder and remove the networks in Wireless.prefs.
-
-- Installer: with the Pi Wi-Fi selected, installs WirelessManager 1.5, asks for the network name and passphrase, and starts the Wi-Fi at boot, beside the Ethernet.
-
-- NetWireless and NetWirelessPrefs find a prism2.device Wi-Fi card (PC Card or PCI) from its interface file when neither DEVICE nor INTERFACE is given.
-
-- New NetWireless commodity: Wi-Fi state and signal as an AppIcon, a Tools menu item and ENV:WiFi; the signal is read only while connected.
-
-- New NetWirelessPrefs: Wi-Fi networks in range, joining one through WirelessManager, and the link's state; Shell forms LIST, STATUS and JOIN.
-
-- Installer: a PCMCIA NE2000 card with a manufacturer ID (DFE-670TXD and
-  most branded clones) is detected at Novice.
-
-- Installer: on Emu68 older than 1.1 alpha.1 it uses Emu68's genet.device
-  for the Pi Ethernet, or stops with one page when no network device works.
-
-- Nightly builds: the newest tested build of main is published every
-  night as the "nightly" pre-release on GitHub, for testing between
-  numbered releases.
-
-- X-Surf 100 with anxnet.device: optional LINKSPEED=10 limits advertised
-  modes to 10 Mbit/s; duplex and PAUSE still negotiate. Default AUTO.
-
-- X-Surf 100 documentation: switch PAUSE setup, receive-overrun checks and
-  automatic TCP-window guidance for anxnet.device.
-
-- New fat build (-O2, 68020+), default on PiStorm (Emu68).
-
-- anxzz9000.device no longer drops an occasional received frame as
-  oversize. It read the frame's length before its serial, and a frame
-  published between the two reads looked empty-but-numbered.
-
-- anxzz9000.device asks ZZ9000 firmware that offers it to place received
-  frames two bytes further into the card's receive slot, so the payload
-  copy into the stack runs longword aligned on both sides. Firmware
-  without the option is unaffected.
-
-- anxzz9000.device also recognises that option on ZZ9000 firmware that
-  reports it the way the upstream firmware does, in the Ethernet config
-  register, not only on the fork's builds.
-
-- httpd's file browser (/files): pressing Return in the New drawer and
-  Rename dialogs now creates or renames. It cancelled the dialog instead;
-  only clicking the button worked.
-
-- NetMeter's icon carries the DONOTWAIT ToolType, so NetMeter started
-  from SYS:WBStartup no longer brings up a "not responding" requester at
-  boot. An icon already in WBStartup needs DONOTWAIT added in its
-  Information window.
+- Installer: Prism2/Hermes Wi-Fi is no longer offered or bundled. Pi Wi-Fi
+  and wired PCMCIA remain supported; third-party Wi-Fi can be configured
+  manually.
+- CheckNetDevice reports the card in the A600/A1200 PCMCIA slot, its
+  identification and matching driver, or "No card".
+- Installer detects ROM and registered network drivers, including
+  uaenet.device and Amithlon drivers, without requiring a DEVS: file.
+- Installation supports a 68000 A500 with Kickstart/Workbench 2.04 and
+  512 KB chip plus 512 KB trapdoor RAM.
+- Installer defaults to micro with up to 2 MB RAM, minimal below 8 MB,
+  and full from 8 MB. PiStorm defaults to the new fat profile (-O2, 68020+).
+  Intermediate and Expert can override the recommendation.
+- Micro and machines with at most 4 MB RAM default to manual networking.
+  Intermediate and Expert can enable automatic startup.
+- Installer always installs the supplied network drivers. Micro uses
+  smaller drivers supporting one hardware unit. All library profiles use
+  32 KiB less runtime RAM.
+- Installer includes the Xircom PCMCIA driver and pccard.library with
+  their manuals, licences and source. Existing installed copies are kept.
+- Installer detects Pi 4 and CM4 Wi-Fi, PCMCIA cards already in use, and
+  branded NE2000 PCMCIA cards such as the DFE-670TXD at Novice level.
+- Installer uses Emu68's genet.device on versions before 1.1 alpha.1 and
+  reports when no usable network device is available.
+- Installer preserves replaced libraries, commands and configuration in
+  the AmiNetXDuo drawer's Backup. Uninstall-AmiNetXDuo restores those files.
+- Installer offers migration from another stack at Novice level. Updates
+  over AmiNetXDuo keep its configuration and no longer ask to replace its
+  own bsdsocket.library.
+- Installer defaults the hostname to amiga- plus the card's last three
+  address octets, enables clock setting from pool.ntp.org, and enables
+  .local names on a 68020 or newer. Drawer location, boot startup, HTTP
+  port and time-server settings are Expert options.
+- Installer starts networking in the background and reports its status
+  on the final page. Starting Wi-Fi beside another interface does not
+  hold up boot.
+- Pi Wi-Fi installation includes WirelessManager 1.5, firmware and
+  licences, asks for the network and passphrase, and configures startup.
+  An existing WirelessManager in C: is also started at boot.
+- New NetWireless commodity shows Wi-Fi state and signal through an
+  AppIcon, Tools menu item and ENV:WiFi. NetWirelessPrefs lists available
+  networks, joins through WirelessManager, and reorders or removes saved
+  networks. Shell commands include LIST, STATUS and JOIN.
+- NetWireless and NetWirelessPrefs include Workbench icons and install in
+  SYS:Tools/Commodities and SYS:Prefs, respectively, or in the chosen
+  drawer. They find configured prism2.device cards automatically and show
+  "Wi-Fi off" after Disconnect.
+- GetNetStatus returns 10 when another stack's bsdsocket.library is in
+  memory, even when that stack has no port.
+- Nightly pre-releases provide the latest tested build between numbered
+  releases.
+- X-Surf 100 with anxnet.device supports LINKSPEED=10; AUTO remains the
+  default. The guide covers switch PAUSE settings and TCP receive windows.
+- anxzz9000.device no longer occasionally rejects a newly received frame
+  as oversize. Compatible firmware can align receive copies by shifting
+  frames two bytes; the driver recognises both fork and upstream firmware.
+- httpd's file browser accepts Return in the New drawer and Rename dialogs.
+- NetMeter starts from SYS:WBStartup without a "not responding" requester.
+  Existing WBStartup icons need DONOTWAIT added in their Information window.
 
 ## 1.0.0-beta8
 
