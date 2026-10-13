@@ -174,6 +174,12 @@ def tool_cases(tool, spec, root=ROOT):
             if 'S' in mods or 'T' in mods:
                 add('invalid-switch:' + name, line({name: val}) + ' "invalid-value"', syntax_mode)
             else:
+                if parser == 'installer' and name == 'SCRIPT':
+                    # Direct NP_Arguments with a 104-character path reboots
+                    # the pinned Installer at both tested stack sizes. The
+                    # argument fits a standard 512-character Shell line;
+                    # keep this focused case beside the 2 KB stress case.
+                    add('short-path:' + name, line({name: 'x' * 104}))
                 for tag, bad in [('empty', ''), ('invalid', 'not-a-value'), ('long', 'x' * 2048),
                                  ('quoted', 'x * " / : =')]:
                     add(tag + ':' + name, line({name: bad}))
