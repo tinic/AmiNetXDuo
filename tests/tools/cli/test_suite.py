@@ -63,6 +63,23 @@ class InventoryTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 matrix.quote(val)
 
+    def test_shards_cover_each_case_once_with_both_stacks(self):
+        original = {r['id'] for r in self.rows}
+        shards = [run.shard_rows(self.rows, i, 4) for i in range(4)]
+        self.assertEqual(original, {r['id'] for shard in shards for r in shard})
+        self.assertEqual(len(self.rows), sum(len(shard) for shard in shards))
+        for shard in shards:
+            self.assertTrue(shard)
+            for tool in self.policy:
+                self.assertIn(tool, {r['tool'] for r in shard})
+            pairs = {}
+            for row in shard:
+                pairs.setdefault(int(row['id'][1:]) // 2, set()).add(row['stack'])
+            self.assertTrue(all(stacks == {4096, 8192} for stacks in pairs.values()))
+        for bad_index, bad_count in ((-1, 4), (4, 4), (0, 0)):
+            with self.assertRaisesRegex(ValueError, 'shard index'):
+                run.shard_rows(self.rows, bad_index, bad_count)
+
 
 class VerdictTests(unittest.TestCase):
     def setUp(self):

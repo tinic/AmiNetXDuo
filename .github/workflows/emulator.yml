@@ -36,11 +36,15 @@ on:
         description: "Also run the Kickstart/self-hosted tier"
         type: boolean
         default: false
+      run_cli_crashes:
+        description: "Run the complete shipped CLI crash matrix (long-running)"
+        type: boolean
+        default: false
   schedule:
     # Nightly.
     - cron: "17 4 * * *"
-  # Deliberately NOT on push. This tier boots an emulator and takes 7-20
-  # minutes, so on an active day it is cancelled by the next push before it
+  # Deliberately NOT on push. This tier boots an emulator and can run for
+  # hours, so on an active day it is cancelled by the next push before it
   # finishes and reports nothing useful either way -- while still emailing on
   # every failure. Nightly plus on-demand gives the same coverage without the
   # noise, and tier 1 (ci.yml) still runs on every push.
@@ -56,10 +60,10 @@ concurrency:
 jobs:
 
   cli-crashes:
-    name: Shipped CLI crashes (${{ matrix.profile }}, 4/8 KB stack)
+    name: Shipped CLI crashes (${{ matrix.profile }}, shard ${{ matrix.shard }}, 4/8 KB stack)
     if: >
       vars.AMINETXDUO_KICKSTART_RUNNER != '' &&
-      (github.event_name != 'workflow_dispatch' || inputs.run_kickstart)
+      github.event_name == 'workflow_dispatch' && inputs.run_cli_crashes
     runs-on: ${{ vars.AMINETXDUO_KICKSTART_RUNNER }}
     timeout-minutes: 360
     strategy:
@@ -69,9 +73,35 @@ jobs:
           - profile: default
             model: A600
             arch: -m68000
+            shard: 0
+          - profile: default
+            model: A600
+            arch: -m68000
+            shard: 1
+          - profile: default
+            model: A600
+            arch: -m68000
+            shard: 2
+          - profile: default
+            model: A600
+            arch: -m68000
+            shard: 3
           - profile: fat
             model: A1200
             arch: -m68020-60
+            shard: 0
+          - profile: fat
+            model: A1200
+            arch: -m68020-60
+            shard: 1
+          - profile: fat
+            model: A1200
+            arch: -m68020-60
+            shard: 2
+          - profile: fat
+            model: A1200
+            arch: -m68020-60
+            shard: 3
     env:
       AMINETXDUO_KICKSTART: ${{ vars.AMINETXDUO_KICKSTART }}
       AMINETXDUO_KICKSTART_A600: ${{ vars.AMINETXDUO_KICKSTART_A600 }}
@@ -99,12 +129,13 @@ jobs:
           fi
           tests/tools/run-cli-crashes.sh -b "build/ci/$CLI_PROFILE" \
             --clients build/cli-clients --model "$CLI_MODEL" \
+            --shard-index "${{ matrix.shard }}" --shard-count 4 \
             --output build/cli-crashes
       - name: Retain CLI verdicts and diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cli-crashes-${{ matrix.profile }}
+          name: cli-crashes-${{ matrix.profile }}-${{ matrix.shard }}
           if-no-files-found: error
           path: |
             build/cli-crashes/inputs.json
@@ -968,6 +999,7 @@ jobs:
       # true when the tier was asked for: nightly, a tag, or a dispatch that
       # ticked the box.
       EXPECTED: ${{ github.event_name != 'workflow_dispatch' || inputs.run_kickstart }}
+      CLI_EXPECTED: ${{ github.event_name == 'workflow_dispatch' && inputs.run_cli_crashes }}
     steps:
       - name: Report
         run: |
@@ -977,10 +1009,10 @@ jobs:
             echo "| tier | ROM | expected | result |"
             echo "|---|---|---|---|"
             echo "| Kickstart 3.1 | self-hosted only | $EXPECTED | $RESULT |"
-            echo "| Shipped CLI (default/fat, 4/8 KB) | self-hosted only | $EXPECTED | $CLI_RESULT |"
+            echo "| Shipped CLI (default/fat, 4/8 KB) | self-hosted only | $CLI_EXPECTED | $CLI_RESULT |"
           } >> "$GITHUB_STEP_SUMMARY"
 
-          if [ "$EXPECTED" = "true" ] && [ "$CLI_RESULT" != "success" ]; then
+          if [ "$CLI_EXPECTED" = "true" ] && [ "$CLI_RESULT" != "success" ]; then
             echo "::error::Native CLI coverage failed or did not run ($CLI_RESULT)."
             exit 1
           fi

@@ -95,6 +95,7 @@ static BOOL close_window(struct Process *child)
                     gui_ids[gui_count * 2 + 1] = g->GadgetType;
                     gui_count++;
                 }
+                close_message.ExecMessage.mn_Node.ln_Type = NT_MESSAGE;
                 close_message.ExecMessage.mn_ReplyPort = close_port;
                 close_message.ExecMessage.mn_Length = sizeof(close_message);
                 g = NULL;
@@ -129,7 +130,7 @@ static BOOL close_window(struct Process *child)
                 close_message.IDCMPWindow = w;
                 close_message.IAddress = close_message.Class == IDCMP_RAWKEY ?
                     (APTR)&raw_key_address : (APTR)g;
-                close_message.Code = g ? g->GadgetID :
+                close_message.Code = g ? 0 :
                     (close_message.Class == IDCMP_VANILLAKEY ? 27 :
                      close_message.Class == IDCMP_RAWKEY ? 0x45 : 0);
                 PutMsg(w->UserPort, (struct Message *)&close_message);

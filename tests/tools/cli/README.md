@@ -73,6 +73,9 @@ tests/tools/run-cli-crashes.sh -b build/ci/default --clients build/dropbear \
 marks them partial. `--controls-only --control-kind NAME` can isolate a failing
 supervisor control. Full runs always execute all controls. `--helper-bin DIR`
 accepts helpers built on a separate compiler host; their hashes are retained.
+`--shard-index N --shard-count 4` partitions inputs deterministically while
+keeping their 4096/8192-byte runs together. All four shards, each with both
+socket-library states, make up one full profile; each artifact records its shard.
 `AMINETXDUO_CLI_ROOT` selects the repository containing the emulator harness for
 such split-host validation. These options do not turn a partial run into full
 coverage.
@@ -85,7 +88,8 @@ arguments. CI uploads diagnostics, not licensed ROMs or guest disk images.
 
 `tools/ci.sh host` runs inventory and transcript negative tests on each host CI
 invocation. Cross CI compiles the supervisor and fault-control program with
-warnings treated as errors. The separate nightly/on-demand Emulator workflow
-runs the complete native matrix for default/68000 A600 and fat/68020 A1200
-shipping configurations. Native execution requires the licensed-ROM runner;
+warnings treated as errors. Dispatch the separate Emulator workflow with
+`run_cli_crashes` to run the complete native matrix for default/68000 A600 and
+fat/68020 A1200 shipping configurations. It is not part of the nightly schedule.
+Native execution requires the licensed-ROM runner;
 host checks alone do not establish that the commands run without crashing.

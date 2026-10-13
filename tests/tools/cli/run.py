@@ -24,6 +24,14 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def shard_rows(rows, index, count):
+    if count < 1 or not 0 <= index < count:
+        raise ValueError('shard index must be in 0..shard-count-1')
+    # IDs are assigned to adjacent 4/8 KB runs of the same input. Keep the
+    # pair together so every shard exercises both actual Shell stack sizes.
+    return [row for row in rows if (int(row['id'][1:]) // 2) % count == index]
+
+
 def verdict(rows, text, run_rc, fatal=False):
     """Strict, per-id transcript accounting (also exercised by host negatives)."""
     events = {}
@@ -146,22 +154,28 @@ def batch(ns, rows, paths, state, ordinal):
     # No active network is requested. This suite tests commands independently
     # of the bench; none means boardless rather than another NAT network test.
     cmd = [str(ROOT / 'tools/amiberry-run.sh'), '-m', ns.model, '-B', 'none',
-           '-t', str(max(90, sum(r.get('seconds', 3) + 4 for r in rows) + 30)), str(ns.output / 'bin/CliCrash'),
+           '-t', str(90 + 6 * sum(r.get('seconds', 3) + (10 if r['mode'] == 'interrupt' else 3) for r in rows)), str(ns.output / 'bin/CliCrash'),
            str(casefile), str(stage / 'c'), str(stage / 'libs'), str(stage / 'devs'),
            str(stage / 'cli-input')]
     logfile = ns.output / ('%s-%04d.log' % (state, ordinal))
     journal_path = hd / 'cli-results.tsv'
+    serial_path = ROOT / 'build' / ('amiberry-serial-' + tag + '.stamped.log')
     started = time.monotonic()
     last_change = started
     last_text = ''
+    longest_text = ''
     current_seconds = 3
     watchdog = False
+    rebooted = False
+    last_serial_check = started
     with logfile.open('w') as log:
         proc = subprocess.Popen(cmd, env=env, cwd=ROOT, stdout=log,
                                 stderr=subprocess.STDOUT, start_new_session=True)
         try:
             while proc.poll() is None:
                 text = journal_path.read_text(errors='replace') if journal_path.exists() else ''
+                if text.startswith(longest_text) and len(text) > len(longest_text):
+                    longest_text = text
                 if text != last_text:
                     last_text, last_change = text, time.monotonic()
                     last_id = text.splitlines()[-1].split('\t')[0] if text else ''
@@ -170,11 +184,16 @@ def batch(ns, rows, paths, state, ordinal):
                 # add shutdown time and bounded host lag.
                 latest = text.splitlines()[-1].split('\t') if text else []
                 parked = len(latest) == 5 and latest[1] in ('TIMEOUT', 'UNREPLIED_CLOSE')
+                now = time.monotonic()
+                if now - last_serial_check >= 1:
+                    last_serial_check = now
+                    if serial_path.exists() and serial_path.read_text(errors='replace').count('ANXD-RUN ') > 1:
+                        rebooted = True
                 # Emulated guest ticks can run slower than host wall time,
                 # especially without JIT or on a busy runner. Parked guests
                 # are reaped immediately; absent progress still has a finite
                 # host deadline beyond the guest's own shutdown budget.
-                if parked or time.monotonic() - last_change > ((current_seconds + 10) * 6 + 30 if last_text else 90):
+                if rebooted or parked or now - last_change > ((current_seconds + 10) * 6 + 30 if last_text else 90):
                     watchdog = True
                     proc.terminate()  # amiberry-run's trap reaps its guest.
                     try:
@@ -189,11 +208,15 @@ def batch(ns, rows, paths, state, ordinal):
                 proc.terminate()
                 proc.wait(timeout=12)
     text = journal_path.read_text(errors='replace') if journal_path.exists() else ''
+    if rebooted:
+        # The rebooted guest truncates DH0:cli-results.tsv on startup. Use
+        # the last complete prefix from the first boot to name its last child.
+        text = longest_text
     saved = ns.output / ('%s-%04d.tsv' % (state, ordinal))
     saved.write_text(text)
     logtext = logfile.read_text(errors='replace')
     results = verdict(rows, text, proc.returncode if not watchdog else 124,
-                      bool(FATAL.search(logtext)))
+                      rebooted or bool(FATAL.search(logtext)))
     for r in results:
         r.update(state=state, batch=ordinal, log=logfile.name, journal=saved.name)
     # Retain bounded final output alongside the failure transcript.
@@ -302,6 +325,8 @@ def main():
     ap.add_argument('--model', default='A1200', choices=['A1200', 'A600'])
     ap.add_argument('--output', type=Path, required=True)
     ap.add_argument('--batch-size', type=int, default=128)
+    ap.add_argument('--shard-index', type=int, default=0)
+    ap.add_argument('--shard-count', type=int, default=1)
     ap.add_argument('--tool', action='append')
     ap.add_argument('--state', action='append', choices=['present', 'missing'])
     ap.add_argument('--control-kind', action='append', choices=['normal', 'break', 'window', 'delayed-window', 'gadget', 'key', 'raw', 'installer', 'badrc', 'late', 'hang', 'crash'], help='focused negative-control debugging, controls-only required')
@@ -318,6 +343,8 @@ def main():
         raise ValueError('missing library for present-state cases')
     if not 1 <= ns.batch_size <= 256:
         raise ValueError('batch size must be 1..256')
+    if ns.shard_count < 1 or not 0 <= ns.shard_index < ns.shard_count:
+        raise ValueError('shard index must be in 0..shard-count-1')
     ns.output.mkdir(parents=True, exist_ok=True)
     ns.token = '%x-%x' % (os.getpid(), time.time_ns())
     if ns.helper_bin:
@@ -341,18 +368,23 @@ def main():
         if unknown:
             raise ValueError('unknown tools: ' + str(unknown))
         rows = [r for r in rows if r['tool'] in ns.tool]
+    rows = shard_rows(rows, ns.shard_index, ns.shard_count)
+    if not rows:
+        raise ValueError('empty CLI shard; review the inventory/shard count')
     provenance = {t: {'path': str(p), 'sha256': digest(p)} for t, p in paths.items()}
     (ns.output / 'inputs.json').write_text(json.dumps({'binaries': provenance,
         'library': {'path': str(ns.library), 'sha256': digest(ns.library)},
         'policy_sha256': digest(matrix.POLICY), 'generator_sha256': digest(Path(matrix.__file__)), 'model': ns.model,
         'tls_sha256': digest(ns.tls) if ns.tls.is_file() else None, 'helper_sha256': digest(ns.output / 'bin/CliCrash'), 'states': ns.state or ['present', 'missing'],
         'case_sha256': hashlib.sha256(json.dumps(rows, sort_keys=True).encode()).hexdigest(),
-        'partial': bool(ns.tool or ns.state), 'cases': len(rows)}, indent=2) + '\n')
+        'partial': bool(ns.tool or ns.state or ns.shard_count > 1),
+        'shard': {'index': ns.shard_index, 'count': ns.shard_count},
+        'cases': len(rows)}, indent=2) + '\n')
     results = sweep(ns, rows, paths)
     shutil.rmtree(ns.output / 'stage', ignore_errors=True)
     bad = sum(not r['passed'] for r in results)
     print('cli_crashes=%s cases=%d failures=%d partial=%s' %
-          ('FAIL' if bad else 'PASS', len(results), bad, bool(ns.tool or ns.state)))
+          ('FAIL' if bad else 'PASS', len(results), bad, bool(ns.tool or ns.state or ns.shard_count > 1)))
     return 1 if bad else 0
 
 if __name__ == '__main__':
