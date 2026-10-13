@@ -930,7 +930,7 @@ static void test_escaping(void)
 static void test_utf8_names(void)
 {
     static uint16_t latin2[128];
-    txt_codeset     cs = { latin2, NULL, NULL };
+    txt_codeset     cs = { latin2, NULL, NULL, 0 };
     HttpPath        out;
     char            esc[256];
 
@@ -977,6 +977,21 @@ static void test_utf8_names(void)
     CHECK(refused("/%C3%BC") == HTTP_PATH_UNMAPPABLE);
     CHECK(http_url_escape("/\xEC", esc, sizeof(esc)) > 0);
     CHECK_STR(esc, "/%C4%9B");
+
+    /* A UTF-8 system codeset: identity both ways, still validated. */
+    {
+        txt_codeset u8 = { NULL, NULL, NULL, 1 };
+
+        http_path_codeset(&u8);
+        CHECK_STR(resolved("Work:", "/B%C3%BC" "cher"), "Work:B\xC3\xBC" "cher");
+        CHECK_STR(resolved("Work:", "/%E2%82%AC"), "Work:\xE2\x82\xAC");
+        CHECK(refused("/%C3%28") == HTTP_PATH_BAD_UTF8);
+        CHECK(refused("/%2E%2E/x") == HTTP_PATH_PARENT);
+        CHECK(http_url_escape("/B\xC3\xBC" "cher", esc, sizeof(esc)) > 0);
+        CHECK_STR(esc, "/B%C3%BC" "cher");
+        CHECK(http_xml_escape_name("B\xC3\xBC" "cher", esc, sizeof(esc)) > 0);
+        CHECK_STR(esc, "B\xC3\xBC" "cher");
+    }
     http_path_codeset(NULL);
 }
 

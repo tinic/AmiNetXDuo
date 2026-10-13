@@ -23,6 +23,29 @@ static uint8_t tc_byte(const txt_codeset *cs, uint32_t cp)
     return 0;
 }
 
+/* cp as UTF-8, 2-4 bytes (cp >= 0x80, valid). */
+static size_t tc_enc(uint32_t cp, uint8_t *out)
+{
+    if (cp < 0x800u)
+    {
+        out[0] = (uint8_t)(0xC0u | (cp >> 6));
+        out[1] = (uint8_t)(0x80u | (cp & 0x3Fu));
+        return 2;
+    }
+    if (cp < 0x10000u)
+    {
+        out[0] = (uint8_t)(0xE0u | (cp >> 12));
+        out[1] = (uint8_t)(0x80u | ((cp >> 6) & 0x3Fu));
+        out[2] = (uint8_t)(0x80u | (cp & 0x3Fu));
+        return 3;
+    }
+    out[0] = (uint8_t)(0xF0u | (cp >> 18));
+    out[1] = (uint8_t)(0x80u | ((cp >> 12) & 0x3Fu));
+    out[2] = (uint8_t)(0x80u | ((cp >> 6) & 0x3Fu));
+    out[3] = (uint8_t)(0x80u | (cp & 0x3Fu));
+    return 4;
+}
+
 /* One code point >= 0x80 for display: the byte, the look-alike, or '?'. */
 static size_t tc_map(const txt_dec *d, const txt_codeset *cs, uint32_t cp,
                      uint8_t *out)
@@ -35,6 +58,9 @@ static size_t tc_map(const txt_dec *d, const txt_codeset *cs, uint32_t cp,
         out[0] = d->c1 ? (uint8_t)cp : (uint8_t)'?';
         return 1;
     }
+
+    if (cs != NULL && cs->utf8)
+        return tc_enc(cp, out);
 
     b = tc_byte(cs, cp);
     if (b != 0)
@@ -144,6 +170,12 @@ size_t txt_local_to_utf8(const txt_codeset *cs, uint8_t b, uint8_t out[3])
 {
     uint32_t cp = b;
 
+    if (cs != NULL && cs->utf8)             /* already UTF-8 */
+    {
+        out[0] = b;
+        return 1;
+    }
+
     if (b < 0xA0u)                          /* ASCII and C1 as they are */
     {
         if (b < 0x80u)
@@ -196,6 +228,7 @@ int txt_utf8_to_local_exact(const txt_codeset *cs, const uint8_t *in, size_t n,
 {
     txt_dec d = { 0, 0, 0, 1 };
     size_t  i, o = 0;
+    int     same = cs != NULL && cs->utf8;
 
     for (i = 0; i < n; i++)
     {
@@ -210,6 +243,18 @@ int txt_utf8_to_local_exact(const txt_codeset *cs, const uint8_t *in, size_t n,
                 continue;
             if (!tc_valid(&d))
                 return TXT_BAD_UTF8;
+            if (same)
+            {
+                /* Identity: the sequence as it came, never longer. */
+                size_t k;
+
+                if (o + d.len > cap)
+                    return TXT_TOO_LONG;
+                for (k = 0; k < d.len; k++)
+                    out[o + k] = in[i + 1 - d.len + k];
+                o += d.len;
+                continue;
+            }
             if (d.cp < 0xA0u)
                 b = (uint8_t)d.cp;          /* C1 */
             else if ((b = tc_byte(cs, d.cp)) == 0)

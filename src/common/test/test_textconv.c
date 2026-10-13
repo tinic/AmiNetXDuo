@@ -41,12 +41,36 @@ static size_t decode_all(txt_dec *d, const txt_codeset *cs, const char *in,
 
 int main(void)
 {
-    txt_codeset cs2 = { latin2, lookalike, NULL };
+    txt_codeset cs2 = { latin2, lookalike, NULL, 0 };
     uint8_t     out[64];
     size_t      n, used;
     int         r;
 
     latin2[0xEC - 0x80] = 0x011B;
+
+    /* A UTF-8 system codeset (the /shell and clipboard path): identity. */
+    {
+        txt_codeset u8 = { NULL, NULL, NULL, 1 };
+        txt_dec     d = { 0, 0, 0, 1 };
+
+        n  = decode_all(&d, &u8, "B\xC3", 2, out);
+        n += decode_all(&d, &u8, "\xBC\xE2\x82\xAC", 4, out + n);
+        CHECK(n == 6 && memcmp(out, "B\xC3\xBC\xE2\x82\xAC", 6) == 0,
+              "UTF-8 system: decoded byte for byte, split or not");
+        n = decode_all(&d, &u8, "\xC3\x28", 2, out);
+        CHECK(n == 2 && memcmp(out, "?(", 2) == 0, "UTF-8 system: malformed is '?'");
+        n = txt_local_to_utf8_str(&u8, (const uint8_t *)"B\xC3\xBC", 3, out,
+                                  sizeof(out), &used);
+        CHECK(n == 3 && used == 3 && memcmp(out, "B\xC3\xBC", 3) == 0,
+              "UTF-8 system: local text goes out as it is");
+        r = txt_utf8_to_local_exact(&u8, (const uint8_t *)"B\xC3\xBC", 3, out,
+                                    sizeof(out), &n);
+        CHECK(r == TXT_OK && n == 3 && memcmp(out, "B\xC3\xBC", 3) == 0,
+              "UTF-8 system: an exact name is identity");
+        r = txt_utf8_to_local_exact(&u8, (const uint8_t *)"\xC3\x28", 2, out,
+                                    sizeof(out), &n);
+        CHECK(r == TXT_BAD_UTF8, "UTF-8 system: a malformed name is refused");
+    }
 
     /* Streaming: a sequence split across calls. */
     {

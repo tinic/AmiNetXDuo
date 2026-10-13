@@ -142,8 +142,10 @@ const txt_codeset *txt_codeset_open(const char *name, int *flags)
     if (tc_same(tc_cs->name, "UTF-8"))
     {
         *flags |= TXT_CS_UTF8;
+        tc_set.utf8 = 1;
         return &tc_set;
     }
+    tc_set.utf8 = 0;
 
     for (i = 0; i < 128; i++)
     {
@@ -161,6 +163,7 @@ void txt_codeset_close(void)
 {
     tc_set.upper   = NULL;
     tc_set.foreign = NULL;
+    tc_set.utf8    = 0;
     tc_cs          = NULL;
     if (CodesetsBase != NULL)
         CloseLibrary(CodesetsBase);

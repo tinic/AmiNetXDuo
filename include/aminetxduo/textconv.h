@@ -23,7 +23,9 @@
  * The local codeset: upper[i] is the code point of byte 0x80 + i, 0 when the
  * byte has none (only 0x20-0x7F are read).  NULL, or a NULL codeset, is
  * ISO-8859-1.  foreign() is asked for a code point no byte has (codesets'
- * look-alike text); NULL, or 0 back, is '?'.
+ * look-alike text); NULL, or 0 back, is '?'.  utf8 set: the machine's
+ * codeset is UTF-8, so conversion is identity -- UTF-8 in is validated and
+ * passes byte for byte, local bytes go out as they are.
  */
 /* foreign() is pinned to the stack like every shared function-pointer type
    (tools/check-call-abi.py); __stdargs on a GCC for AmigaOS, nothing on a
@@ -42,6 +44,7 @@ typedef struct txt_codeset
     const uint16_t *upper;
     txt_foreign_fn  foreign;
     void           *ctx;
+    uint8_t         utf8;
 } txt_codeset;
 
 /* A UTF-8 decoder that keeps a sequence across buffers.  Zero it; c1 set

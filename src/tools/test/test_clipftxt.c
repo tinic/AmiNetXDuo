@@ -6,6 +6,7 @@
  */
 
 #include "clipftxt.h"
+#include "aminetxduo/textconv.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -123,12 +124,29 @@ static void t_ftxt(void)
     expect_bytes(o, n, "hell", "cut to the buffer");
 }
 
+/* A UTF-8 system codeset: the clipboard is UTF-8 both ways, malformed '?'. */
+static void t_utf8_system(void)
+{
+    txt_codeset u8 = { NULL, NULL, NULL, 1 };
+    uint8_t     o[32];
+    uint32_t    n;
+
+    n = clip_utf8_to_local(&u8, (const uint8_t *)"\xC3\xA4\xE2\x82\xAC", 5,
+                           o, sizeof(o));
+    expect_bytes(o, n, "\xC3\xA4\xE2\x82\xAC", "UTF-8 system: paste is identity");
+    n = clip_utf8_to_local(&u8, (const uint8_t *)"\xC3\x28", 2, o, sizeof(o));
+    expect_bytes(o, n, "?(", "UTF-8 system: malformed paste is '?'");
+    n = clip_local_to_utf8(&u8, (const uint8_t *)"B\xC3\xBC", 3, o, sizeof(o));
+    expect_bytes(o, n, "B\xC3\xBC", "UTF-8 system: copy is identity");
+}
+
 int main(void)
 {
     printf("Console clipboard text\n");
     t_to_latin1();
     t_to_utf8();
     t_ftxt();
+    t_utf8_system();
     printf("clipftxt checks=%lu failures=%lu\n", checks, failures);
     return failures == 0 ? 0 : 1;
 }

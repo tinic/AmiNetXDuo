@@ -105,8 +105,8 @@ static size_t foreign_e(void *ctx, uint32_t cp, uint8_t *out, size_t cap)
 
 int main(void)
 {
-    static const txt_codeset latin1 = { NULL, NULL, NULL };
-    txt_codeset latin2 = { latin2_upper, foreign_e, NULL };
+    static const txt_codeset latin1 = { NULL, NULL, NULL, 0 };
+    txt_codeset latin2 = { latin2_upper, foreign_e, NULL, 0 };
     sshcs_out s;
     uint8_t   out[512];
     size_t    n, step;

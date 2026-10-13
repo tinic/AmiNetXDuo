@@ -11,7 +11,8 @@ uint32_t clip_utf8_to_local(const struct txt_codeset *cs, const uint8_t *in,
                             uint32_t n, uint8_t *out, uint32_t cap)
 {
     /* No look-alike text: out may be in, so one character, one byte. */
-    txt_codeset plain = { cs != NULL ? cs->upper : NULL, NULL, NULL };
+    txt_codeset plain = { cs != NULL ? cs->upper : NULL, NULL, NULL,
+                           cs != NULL ? cs->utf8 : 0 };
     txt_dec     d = { 0, 0, 0, 1 };
     uint32_t    i = 0, o = 0;
 

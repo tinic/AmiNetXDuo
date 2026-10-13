@@ -2132,7 +2132,8 @@ static VOID sock_sink(void *ctx, HttpWsEvent ev, const UBYTE *data,
                U+009B (csiTo8Bit) stays the CSI byte. */
             const txt_codeset *cs = http_path_get_codeset();
             txt_codeset        plain = { cs != NULL ? cs->upper : NULL,
-                                         NULL, NULL };
+                                         NULL, NULL,
+                                         cs != NULL ? cs->utf8 : 0 };
             uint8_t            b[TXT_CHAR_MAX];
 
             for (i = 0; i < len; i++)
@@ -2159,7 +2160,8 @@ static VOID sock_sink(void *ctx, HttpWsEvent ev, const UBYTE *data,
             {
                 const txt_codeset *cs = http_path_get_codeset();
                 txt_codeset        plain = { cs != NULL ? cs->upper : NULL,
-                                             NULL, NULL };
+                                             NULL, NULL,
+                                             cs != NULL ? cs->utf8 : 0 };
 
                 /* UTF-8 to the codeset, in place: never longer. */
                 t->word_n = (UBYTE)txt_utf8_to_local(&plain,
