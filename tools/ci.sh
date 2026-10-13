@@ -744,6 +744,16 @@ stage_host() {
         return 1
     fi
 
+    # Supplied PCMCIA binaries keep their complete sources and notices, and
+    # compacting the shipped Installer preserves every token and line number.
+    if python3 install/test/test_pcmcia_package.py > "$BUILD/pcmcia-package.log" 2>&1; then
+        note "PCMCIA redistribution and Installer packing: PASS"
+    else
+        cat "$BUILD/pcmcia-package.log"
+        fail "install/test/test_pcmcia_package.py"
+        return 1
+    fi
+
     # The installer must not move a live library aside before it has the new
     # one on the disk.  Text order, so it costs nothing and runs everywhere.
     if tools/check-installer-transaction.sh > "$BUILD/installer-txn.log" 2>&1; then

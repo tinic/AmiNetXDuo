@@ -26,17 +26,22 @@ typedef struct
 
 enum
 {
-    NETPROBE_PC_NONE = 0,   /* not a card anxnet.device drives              */
+    NETPROBE_PC_NONE = 0,   /* no supported card identity                  */
     NETPROBE_PC_NE2000,     /* its NE2000 row: cnet.device or anxnet pcmcia */
     NETPROBE_PC_3C589,
     NETPROBE_PC_3CCFEM556,
-    NETPROBE_PC_3CXEM556
+    NETPROBE_PC_3CXEM556,
+    NETPROBE_PC_PRISM2,
+    NETPROBE_PC_XIRCOM
 };
 
 /*
- * anxnet.device's own rule (netdev_card_by_cis): a known EtherLink III MANFID
+ * Prism2 and Xircom use their packaged drivers' supported MANFID tables.
+ * For the other cards, anxnet.device's rule (netdev_card_by_cis) applies:
+ * a known EtherLink III MANFID
  * names its row, and any other LAN card is the NE2000 one.  Less the 802.11
- * cards, whose FUNCID says LAN as an NE2000's does: a FUNCE stating wireless
+ * cards without a supported Prism2 identity, whose FUNCID says LAN as an
+ * NE2000's does: a FUNCE stating wireless
  * technology, or a MANFID from Linux's 802.11 PC Card drivers.  Narrower
  * than the driver in one way: a card that states no FUNCID, or only the
  * multifunction one, is not called an NE2000.

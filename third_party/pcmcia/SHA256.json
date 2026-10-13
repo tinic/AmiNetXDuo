@@ -1,0 +1,16 @@
+{
+  "Docs/GPL": "dcc100d4161cc0b7177545ab6e47216f84857cda3843847c792a25289852dcaa",
+  "Docs/Hermes-LICENSE": "7ffbca65c5888438a4233753abcd8af49c166ebdf48886b3192facd585dff6d8",
+  "Docs/LGPL": "a190dc9c8043755d90f8b0a75fa66b9e42d4af4c980bf5ddc633f0124db3cee7",
+  "Docs/PCCard.guide": "d6f04f746e21fdd86837a129d8bf73477044ada99cb73e75c1f85c2eee9738e6",
+  "Docs/Prism2.guide": "481ba58684fd76f6bdc2e7883ca7b280d49539289b7cca41e5e899be11ea8034",
+  "Docs/Xircom.guide": "8968c76fe730e80087628fcce680fbd0a2bdf88a5438ee55c67967086e297aea",
+  "Firmware/HermesI": "a50af14f92525ed46e4ce91be29b233d949a3fce09d512f32f125f2febecc54b",
+  "Firmware/HermesII": "cfe454b852bce5b3e68c113dedb797ad6cf9a2324a56cd85cca66d2cc7f5365e",
+  "Sources/pccard.lha": "34d25edbd5f5d688079ed4dfedc25dafb98a0453da4bf000a8d13c7ac1eb5650",
+  "Sources/prism2v2.lha": "25b400ef25c44af940e1887576106b8312dcd28fe6c8030fcb78804480c07bc5",
+  "Sources/xircomce2.lha": "aaa154b5a8c86f053edde7a9655c18018974afff761e12278b9e6c9ec217f27c",
+  "pccard.library": "2b0237cad35cdfb4e8410177614029d609d8b52fd7e1936ae5cdf758de36cc49",
+  "prism2.device": "5c6493e63d1382231d99bc44856ca53f7466f2d20fc5320a1128ac188d73dc4b",
+  "xircomce2.device": "21d082b940f206d03ad6d49656fa4e66d64d76b2ff7c2169941faee385cdbae5"
+}

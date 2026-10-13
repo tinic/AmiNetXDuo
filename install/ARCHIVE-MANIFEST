@@ -75,6 +75,7 @@ AmiNetXDuo/Install-AmiNetXDuo       | not-installed | always    | The installer 
 AmiNetXDuo/Install-AmiNetXDuo.info  | not-installed | always    | Its icon, whose default tool is Installer.  Same reason.
 AmiNetXDuo/Uninstall-AmiNetXDuo     | installed     | always    | (source S_UNINSTALL)
 AmiNetXDuo/Uninstall-AmiNetXDuo.info | installed    | always    | (source S_UNINSTALLICON)
+# Modified Installer 2.17; make-dist checks SHA-256 c99b79f4506e547545dde81df435ac1782e8a49674bf4a6814aacdc720bd3111 before staging.
 AmiNetXDuo/Installer                | installed     | always    | (source S_INSTALLER)
 AmiNetXDuo/InstallSameFile          | not-installed | always    | The Installer's file-identity primitive.  It uses dos.library SameLock to distinguish this drawer's library from a byte-identical system copy, runs before anything is written, and has no use after installation.
 AmiNetXDuo/Flavours/*               | not-installed | always    | One key=value manifest per stack the Installer offers: build flags, CPU floor, and every file with its size and sha256.  It describes the download for whoever checks it, and has no use on the machine.
@@ -134,6 +135,16 @@ AmiNetXDuo/Wireless/WirelessManager | installed     | always    | (source S_WM)
 AmiNetXDuo/Wireless/WirelessManager-LICENSE | installed | always | (source S_WMLIC)
 
 # --------------------------------------------------------- the Developer --
+
+# External drivers are copied only for their selected card. Complete GPL
+# sources remain available offline in the release rather than on system disks.
+AmiNetXDuo/PCMCIA/*.device         | installed     | always    | (source PC_SOURCE)
+AmiNetXDuo/PCMCIA/pccard.library   | installed     | always    | (source PC_SOURCE)
+AmiNetXDuo/PCMCIA/Firmware/*       | installed     | always    | (source PC_SOURCE)
+AmiNetXDuo/PCMCIA/Docs/*           | installed     | always    | (source S_PCMDOCS)
+AmiNetXDuo/PCMCIA/README           | installed     | always    | (source (tackon S_PCMCIA "README"))
+AmiNetXDuo/PCMCIA/SHA256.json      | not-installed | always    | Release integrity manifest for the unmodified third-party files; checked by the host packer, not needed to run a driver.
+AmiNetXDuo/PCMCIA/Sources/*        | not-installed | always    | Complete original corresponding-source archives and build scripts supplied with every binary release to satisfy the GPL without a separate download; keep with the unpacked distribution.
 #
 # One decision for the drawer and a second for the profiler under it, and both
 # are real choices rather than oversights.  Profile first: it sits inside

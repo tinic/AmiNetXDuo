@@ -116,6 +116,8 @@
 (set S_WIRELESS (if (> (strlen SRCDIR) 0) (tackon SRCDIR "Wireless") "Wireless"))
 (set S_WM    (tackon S_WIRELESS "WirelessManager"))
 (set S_WMLIC (tackon S_WIRELESS "WirelessManager-LICENSE"))
+(set S_PCMCIA (if (> (strlen SRCDIR) 0) (tackon SRCDIR "PCMCIA") "PCMCIA"))
+(set S_PCMDOCS (tackon S_PCMCIA "Docs"))
 (set S_INSTWIFI (if (> (strlen SRCDIR) 0)
                     (tackon SRCDIR "InstallWiFi") "InstallWiFi"))
 (set S_NWPREFS (tackon S_C "NetWirelessPrefs"))
@@ -154,10 +156,13 @@
        "several different drivers.\n\n"
        "  NE2000 or CNet    cnet.device\n"
        "  3Com 3C589        etherlink3.device\n"
-       "  Prism2 wireless   prism2.device\n\n"
+       "  Prism2 wireless   prism2.device\n"
+       "  Xircom Ethernet   xircomce2.device\n\n"
        "Most NE2000-compatible Ethernet cards use cnet.device.  The 3Com "
        "EtherLink III (3C589) has its own driver.  Prism2 is the usual "
-       "driver for wireless cards.\n\n"
+       "driver for wireless cards. Prism2 and Xircom drivers and their "
+       "PCMCIA library are supplied, with source and licences. An existing "
+       "driver is kept.\n\n"
        "If the card is not known, try cnet.device first."))
 
 (set H_OTHERDEV
@@ -275,6 +280,9 @@
        "Type AddNetInterface by hand when you want one.  A network program "
        "which opens bsdsocket.library gets the built-in loopback, but no card "
        "is opened and there is no route to an external network.\n\n"
+       "The default is no for the micro stack or a machine with 4 MB of "
+       "installed RAM or less, leaving memory available until networking "
+       "is needed. Intermediate and Expert can choose automatic startup.\n\n"
        "For an installation in its own drawer, the managed block first "
        "assigns AmiNetXDuo: to the drawer and ADDs its Libs, C and Devs to "
        "LIBS:, C: and DEVS:, after everything already there, the way AmiTCP "
@@ -762,9 +770,9 @@
     (
       (set DEV_NAME
         (select PCM "cnet.device" "etherlink3.device" "etherlink3.device"
-                    "etherlink3.device" "prism2.device" PCM_OTHER_DEV))
+                    "etherlink3.device" "prism2.device" "xircomce2.device" PCM_OTHER_DEV))
       (set CARD_KEY
-        (select PCM "pcmcia" "3c589" "3ccfem556" "3cxem556" "" ""))
+        (select PCM "pcmcia" "3c589" "3ccfem556" "3cxem556" "" "" ""))
     ))
 )
 
@@ -790,14 +798,16 @@
         ; drives nothing else.  An archive without it falls through to the
         ; missing-driver warning below, like any other card.
         (set DEV_WRITE W_ANXZZ9000)
-        (if (= dev_present 0)
+        (if (AND (= dev_present 0) (= CARD_INDEX 10) (OR (= PCM 4) (= PCM 5)))
+          (set DEV_WRITE (tackon W_NETWORKS DEV_NAME))
+          (if (= dev_present 0)
           (if (AND DO_ANXNET (> (strlen CARD_KEY) 0))
             (
               (set DEV_WRITE W_ANX)
               (set USE_CARD 1)
             )
             (if WARN_DRIVER
-              (message (F_NODEV DEV_NAME) (help H_CARD))))))))
+              (message (F_NODEV DEV_NAME) (help H_CARD)))))))))
 
   ; WirelessManager opens the driver the Wi-Fi interface file names: the
   ; Pi Wi-Fi's, or a Prism2 PCMCIA card's when the Pi Wi-Fi is not selected.
@@ -833,8 +843,7 @@
 ;
 ; Libs/minimal is still a drawer, and still a question further down, because it
 ; is a FEATURE choice -- no IPv6, no .local names, no packet filter, no
-; encryption -- for somebody who has measured their memory.  MINPICK, not
-; CPUPICK, and it defaults to the full stack.
+; encryption. MINPICK, not CPUPICK; installed RAM selects its default below.
 (set MINPICK 0)
 
 ; The fat stack (MINPICK 3) is the one exception: 68020 code.
@@ -888,6 +897,21 @@
            "The download is incomplete, or was unpacked with a tool that "
            "dropped the subdrawers.\n\n"
            "Nothing was changed."))
+; External drivers are complete distributions, including offline source.
+(set PC_N 0)
+(while (set PC_F (select PC_N "prism2.device" "xircomce2.device" "pccard.library"
+                            "Docs/GPL" "Docs/LGPL" "Docs/Hermes-LICENSE"
+                            "Docs/Prism2.guide" "Docs/Xircom.guide" "Docs/PCCard.guide"
+                            "Sources/prism2v2.lha" "Sources/xircomce2.lha" "Sources/pccard.lha"
+                            "Firmware/HermesI" "Firmware/HermesII" "README" ""))
+  (
+    (if (NOT (exists (tackon S_PCMCIA PC_F) (noreq)))
+        (abort (cat "This archive has no PCMCIA/" PC_F ".\n\n"
+                    "The driver, its licences and source must travel together. "
+                    "Nothing was changed.")))
+    (set PC_N (+ PC_N 1))
+  ))
+
 ; anxzz9000.device is optional: an archive built without
 ; -DAMINETXDUO_ZZ9000=ON does not carry it (CMakeLists.txt), and a ZZ9000
 ; is then driven only by MNT's own ZZ9000Net.device.
@@ -931,6 +955,7 @@
           "uaenet.device"
           "etherlink3.device"
           "prism2.device"
+          "xircomce2.device"
           ""))
   (
     (if (> (strlen DET_TRY) 0)
@@ -939,7 +964,7 @@
         (set DRIVER_DEFAULT
           (bitor DRIVER_DEFAULT
             (select DET_N 2 4 8 16 32 64 128 256 512 1024 4096
-                          1024 1024)))))
+                          1024 1024 1024)))))
     (set DET_N (+ DET_N 1))
   ))
 
@@ -952,6 +977,10 @@
          (OR (exists "DEVS:prism2.device" (noreq))
              (exists "DEVS:Networks/prism2.device" (noreq))))
     (set PCM_DEFAULT 4))
+(if (AND (= PCM_DEFAULT 0)
+         (OR (exists "DEVS:xircomce2.device" (noreq))
+             (exists "DEVS:Networks/xircomce2.device" (noreq))))
+    (set PCM_DEFAULT 5))
 
 
 ; ==========================================================================
@@ -1043,7 +1072,7 @@
 (set PCM_FOUND 0)
 (set PROBE_N 0)
 (while (set PROBE_CARD
-         (select PROBE_N "cnet" "3c589" "3ccfem556" "3cxem556" ""))
+         (select PROBE_N "cnet" "3c589" "3ccfem556" "3cxem556" "prism2" "xircom" ""))
   (
     (set PROBE_CMD ("\"%s\" CARD %s" S_NETPROBE PROBE_CARD))
     (if (= 0 (run PROBE_CMD (quiet) (safe)))
@@ -1110,32 +1139,38 @@
 ; about memory, so quote memory.  Re-measure at every release; the numbers are
 ; quoted twice in the help below.
 ;
-; Nothing changes for a novice install.  At NOVICE every ask... returns its
-; (default) without showing anything, so the full stack is what goes on, or
-; the fat one on Emu68.
+; At NOVICE every ask... returns its (default) without showing anything.
+; Choose the profile from installed RAM before asking the question.
 ;
-; FAT ON EMU68.  The fat stack is preselected when InstallNetProbe finds
-; Emu68's device tree (AUTO_EMU68, section 3), the CPU is a 68020 or newer and
-; the archive has Libs/fat; it stays a visible choice.  A probe that fails or
-; is missing reads as "not Emu68", so the default is then the full stack.
+; Fat is preselected on Emu68 only with at least 8 MB, a 68020 or newer
+; and Libs/fat in the archive. It stays a visible choice on smaller machines.
 (set HAVE_FAT (if (exists (tackon (tackon S_LIBSBASE "fat") "bsdsocket.library") (noreq)) 1 0))
-(if (AND AUTO_EMU68 (AND CPU020 HAVE_FAT)) (set MINPICK 3))
+; Installed RAM, rather than memory free while unpacking or running Installer.
+; The helper rounds Exec's small boot reservation up to the fitted RAM tier.
+; A failed query keeps the conservative minimal recommendation.
+(set MINPICK 1)
+(if (= 0 (run ("\"%s\" MEMORY 8388608" S_NETPROBE) (quiet) (safe)))
+    (set MINPICK 0)
+    (if (= 5 (run ("\"%s\" MEMORY 2162688" S_NETPROBE) (quiet) (safe)))
+        (set MINPICK 2)))
+(if (AND (= MINPICK 0) AUTO_EMU68 CPU020 HAVE_FAT) (set MINPICK 3))
 
 (set STACK_OK 0)
 (until STACK_OK
 (set MINPICK
   (askchoice
-    (prompt "Select the stack to install.\n\n")
+    (prompt "Select the stack to install.\n\nThe recommended choice for this machine is selected.")
     (help "The full, minimal and micro stacks run on every Amiga from a 68000 up.  One binary picks "
           "the code for this processor when the library opens.  Nothing has "
           "to match the machine.  If the disk moves to another machine, "
           "nothing changes.\n\n"
-          "If memory is tight, install the minimal stack.  If not, "
-          "install the full stack.\n\n"
+          "The default is micro up to 2 MB, minimal below 8 MB, and full "
+          "from 8 MB. PiStorm uses fat from 8 MB. This uses installed RAM, "
+          "so programs running during installation do not change the choice. "
+          "At Intermediate or Expert you can choose another profile.\n\n"
           "The minimal stack leaves out IPv6, .local name lookups, the packet "
           "filter, encrypted (https:) connections, IPv4 multicast, the ARexx "
-          "host and the TCP: handler. It holds 170 KB less RAM. On a 1 MB "
-          "machine that is worth having. On a larger machine it is not.\n\n"
+          "host and the TCP: handler. It holds about 170 KB less RAM.\n\n"
           "The micro stack leaves out all of that plus getaddrinfo/getnameinfo, "
           "ancillary data and out-of-band TCP, and carries a single interface "
           "with no Roadshow route or address-allocation calls. The classic "
@@ -1147,7 +1182,8 @@
           "connection to the same server takes less than a second.\n\n"
           "The fat stack is the full stack compiled for speed, drivers and "
           "commands included. It needs a 68020 or newer and uses more "
-          "memory. It is preselected on a PiStorm running Emu68.")
+          "memory. It is preselected on a PiStorm running Emu68 with "
+          "at least 8 MB of installed RAM.")
     ; 22 characters is the limit -- install/tools/checkscript.py enforces it,
     ; because a longer gadget is dropped from the page without a word.
     (choices "Everything"
@@ -1840,9 +1876,10 @@
               "3Com 3CCFEM556"
               "3Com 3CXEM556"
               "Prism2 wireless"
+              "Xircom Ethernet"
               "Something else")
             (default PCM_DEFAULT))))
-        (if (= PCM 5)
+        (if (= PCM 6)
           (set PCM_OTHER_DEV
             (askstring
               (prompt "Type the PCMCIA card's driver file name.")
@@ -2152,16 +2189,20 @@
 
 ; --- start the network at boot? ------------------------------------------
 
-; Yes for everybody but an Expert who says otherwise: a network that does not
-; start is not what an installation is run for.
-(set DO_STARTUP 1)
-(if (= @user-level 2)
-  (set DO_STARTUP
-    (askbool
-      (prompt "Start the network automatically when this Amiga boots?")
-      (help    H_STARTUP)
-      (choices "Yes, at boot" "No, I will do it")
-      (default 1))))
+; Keep scarce RAM available until networking is needed. MEMORY includes used
+; RAM and rounds Exec's boot reservation back up to the installed tier.
+; The threshold is one byte above 4 MiB: exactly 4 MiB defaults to manual.
+; A failed probe also defaults to manual. Micro does so at every RAM size.
+(set STARTUP_DEFAULT 0)
+(if (AND (<> MINPICK 2)
+         (= 0 (run ("\"%s\" MEMORY 4194305" S_NETPROBE) (quiet) (safe))))
+    (set STARTUP_DEFAULT 1))
+(set DO_STARTUP
+  (askbool
+    (prompt "Start the network automatically when this Amiga boots?")
+    (help    H_STARTUP)
+    (choices "Yes, at boot" "No, I will do it")
+    (default STARTUP_DEFAULT)))
 
 ; KEEP CONFIGURATION MEANS KEEP ITS BOOT POLICY TOO.  S:Network-Startup is a
 ; user-editable configuration file in both Roadshow and AmiTCP_NG.  Replacing
@@ -2850,6 +2891,29 @@
       (P_rec_old)
       (set REC_N (+ REC_N 1))
     ))
+  ; Only external files this installer added. A user's existing copy never
+  ; gets a marker, and a later edited/replaced copy is kept on uninstall.
+  (set PC_N 0)
+  (while (set PC_REL (select PC_N "Devs/Networks/prism2.device"
+                                  "Devs/Networks/xircomce2.device"
+                                  "Libs/pccard.library"
+                                  "Devs/Firmware/HermesI" "Devs/Firmware/HermesII" ""))
+    (
+      (set PC_MARK (tackon (tackon D_INSTALLED "PCMCIA") (fileonly PC_REL)))
+      (set PC_TARGET (if (= PC_N 2) (tackon D_LIBS "pccard.library")
+                      (tackon D_DEVS (substr PC_REL 5 (- (strlen PC_REL) 5)))))
+      (if (exists PC_MARK (noreq))
+        ((set REC_ADD (cat
+          "If EXISTS \"" PC_TARGET "\"\n"
+          "  \"" REC_SF "\" \"" PC_TARGET "\" \"" PC_MARK "\" BYTES\n"
+          "  If WARN\n"
+          "    Echo >>T:AmiNetXDuo-Kept \"" PC_TARGET "\"\n"
+          "  Else\n"
+          "    Delete \"" PC_TARGET "\" QUIET\n"
+          "  EndIf\n"
+          "EndIf\n")) (P_rec_add)))
+      (set PC_N (+ PC_N 1))
+    ))
   ; The .old files.
   (set REC_SUB "Libs")
   (set REC_F D_BSD_OLD) (P_rec_old)
@@ -2887,6 +2951,10 @@
          "  Delete \"" D_BACKUP_TOP "\" ALL QUIET\n"
          "  Delete \"" D_INSTALLED "\" ALL QUIET\n"
          "EndIf\n")) (P_rec_add))
+  ; The PCMCIA manuals/licences, copied as one small drawer.
+  (set REC_F (tackon (tackon DOCDIR "PCMCIA") "README")) (P_rec_ours)
+  (set RT_SELF 1)
+  (set RT_SRC S_PCMDOCS) (set RT_DST (tackon DOCDIR "PCMCIA")) (P_rec_tree)
   ; The drawer's own files, by name.
   (set RT_SELF 0)
   (set RT_SRC S_DOCS) (set RT_DST DOCDIR) (P_rec_tree)
@@ -3352,6 +3420,61 @@
         (P_install_firmware)
       ))
   ))
+
+; A selected external PCMCIA driver, added only when absent. Unlike our own
+; drivers, a vendor image already installed belongs to its owner and is kept.
+; PC_KEEP is its conventional global location (private drawer installs may
+; use a system library/firmware through LIBS:/DEVS:).
+(procedure P_install_pcmcia_file
+  (if (NOT (OR (exists PC_DEST (noreq)) (exists PC_KEEP (noreq))))
+    (
+      (makedir (pathonly PC_DEST) (help @makedir-help))
+      (set PC_MARKDIR (tackon D_INSTALLED "PCMCIA"))
+      (makedir PC_MARKDIR (help @makedir-help))
+      (copyfiles (source PC_SOURCE) (dest PC_MARKDIR) (optional "force"))
+      (if (NOT (exists (tackon PC_MARKDIR (fileonly PC_SOURCE)) (noreq)))
+          (abort "The PCMCIA installation record could not be written. Nothing further was copied."))
+      (P_write_record)
+      (copyfiles (prompt (cat "Installing " (fileonly PC_DEST)))
+                 (source PC_SOURCE) (dest (pathonly PC_DEST)) (optional "force"))
+      (if (NOT (exists PC_DEST (noreq)))
+          (abort (cat "Could not install " PC_DEST ". Run the installer again.")))
+    ))
+)
+
+(if (> (bitand CARD_MASK 1024) 0)
+  (if (OR (= PCM 4) (= PCM 5))
+    (
+      (set PC_NAME (select (- PCM 4) "prism2.device" "xircomce2.device"))
+      (set PC_SOURCE (tackon S_PCMCIA PC_NAME))
+      (set PC_DEST (tackon (tackon D_DEVS "Networks") PC_NAME))
+      (set PC_KEEP (cat "DEVS:" PC_NAME))
+      ; P_prepare_card kept a vendor image from DEVS:Networks as well.
+      (if (NOT (exists (cat "DEVS:Networks/" PC_NAME) (noreq)))
+          (P_install_pcmcia_file))
+      (set PC_SOURCE (tackon S_PCMCIA "pccard.library"))
+      (set PC_DEST (tackon D_LIBS "pccard.library"))
+      (set PC_KEEP "LIBS:pccard.library")
+      (P_install_pcmcia_file)
+      (if (= PCM 4)
+        (
+          (set PC_FN 0)
+          (while (set PC_FW (select PC_FN "HermesI" "HermesII" ""))
+            (
+              (set PC_SOURCE (tackon (tackon S_PCMCIA "Firmware") PC_FW))
+              (set PC_DEST (tackon (tackon D_DEVS "Firmware") PC_FW))
+              (set PC_KEEP (cat "DEVS:Firmware/" PC_FW))
+              (P_install_pcmcia_file)
+              (set PC_FN (+ PC_FN 1))
+            ))
+        ))
+    )))
+
+; Licences are installed with the drivers and firmware; source archives stay
+; in the unpacked distribution so small system disks need not copy them twice.
+(makedir (tackon DOCDIR "PCMCIA") (help @makedir-help))
+(copyfiles (source S_PCMDOCS) (dest (tackon DOCDIR "PCMCIA")) (all))
+(copyfiles (source (tackon S_PCMCIA "README")) (dest (tackon DOCDIR "PCMCIA")))
 
 ; --- tls.library, if this archive has one --------------------------------
 ;
@@ -4493,6 +4616,11 @@
                             (set FINAL_START (F_START_YES C_PREFIX START_IF))))))))
     (set FINAL_START (F_START_NO  C_PREFIX START_IF)))
 
+(if (AND (= DO_STARTUP 0) DRAWER_LAYOUT)
+    (set FINAL_START
+      (cat FINAL_START "\nReboot first to make the AmiNetXDuo: assign "
+           "available. The network stays offline.\n")))
+
 ; Said again on the last page, and deliberately.  The question that turned it
 ; on was one of a dozen; this is the sentence somebody reads after the fact and
 ; realises what is now running.
@@ -4519,6 +4647,8 @@
   FINAL_START
   FINAL_HTTPD
   FINAL_SNTP
-  "\nShowNetStatus reports whether it came up.  The ReadMe in the "
+  (if DO_STARTUP
+      "\nShowNetStatus reports whether it came up.  The ReadMe in the "
+      "\nShowNetStatus reports its status after starting it. The ReadMe in the ")
   "AmiNetXDuo drawer covers the rest.  Version, on any of the installed "
   "files, reports " VERSION_STR " as well.\n")

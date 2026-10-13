@@ -19,8 +19,8 @@
 #   contributors, (c) 2011-2025 Neil Cafferkey.  Clause 2 requires the notice
 #   with every binary copy, so dist/make-dist.sh packs it beside the binary
 #   and the Installer copies it into the AmiNetXDuo drawer.  prism2.device,
-#   pccard.library and WaitForLink in the same archive are GPL and are not
-#   vendored.
+#   pccard.library are separately vendored, with complete source, under
+#   third_party/pcmcia. WaitForLink is not vendored.
 #
 # NOT PATCHED
 #

@@ -10,6 +10,7 @@
  *
  * Exit status is RETURN_OK when the requested feature is present and
  * RETURN_WARN when it is not.  Bad arguments are RETURN_ERROR.
+ * MEMORY checks installed RAM, including allocations, against a byte count.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -19,6 +20,7 @@
 #include <dos/dos.h>
 #include <dos/rdargs.h>
 #include <exec/libraries.h>
+#include <exec/memory.h>
 #include <libraries/configvars.h>
 #include <resources/card.h>
 #include <proto/dos.h>
@@ -28,13 +30,14 @@
 #include "aminetxduo/version.h"
 #include "../netdev/netdev_dtree.h"
 #include "netprobe_card.h"
+#include "netprobe_memory.h"
 
 const char *const tool_name = "InstallNetProbe";
 
 static const char version_tag[] __attribute__((used)) =
     TOOL_VERSTAG("InstallNetProbe");
 
-#define TEMPLATE "EMU68/S,GENET/S,GENETOK/S,WIFIPI/S,CARD/K"
+#define TEMPLATE "EMU68/S,GENET/S,GENETOK/S,WIFIPI/S,CARD/K,MEMORY/N/K"
 
 enum
 {
@@ -43,6 +46,7 @@ enum
     ARG_GENETOK,
     ARG_WIFIPI,
     ARG_CARD,
+    ARG_MEMORY,
     ARG_COUNT
 };
 
@@ -312,6 +316,10 @@ static BOOL pcmcia_card_present(const char *name)
     kind = netprobe_pc_kind(&cis);
     if (same(name, "pcmcia"))
         return (BOOL)(kind != NETPROBE_PC_NONE);
+    if (same(name, "prism2"))
+        return (BOOL)(kind == NETPROBE_PC_PRISM2);
+    if (same(name, "xircom"))
+        return (BOOL)(kind == NETPROBE_PC_XIRCOM);
     if (same(name, "cnet"))
         return (BOOL)(kind == NETPROBE_PC_NE2000);
     if (same(name, "3c589"))
@@ -373,13 +381,31 @@ int main(int argc, char **argv)
         return RETURN_ERROR;
     if ((args[ARG_EMU68] != 0) + (args[ARG_GENET] != 0) +
         (args[ARG_GENETOK] != 0) + (args[ARG_WIFIPI] != 0) +
-        (args[ARG_CARD] != 0) != 1)
+        (args[ARG_CARD] != 0) + (args[ARG_MEMORY] != 0) != 1)
     {
         FreeArgs(rda);
         return RETURN_ERROR;
     }
 
-    if (args[ARG_EMU68] != 0)
+    if (args[ARG_MEMORY] != 0)
+    {
+        LONG wanted = *(const LONG *)args[ARG_MEMORY];
+        ULONG total = netprobe_memory_total();
+
+        /* Exec excludes its memory headers and the low Chip RAM reserved at
+           boot. Round to the next 64 KiB so a fitted 8 MiB is still 8 MiB.
+           MEMF_TOTAL counts allocated RAM too: an open Installer, another
+           stack or programs in RAM: must not change the hardware tier. */
+        if (total <= 0xffff0000UL)
+            total = (total + 65535UL) & ~65535UL;
+        if (wanted <= 0)
+        {
+            FreeArgs(rda);
+            return RETURN_ERROR;
+        }
+        present = (BOOL)(total >= (ULONG)wanted);
+    }
+    else if (args[ARG_EMU68] != 0)
         present = netdev_dtree_present();
     else if (args[ARG_GENET] != 0)
         present = netdev_dtree_find("brcm,bcm2711-genet-v5", &info);
@@ -399,7 +425,8 @@ int main(int argc, char **argv)
 
         if (same(card, "pcmcia") || same(card, "cnet") ||
             same(card, "3c589") ||
-            same(card, "3ccfem556") || same(card, "3cxem556"))
+            same(card, "3ccfem556") || same(card, "3cxem556") ||
+            same(card, "prism2") || same(card, "xircom"))
             present = pcmcia_card_present(card);
         else if (same(card, "uae"))
             present = (BOOL)(FindResident((CONST_STRPTR)"uaenet.device") !=

@@ -5,6 +5,23 @@ Add new entries under `Unreleased`; published release sections are history.
 
 ## Unreleased
 
+- Bundle the modified Installer 2.17 with lower-memory parsing, tested on
+  a 68000 A500 with Kickstart/Workbench 2.04 and 512 KB chip + 512 KB
+  trapdoor RAM. The complete unsegmented script is retained.
+- Default micro and all machines with at most 4 MB RAM to manual networking,
+  after installation and at boot. Intermediate and Expert can enable
+  automatic startup.
+- Installer: choose micro by default with up to 2 MB of installed RAM,
+  minimal below 8 MB, and full from 8 MB (fat on PiStorm). Intermediate
+  and Expert can override the recommendation.
+- Release packaging omits Installer source comments and indentation, keeping
+  its tokens and diagnostic line numbers unchanged while reducing the input
+  buffer needed on small machines.
+- Installer: include unmodified Prism2 and Xircom PCMCIA drivers, their
+  shared pccard.library, manuals, licence notices and complete source
+  archives. Install missing files for the selected card and preserve
+  existing user-installed copies.
+
 - Micro's supplied network drivers reserve one hardware unit instead of four,
   and the installer selects those smaller driver images for the micro profile.
 

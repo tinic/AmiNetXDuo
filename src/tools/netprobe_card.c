@@ -52,8 +52,98 @@ static int wireless(const NetprobeCis *cis)
     return 0;
 }
 
+/* Manufacturer/product facts accepted by Neil Cafferkey's unmodified
+   prism2.device 2.9 and xircomce2.device 1.1 (PCMCIA/Sources in the release).
+   Both report LAN; a Xircom modem combo may report multifunction instead.
+   Identify them before the generic LAN-to-NE2000 fallback. */
+static const uint32_t prism2_ids[] =
+{
+    0x000b7100UL,
+    0x000b7300UL,
+    0x0032000cUL,
+    0x00890001UL,
+    0x00890002UL,
+    0x01010001UL,
+    0x01010777UL,
+    0x01050000UL,
+    0x01260002UL,
+    0x01268000UL,
+    0x01380002UL,
+    0x014d0801UL,
+    0x01560002UL,
+    0x01560003UL,
+    0x016b0001UL,
+    0x016c0001UL,
+    0x01bf2328UL,
+    0x01bf3301UL,
+    0x01eb080aUL,
+    0x01ff0008UL,
+    0x02500002UL,
+    0x02610002UL,
+    0x02680001UL,
+    0x02680003UL,
+    0x026f0305UL,
+    0x026f030bUL,
+    0x02741612UL,
+    0x02741613UL,
+    0x02743301UL,
+    0x028a0002UL,
+    0x028a0673UL,
+    0x02aa0002UL,
+    0x02ac0002UL,
+    0x02ac3021UL,
+    0x02d20001UL,
+    0x14eab001UL,
+    0x16680101UL,
+    0x50c20001UL,
+    0x50c27300UL,
+    0x90050021UL,
+    0xc0010008UL,
+    0xc00f0000UL,
+    0xc0380000UL,
+    0xc2500002UL,
+    0xd6010002UL,
+    0xd6010004UL,
+    0xd6010005UL,
+    0xd6010010UL,
+    0
+};
+
+static const uint32_t xircom_ids[] =
+{
+    0x0089010aUL,
+    0x0089110aUL,
+    0x01050108UL,
+    0x0105010aUL,
+    0x0105010bUL,
+    0x0105110aUL,
+    0x0105110bUL,
+    0x0105110cUL,
+    0x0105110dUL,
+    0x0138110aUL,
+    0x0183010aUL,
+    0x01bf010aUL,
+    0
+};
+
+static int has_id(const uint32_t *ids, uint32_t id)
+{
+    while (*ids != 0)
+        if (*ids++ == id)
+            return 1;
+    return 0;
+}
+
 int netprobe_pc_kind(const NetprobeCis *cis)
 {
+    if (cis->have_manf)
+    {
+        uint32_t id = ((uint32_t)cis->manf << 16) | cis->prod;
+        if (has_id(prism2_ids, id))
+            return NETPROBE_PC_PRISM2;
+        if (has_id(xircom_ids, id))
+            return NETPROBE_PC_XIRCOM;
+    }
     /* The EtherLink III rows, netdev_cards.c, by MANFID alone as the driver
        matches them. */
     if (cis->have_manf && cis->manf == 0x0101)

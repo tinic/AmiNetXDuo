@@ -1789,7 +1789,7 @@ function(aminetxduo_check_pcrel target)
                 "-DTOOL=${CMAKE_SOURCE_DIR}/tools/check-pcrel-exact.py"
                 "-DBINARY=$<TARGET_FILE:${target}>"
                 "-DMAPFILE=$<TARGET_FILE:${target}>.map"
-                "-DDIRS=${CMAKE_CURRENT_BINARY_DIR}|$<TARGET_FILE_DIR:${target}>"
+                "-DDIRS=${CMAKE_BINARY_DIR}|${CMAKE_CURRENT_BINARY_DIR}|$<TARGET_FILE_DIR:${target}>"
                 "-DKEEP_TEMPS=${_pcrel_keep_temps}"
                 -P "${CMAKE_SOURCE_DIR}/cmake/check-pcrel-branches.cmake"
         VERBATIM)

@@ -542,7 +542,8 @@ fi
 # source as everything else rather than shipping whatever the source tree last
 # had in it.
 sed -e "s/^(set VERSION_STR \".*\")/(set VERSION_STR \"$VERSION\")/" \
-    "$INSTALL/Install-AmiNetXDuo" > "$TREE/Install-AmiNetXDuo"
+    "$INSTALL/Install-AmiNetXDuo" | python3 "$INSTALL/tools/packscript.py" \
+    > "$TREE/Install-AmiNetXDuo"
 grep -q "(set VERSION_STR \"$VERSION\")" "$TREE/Install-AmiNetXDuo" || {
     echo "the Installer script has no VERSION_STR line to stamp" >&2
     exit 2
@@ -554,9 +555,14 @@ cp "$INSTALL/Uninstall-AmiNetXDuo.info" "$TREE/"
 cp "$INSTALL/AmiNetXDuo.info"          "$TREE/"
 cp "$INSTALL/AmiNetXDuo.info"          "$OUTDIR/"
 
-# The Commodore Installer, bundled in the same drawer.  Install-AmiNetXDuo.info's
+# The modified Installer, bundled in the same drawer. Install-AmiNetXDuo.info's
 # default tool is "Installer", so Workbench finds it here and a double-click just
 # works, nothing to fetch or install first.
+installer_sha=$( (sha256sum "$INSTALL/Installer" 2>/dev/null || shasum -a 256 "$INSTALL/Installer") | cut -d" " -f1)
+if [ "$installer_sha" != "c99b79f4506e547545dde81df435ac1782e8a49674bf4a6814aacdc720bd3111" ]; then
+    echo "the supplied Installer does not match the validated low-memory build" >&2
+    exit 1
+fi
 cp "$INSTALL/Installer" "$TREE/Installer"
 chmod 755 "$TREE/Installer"
 
@@ -660,6 +666,10 @@ cp "$WM_SRC/WirelessManager" "$TREE/Wireless/WirelessManager"
 cp "$WM_SRC/LICENSE"         "$TREE/Wireless/WirelessManager-LICENSE"
 chmod 755 "$TREE/Wireless/WirelessManager"
 chmod 644 "$TREE/Wireless/WirelessManager-LICENSE"
+
+# Optional external PCMCIA drivers. Fail closed if any binary, license or
+# corresponding source archive is missing/changed; never fetch during packing.
+python3 "$ROOT/tools/pcmcia-drivers.py" --stage "$TREE"
 
 cp "$ROOT/dist/ReadMe" "$TREE/ReadMe"
 cp "$INSTALL/Document.info" "$TREE/ReadMe.info"

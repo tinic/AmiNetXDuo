@@ -63,6 +63,10 @@ int main(void)
     NetprobeCis aironet = { 0x015f, 0x0007, 6, { 0, 0 }, 1, 1, 0 };
     /* An unknown maker whose FUNCE says wireless. */
     NetprobeCis wlan = { 0x1234, 0x0001, 6, { 0x01, 0x07 }, 1, 1, 1 };
+    NetprobeCis xircom = { 0x0105, 0x010a, 6, { 0x01, 0x02 }, 1, 1, 1 };
+    NetprobeCis xircom_combo = { 0x0105, 0x110b, 0, { 0, 0 }, 1, 0, 0 };
+    /* Same vendor, unsupported model: never select the Xircom driver. */
+    NetprobeCis xircom_other = { 0x0105, 0x9999, 2, { 0, 0 }, 1, 1, 0 };
     /* Not network cards. */
     NetprobeCis modem = { 0x0149, 0x4530, 2, { 0, 0 }, 1, 1, 0 };
     NetprobeCis disk = { 0, 0, 4, { 0, 0 }, 0, 1, 0 };
@@ -74,11 +78,14 @@ int main(void)
     expect_kind(&el3, NETPROBE_PC_3C589, "3C589");
     expect_kind(&cfem, NETPROBE_PC_3CCFEM556, "3CCFEM556");
     expect_kind(&cxem, NETPROBE_PC_3CXEM556, "3CXEM556");
-    expect_kind(&prism2, NETPROBE_PC_NONE, "Prism2");
-    expect_kind(&wpc11, NETPROBE_PC_NONE, "Linksys WPC11");
-    expect_kind(&airconnect, NETPROBE_PC_NONE, "3Com AirConnect");
+    expect_kind(&prism2, NETPROBE_PC_PRISM2, "Prism2");
+    expect_kind(&wpc11, NETPROBE_PC_PRISM2, "Linksys WPC11");
+    expect_kind(&airconnect, NETPROBE_PC_PRISM2, "3Com AirConnect");
     expect_kind(&aironet, NETPROBE_PC_NONE, "Cisco Aironet");
     expect_kind(&wlan, NETPROBE_PC_NONE, "FUNCE wireless");
+    expect_kind(&xircom, NETPROBE_PC_XIRCOM, "Xircom CE3");
+    expect_kind(&xircom_combo, NETPROBE_PC_XIRCOM, "Xircom combo, no LAN FUNCID");
+    expect_kind(&xircom_other, NETPROBE_PC_NONE, "unsupported Xircom modem");
     expect_kind(&modem, NETPROBE_PC_NONE, "modem");
     expect_kind(&disk, NETPROBE_PC_NONE, "CompactFlash disk");
     /* The driver would try this one; the probe leaves it to the card page. */

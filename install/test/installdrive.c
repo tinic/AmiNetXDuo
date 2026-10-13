@@ -68,6 +68,9 @@
 #ifndef DRIVE_LEVEL
 #define DRIVE_LEVEL     "NOVICE"
 #endif
+#ifndef DRIVE_INSTALL_STACK
+#define DRIVE_INSTALL_STACK 40000UL
+#endif
 
 /*
  * How many times to run the Installer.  Two is the interesting number: the
@@ -1374,7 +1377,7 @@ static BOOL drive_once(LONG run_number, BPTR nil_in, BPTR nil_out)
     tags[0].ti_Tag = SYS_Asynch;    tags[0].ti_Data = TRUE;
     tags[1].ti_Tag = SYS_Input;     tags[1].ti_Data = (ULONG)nil_in;
     tags[2].ti_Tag = SYS_Output;    tags[2].ti_Data = (ULONG)nil_out;
-    tags[3].ti_Tag = NP_StackSize;  tags[3].ti_Data = 40000UL;
+    tags[3].ti_Tag = NP_StackSize;  tags[3].ti_Data = DRIVE_INSTALL_STACK;
     tags[4].ti_Tag = TAG_DONE;      tags[4].ti_Data = 0;
 
     if (SystemTagList((STRPTR)(run_number <= DRIVE_RUNS ?

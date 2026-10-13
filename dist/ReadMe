@@ -29,7 +29,7 @@ This machine needs:
      connections work on every processor, the 68000 included, but a first
      handshake there takes a minute or two.  A resumed one takes under a
      second.
-  *  1 MB of memory.  The archive holds three stacks, and the installer
+  *  1 MB of memory.  The archive holds four stacks, and the installer
      asks which one to put on:
 
         Stack     Leaves out                                    RAM while up
@@ -44,12 +44,19 @@ This machine needs:
                   calls.  DHCP, the classic resolver and raw
                   sockets work                                    243 KB
 
+     Novice chooses micro with up to 2 MB of installed RAM, minimal below
+     8 MB, and full from 8 MB. On PiStorm, fat is selected from 8 MB.
+     Intermediate and Expert can choose another profile. Minimal and micro
+     omit IPv6 and encrypted connections; choose full if you need them.
+     Programs running during installation do not change this default.
+
      The stack sizes its packet buffers from what is left, so more memory
      means more buffers.  Encryption adds about 210 KB the first time it is
      used.
   *  A network card, and the SANA-II driver for that card.  The driver is a
      file whose name ends in ".device", and it came with the card.  Put the
-     driver in DEVS: before the installation.  The installer then finds it
+     driver in DEVS: before the installation, except for supported Prism2
+     and Xircom cards: their drivers are included. The installer then finds it
      and pre-selects the card.
 
 The installer offers these cards by name, and writes the driver each one
@@ -65,6 +72,7 @@ uses:
      PCMCIA NE2000 or CNet . . . . . . cnet.device
      PCMCIA 3Com EtherLink III 3C589 . etherlink3.device
      PCMCIA Prism2 wireless  . . . . . prism2.device
+     PCMCIA Xircom Ethernet  . . . . . xircomce2.device
      UAE (emulators) . . . . . . . . . uaenet.device
 
 Any other SANA-II driver works too.  The last menu entry of the installer
@@ -79,12 +87,13 @@ anxwifipi.device for that machine's Wi-Fi.  See SUPPLIED DRIVERS below.
 INSTALLING
 ----------
 
-Double-click "Install-AmiNetXDuo".  Commodore's Installer is in the same
-drawer, so nothing has to be fetched first.
+Double-click "Install-AmiNetXDuo". The modified Installer 2.17 is in the same
+drawer, so nothing has to be fetched first. Its lower-memory parser supports
+the complete script on a 1 MB Kickstart/Workbench 2.04 desktop.
 
 From a Shell, the equivalent is:
 
-     Stack 10000
+     Stack 16384
      CD <the drawer this file is in>
      Installer SCRIPT Install-AmiNetXDuo APPNAME AmiNetXDuo
 
@@ -96,7 +105,9 @@ the current directory.)
 The installer asks, in this order:
 
      Which stack: Everything, Minimal, Micro
-       or Fat                                     (Everything; Fat on Emu68)
+       or Fat                                     (Micro through 2 MB,
+                                                   Minimal below 8 MB,
+                                                   Everything/Fat from 8 MB)
      Into the system, or into its own drawer      (into the system;
                                                    Intermediate and Expert)
      Where the AmiNetXDuo drawer of documentation
@@ -115,7 +126,9 @@ The installer asks, in this order:
      The name of this machine                     (amiga- and the last
                                                    three octets of the
                                                    card's address; Expert)
-     Start the network at boot                    (yes; Expert)
+     Start the network at boot                    (no for micro or <=4 MB;
+                                                   yes otherwise;
+                                                   Intermediate and Expert)
      Start httpd at boot, with a browser file
        manager, text editor and Shell; which port (no; the port at Expert)
      Set the clock at boot; which server          (yes, pool.ntp.org;
@@ -123,8 +136,9 @@ The installer asks, in this order:
 
 At Novice level every question takes its default without being shown.
 
-On a system installation where LIBS: held no bsdsocket.library and no
-other stack is running, the installer runs the S:Network-Startup it writes,
+When automatic startup is selected, on a system installation where LIBS:
+held no bsdsocket.library and no other stack is running, the installer runs
+the S:Network-Startup it writes,
 in the background, and waits at most 40 seconds (60 with the Wi-Fi as the
 primary interface) for an interface and a default route.  The last page
 states whether the network came up.  With another stack or an earlier
@@ -430,6 +444,9 @@ LICENCE
 
 MIT, with these exceptions, each confined to the files it names:
 
+  *  The bundled modified Installer 2.17 retains the original Commodore-Amiga
+     and Sylvan Technical Arts copyrights and is separate from the stack's
+     MIT licence. See Installer-NOTICE.txt for provenance and build details.
   *  ThreadX and NetX Duo are MIT as well (Microsoft / Eclipse ThreadX
      contributors).  Both are maintained forks, at github.com/tinic/threadx
      and github.com/tinic/netxduo.
@@ -451,6 +468,18 @@ MIT, with these exceptions, each confined to the files it names:
      the unmodified binary from Aminet's driver/net/prism2v2.  Its notice is
      Wireless/WirelessManager-LICENSE, installed as WirelessManager-LICENSE
      in the AmiNetXDuo drawer.
+
+  *  The unmodified prism2.device, xircomce2.device and pccard.library are
+     Neil Cafferkey's, under GPL-2.0-or-later. Complete corresponding source
+     and build files are included offline in PCMCIA/Sources/; the standalone
+     pccard archive supplies the library source missing from the driver
+     archives. The original GPL/LGPL notices and manuals are retained.
+     Hermes firmware has separate AT&T/Lucent/Agere redistribution terms,
+     reproduced in PCMCIA/Docs/Hermes-LICENSE. These files are independently
+     loaded, not linked into the stack. Only missing runtime files for the
+     selected card are installed; existing copies are preserved. Installed
+     notices and manuals are in AmiNetXDuo/PCMCIA. Source archives stay with
+     the unpacked release and take no resident RAM. See PCMCIA/README.
 
 No AmiTCP, AROSTCP, Miami or Roadshow code is used, copied or disassembled.
 Olaf Barthel's freely distributable Roadshow SDK headers and autodocs were
