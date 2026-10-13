@@ -54,7 +54,9 @@ on:
   # dispatch are what start it.
 
 concurrency:
-  group: emulator-${{ github.ref }}
+  # A long on-demand CLI matrix must not be cancelled by the next nightly
+  # Kickstart run on main. Repeated CLI dispatches still replace each other.
+  group: emulator-${{ github.ref }}-${{ github.event_name == 'workflow_dispatch' && inputs.run_cli_crashes && 'cli' || 'regular' }}
   cancel-in-progress: true
 
 jobs:
