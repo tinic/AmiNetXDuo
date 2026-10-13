@@ -157,6 +157,9 @@ static struct
 
     /* F-060: a clock the waits advance, and what each wait was handed.  A
        call given a wait other than NX_NO_WAIT costs `cost` ticks. */
+    BOOL        alloc_pressure, send_pressure;
+    ULONG       signals, break_at_send;
+    ULONG       sliced_calls, run_flushes;
     ULONG       clock;
     ULONG       cost;
     BOOL        forever;            /* bsd_wait_option() answers FOREVER     */
@@ -267,18 +270,22 @@ VOID bsd_nx_leave(struct AmiSocketBase *base)
 
 /*
  * One slice, run once.  The real one splits a long wait so Ctrl-C is noticed;
- * nothing here tests that, and `aborted` is always FALSE, so the break paths
- * in transfer.c are NOT covered by this harness.
+ * this stub observes pending breaks but does not model the slicing loop.
+ * select.c's own tests cover slicing; these cover transfer.c's accounting.
  */
 UINT bsd_wait_sliced(struct AmiSocketBase *base, ULONG wait,
                      BsdSlicedCall call, VOID *arg, BOOL *aborted)
 {
-    (VOID)base;
+    h.sliced_calls++;
+    *aborted = wait != NX_NO_WAIT && (h.signals & base->sb_BreakMask) != 0;
+    return *aborted ? NX_SUCCESS : call(arg, wait);
+}
 
-    if (aborted != NULL)
-        *aborted = FALSE;
-
-    return call(arg, wait);
+ULONG SetSignal(ULONG new_signals, ULONG signal_set)
+{
+    ULONG old = h.signals;
+    h.signals = (old & ~signal_set) | (new_signals & signal_set);
+    return old;
 }
 
 ULONG bsd_wait_option(AmiSocket *sock, ULONG timeout_ticks, LONG flags)
@@ -316,6 +323,7 @@ VOID ami_sana2_tx_run_begin(AmiSana2If *iface)
 VOID ami_sana2_tx_run_flush(AmiSana2If *iface)
 {
     (VOID)iface;
+    h.run_flushes++;
 }
 
 VOID ami_sana2_tx_run_end(AmiSana2If *iface)
@@ -624,8 +632,11 @@ UINT _nxe_packet_allocate(NX_PACKET_POOL *pool_ptr, NX_PACKET **packet_ptr,
     if (h.allocs < H_PLAN)
         h.alloc_waits[h.allocs] = wait_option;
     h_spend(wait_option);
+    if (wait_option != NX_NO_WAIT && h_sock[0].as_Nx.tcp.nx_tcp_socket_connect_interface)
+        CHECK(h.run_flushes != 0, "the held run is flushed before allocation waits");
 
-    status = h_plan(h.alloc_plan, h.alloc_planned, h.allocs);
+    status = (h.alloc_pressure && wait_option == NX_NO_WAIT)
+                 ? NX_NO_PACKET : h_plan(h.alloc_plan, h.alloc_planned, h.allocs);
     h.allocs++;
 
     if (h.reconnect != NULL)
@@ -736,9 +747,14 @@ UINT _nxe_tcp_socket_send(NX_TCP_SOCKET *socket_ptr, NX_PACKET **packet_ptr_ptr,
     if (h.sends < H_PLAN)
         h.send_waits[h.sends] = wait_option;
     h_spend(wait_option);
+    if (wait_option != NX_NO_WAIT && h_sock[0].as_Nx.tcp.nx_tcp_socket_connect_interface)
+        CHECK(h.run_flushes >= 2, "the held run is flushed before send waits");
 
-    status = h_plan(h.send_plan, h.send_planned, h.sends);
+    status = (h.send_pressure && wait_option == NX_NO_WAIT)
+                 ? NX_WINDOW_OVERFLOW : h_plan(h.send_plan, h.send_planned, h.sends);
     h.sends++;
+    if (h.break_at_send != 0 && h.sends == h.break_at_send)
+        h.signals |= h_base.sb_BreakMask;
 
     if (p == NULL)
         return status;
@@ -1378,6 +1394,7 @@ static void t_short_write_is_credited(void)
     h.send_plan[1] = NX_WINDOW_OVERFLOW;
     h.send_planned = 2;
     h.send_trim    = 4;         /* four of the second segment's ten went */
+    h_sock[0].as_Flags |= ASF_NONBLOCK; /* refusal is final, no wait/retry */
 
     CHECK(bsd_send(0, buf, 24, 0, &h_base) == 14,
           "the four bytes the refused segment had already queued are credited");
@@ -1776,31 +1793,42 @@ static void t_call_budget(void)
 
     printf("transfer: one timeout per call, not per wait\n");
 
-    /* A blocking send of three 10-byte segments, each wait costing 30. */
+    /* Immediate success needs no wait callback, even with a finite timeout. */
     h_reset();
     h_tcp(0);
-    h.mss  = 10;
+    h.mss = 10;
     h.cost = 30;
-    h.clock = 0xFFFFFFC0UL;                     /* across a tick wrap */
-    CHECK(bsd_send(0, buf, 24, 0, &h_base) == 24, "the send completes");
-    CHECK(h.sends == 3, "in three segments");
-    CHECK(h.alloc_waits[0] == 100UL && h.send_waits[0] == 70UL,
-          "the first packet gets the whole budget, its send what is left");
-    CHECK(h.alloc_waits[1] == 40UL && h.send_waits[1] == 10UL,
-          "the second segment what is left after that");
-    CHECK(h.alloc_waits[2] == NX_NO_WAIT && h.send_waits[2] == NX_NO_WAIT,
-          "and once it is spent, no wait at all");
+    CHECK(bsd_send(0, buf, 24, 0, &h_base) == 24, "an immediate send completes");
+    CHECK(h.allocs == 3 && h.sends == 3 && h.sliced_calls == 0,
+          "each segment allocates and sends directly");
+    CHECK(h.clock == 0, "successful immediate calls consume no wait budget");
 
-    /* NX_WAIT_FOREVER stays forever. */
+    /* Resource pressure forces real waits; one budget spans both resources
+       and segments, including across a clock wrap. */
     h_reset();
     h_tcp(0);
-    h.mss     = 10;
-    h.cost    = 30;
+    h.mss = 10;
+    h.cost = 30;
+    h.alloc_pressure = h.send_pressure = TRUE;
+    h.clock = 0xFFFFFFC0UL;
+    CHECK(bsd_send(0, buf, 24, 0, &h_base) == 20,
+          "the exhausted budget returns the two completed segments");
+    CHECK(h.alloc_waits[1] == 100UL && h.send_waits[1] == 70UL,
+          "the first waits share the call budget");
+    CHECK(h.alloc_waits[3] == 40UL && h.send_waits[3] == 10UL,
+          "the next waits receive only the remainder");
+    CHECK(h.alloc_waits[4] == NX_NO_WAIT && h.allocs == 5,
+          "once spent, a failed immediate attempt ends the call");
+
+    h_reset();
+    h_tcp(0);
+    h.mss = 10;
     h.forever = TRUE;
+    h.alloc_pressure = h.send_pressure = TRUE;
     CHECK(bsd_send(0, buf, 24, 0, &h_base) == 24, "a forever send completes");
-    CHECK(h.alloc_waits[2] == NX_WAIT_FOREVER &&
-              h.send_waits[2] == NX_WAIT_FOREVER,
-          "and every wait is still forever");
+    CHECK(h.alloc_waits[5] == NX_WAIT_FOREVER &&
+          h.send_waits[5] == NX_WAIT_FOREVER,
+          "resource waits still receive FOREVER");
 
     /* Non-blocking stays non-blocking, and costs nothing. */
     h_reset();
@@ -1825,11 +1853,87 @@ static void t_call_budget(void)
           "each receive waits only for what is left of the one budget");
 }
 
+static void t_immediate_send_break(void)
+{
+    UBYTE buf[24];
+
+    h_reset();
+    h_tcp(0);
+    h.mss = 10;
+    h_base.sb_BreakMask = 1UL << 12;
+    h.signals = h_base.sb_BreakMask;
+    CHECK(bsd_send(0, buf, sizeof(buf), 0, &h_base) == -1 &&
+          h.errno_value == AMI_EINTR && h.allocs == 0,
+          "pending break stops a blocking send before allocating");
+
+    h_reset();
+    h_tcp(0);
+    h.mss = 10;
+    h_base.sb_BreakMask = 1UL << 12;
+    h.break_at_send = 1;
+    CHECK(bsd_send(0, buf, sizeof(buf), 0, &h_base) == 10 && h.sends == 1,
+          "a break between immediate segments returns the completed bytes");
+    CHECK(h.signals == h_base.sb_BreakMask,
+          "the break check observes without consuming the signal");
+
+    h_reset();
+    h_tcp(0);
+    h_base.sb_BreakMask = 1UL << 12;
+    h.send_plan[0] = NX_WINDOW_OVERFLOW;
+    h.send_planned = 1;
+    h.send_trim = 4;
+    h.break_at_send = 1;
+    CHECK(bsd_send(0, buf, sizeof(buf), 0, &h_base) == 4 && h.releases == 1,
+          "a break after partial immediate send credits bytes and releases the remainder");
+
+    h_reset();
+    h_tcp(0);
+    h.send_plan[0] = NX_WINDOW_OVERFLOW;
+    h.send_plan[1] = NX_SUCCESS;
+    h.send_planned = 2;
+    h.send_trim = 4;
+    CHECK(bsd_send(0, buf, sizeof(buf), 0, &h_base) == sizeof(buf) &&
+          h.sent_bytes == sizeof(buf) && h.releases == 0,
+          "a blocking retry sends the trimmed remainder exactly once");
+
+    h_reset();
+    h_tcp(0);
+    h.send_plan[0] = NX_NO_PACKET;
+    h.send_plan[1] = NX_SUCCESS;
+    h.send_planned = 2;
+    CHECK(bsd_send(0, buf, sizeof(buf), 0, &h_base) == sizeof(buf) && h.sends == 2,
+          "segment allocation failure remains eligible for a blocking retry");
+
+#ifdef AMINETXDUO_TX_RUN
+    {
+        NX_INTERFACE nxif = { 0 };
+        UBYTE run = 0; /* opaque interface token; the run stubs never dereference it */
+
+        h_reset();
+        h_tcp(0)->as_Nx.tcp.nx_tcp_socket_connect_interface = &nxif;
+        nxif.nx_interface_additional_link_info = &run;
+        h.alloc_pressure = h.send_pressure = TRUE;
+        CHECK(bsd_send(0, buf, sizeof(buf), 0, &h_base) == sizeof(buf) &&
+              h.run_flushes == 2,
+              "both resource waits flush the active run first");
+    }
+#endif
+
+    h_reset();
+    h_tcp(0)->as_Flags |= ASF_NONBLOCK;
+    h.mss = 10;
+    h_base.sb_BreakMask = 1UL << 12;
+    h.signals = h_base.sb_BreakMask;
+    CHECK(bsd_send(0, buf, sizeof(buf), 0, &h_base) == sizeof(buf),
+          "a pending break does not interrupt a non-blocking send");
+}
+
 int main(void)
 {
     printf("transfer.c host checks\n\n");
 
     t_call_budget();
+    t_immediate_send_break();
     t_abi();
     t_refusals();
 #ifdef AMINETXDUO_IPV6
