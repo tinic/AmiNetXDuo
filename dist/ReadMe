@@ -107,7 +107,7 @@ The installer asks, in this order:
      Which stack: Everything, Minimal, Micro
        or Fat                                     (Micro through 2 MB,
                                                    Minimal below 8 MB,
-                                                   Full/Fat from 8 MB)
+                                                   Everything/Fat from 8 MB)
      Into the system, or into its own drawer      (into the system;
                                                    Intermediate and Expert)
      Where the AmiNetXDuo drawer of documentation

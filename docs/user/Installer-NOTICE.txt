@@ -11,11 +11,13 @@ Original source notices include:
 Source provenance:
   https://github.com/Arquivotheca/amiga-os-src
   Branch: 3.1
-  Tree: b78c1ada537615c6eda889ad97b4ccd51ff4a178
+  Commit: b78c1ada537615c6eda889ad97b4ccd51ff4a178
   Directory: os-source/v42/src/workbench/utilities/installer
 
 This source mirror is identified for provenance; it is not an additional
 licence grant. Original notices remain in the maintained source copy.
+The modified source and build recipe are maintained separately by AmiNetXDuo
+and are not included in this binary distribution.
 
 Memory changes:
   - Allocate 12-byte syntax-tree nodes in blocks of 256 and recycle nodes.
