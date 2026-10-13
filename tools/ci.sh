@@ -993,6 +993,18 @@ ${rlwhy:+ -- }${rlwhy:-, see the log above}" ;;
         return 1
     fi
 
+    # Inventory drift and transcript negatives run on every host CI invocation.
+    # Native stack/crash execution belongs to the licensed-ROM emulator tier.
+    if python3 -B tests/tools/cli/matrix.py --check > "$BUILD/cli-inventory.log" 2>&1 &&
+       python3 -B tests/tools/cli/test_suite.py > "$BUILD/cli-accounting.log" 2>&1 &&
+       python3 -B tests/tools/cli/test_host_report.py > "$BUILD/cli-host-report.log" 2>&1; then
+        note "$(cat "$BUILD/cli-inventory.log")"
+    else
+        cat "$BUILD/cli-inventory.log" "$BUILD/cli-accounting.log" "$BUILD/cli-host-report.log"
+        fail "shipped CLI inventory or crash verdict accounting"
+        return 1
+    fi
+
     # And that the backlog still points at the tree it describes.  A row whose
     # file has moved sends a reader to a directory that does not have it --
     # `rfbbench` cannot price the banded path named tests/perf/rfbbench.c for
@@ -1534,6 +1546,12 @@ stage_sanitize() {
 # ----------------------------------------------------------------- cross ----
 
 stage_cross() {
+    # Compile the native crash supervisor even when the licensed emulator
+    # tier is not available on a PR runner.
+    bash tests/tools/cli/build.sh "$BUILD/cli-helpers" || {
+        fail "CLI crash supervisor/control cross build"
+        return 1
+    }
     local entry name opts
 
     # The Developer drawer's inline/proto/pragma headers are committed, so

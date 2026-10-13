@@ -591,10 +591,10 @@ check_copy "$UNP/Libs/usergroup.library" Libs/usergroup.library
 
 # Every command in the archive, because copyfiles (all) copies every one of
 # them.  ssh is in here, which is the whole reason the archive is built with a
-# dbclient in it.
+# dbclient in it.  C/fat is the fat profile's drawer, not copied to C: as such.
 while IFS= read -r rel; do
     check_copy "$UNP/C/$rel" "C/$rel"
-done < <(cd "$UNP/C" && find . -type f | sed 's|^\./||' | sort)
+done < <(cd "$UNP/C" && find . -path ./fat -prune -o -type f -print | sed 's|^\./||' | sort)
 
 for pair in "Docs:" "Examples:/Examples" "Terminal:/Terminal"; do
     drawer="${pair%%:*}"
