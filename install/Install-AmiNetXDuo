@@ -160,7 +160,7 @@
        "  3Com 3C589        etherlink3.device\n"
        "  Xircom Ethernet   xircomce2.device\n\n"
        "Most NE2000-compatible Ethernet cards use cnet.device.  The 3Com "
-       "EtherLink III (3C589) has its own driver. The Xircom driver and its "
+       "EtherLink III (3C589) has its own driver.  The Xircom driver and its "
        "PCMCIA library are supplied, with source and licences. An existing "
        "driver is kept.\n\n"
        "If the card is not known, try cnet.device first."))
@@ -386,7 +386,7 @@
        "the previous copy can be put back by hand."))
 
 (set H_WIFI
-  (cat "WirelessManager joins the Pi Wi-Fi network for anxwifipi.device. It "
+  (cat "WirelessManager joins the Pi Wi-Fi network for anxwifipi.device.  It "
        "reads the network from ENV:Sys/Wireless.prefs, which AmigaOS copies "
        "from ENVARC:Sys/Wireless.prefs at every boot.\n\n"
        "NetWirelessPrefs opens first: it lists the networks in range, and "

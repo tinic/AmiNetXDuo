@@ -6,6 +6,8 @@ Add new entries under `Unreleased`; published release sections are history.
 ## Unreleased
 
 - Installer: remove Prism2/Hermes PCMCIA Wi-Fi selection and bundled driver, firmware and source payload. Pi Wi-Fi and wired PCMCIA support remain; third-party Wi-Fi can be configured manually.
+- CheckNetDevice: report the PC Card in the A600/A1200 slot (MANFID, VERS_1,
+  FUNCID, FUNCE, matching driver), or "No card", for any card.
 - Installer: recognize ROM and registered network drivers without requiring
   a DEVS: file. Detect uaenet.device and Amithlon's network drivers; preserve
   the bare device name in the interface definition.

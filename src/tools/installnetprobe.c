@@ -17,20 +17,18 @@
  */
 
 #include <exec/types.h>
-#include <exec/interrupts.h>
 #include <dos/dos.h>
 #include <dos/rdargs.h>
 #include <exec/libraries.h>
 #include <exec/memory.h>
 #include <libraries/configvars.h>
-#include <resources/card.h>
 #include <proto/dos.h>
 #include <proto/exec.h>
 #include <proto/expansion.h>
 
 #include "aminetxduo/version.h"
 #include "../netdev/netdev_dtree.h"
-#include "netprobe_card.h"
+#include "netprobe_pcmcia.h"
 #include "netprobe_memory.h"
 #include "netprobe_device.h"
 
@@ -54,66 +52,6 @@ enum
 };
 
 struct ExpansionBase *ExpansionBase;
-struct Library       *CardResource;
-
-/* card.resource's proto headers are not portable across the two supported
-   Amiga GCC layouts.  These LVOs are small stubs like the driver's:
-   OwnCard -6, ReleaseCard -12, ReadCardStatus -36, CopyTuple -72.  Each may
-   destroy d0/d1/a0/a1, so an argument register is a "+r" operand (#70). */
-static struct CardHandle *probe_own_card(struct CardHandle *handle)
-{
-    register struct Library    *_a6 __asm("a6") = CardResource;
-    register struct CardHandle *_a1 __asm("a1") = handle;
-    register struct CardHandle *result __asm("d0");
-
-    __asm __volatile ("jsr a6@(-0x6)"
-                      : "=r" (result), "+r" (_a1)
-                      : "r" (_a6)
-                      : "d1", "a0", "cc", "memory");
-    return result;
-}
-
-static VOID probe_release_card(struct CardHandle *handle, ULONG flags)
-{
-    register struct Library    *_a6 __asm("a6") = CardResource;
-    register struct CardHandle *_a1 __asm("a1") = handle;
-    register ULONG              _d0 __asm("d0") = flags;
-
-    __asm __volatile ("jsr a6@(-0xc)"
-                      : "+r" (_d0), "+r" (_a1)
-                      : "r" (_a6)
-                      : "d1", "a0", "cc", "memory");
-}
-
-static BOOL probe_copy_tuple(struct CardHandle *handle, UBYTE *buffer,
-                             ULONG code, ULONG size)
-{
-    register struct Library    *_a6 __asm("a6") = CardResource;
-    register struct CardHandle *_a1 __asm("a1") = handle;
-    register UBYTE             *_a0 __asm("a0") = buffer;
-    register ULONG              _d1 __asm("d1") = code;
-    register ULONG              _d0 __asm("d0") = size;
-    register LONG               result __asm("d0");
-
-    __asm __volatile ("jsr a6@(-0x48)"
-                      : "=r" (result), "+r" (_a1), "+r" (_a0), "+r" (_d1)
-                      : "r" (_a6), "0" (_d0)
-                      : "cc", "memory");
-    return (BOOL)(result != 0);
-}
-
-/* ReadCardStatus -36: Gayle's status byte, nothing claimed. */
-static UBYTE probe_card_status(VOID)
-{
-    register struct Library *_a6 __asm("a6") = CardResource;
-    register ULONG           result __asm("d0");
-
-    __asm __volatile ("jsr a6@(-0x24)"
-                      : "=r" (result)
-                      : "r" (_a6)
-                      : "d1", "a0", "a1", "cc", "memory");
-    return (UBYTE)result;
-}
 
 typedef struct ClassicCard
 {
@@ -190,121 +128,19 @@ static BOOL classic_card_present(const char *name)
     return present;
 }
 
-/* Gayle's attribute window: CIS byte n at 0xA00000 + 2n (netdev_pcmcia.c).
-   The walk stops at the first END, long before the 64 KB of CIS bytes. */
-#define PC_ATTR_BASE      0x00a00000UL
-#define PC_ATTR_CIS_BYTES 0x00010000UL
-
-static uint8_t attr_read(void *ctx, uint32_t n)
-{
-    (VOID)ctx;
-    return *(volatile UBYTE *)(PC_ATTR_BASE + n * 2UL);
-}
-
-/* The owner's handle name, read under Forbid while the handle is live. */
-static BOOL owner_is(struct CardHandle *owner, const char *name)
-{
-    BOOL  is = FALSE;
-    char *n;
-
-    if (owner == (struct CardHandle *)-1)
-        return FALSE;
-    Forbid();
-    if (TypeOfMem(owner) != 0)
-    {
-        n = owner->cah_CardNode.ln_Name;
-        if (n != NULL && TypeOfMem(n) != 0)
-            is = same(n, name);
-    }
-    Permit();
-    return is;
-}
-
-static ULONG ignore_card_event(VOID)
-{
-    return 0;
-}
-
-/* Read only the identity tuples.  IFAVAILABLE means an active driver is never
-   displaced or queued behind.  A card another driver owns -- anxnet.device
-   started from the startup files, on a reinstall -- is read straight from
-   attribute memory instead: CopyTuple() needs the owner's handle, and a read
-   of the CIS changes nothing on a configured card.  No reset, COR write or
-   device open occurs. */
+/* Read raw identity through the shared passive probe. A user-installed
+   wireless driver may own a card whose CIS does not state wireless; never
+   propose NE2000 for that card. */
 static BOOL pcmcia_identity(NetprobeCis *cis)
 {
-    static struct Interrupt  removed;
-    static struct Interrupt  inserted;
-    static struct Interrupt  status;
-    static struct CardHandle handle;
-    struct CardHandle       *owner;
-    /* CopyTuple() writes the two header bytes, then up to size body
-       bytes; the autodoc asks for size + 8. */
-    UBYTE                    tuple[4 + 8] = { 0 };
+    static NetprobeSlot slot;
 
-    CardResource = OpenResource((CONST_STRPTR)CARDRESNAME);
-    if (CardResource == NULL)
+    netprobe_pcmcia_read(&slot);
+    *cis = slot.cis;
+    if (slot.slot == NETPROBE_SLOT_OWNED && same(slot.owner, "prism2.device"))
         return FALSE;
-
-    removed.is_Node.ln_Type = NT_INTERRUPT;
-    removed.is_Node.ln_Name = (char *)"InstallNetProbe removed";
-    removed.is_Code = (VOID (*)())ignore_card_event;
-    inserted.is_Node.ln_Type = NT_INTERRUPT;
-    inserted.is_Node.ln_Name = (char *)"InstallNetProbe inserted";
-    inserted.is_Code = (VOID (*)())ignore_card_event;
-    status.is_Node.ln_Type = NT_INTERRUPT;
-    status.is_Node.ln_Name = (char *)"InstallNetProbe status";
-    status.is_Code = (VOID (*)())ignore_card_event;
-
-    handle.cah_CardNode.ln_Type = 0;
-    handle.cah_CardNode.ln_Pri = 0;
-    handle.cah_CardNode.ln_Name = (char *)"InstallNetProbe";
-    handle.cah_CardFlags = CARDF_IFAVAILABLE;
-    handle.cah_CardRemoved = &removed;
-    handle.cah_CardInserted = &inserted;
-    handle.cah_CardStatus = &status;
-
-    owner = probe_own_card(&handle);
-    if (owner != NULL)
-    {
-        /* IFAVAILABLE did not enqueue this handle, so there is nothing to
-           release or remove from card.resource's owner list. */
-        handle.cah_CardNode.ln_Name = NULL;
-        if ((probe_card_status() & CARD_STATUSF_CCDET) == 0)
-            return FALSE;
-        /* A user-installed wireless driver may own a card whose CIS does
-           not state wireless. Never propose a wired driver for that card. */
-        if (owner_is(owner, "prism2.device"))
-            return FALSE;
-        return (BOOL)netprobe_cis_walk(attr_read, NULL, PC_ATTR_CIS_BYTES,
-                                       cis);
-    }
-
-    if (probe_copy_tuple(&handle, tuple, 0x20, 4) &&
-        tuple[1] >= 4)
-    {
-        cis->manf = (UWORD)(((UWORD)tuple[3] << 8) | tuple[2]);
-        cis->prod = (UWORD)(((UWORD)tuple[5] << 8) | tuple[4]);
-        cis->have_manf = 1;
-    }
-    if (probe_copy_tuple(&handle, tuple, 0x21, 4) &&
-        tuple[1] >= 1)
-    {
-        cis->funcid = tuple[2];
-        cis->have_funcid = 1;
-    }
-    /* The first FUNCE: on an 802.11 card, its LAN technology. */
-    if (probe_copy_tuple(&handle, tuple, 0x22, 4) &&
-        tuple[1] >= 2)
-    {
-        cis->funce[0] = tuple[2];
-        cis->funce[1] = tuple[3];
-        cis->have_funce = 1;
-    }
-
-    probe_release_card(&handle, CARDF_REMOVEHANDLE);
-    handle.cah_CardNode.ln_Name = NULL;
-    return (BOOL)(cis->have_manf || cis->have_funcid);
+    return (BOOL)(slot.slot >= NETPROBE_SLOT_FREE &&
+                  (cis->have_manf || cis->have_funcid));
 }
 
 static BOOL pcmcia_card_present(const char *name)

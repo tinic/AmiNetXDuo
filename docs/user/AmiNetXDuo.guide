@@ -1995,6 +1995,23 @@
         REFUSED:
           command register is not a stopped DP8390
 
+  A PC CARD SLOT section follows, also when the driver has not run. It
+  identifies the card in an A600 or A1200 slot whatever the driver did
+  with it, network card or not: CISTPL_MANFID, the CISTPL_VERS_1
+  strings, CISTPL_FUNCID, the first CISTPL_FUNCE, and the driver in this
+  archive for that identity. A card another driver owns is read from
+  attribute memory. Nothing is loaded, opened, reset or written. Without
+  card.resource the section says there is no PCMCIA slot; with the slot
+  empty it says "No card."
+
+      PC CARD SLOT
+        Card present, owned by anxnet.device; CIS read from attribute memory.
+        CISTPL_MANFID: manufacturer $0101, product $0589.
+        CISTPL_VERS_1: "3Com Corporation", "3C589", "TP/BNC LAN Card", "000002".
+        CISTPL_FUNCID 6 (LAN).
+        First CISTPL_FUNCE: type $01, value $02.
+        Driver: anxnet.device, CARD=3c589.
+
   @{b}DEVICE@{ub}    The driver to ask about. Default anxnet.device; use
             anxgenet.device for the Raspberry Pi Ethernet report.
   @{b}NOLOAD@{ub}    Do not load the driver to make it probe. Without this,
