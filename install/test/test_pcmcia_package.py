@@ -7,6 +7,7 @@ SPDX-License-Identifier: MIT
 import importlib.util
 from pathlib import Path
 import shutil
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -183,6 +184,122 @@ int main(void) {
                             "-I" + str(directory), "-I" + str(ROOT / "src/tools"),
                             str(source), "-o", str(program)], check=True)
             subprocess.run([str(program)], check=True)
+
+
+class InstallerDeviceSelectionTests(unittest.TestCase):
+    """Evaluate the production lookup expressions with controlled Exec/files.
+
+    This small model deliberately rejects operations outside that subset;
+    it is not an emulator or a replacement for the Workbench test lane.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        spec = importlib.util.spec_from_file_location("checkscript", ROOT / "install/tools/checkscript.py")
+        cls.syntax = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.syntax)
+        errors = []
+        tokens = iter(cls.syntax.tokenise((ROOT / "install/Install-AmiNetXDuo").read_text(), "Installer", errors))
+        if errors:
+            raise AssertionError(errors)
+
+        def parse(token):
+            if token[0] != cls.syntax.LP:
+                return token
+            out = []
+            for token in tokens:
+                if token[0] == cls.syntax.RP:
+                    return out
+                out.append(parse(token))
+            raise AssertionError("unbalanced expression")
+
+        tree = [parse(token) for token in tokens]
+        cls.procedure = next(n[2:] for n in tree if n[0][1] == "procedure" and n[1][1] == "P_dev_path")
+        start = next(i for i, n in enumerate(tree) if n[0][1] == "set" and n[1][1] == "EMU_N")
+        cls.discovery = tree[start:start + 3]
+
+    def model(self, live=(), files=()):
+        variables = {"s_netprobe": "InstallNetProbe", "emu_found": 0, "emu_dev": "uaenet.device",
+                     "emu_file_dev": "", "driver_default": 0}
+        commands = []
+
+        def evaluate(node):
+            if isinstance(node, tuple):
+                kind, value, _ = node
+                return value if kind == self.syntax.STR else int(value) if kind == self.syntax.INT else variables.get(value.lower(), 0)
+            if isinstance(node[0], list):
+                for child in node:
+                    result = evaluate(child)
+                return result
+            if node[0][0] == self.syntax.STR:
+                return node[0][1] % tuple(evaluate(a) for a in node[1:])
+            op, args = node[0][1].lower(), node[1:]
+            if op == "set":
+                result = evaluate(args[1])
+                variables[args[0][1].lower()] = result
+                return result
+            if op == "if":
+                return evaluate(args[1]) if evaluate(args[0]) else evaluate(args[2]) if len(args) > 2 else 0
+            if op == "while":
+                for _ in range(10):
+                    if not evaluate(args[0]):
+                        return 0
+                    evaluate(args[1])
+                raise AssertionError("discovery loop did not terminate")
+            if op == "run":
+                command = shlex.split(evaluate(args[0]))
+                self.assertEqual(command[:2], ["InstallNetProbe", "DEVICE"])
+                commands.append(command[2])
+                return 0 if command[2] in live else 5
+            if op == "exists":
+                return evaluate(args[0]) in files
+            if op == "patmatch":
+                self.assertEqual(evaluate(args[0]), '#?"#?')
+                return '"' in evaluate(args[1])
+            values = [evaluate(a) for a in args]
+            operations = {"and": lambda: all(values), "or": lambda: any(values),
+                          "not": lambda: not values[0], "=": lambda: values[0] == values[1],
+                          ">": lambda: values[0] > values[1], "+": lambda: sum(values),
+                          "bitor": lambda: values[0] | values[1], "cat": lambda: "".join(values),
+                          "strlen": lambda: len(values[0]),
+                          "select": lambda: values[1 + values[0]] if 1 + values[0] < len(values) else ""}
+            return operations[op]()
+
+        return variables, commands, evaluate
+
+    def test_paths_survive_reboot_and_rom_needs_no_file(self):
+        for name, live, files, expected in (
+            ("uaenet.device", ["uaenet.device"], [], ("uaenet.device", 1)),
+            ("anothernet.device", ["anothernet.device"], [], ("anothernet.device", 1)),
+            ("powerne2k.device", ["powerne2k.device"], ["DEVS:Networks/powerne2k.device"], ("DEVS:Networks/powerne2k.device", 1)),
+            ("powerne2k.device", [], ["DEVS:Networks/powerne2k.device"], ("DEVS:Networks/powerne2k.device", 1)),
+            ("uaenet.device", [], ["DEVS:uaenet.device"], ("uaenet.device", 1)),
+            ("missing.device", [], [], ("missing.device", 0)),
+            ('bad"name.device', [], [], ('bad"name.device', 0)),
+        ):
+            with self.subTest(name=name, live=live):
+                variables, commands, evaluate = self.model(live, files)
+                variables["dev_name"] = name
+                for node in self.procedure:
+                    evaluate(node)
+                self.assertEqual((variables["dev_write"], variables["dev_present"]), expected)
+                if files or '"' in name:
+                    self.assertFalse(commands)
+
+    def test_known_names_and_multiple_live_driver_precedence(self):
+        for live, files, name, found in (
+            ([], [], "uaenet.device", 0),
+            ([], ["DEVS:Networks/amithlon1_net.device"], "amithlon1_net.device", 0),
+            ([], ["DEVS:powerne2k.device"], "powerne2k.device", 0),
+            (["amithlon1_net.device"], ["DEVS:Networks/uaenet.device"], "amithlon1_net.device", 1),
+            (["powerne2k.device"], [], "powerne2k.device", 1),
+            (["uaenet.device", "amithlon1_net.device"], [], "uaenet.device", 1),
+        ):
+            with self.subTest(live=live, files=files):
+                variables, _, evaluate = self.model(live, files)
+                for node in self.discovery:
+                    evaluate(node)
+                self.assertEqual((variables["emu_dev"], variables["emu_found"]), (name, found))
 
 
 if __name__ == "__main__":

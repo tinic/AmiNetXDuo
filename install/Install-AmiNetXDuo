@@ -137,7 +137,7 @@
        "Zorro cards and Emu68 devices found in hardware are checked already. "
        "Installed drivers are used only as a fallback.  Check or clear any "
        "entry before proceeding.\n\n"
-       "Emulator network drivers supplied in ROM need no file in DEVS:. "
+       "Emulator network drivers supplied in ROM need no file in DEVS:.  "
        "They are detected in Exec and used by their bare device name.\n\n"
        "The AmigaNet is Hydra Systems' card and its driver is hydra.device; "
        "the LAN Rover is ASDG's and its driver is eb920.device.  The board "
@@ -734,21 +734,23 @@
 (procedure P_dev_path
   (set dev_write   dev_name)
   (set dev_present 0)
-  ; ROM-injected and registered drivers need no disk file. Keep the bare
-  ; name so OpenDevice reaches Exec's device/resident lookup. Reject quotes
-  ; before constructing the helper command from an Other-driver answer.
-  (if (NOT (patmatch "#?\"#?" dev_name))
-    (
-      (set PROBE_CMD ("\"%s\" DEVICE \"%s\"" S_NETPROBE dev_name))
-      (if (= 0 (run PROBE_CMD (quiet) (safe))) (set dev_present 1))
-    ))
-  (if (AND (= dev_present 0) (exists (cat "DEVS:" dev_name) (noreq)))
+  ; A registered driver may have been loaded from DEVS:Networks. Preserve
+  ; its disk path for the next boot, when it may not yet be in DeviceList.
+  (if (exists (cat "DEVS:" dev_name) (noreq))
       (set dev_present 1)
-      (if (AND (= dev_present 0) (exists (cat "DEVS:Networks/" dev_name) (noreq)))
+      (if (exists (cat "DEVS:Networks/" dev_name) (noreq))
           (
             (set dev_write   (cat "DEVS:Networks/" dev_name))
             (set dev_present 1)
           )))
+  ; ROM-injected and registered drivers can also exist without a disk file.
+  ; Keep the bare name only then. Reject quotes in an Other-driver answer
+  ; before constructing the helper command.
+  (if (AND (= dev_present 0) (NOT (patmatch "#?\"#?" dev_name)))
+    (
+      (set PROBE_CMD ("\"%s\" DEVICE \"%s\"" S_NETPROBE dev_name))
+      (if (= 0 (run PROBE_CMD (quiet) (safe))) (set dev_present 1))
+    ))
 )
 
 ; CARD_INDEX is the position in the askoptions page below.  One table assigns
