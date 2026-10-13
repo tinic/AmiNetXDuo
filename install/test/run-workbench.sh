@@ -2810,7 +2810,7 @@ fi
 _fw_src="$UNPACK/AmiNetXDuo/Devs/Firmware"
 _fw_sys=$(amiga_path Devs/Firmware 2>/dev/null || true)
 _fw_dir=$(amiga_path "${INST}Devs/Firmware" 2>/dev/null || true)
-case "$_fw_fixture" in
+case "$EMU68_FIXTURE" in
     wifi|both)
         _fw_bad=0
         _fw_n=0
