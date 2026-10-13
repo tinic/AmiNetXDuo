@@ -5,6 +5,9 @@
  * outcome; this reads it. Nothing on that path needs a unit, an open device, a
  * running stack or a filesystem.
  *
+ * The PC Card in an A600/A1200 slot is reported whatever the driver did with
+ * it, network card or not, read without loading or opening anything.
+ *
  * SPDX-License-Identifier: MIT
  */
 
@@ -15,6 +18,7 @@
 
 #include "aminetxduo/anxdiag.h"
 #include "aminetxduo/anxnet.h"
+#include "netprobe_pcmcia.h"
 
 const char *const tool_name = "CheckNetDevice";
 
@@ -783,6 +787,23 @@ static VOID cnd_report(BOOL raw)
     }
 }
 
+/* ------------------------------------------------------------ the slot --- */
+
+static VOID cnd_slot_line(void *ctx, const char *text)
+{
+    (VOID)ctx;
+    say("  %s\n", (LONG)text);
+}
+
+static VOID cnd_slot(VOID)
+{
+    static NetprobeSlot slot;
+
+    netprobe_pcmcia_read(&slot);
+    say("\nPC CARD SLOT\n");
+    netprobe_slot_report(&slot, cnd_slot_line, NULL);
+}
+
 /* ---------------------------------------------------------------- main --- */
 
 int main(int argc, char **argv)
@@ -809,7 +830,7 @@ int main(int argc, char **argv)
     {
         tool_fault(IoErr());
         tool_usage("[DEVICE <name>] [NOLOAD] [RAW]",
-                   "Report what the driver found at probe.");
+                   "Report what the driver found at probe, and the PC Card.");
         return RETURN_ERROR;
     }
 
@@ -831,6 +852,9 @@ int main(int argc, char **argv)
     }
 
     say("%s: %s probe record\n", (LONG)tool_name, (LONG)device);
+
+    if (status != CND_OK)
+        cnd_slot();
 
     if (status == CND_BAD_VERSION)
     {
@@ -861,6 +885,7 @@ int main(int argc, char **argv)
     }
 
     cnd_report(args[ARG_RAW] != 0);
+    cnd_slot();
 
     say("\nVERDICT\n");
     if (cnd_mark.ad_Units == 0)

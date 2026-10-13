@@ -224,7 +224,8 @@ aminetxduo_add_tool(tool_installsamefile InstallSameFile
 # The other Installer-only primitive: identify Emu68's supported on-board
 # network devices from its device tree without opening either device.
 aminetxduo_add_tool(tool_installnetprobe InstallNetProbe
-    SOURCES installnetprobe.c netprobe_card.c ../netdev/netdev_dtree.c)
+    SOURCES installnetprobe.c netprobe_card.c netprobe_pcmcia.c
+            ../netdev/netdev_dtree.c)
 
 # The Installer's Wi-Fi page.  Installer logs every askstring answer, so the
 # passphrase is asked here and written straight to the prefs file.
@@ -244,7 +245,7 @@ aminetxduo_add_tool(tool_checknetconfig CheckNetConfig
 # came up, so it must not need a running stack -- and it must not need an open
 # unit either, which is the whole point of the record.
 aminetxduo_add_tool(tool_checknetdevice CheckNetDevice
-    SOURCES checknetdevice.c tool_passive.c)
+    SOURCES checknetdevice.c tool_passive.c netprobe_card.c netprobe_pcmcia.c)
 
 # CreateAmiNetXDuoStatusReport: a key=value snapshot for a bug report.
 # Passive by contract -- no device opened, no driver loaded, no stack started
