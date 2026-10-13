@@ -3053,6 +3053,8 @@
 ; older copy or none: a newer one, or a system one at least as new beside a
 ; private installation, is kept.  getversion is (version << 16) | revision.
 (set CS_DEST (tackon D_LIBS "codesets.library"))
+(set D_CS_NEW (cat CS_DEST ".new"))
+(set D_CS_OLD (cat CS_DEST ".old"))
 (set CS_DO 0)
 (if (AND (>= OSVER 39) (exists CS_SRC (noreq)))
   (
@@ -3514,11 +3516,41 @@
     (if (NOT (exists (tackon CS_MARKDIR "codesets.library") (noreq)))
         (abort "The codesets.library installation record could not be written. Nothing further was copied."))
     (P_write_record)
+    ; Staged, then swapped, as tls.library is: a copy that fails leaves the
+    ; old library at its live name, never a truncated one.
+    (if (exists D_CS_NEW (noreq))
+        (delete D_CS_NEW
+                (prompt "Removing a leftover codesets.library.new")
+                (help @copyfiles-help)
+                (optional "force" "nofail")))
+    (if (exists D_CS_NEW (noreq))
+        (abort (cat "The leftover staging file " D_CS_NEW " could not be "
+                    "removed. Remove it and run the installer again.")))
     (copyfiles (prompt "Installing codesets.library")
                (help   @copylib-help)
-               (source CS_SRC) (dest D_LIBS) (optional "force"))
-    (if (NOT (exists CS_DEST (noreq)))
-        (abort (cat "Could not install " CS_DEST ". Run the installer again.")))
+               (source CS_SRC) (dest D_LIBS)
+               (newname "codesets.library.new")
+               (optional "force"))
+    (if (exists D_CS_NEW (noreq))
+      (
+        (if (exists D_CS_OLD (noreq))
+            (delete D_CS_OLD
+                    (prompt "Removing the previous codesets.library.old")
+                    (help @copyfiles-help)
+                    (optional "force" "nofail")))
+        (if (exists CS_DEST (noreq))
+            (rename CS_DEST D_CS_OLD
+                    (prompt "Renaming the old codesets.library out of the way")
+                    (help H_REPLACELIB)))
+        (rename D_CS_NEW CS_DEST
+                (prompt "Putting the new codesets.library in place")
+                (help H_REPLACELIB))
+        ; The replaced copy is in Backup; the .old was only the swap's.
+        (if (exists D_CS_OLD (noreq))
+            (delete D_CS_OLD (optional "force" "nofail")))
+      )
+      (abort (cat "Could not copy " D_CS_NEW ". " CS_DEST " is unchanged."))
+    )
   ))
 (makedir (tackon DOCDIR "Codesets") (help @makedir-help))
 (copyfiles (source (tackon S_CODESETS "COPYING")) (dest (tackon DOCDIR "Codesets")))
