@@ -124,5 +124,34 @@ class VerdictTests(unittest.TestCase):
                 run.binaries(ns, {'Missing': {'binary': 'missing'}})
 
 
+class OrchestrationTests(unittest.TestCase):
+    def test_only_unstarted_suffix_is_retried(self):
+        from types import SimpleNamespace
+        rows = [dict(id=name, stack=4096, mode='exit', allowed=[0]) for name in ('first', 'crash', 'last')]
+        calls = []
+        def fake_batch(ns, group, paths, state, ordinal):
+            calls.append([r['id'] for r in group])
+            text = ('first\tSTART\t0\t4096\t0\nfirst\tEND\t0\t4096\t0\n'
+                    'crash\tSTART\t0\t4096\t0\ncrash\tTIMEOUT\t0\t0\t0\n') if ordinal == 0 else (
+                    'last\tSTART\t0\t4096\t0\nlast\tEND\t0\t4096\t0\nSUITE\tDONE\t0\t0\t0\n')
+            return run.verdict(group, text, 124 if ordinal == 0 else 0)
+        ns = SimpleNamespace(state=['present'], batch_size=3)
+        with patch.object(run, 'batch', side_effect=fake_batch), patch.object(run, 'write_results'), patch('builtins.print'):
+            results = run.sweep(ns, rows, {})
+        self.assertEqual(calls, [['first', 'crash', 'last'], ['last']])
+        self.assertEqual([r['id'] for r in results], ['first', 'crash', 'last'])
+        self.assertEqual([r['passed'] for r in results], [True, False, True])
+
+    def test_bootstrap_failure_stops_without_claiming_coverage(self):
+        from types import SimpleNamespace
+        rows = [dict(id=str(n), stack=4096, mode='exit', allowed=[0]) for n in range(3)]
+        ns = SimpleNamespace(state=['present'], batch_size=2)
+        with patch.object(run, 'batch', side_effect=lambda n, group, p, s, o: run.verdict(group, '', 124)) as batch, patch.object(run, 'write_results'), patch('builtins.print'):
+            results = run.sweep(ns, rows, {})
+        self.assertEqual(batch.call_count, 1)
+        self.assertEqual(len(results), 3)
+        self.assertTrue(all(not r['passed'] and not r['events'] for r in results))
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

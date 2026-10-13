@@ -116,6 +116,8 @@ def quote(value):
 
 def tool_cases(tool, spec, root=ROOT):
     parser = spec['parser']
+    # Installer reports argument/script errors through modal requesters.
+    syntax_mode = spec.get('mode', 'exit') if parser in ('none', 'installer') else 'exit'
     rows = []
     def add(kind, args, mode=None, allowed=None):
         rows.append(dict(tool=tool, kind=kind, arguments=args,
@@ -126,8 +128,8 @@ def tool_cases(tool, spec, root=ROOT):
     # ReadArgs '?' prompts for a replacement line. With NIL input it can
     # continue using defaults, so resident tools retain their normal lifecycle.
     add('help', spec.get('help', '?'), spec.get('mode', 'exit'))
-    add('unknown', 'ANXD_UNKNOWN_OPTION=bad' if parser in ('readargs', 'installer', 'vendored-readargs') else '-@', spec.get('mode', 'exit') if parser == 'none' else 'exit')
-    add('unterminated-quote', '"unterminated', spec.get('mode', 'exit') if parser == 'none' else 'exit')
+    add('unknown', 'ANXD_UNKNOWN_OPTION=bad' if parser in ('readargs', 'installer', 'vendored-readargs') else '-@', syntax_mode)
+    add('unterminated-quote', '"unterminated', syntax_mode)
     if parser == 'none':
         add('extra-long', quote('x' * 2048))
         return rows
@@ -166,12 +168,12 @@ def tool_cases(tool, spec, root=ROOT):
             add('duplicate:' + name, line({name: val}) + ' ' +
                 (name if 'S' in mods else name + ' ' + quote(str(val))))
             if 'S' in mods or 'T' in mods:
-                add('invalid-switch:' + name, line({name: val}) + ' "invalid-value"', 'exit')
+                add('invalid-switch:' + name, line({name: val}) + ' "invalid-value"', syntax_mode)
             else:
                 for tag, bad in [('empty', ''), ('invalid', 'not-a-value'), ('long', 'x' * 2048),
                                  ('quoted', 'x * " / : =')]:
                     add(tag + ':' + name, line({name: bad}))
-                add('missing-value:' + name, line(omit=name, raw=name), 'exit')
+                add('missing-value:' + name, line(omit=name, raw=name), syntax_mode)
                 if 'N' in mods:
                     for num in ('-1', '0', '1', '2147483647', '-2147483648',
                                 '2147483648', '-2147483649', '99999999999999999999'):
@@ -179,7 +181,7 @@ def tool_cases(tool, spec, root=ROOT):
                 if 'M' in mods:
                     add('multiple:' + name, line({name: val}) + ' ' + quote(str(val)))
                 if 'A' in mods:
-                    add('missing-required:' + name, line(omit=name), 'exit')
+                    add('missing-required:' + name, line(omit=name), syntax_mode)
         # Every pair with valid representations, including conflicting modes.
         for a, b in itertools.combinations([a[0] for a, _ in fs], 2):
             add('pair:' + a + ':' + b, line({a: spec['values'][a], b: spec['values'][b]}))

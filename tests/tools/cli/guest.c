@@ -22,6 +22,10 @@ static BPTR journal;
 static char line[8192], arguments[8192];
 static struct IntuiMessage close_message;
 static struct MsgPort *close_port;
+static ULONG raw_key_address;
+static BOOL child_installer;
+static LONG gui_ids[40];
+static ULONG gui_count;
 
 static VOID child_exit(register LONG rc __asm("d0"),
                        register APTR data __asm("d1"))
@@ -75,6 +79,7 @@ static BOOL close_window(struct Process *child)
     ULONG lock, seen = 0, owned = 0, flags = 0;
     BOOL sent = FALSE;
     if (IntuitionBase == NULL) return FALSE;
+    gui_count = 0;
     lock = LockIBase(0);
     Forbid();
     if (finished()) { Permit(); UnlockIBase(lock); return FALSE; }
@@ -85,13 +90,34 @@ static BOOL close_window(struct Process *child)
             if (w->UserPort != NULL && w->UserPort->mp_SigTask == (struct Task *)child)
             {
                 owned++; flags = w->IDCMPFlags;
+                for (g = w->FirstGadget; g && gui_count < 20; g = g->NextGadget) {
+                    gui_ids[gui_count * 2] = g->GadgetID;
+                    gui_ids[gui_count * 2 + 1] = g->GadgetType;
+                    gui_count++;
+                }
                 close_message.ExecMessage.mn_ReplyPort = close_port;
                 close_message.ExecMessage.mn_Length = sizeof(close_message);
                 g = NULL;
-                if (w->IDCMPFlags & IDCMP_CLOSEWINDOW)
+                if (child_installer && (w->IDCMPFlags & IDCMP_GADGETUP)) {
+                    /* Same pinned Commodore Installer contract used by
+                     * install/test/installdrive.c. Its labels live outside
+                     * struct Gadget; never interpret other tools this way.
+                     * Abort first; otherwise dismiss/advance the harmless
+                     * fixture's startup, confirmation or error requester. */
+                    static const UWORD ids[] = {91, 90, 2, 1};
+                    ULONG k;
+                    for (k = 0; k < 4 && g == NULL; k++)
+                        for (g = w->FirstGadget; g != NULL; g = g->NextGadget)
+                            if (g->GadgetID == ids[k] && !(g->Flags & GFLG_DISABLED)) break;
+                    if (g == NULL) continue;
+                    close_message.Class = IDCMP_GADGETUP;
+                }
+                else if (w->IDCMPFlags & IDCMP_CLOSEWINDOW)
                     close_message.Class = IDCMP_CLOSEWINDOW;
                 else if (w->IDCMPFlags & IDCMP_VANILLAKEY)
-                    close_message.Class = IDCMP_VANILLAKEY; /* Escape: cancel a modal requester. */
+                    close_message.Class = IDCMP_VANILLAKEY;
+                else if (w->IDCMPFlags & IDCMP_RAWKEY)
+                    close_message.Class = IDCMP_RAWKEY;
                 else {
                     if (!(w->IDCMPFlags & IDCMP_GADGETUP)) continue;
                     for (g = w->FirstGadget; g != NULL; g = g->NextGadget)
@@ -101,9 +127,11 @@ static BOOL close_window(struct Process *child)
                     close_message.Class = IDCMP_GADGETUP;
                 }
                 close_message.IDCMPWindow = w;
-                close_message.IAddress = (APTR)g;
+                close_message.IAddress = close_message.Class == IDCMP_RAWKEY ?
+                    (APTR)&raw_key_address : (APTR)g;
                 close_message.Code = g ? g->GadgetID :
-                    (close_message.Class == IDCMP_VANILLAKEY ? 27 : 0);
+                    (close_message.Class == IDCMP_VANILLAKEY ? 27 :
+                     close_message.Class == IDCMP_RAWKEY ? 0x45 : 0);
                 PutMsg(w->UserPort, (struct Message *)&close_message);
                 sent = TRUE;
             }
@@ -114,6 +142,11 @@ static BOOL close_window(struct Process *child)
         LONG vals[3];
         vals[0] = seen; vals[1] = owned; vals[2] = flags;
         VFPrintf(Output(), (CONST_STRPTR)"cli_gui windows=%ld owned=%ld flags=%lx\n", (APTR)vals);
+        {
+            ULONG j;
+            for (j = 0; j < gui_count; j++)
+                VFPrintf(Output(), (CONST_STRPTR)"cli_gui gadget=%ld type=%lx\n", (APTR)&gui_ids[j * 2]);
+        }
         Flush(Output());
     }
     return sent;
@@ -158,6 +191,11 @@ static LONG run_case(char *id, ULONG stack, char mode, ULONG seconds, const char
         if (seg) UnLoadSeg(seg);
         return 20;
     }
+    {
+        const char *want = "SYS:c/Installer", *at = path;
+        while (*want && *want == *at) { want++; at++; }
+        child_installer = !*want && !*at;
+    }
     child_rc = -999; child_stack = 0;
     SetSignal(0, gone);
     record(id, "START", 0, stack, 0);
@@ -187,14 +225,16 @@ static LONG run_case(char *id, ULONG stack, char mode, ULONG seconds, const char
         }
         if (sent_close) broke = 1;
         Permit();
-        for (waited = 0; waited < 150UL && !finished(); waited += 2)
+        for (waited = 0; waited < (mode == 'I' ? 500UL : 150UL) && !finished(); waited += 2)
         {
             Delay(2);
             if (close_pending && GetMsg(close_port) != NULL) close_pending = FALSE;
             /* Cancel can open a second confirmation requester. Reuse our
              * message only after its reply, never while queued in a child. */
-            if (sent_close && !close_pending && waited % 10UL == 0 && !finished())
+            if (mode == 'I' && !close_pending && waited % 10UL == 0 && !finished()) {
                 close_pending = close_window(child);
+                if (close_pending) sent_close = TRUE;
+            }
         }
     }
     if (!finished()) park(id, "TIMEOUT");

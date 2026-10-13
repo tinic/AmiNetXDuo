@@ -168,7 +168,7 @@ def batch(ns, rows, paths, state, ordinal):
                     current_seconds = next((r.get('seconds', 3) for r in rows if r['id'] == last_id), 3)
                 # Bootstrap has its own deadline. Child grace is per case;
                 # add shutdown time and bounded host lag.
-                if time.monotonic() - last_change > (current_seconds + 12 if last_text else 60):
+                if time.monotonic() - last_change > (current_seconds + 25 if last_text else 60):
                     watchdog = True
                     proc.terminate()  # amiberry-run's trap reaps its guest.
                     try:
@@ -206,25 +206,25 @@ def batch(ns, rows, paths, state, ordinal):
 
 def controls(ns):
     """Real guest negatives must reach the child, not just fail to boot."""
-    paths = {'CliControl': ns.output / 'bin/CliControl'}
+    paths = {'CliControl': ns.output / 'bin/CliControl', 'Installer': ns.output / 'bin/CliControl'}
     (ns.output / 'control-inputs.json').write_text(json.dumps({
         'model': ns.model, 'selected': ns.control_kind,
         'supervisor_sha256': digest(ns.output / 'bin/CliCrash'),
         'control_sha256': digest(ns.output / 'bin/CliControl')}, indent=2) + '\n')
     results = []
     for index, (kind, args, mode) in enumerate((
-            ('normal', '', 'exit'), ('break', 'BREAK', 'interrupt'), ('window', 'WINDOW', 'interrupt'), ('gadget', 'GADGET', 'interrupt'), ('key', 'KEY', 'interrupt'),
+            ('normal', '', 'exit'), ('break', 'BREAK', 'interrupt'), ('window', 'WINDOW', 'interrupt'), ('delayed-window', 'WINDOW WAITGUI', 'interrupt'), ('gadget', 'GADGET', 'interrupt'), ('key', 'KEY', 'interrupt'), ('raw', 'RAW', 'interrupt'), ('installer', 'GADGET', 'interrupt'),
             ('badrc', 'BADRC', 'exit'), ('late', 'BREAK', 'exit'),
             ('hang', 'HANG', 'exit'), ('crash', 'CRASH', 'exit'))):
         if ns.control_kind and kind not in ns.control_kind:
             continue
         for stack in (4096, 8192):
-            row = dict(id='control', tool='CliControl', kind=kind, arguments=args,
+            row = dict(id='control', tool='Installer' if kind == 'installer' else 'CliControl', kind=kind, arguments=args,
                        mode=mode, allowed=[0], stack=stack, binary='CliControl')
             result = batch(ns, [row], paths, 'control', index * 2 + (stack == 8192))[0]
             ev = result['events']
             started = bool(ev and ev[0] == ('START', 0, stack, 0))
-            if kind in ('normal', 'break', 'window', 'gadget', 'key'):
+            if kind in ('normal', 'break', 'window', 'delayed-window', 'gadget', 'key', 'raw', 'installer'):
                 good = result['passed']
             elif kind == 'badrc':
                 good = started and len(ev) == 2 and ev[1] == ('END', 42, stack, 0) and not result['passed']
@@ -298,7 +298,7 @@ def main():
     ap.add_argument('--batch-size', type=int, default=128)
     ap.add_argument('--tool', action='append')
     ap.add_argument('--state', action='append', choices=['present', 'missing'])
-    ap.add_argument('--control-kind', action='append', choices=['normal', 'break', 'window', 'gadget', 'key', 'badrc', 'late', 'hang', 'crash'], help='focused negative-control debugging, controls-only required')
+    ap.add_argument('--control-kind', action='append', choices=['normal', 'break', 'window', 'delayed-window', 'gadget', 'key', 'raw', 'installer', 'badrc', 'late', 'hang', 'crash'], help='focused negative-control debugging, controls-only required')
     ap.add_argument('--helper-bin', type=Path, help='prebuilt helpers from this source for a separate emulator host')
     ap.add_argument('--controls-only', action='store_true', help='validate supervisor without shipping binaries')
     ns = ap.parse_args()

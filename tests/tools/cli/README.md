@@ -29,7 +29,12 @@ intentional StackSwap is permitted; it must restore the process stack at exit.
 No tool is silently given the supervisor's larger stack.
 
 Resident and GUI programs are stopped through Ctrl-C, close-window, Escape or
-a Cancel gadget event. The minimal Installer script exits with `(quiet)` so a
+a Cancel gadget event (both vanilla and raw Escape are supported).
+For the pinned Commodore Installer, the suite reuses the button IDs documented
+in `install/test/installdrive.c`; no private button layout is assumed for other
+programs. Startup/error/abort-confirmation requesters are answered within the
+ten-second resident shutdown period (ordinary late-exit cleanup allows three
+seconds). Windows that appear after startup are polled as well. The Installer has no batch mode. The minimal Installer script exits with `(quiet)` so a
 completion dialog does not obscure its CLI parsing. ReadArgs `?` can continue
 using defaults; resident programs keep their ordinary shutdown contract.
 The finite profiler workload has a 120-second guest deadline; other cases use
@@ -42,7 +47,8 @@ fresh guest; unrun cases never count as coverage. The guest retains a hung child
 parks until the host reaps the entire emulator, avoiding an unsafe UnLoadSeg.
 
 Before every full sweep, real guest controls prove normal completion, Ctrl-C,
-GUI close, modal Cancel/Escape, unexpected return codes, late exit, a hang and an illegal instruction
+GUI close (including delayed windows), modal Cancel/Escape, Installer-button
+routing, unexpected return codes, late exit, a hang and an illegal instruction
 at both stack sizes. A boot failure cannot satisfy a negative control: its child
 must actually reach START and produce the expected failure evidence.
 
