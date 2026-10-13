@@ -140,7 +140,6 @@ AmiNetXDuo/Wireless/WirelessManager-LICENSE | installed | always | (source S_WML
 # sources remain available offline in the release rather than on system disks.
 AmiNetXDuo/PCMCIA/*.device         | installed     | always    | (source PC_SOURCE)
 AmiNetXDuo/PCMCIA/pccard.library   | installed     | always    | (source PC_SOURCE)
-AmiNetXDuo/PCMCIA/Firmware/*       | installed     | always    | (source PC_SOURCE)
 AmiNetXDuo/PCMCIA/Docs/*           | installed     | always    | (source S_PCMDOCS)
 AmiNetXDuo/PCMCIA/README           | installed     | always    | (source (tackon S_PCMCIA "README"))
 AmiNetXDuo/PCMCIA/SHA256.json      | not-installed | always    | Release integrity manifest for the unmodified third-party files; checked by the host packer, not needed to run a driver.

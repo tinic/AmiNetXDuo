@@ -31,20 +31,15 @@ enum
     NETPROBE_PC_3C589,
     NETPROBE_PC_3CCFEM556,
     NETPROBE_PC_3CXEM556,
-    NETPROBE_PC_PRISM2,
     NETPROBE_PC_XIRCOM
 };
 
 /*
- * Prism2 and Xircom use their packaged drivers' supported MANFID tables.
+ * Xircom uses its packaged driver's supported MANFID table.
  * For the other cards, anxnet.device's rule (netdev_card_by_cis) applies:
- * a known EtherLink III MANFID
- * names its row, and any other LAN card is the NE2000 one.  Less the 802.11
- * cards without a supported Prism2 identity, whose FUNCID says LAN as an
- * NE2000's does: a FUNCE stating wireless
- * technology, or a MANFID from Linux's 802.11 PC Card drivers.  Narrower
- * than the driver in one way: a card that states no FUNCID, or only the
- * multifunction one, is not called an NE2000.
+ * known EtherLink III identities select their row; other LAN cards select
+ * NE2000, excluding known wireless identities and wireless FUNCE technology.
+ * Cards with no FUNCID or only multifunction are not called NE2000.
  */
 int netprobe_pc_kind(const NetprobeCis *cis);
 

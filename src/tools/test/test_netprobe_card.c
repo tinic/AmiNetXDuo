@@ -131,9 +131,9 @@ int main(void)
     expect_kind(&el3, NETPROBE_PC_3C589, "3C589");
     expect_kind(&cfem, NETPROBE_PC_3CCFEM556, "3CCFEM556");
     expect_kind(&cxem, NETPROBE_PC_3CXEM556, "3CXEM556");
-    expect_kind(&prism2, NETPROBE_PC_PRISM2, "Prism2");
-    expect_kind(&wpc11, NETPROBE_PC_PRISM2, "Linksys WPC11");
-    expect_kind(&airconnect, NETPROBE_PC_PRISM2, "3Com AirConnect");
+    expect_kind(&prism2, NETPROBE_PC_NONE, "Prism2");
+    expect_kind(&wpc11, NETPROBE_PC_NONE, "Linksys WPC11");
+    expect_kind(&airconnect, NETPROBE_PC_NONE, "3Com AirConnect");
     expect_kind(&aironet, NETPROBE_PC_NONE, "Cisco Aironet");
     expect_kind(&wlan, NETPROBE_PC_NONE, "FUNCE wireless");
     expect_kind(&xircom, NETPROBE_PC_XIRCOM, "Xircom CE3");

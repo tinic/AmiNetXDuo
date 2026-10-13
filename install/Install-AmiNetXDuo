@@ -158,11 +158,9 @@
        "several different drivers.\n\n"
        "  NE2000 or CNet    cnet.device\n"
        "  3Com 3C589        etherlink3.device\n"
-       "  Prism2 wireless   prism2.device\n"
        "  Xircom Ethernet   xircomce2.device\n\n"
        "Most NE2000-compatible Ethernet cards use cnet.device.  The 3Com "
-       "EtherLink III (3C589) has its own driver.  Prism2 is the usual "
-       "driver for wireless cards. Prism2 and Xircom drivers and their "
+       "EtherLink III (3C589) has its own driver.  The Xircom driver and its "
        "PCMCIA library are supplied, with source and licences. An existing "
        "driver is kept.\n\n"
        "If the card is not known, try cnet.device first."))
@@ -388,8 +386,7 @@
        "the previous copy can be put back by hand."))
 
 (set H_WIFI
-  (cat "WirelessManager joins the Wi-Fi network for anxwifipi.device, or "
-       "for prism2.device when a Prism2 PCMCIA card is selected instead.  It "
+  (cat "WirelessManager joins the Pi Wi-Fi network for anxwifipi.device.  It "
        "reads the network from ENV:Sys/Wireless.prefs, which AmigaOS copies "
        "from ENVARC:Sys/Wireless.prefs at every boot.\n\n"
        "NetWirelessPrefs opens first: it lists the networks in range, and "
@@ -402,8 +399,7 @@
        "is not written to the installation log.  An empty passphrase "
        "selects an open network.  Skip writes no file, and the Wi-Fi "
        "interface does not start until ENVARC:Sys/Wireless.prefs exists.\n\n"
-       "The window appears only when the Pi Wi-Fi or a Prism2 PCMCIA card is "
-       "selected and there is "
+       "The window appears only when the Pi Wi-Fi is selected and there is "
        "no Wireless.prefs.  An existing one is never replaced.  The Manual "
        "in Aminet's driver/net/prism2v2 describes the file, including hidden "
        "networks, WEP and several networks in one file."))
@@ -784,9 +780,9 @@
     (
       (set DEV_NAME
         (select PCM "cnet.device" "etherlink3.device" "etherlink3.device"
-                    "etherlink3.device" "prism2.device" "xircomce2.device" PCM_OTHER_DEV))
+                    "etherlink3.device" "xircomce2.device" PCM_OTHER_DEV))
       (set CARD_KEY
-        (select PCM "pcmcia" "3c589" "3ccfem556" "3cxem556" "" "" ""))
+        (select PCM "pcmcia" "3c589" "3ccfem556" "3cxem556" "" ""))
     ))
 )
 
@@ -812,7 +808,7 @@
         ; drives nothing else.  An archive without it falls through to the
         ; missing-driver warning below, like any other card.
         (set DEV_WRITE W_ANXZZ9000)
-        (if (AND (= dev_present 0) (= CARD_INDEX 10) (OR (= PCM 4) (= PCM 5)))
+        (if (AND (= dev_present 0) (= CARD_INDEX 10) (= PCM 4))
           (set DEV_WRITE (tackon W_NETWORKS DEV_NAME))
           (if (= dev_present 0)
           (if (AND DO_ANXNET (> (strlen CARD_KEY) 0))
@@ -823,11 +819,8 @@
             (if WARN_DRIVER
               (message (F_NODEV DEV_NAME) (help H_CARD)))))))))
 
-  ; WirelessManager opens the driver the Wi-Fi interface file names: the
-  ; Pi Wi-Fi's, or a Prism2 PCMCIA card's when the Pi Wi-Fi is not selected.
-  (if (OR (= CARD_INDEX 11)
-          (AND (= CARD_INDEX 10) (= PCM 4) (= (bitand CARD_MASK 2048) 0)))
-      (set WIFI_DEV DEV_WRITE))
+  ; WirelessManager opens the selected Pi Wi-Fi interface driver.
+  (if (= CARD_INDEX 11) (set WIFI_DEV DEV_WRITE))
 )
 
 ; ==========================================================================
@@ -913,11 +906,11 @@
            "Nothing was changed."))
 ; External drivers are complete distributions, including offline source.
 (set PC_N 0)
-(while (set PC_F (select PC_N "prism2.device" "xircomce2.device" "pccard.library"
-                            "Docs/GPL" "Docs/LGPL" "Docs/Hermes-LICENSE"
-                            "Docs/Prism2.guide" "Docs/Xircom.guide" "Docs/PCCard.guide"
-                            "Sources/prism2v2.lha" "Sources/xircomce2.lha" "Sources/pccard.lha"
-                            "Firmware/HermesI" "Firmware/HermesII" "README" ""))
+(while (set PC_F (select PC_N "xircomce2.device" "pccard.library"
+                            "Docs/GPL" "Docs/LGPL"
+                            "Docs/Xircom.guide" "Docs/PCCard.guide"
+                            "Sources/xircomce2.lha" "Sources/pccard.lha"
+                            "README" ""))
   (
     (if (NOT (exists (tackon S_PCMCIA PC_F) (noreq)))
         (abort (cat "This archive has no PCMCIA/" PC_F ".\n\n"
@@ -971,7 +964,6 @@
           "cnet.device"
           "uaenet.device"
           "etherlink3.device"
-          "prism2.device"
           "xircomce2.device"
           ""))
   (
@@ -981,7 +973,7 @@
         (set DRIVER_DEFAULT
           (bitor DRIVER_DEFAULT
             (select DET_N 2 4 8 16 32 64 128 256 512 1024 4096
-                          1024 1024 1024)))))
+                          1024 1024)))))
     (set DET_N (+ DET_N 1))
   ))
 
@@ -1013,16 +1005,10 @@
 (if (OR (exists "DEVS:etherlink3.device" (noreq))
         (exists "DEVS:Networks/etherlink3.device" (noreq)))
     (set PCM_DEFAULT 1))
-; prism2.device beside etherlink3.device says nothing about the card: the
-; EtherLink default stays, and the card's own ID below decides.
-(if (AND (= PCM_DEFAULT 0)
-         (OR (exists "DEVS:prism2.device" (noreq))
-             (exists "DEVS:Networks/prism2.device" (noreq))))
-    (set PCM_DEFAULT 4))
 (if (AND (= PCM_DEFAULT 0)
          (OR (exists "DEVS:xircomce2.device" (noreq))
              (exists "DEVS:Networks/xircomce2.device" (noreq))))
-    (set PCM_DEFAULT 5))
+    (set PCM_DEFAULT 4))
 
 
 ; ==========================================================================
@@ -1114,7 +1100,7 @@
 (set PCM_FOUND 0)
 (set PROBE_N 0)
 (while (set PROBE_CARD
-         (select PROBE_N "cnet" "3c589" "3ccfem556" "3cxem556" "prism2" "xircom" ""))
+         (select PROBE_N "cnet" "3c589" "3ccfem556" "3cxem556" "xircom" ""))
   (
     (set PROBE_CMD ("\"%s\" CARD %s" S_NETPROBE PROBE_CARD))
     (if (= 0 (run PROBE_CMD (quiet) (safe)))
@@ -1671,14 +1657,13 @@
 (set PCM_OTHER_DEV "mycard.device")
 (set PCM 0)
 
-; The Wi-Fi: the Pi Wi-Fi, or a Prism2 PCMCIA card without it (WIFI_PRISM).
-; WIFI_SEL: it is selected, or a kept definition names anxwifipi.device or
-; prism2.device.  WIFI_PRIMARY: it is the interface S:Network-Startup
+; The Wi-Fi is the Pi Wi-Fi.
+; WIFI_SEL: it is selected, or a kept definition names anxwifipi.device.
+; WIFI_PRIMARY: it is the interface S:Network-Startup
 ; starts first.  WIFI_START: S:Network-Startup starts it too, after the
 ; primary -- every profile but micro, which brings up one interface.
 ; WIFI_DEV is what its interface file names.
 (set WIFI_SEL 0)
-(set WIFI_PRISM 0)
 (set WIFI_PRIMARY 0)
 (set WIFI_START 0)
 (set WIFI_IF "wifipi")
@@ -1916,11 +1901,10 @@
               "3Com 3C589"
               "3Com 3CCFEM556"
               "3Com 3CXEM556"
-              "Prism2 wireless"
               "Xircom Ethernet"
               "Something else")
             (default PCM_DEFAULT))))
-        (if (= PCM 6)
+        (if (= PCM 5)
           (set PCM_OTHER_DEV
             (askstring
               (prompt "Type the PCMCIA card's driver file name.")
@@ -1942,16 +1926,6 @@
     (set PRIMARY_INDEX 0)
     (until (> (bitand CARD_MASK (shiftleft 1 PRIMARY_INDEX)) 0)
       (set PRIMARY_INDEX (+ PRIMARY_INDEX 1)))
-
-    ; One Wi-Fi at a time: a Prism2 card that is the primary interface is
-    ; the Wi-Fi, and the Pi Wi-Fi is not set up beside it.
-    (if (AND (= PRIMARY_INDEX 10) (= PCM 4) (> (bitand CARD_MASK 2048) 0))
-      (
-        (message "The Prism2 card is the Wi-Fi, so the Pi Wi-Fi is not set "
-                 "up as well: WirelessManager serves one Wi-Fi device."
-                 (help H_WM))
-        (set CARD_MASK (bitand CARD_MASK (bitnot 2048)))
-      ))
 
     (set WARN_DRIVER 1)
     (set CARD_INDEX 0)
@@ -2049,14 +2023,6 @@
     ; --- the Wi-Fi ---------------------------------------------------
     (set WIFI_SEL (if (> (bitand CARD_MASK 2048) 0) 1 0))
     (set WIFI_PRIMARY (if (= PRIMARY_INDEX 11) 1 0))
-    ; A Prism2 PCMCIA card is the Wi-Fi when the Pi Wi-Fi is not selected.
-    (if (AND (= WIFI_SEL 0) (> (bitand CARD_MASK 1024) 0) (= PCM 4))
-      (
-        (set WIFI_SEL 1)
-        (set WIFI_PRISM 1)
-        (set WIFI_IF "pcmcia")
-        (set WIFI_PRIMARY (if (= PRIMARY_INDEX 10) 1 0))
-      ))
     (if WIFI_PRIMARY
       (
         (set WIFI_IF IFNAME)
@@ -2075,7 +2041,7 @@
   (
     (set WIFI_NAME_N 0)
     (while (AND (= WIFI_SEL 0)
-                (<> (set WIFI_NAME (select WIFI_NAME_N OLD_IF "wifipi" "pcmcia" "")) ""))
+                (<> (set WIFI_NAME (select WIFI_NAME_N OLD_IF "wifipi" "")) ""))
       (
         (set KEPT_IF (tackon D_IFDIR WIFI_NAME))
         (if (exists KEPT_IF (noreq))
@@ -2094,20 +2060,7 @@
                   (set WIFI_SEL 1)
                   (set WIFI_DEV "anxwifipi.device")
                 )
-                ; A kept Prism2 card, from the file's live DEVICE as the
-                ; interface parser reads it (a comment never matches):
-                ; 0 in DEVS:Networks, 2 in DEVS: or named bare.
-                (
-                  (set WIFI_KEPT_RC (run ("\"%s\" PRISM2 \"%s\"" S_INSTWIFI KEPT_IF)
-                                         (quiet) (safe)))
-                  (if (OR (= WIFI_KEPT_RC 0) (= WIFI_KEPT_RC 2))
-                    (
-                      (set WIFI_SEL 1)
-                      (set WIFI_PRISM 1)
-                      (set WIFI_DEV (if (= WIFI_KEPT_RC 0)
-                                        "DEVS:Networks/prism2.device" "prism2.device"))
-                    ))
-                )))
+                ))
             (if WIFI_SEL (set WIFI_IF WIFI_NAME))
           ))
         (set WIFI_NAME_N (+ WIFI_NAME_N 1))
@@ -2932,6 +2885,8 @@
       (P_rec_old)
       (set REC_N (+ REC_N 1))
     ))
+  ; Retain legacy Prism2/Hermes uninstall records for prior installations;
+  ; this version never installs those files.
   ; Only external files this installer added. A user's existing copy never
   ; gets a marker, and a later edited/replaced copy is kept on uninstall.
   (set PC_N 0)
@@ -3484,9 +3439,9 @@
 )
 
 (if (> (bitand CARD_MASK 1024) 0)
-  (if (OR (= PCM 4) (= PCM 5))
+  (if (= PCM 4)
     (
-      (set PC_NAME (select (- PCM 4) "prism2.device" "xircomce2.device"))
+      (set PC_NAME "xircomce2.device")
       (set PC_SOURCE (tackon S_PCMCIA PC_NAME))
       (set PC_DEST (tackon (tackon D_DEVS "Networks") PC_NAME))
       (set PC_KEEP (cat "DEVS:" PC_NAME))
@@ -3497,21 +3452,9 @@
       (set PC_DEST (tackon D_LIBS "pccard.library"))
       (set PC_KEEP "LIBS:pccard.library")
       (P_install_pcmcia_file)
-      (if (= PCM 4)
-        (
-          (set PC_FN 0)
-          (while (set PC_FW (select PC_FN "HermesI" "HermesII" ""))
-            (
-              (set PC_SOURCE (tackon (tackon S_PCMCIA "Firmware") PC_FW))
-              (set PC_DEST (tackon (tackon D_DEVS "Firmware") PC_FW))
-              (set PC_KEEP (cat "DEVS:Firmware/" PC_FW))
-              (P_install_pcmcia_file)
-              (set PC_FN (+ PC_FN 1))
-            ))
-        ))
     )))
 
-; Licences are installed with the drivers and firmware; source archives stay
+; Licences are installed with the drivers and library; source archives stay
 ; in the unpacked distribution so small system disks need not copy them twice.
 (makedir (tackon DOCDIR "PCMCIA") (help @makedir-help))
 (copyfiles (source S_PCMDOCS) (dest (tackon DOCDIR "PCMCIA")) (all))
@@ -4439,8 +4382,6 @@
                 "C:WirelessManager" (cat C_PREFIX "WirelessManager")))
 (set WIFI_TIMEOUT 30)
 (set WM_PFX (if WM_LIVE "" ";"))
-; A Prism2 card as the primary interface starts without Wireless.prefs as
-; well (an open network needs none): only WirelessManager waits for it.
 ; Behind another interface the Wi-Fi starts in the background, so a
 ; missing network or a wrong key never holds the boot; as the primary, the
 ; boot waits for it, bounded, so that sntp and httpd after it have a network.
@@ -4453,15 +4394,10 @@
        "  " WM_PFX "  " WM_CMD (" DEVICE=%s UNIT=%ld\n" WIFI_DEV WIFI_UNIT)
        "  " WM_PFX "EndIf\n"))
 (set WIFI_LINES
-  (if (AND WIFI_PRISM WIFI_PRIMARY)
-      (cat WIFI_WM_LINES
-           "EndIf\n"
-           C_PREFIX "AddNetInterface DEVS:NetInterfaces/" WIFI_IF
-           (" QUIET TIMEOUT=%ld\n" WIFI_TIMEOUT))
-      (cat WIFI_WM_LINES
-           "  " WIFI_AN_RUN C_PREFIX "AddNetInterface DEVS:NetInterfaces/" WIFI_IF
-           (" QUIET TIMEOUT=%ld\n" WIFI_TIMEOUT)
-           "EndIf\n")))
+  (cat WIFI_WM_LINES
+       "  " WIFI_AN_RUN C_PREFIX "AddNetInterface DEVS:NetInterfaces/" WIFI_IF
+       (" QUIET TIMEOUT=%ld\n" WIFI_TIMEOUT)
+       "EndIf\n"))
 (set WIFI_NOTE
   (cat ";\n"
        "; Wi-Fi: with ENV:Sys/Wireless.prefs, WirelessManager joins that\n"
@@ -4470,9 +4406,7 @@
                 "; " ("%ld" WIFI_TIMEOUT) " seconds; DHCP goes on asking after the boot continues.\n")
            (cat "; network, then the interface asks for an address in the\n"
                 "; background, so the boot does not wait for it.\n"))
-       (if (AND WIFI_PRISM WIFI_PRIMARY)
-           "; Without the file the card starts alone, for an open network.\n"
-           "; Without the file the Wi-Fi does not start.\n")
+       "; Without the file the Wi-Fi does not start.\n"
        "; Status recognises a WirelessManager already running only under\n"
        "; this exact command name.\n"
        (if WM_LIVE ""

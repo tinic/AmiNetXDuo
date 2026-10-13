@@ -55,11 +55,10 @@ static int wireless(const NetprobeCis *cis)
     return 0;
 }
 
-/* Manufacturer/product facts accepted by Neil Cafferkey's unmodified
-   prism2.device 2.9 and xircomce2.device 1.1 (PCMCIA/Sources in the release).
-   Both report LAN; a Xircom modem combo may report multifunction instead.
-   Identify them before the generic LAN-to-NE2000 fallback. */
-static const uint32_t prism2_ids[] =
+/* Known wireless identities must be excluded before LAN-to-NE2000 fallback.
+   Retain the Prism2 2.9 identity list solely to reject those cards, including
+   cards whose CIS does not state wireless technology. */
+static const uint32_t excluded_wireless_ids[] =
 {
     0x000b7100UL,
     0x000b7300UL,
@@ -112,6 +111,7 @@ static const uint32_t prism2_ids[] =
     0
 };
 
+/* Wired Xircom identities from the packaged xircomce2.device 1.1. */
 static const uint32_t xircom_ids[] =
 {
     0x0089010aUL,
@@ -142,8 +142,8 @@ int netprobe_pc_kind(const NetprobeCis *cis)
     if (cis->have_manf)
     {
         uint32_t id = ((uint32_t)cis->manf << 16) | cis->prod;
-        if (has_id(prism2_ids, id))
-            return NETPROBE_PC_PRISM2;
+        if (has_id(excluded_wireless_ids, id))
+            return NETPROBE_PC_NONE;
         if (has_id(xircom_ids, id))
             return NETPROBE_PC_XIRCOM;
     }

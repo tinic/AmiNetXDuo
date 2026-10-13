@@ -23,6 +23,18 @@ class PackageTests(unittest.TestCase):
     def test_complete_package(self):
         PACKAGE.verify()
 
+    def test_staged_payload_is_wired_only(self):
+        with tempfile.TemporaryDirectory(prefix="pcmcia-stage-test-", dir=ROOT / "build") as directory:
+            subprocess.run([sys.executable, str(ROOT / "tools/pcmcia-drivers.py"),
+                            "--stage", directory], check=True, capture_output=True)
+            staged = Path(directory) / "PCMCIA"
+            self.assertEqual({p.relative_to(staged).as_posix() for p in staged.rglob("*") if p.is_file()},
+                             {*PACKAGE.verify(), "README", "SHA256.json"})
+            self.assertFalse(any("prism" in p.name.lower() or "hermes" in p.name.lower()
+                                 for p in staged.rglob("*")))
+            self.assertTrue((staged / "xircomce2.device").is_file())
+            self.assertTrue((staged / "pccard.library").is_file())
+
     def test_missing_or_changed_redistribution_files_fail_closed(self):
         original = PACKAGE.VENDOR
         (ROOT / "build").mkdir(exist_ok=True)
@@ -30,8 +42,7 @@ class PackageTests(unittest.TestCase):
             PACKAGE.VENDOR = Path(directory) / "PCMCIA"
             try:
                 shutil.copytree(original, PACKAGE.VENDOR)
-                for rel in ("Docs/GPL", "Docs/LGPL", "Docs/Hermes-LICENSE",
-                            "Sources/prism2v2.lha", "Sources/xircomce2.lha", "Sources/pccard.lha"):
+                for rel in ("Docs/GPL", "Docs/LGPL", "Sources/xircomce2.lha", "Sources/pccard.lha"):
                     with self.subTest(file=rel):
                         path = PACKAGE.VENDOR / rel
                         data = path.read_bytes()
@@ -215,6 +226,7 @@ class InstallerDeviceSelectionTests(unittest.TestCase):
 
         tree = [parse(token) for token in tokens]
         cls.procedure = next(n[2:] for n in tree if n[0][1] == "procedure" and n[1][1] == "P_dev_path")
+        cls.card_fields = next(n[2:] for n in tree if n[0][1] == "procedure" and n[1][1] == "P_card_fields")
         start = next(i for i, n in enumerate(tree) if n[0][1] == "set" and n[1][1] == "EMU_N")
         cls.discovery = tree[start:start + 3]
 
@@ -259,6 +271,7 @@ class InstallerDeviceSelectionTests(unittest.TestCase):
             values = [evaluate(a) for a in args]
             operations = {"and": lambda: all(values), "or": lambda: any(values),
                           "not": lambda: not values[0], "=": lambda: values[0] == values[1],
+                          "bitand": lambda: values[0] & values[1],
                           ">": lambda: values[0] > values[1], "+": lambda: sum(values),
                           "bitor": lambda: values[0] | values[1], "cat": lambda: "".join(values),
                           "strlen": lambda: len(values[0]),
@@ -266,6 +279,30 @@ class InstallerDeviceSelectionTests(unittest.TestCase):
             return operations[op]()
 
         return variables, commands, evaluate
+
+    def test_wired_pcmcia_indices_and_manual_selection(self):
+        for pcm, device, key in (
+            (0, "cnet.device", "pcmcia"),
+            (1, "etherlink3.device", "3c589"),
+            (2, "etherlink3.device", "3ccfem556"),
+            (3, "etherlink3.device", "3cxem556"),
+            (4, "xircomce2.device", ""),
+            (5, "manual.device", ""),
+        ):
+            with self.subTest(pcm=pcm):
+                variables, _, evaluate = self.model()
+                variables.update(card_index=10, pcm=pcm, pcm_other_dev="manual.device")
+                for node in self.card_fields:
+                    evaluate(node)
+                self.assertEqual((variables["dev_name"], variables["card_key"], variables["default_if"]),
+                                 (device, key, "pcmcia"))
+        # Removing PCMCIA Wi-Fi must preserve the Pi Wi-Fi menu row.
+        variables, _, evaluate = self.model()
+        variables["card_index"] = 11
+        for node in self.card_fields:
+            evaluate(node)
+        self.assertEqual((variables["dev_name"], variables["default_if"]),
+                         ("anxwifipi.device", "wifipi"))
 
     def test_paths_survive_reboot_and_rom_needs_no_file(self):
         for name, live, files, expected in (

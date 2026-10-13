@@ -128,9 +128,9 @@ static BOOL classic_card_present(const char *name)
     return present;
 }
 
-/* The identity tuples of the card in the slot.  A card prism2.device owns
-   is a wireless card whose CIS need not say so, so never an NE2000 here: the
-   driver file's Prism2 default stands and the PCMCIA type page is drawn. */
+/* Read raw identity through the shared passive probe. A user-installed
+   wireless driver may own a card whose CIS does not state wireless; never
+   propose NE2000 for that card. */
 static BOOL pcmcia_identity(NetprobeCis *cis)
 {
     static NetprobeSlot slot;
@@ -154,8 +154,6 @@ static BOOL pcmcia_card_present(const char *name)
     kind = netprobe_pc_kind(&cis);
     if (same(name, "pcmcia"))
         return (BOOL)(kind != NETPROBE_PC_NONE);
-    if (same(name, "prism2"))
-        return (BOOL)(kind == NETPROBE_PC_PRISM2);
     if (same(name, "xircom"))
         return (BOOL)(kind == NETPROBE_PC_XIRCOM);
     if (same(name, "cnet"))
@@ -267,7 +265,7 @@ int main(int argc, char **argv)
         if (same(card, "pcmcia") || same(card, "cnet") ||
             same(card, "3c589") ||
             same(card, "3ccfem556") || same(card, "3cxem556") ||
-            same(card, "prism2") || same(card, "xircom"))
+            same(card, "xircom"))
             present = pcmcia_card_present(card);
         else if (same(card, "uae"))
             present = netprobe_device_present("uaenet.device");

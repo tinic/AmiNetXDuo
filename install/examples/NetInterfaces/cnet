@@ -13,7 +13,6 @@
 ; them.  Two other PCMCIA drivers are in use:
 ;
 ;     etherlink3.device   3Com EtherLink III / 3C589
-;     prism2.device       Prism2 wireless cards
 ;
 ; On some accelerators the PCMCIA slot and an A1200 with more than 4 MB
 ; of fast RAM contend for the same address space.  That is a hardware
