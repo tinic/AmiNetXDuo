@@ -52,8 +52,9 @@ _Static_assert(TX_AMIGA_OFF_ET_UNIQUEID == 24, "et_UniqueID is not at ETask+24")
 
 /* The tail of Permit(), reached from TX_RESTORE only when AttnResched is set.  The
    decrement has already happened; when all three of Exec's conditions hold the
-   nesting is put back and the real Permit() runs, so the reschedule is Exec's.  */
-VOID _tx_amiga_permit_finish(void)
+   nesting is put back and the real Permit() runs, so the reschedule is Exec's.
+   Keep the rare checks and Exec call out of every LTO-inlined TX_RESTORE.  */
+__attribute__((noinline, cold)) VOID _tx_amiga_permit_finish(void)
 {
 
     if ((SysBase -> TDNestCnt >= 0) || (SysBase -> IDNestCnt >= 0) ||
