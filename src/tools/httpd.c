@@ -364,8 +364,9 @@ static HttpConn *httpd_conn;
    only because exactly one request is parsed and one answer produced per pass:
    the connections interleave between passes, never inside one. */
 static char httpd_scratch[HTTPD_CHUNK_MAX];
-/* x6: an escaped byte is three, and a local byte can be two of UTF-8. */
-static char httpd_escape[(HTTP_URL_MAX + HTTP_NAME_MAX + 2) * 6];
+/* x9: a local byte is up to three bytes of UTF-8 (U+0800 and up, which
+   ISO-8859-2 and other codesets map to), and each escapes to three. */
+static char httpd_escape[(HTTP_URL_MAX + HTTP_NAME_MAX + 2) * 9];
 /* The request-body read buffer, static for the reason above and large for
    the reason at HTTPD_BODY_BUF.  Filled and drained inside one
    httpd_readable() pass, so it shares the "one request per pass" safety. */
@@ -946,9 +947,17 @@ static const char *httpd_url_of(const char *path)
     if (http_path_url(httpd_volumes, httpd_root, path,
                       httpd_href_buf, sizeof(httpd_href_buf),
                       httpd_escape, sizeof(httpd_escape)) == 0UL)
-        return "/";
+        return NULL;
 
     return httpd_escape;
+}
+
+/* An href onto dst; FALSE, and nothing written, when there is none: a name
+   that does not fit is refused, never shortened into another URL. */
+static BOOL httpd_append_href(char *dst, ULONG dstlen, ULONG *used,
+                              const char *href)
+{
+    return href != NULL && hs_append(dst, dstlen, used, href);
 }
 
 /* --------------------------------------------------------------- walking --- */
@@ -976,8 +985,8 @@ static VOID httpd_walk_failed(HttpConn *c, const char *path, ULONG status)
 
     ok = hs_append(c->fail_xml, sizeof(c->fail_xml), &used,
                    "<D:response><D:href>");
-    ok = ok && hs_append(c->fail_xml, sizeof(c->fail_xml), &used,
-                         httpd_url_of(path));
+    ok = ok && httpd_append_href(c->fail_xml, sizeof(c->fail_xml), &used,
+                                 httpd_url_of(path));
     ok = ok && hs_append(c->fail_xml, sizeof(c->fail_xml), &used,
                          "</D:href><D:status>HTTP/1.1 ");
     ok = ok && hs_append_num(c->fail_xml, sizeof(c->fail_xml), &used, status);
@@ -1803,7 +1812,7 @@ static BOOL httpd_activelock(const HttpLock *l, char *out, ULONG outlen,
     ok = ok && hs_append(out, outlen, used, l->token);
     ok = ok && hs_append(out, outlen, used,
                          "</D:href></D:locktoken><D:lockroot><D:href>");
-    ok = ok && hs_append(out, outlen, used, httpd_url_of(l->path));
+    ok = ok && httpd_append_href(out, outlen, used, httpd_url_of(l->path));
     ok = ok && hs_append(out, outlen, used,
                          "</D:href></D:lockroot></D:activelock>");
 
@@ -1857,13 +1866,13 @@ static const char *httpd_href(const HttpPath *p, const char *child, BOOL dir)
         ok = ok && hs_append(httpd_href_buf, sizeof(httpd_href_buf), &used, "/");
 
     if (!ok)
-        return "/";
+        return NULL;
 
     /* Percent-encoding leaves no &, < or > behind, so an escaped href needs
        no XML escaping on top of it. */
     if (http_url_escape(httpd_href_buf, httpd_escape,
                         sizeof(httpd_escape)) == 0UL)
-        return "/";
+        return NULL;
 
     return httpd_escape;
 }
@@ -1895,7 +1904,8 @@ static ULONG httpd_propfind_entry(HttpConn *c, const char *href, const char *nam
 
     ok = hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
                    "<D:response><D:href>");
-    ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used, href);
+    ok = ok && httpd_append_href(httpd_scratch, sizeof(httpd_scratch), &used,
+                                 href);
     ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
                          "</D:href><D:propstat><D:prop>");
 
@@ -2041,7 +2051,8 @@ static ULONG httpd_index_entry(const char *href, const char *name,
     (VOID)http_xml_escape_name(name, httpd_text, sizeof(httpd_text));
 
     ok = hs_append(httpd_scratch, sizeof(httpd_scratch), &used, "<li><a href=\"");
-    ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used, href);
+    ok = ok && httpd_append_href(httpd_scratch, sizeof(httpd_scratch), &used,
+                                 href);
     ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used, "\">");
     ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used, httpd_text);
     ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
@@ -2553,6 +2564,11 @@ static VOID httpd_do_get(HttpConn *c)
             UnLock(c->dirlock);
             c->dirlock = (BPTR)0;
 
+            if (href == NULL)
+            {
+                httpd_error(c, 414, "The drawer's URL is too long.");
+                return;
+            }
             httpd_begin(c, 301);
             httpd_header(c, "Location", href);
             httpd_body_text(c, "text/html; charset=utf-8",
@@ -3750,8 +3766,8 @@ static VOID httpd_do_proppatch(HttpConn *c)
 
     ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
                          ">\n<D:response><D:href>");
-    ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
-                         httpd_href(&c->path, NULL, FALSE));
+    ok = ok && httpd_append_href(httpd_scratch, sizeof(httpd_scratch), &used,
+                                 httpd_href(&c->path, NULL, FALSE));
     ok = ok && hs_append(httpd_scratch, sizeof(httpd_scratch), &used,
                          "</D:href>");
 

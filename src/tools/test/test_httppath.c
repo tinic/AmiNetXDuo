@@ -992,6 +992,24 @@ static void test_utf8_names(void)
         CHECK(http_xml_escape_name("B\xC3\xBC" "cher", esc, sizeof(esc)) > 0);
         CHECK_STR(esc, "B\xC3\xBC" "cher");
     }
+    /* The longest href httpd builds, every byte a three-byte character:
+       nine escaped bytes each, which httpd_escape is sized for.  Short of
+       that, refused whole rather than cut. */
+    {
+        static uint16_t euro[128];
+        static char     big[HTTP_URL_MAX + HTTP_NAME_MAX + 2];
+        static char     wide[(HTTP_URL_MAX + HTTP_NAME_MAX + 2) * 9];
+        static char     narrow[(HTTP_URL_MAX + HTTP_NAME_MAX + 2) * 6];
+        txt_codeset     cs3 = { euro, NULL, NULL, 0 };
+
+        euro[0xA4 - 0x80] = 0x20AC;
+        memset(big, 0xA4, sizeof(big) - 1);
+        big[sizeof(big) - 1] = '\0';
+        http_path_codeset(&cs3);
+        CHECK(http_url_escape(big, wide, sizeof(wide)) == (sizeof(big) - 1) * 9);
+        CHECK(strncmp(wide, "%E2%82%AC", 9) == 0);
+        CHECK(http_url_escape(big, narrow, sizeof(narrow)) == 0);
+    }
     http_path_codeset(NULL);
 }
 
