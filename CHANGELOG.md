@@ -28,7 +28,8 @@ are history.
 - Installer uses Emu68's genet.device on versions before 1.1 alpha.1 and
   reports when no usable network device is available.
 - Installer preserves replaced libraries, commands and configuration in
-  the AmiNetXDuo drawer's Backup. Uninstall-AmiNetXDuo restores those files.
+  the AmiNetXDuo drawer's Backup. New Uninstall-AmiNetXDuo removes the
+  installation and restores those files.
 - Installer offers migration from another stack at Novice level. Updates
   over AmiNetXDuo keep its configuration and no longer ask to replace its
   own bsdsocket.library.
@@ -45,20 +46,16 @@ are history.
 - New NetWireless commodity shows Wi-Fi state and signal through an
   AppIcon, Tools menu item and ENV:WiFi. NetWirelessPrefs lists available
   networks, joins through WirelessManager, and reorders or removes saved
-  networks. Shell commands include LIST, STATUS and JOIN.
-- NetWireless and NetWirelessPrefs include Workbench icons and install in
-  SYS:Tools/Commodities and SYS:Prefs, respectively, or in the chosen
-  drawer. They find configured prism2.device cards automatically and show
-  "Wi-Fi off" after Disconnect.
+  networks. Shell commands include LIST, STATUS and JOIN. Both install
+  with Workbench icons in SYS:Tools/Commodities and SYS:Prefs,
+  respectively, or in the chosen drawer, and find configured
+  prism2.device cards automatically.
 - GetNetStatus returns 10 when another stack's bsdsocket.library is in
   memory, even when that stack has no port.
 - Nightly pre-releases provide the latest tested build between numbered
   releases.
 - X-Surf 100 with anxnet.device supports LINKSPEED=10; AUTO remains the
   default. The guide covers switch PAUSE settings and TCP receive windows.
-- anxzz9000.device no longer occasionally rejects a newly received frame
-  as oversize. Compatible firmware can align receive copies by shifting
-  frames two bytes; the driver recognises both fork and upstream firmware.
 - httpd's file browser accepts Return in the New drawer and Rename dialogs.
 - NetMeter starts from SYS:WBStartup without a "not responding" requester.
   Existing WBStartup icons need DONOTWAIT added in their Information window.
