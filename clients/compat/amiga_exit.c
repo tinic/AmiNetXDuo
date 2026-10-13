@@ -18,3 +18,9 @@ __attribute__((weak)) unsigned long amiga_client_stack_size(void)
 {
     return 32UL * 1024UL;
 }
+
+__attribute__((weak)) int amiga_client_argv_filter(int argc, char **argv)
+{
+    (void)argv;
+    return argc;
+}
