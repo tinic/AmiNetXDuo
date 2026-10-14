@@ -2309,7 +2309,7 @@ static VOID ami_ns_alias_detach(AmiNetStack *ns, UWORD slot, UWORD parent)
 {
     (VOID)ami_sana2_alias_publish(ns->ns_Iface[parent],
                                   &ns->ns_Ip.nx_ip_interface[slot], FALSE);
-    (VOID)nx_ip_interface_detach(&ns->ns_Ip, (UINT)slot);
+    AMI_NX_CLEANUP(nx_ip_interface_detach(&ns->ns_Ip, (UINT)slot));
 }
 
 /* Every alias of `index`, before the interface itself goes.  Inside a caller

@@ -679,7 +679,8 @@ VOID ami_sana2_alias_driver_entry(NX_IP_DRIVER *driver_req)
         if (iface == NULL || iface->detaching || !iface->admin_up)
         {
             if (driver_req->nx_ip_driver_packet != NULL)
-                nx_packet_transmit_release(driver_req->nx_ip_driver_packet);
+                AMI_NX_CLEANUP(nx_packet_transmit_release(
+                    driver_req->nx_ip_driver_packet));
             driver_req->nx_ip_driver_status = NX_INVALID_INTERFACE;
             return;
         }
