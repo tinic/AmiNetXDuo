@@ -264,8 +264,13 @@ static __attribute__((noinline)) LONG wb_arguments(const struct WBStartup *wbs, 
         (*count)++;
         addif_names[*count] = NULL;
 
+        /* Before anything is refused: QUIET is what decides whether the
+           refusal comes up as a requester. */
         if (icon_tool_type(path, "QUIET", &dob) != NULL)
-            *quiet = TRUE;
+        {
+            *quiet      = TRUE;
+            addif_quiet = TRUE;
+        }
         v = icon_tool_type(path, "TIMEOUT", &dob);
         if (v != NULL)
         {
