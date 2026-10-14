@@ -211,7 +211,7 @@ static const char *icon_tool_type(const char *path, const char *key,
 }
 
 /* PRI= or PRIORITY= in the icon beside `path`; 0 without one. */
-static LONG icon_priority(const char *path)
+static __attribute__((noinline)) LONG icon_priority(const char *path)
 {
     struct DiskObject *dob = NULL;
     const char        *v   = icon_tool_type(path, "PRI", &dob);
@@ -231,7 +231,7 @@ static LONG icon_priority(const char *path)
  * The project icons Workbench passed, as paths, with their QUIET and TIMEOUT.
  * QUIET in any of them makes the run quiet; the longest TIMEOUT wins.
  */
-static BOOL wb_arguments(const struct WBStartup *wbs, ULONG *count,
+static __attribute__((noinline)) BOOL wb_arguments(const struct WBStartup *wbs, ULONG *count,
                          BOOL *quiet, LONG *timeout)
 {
     LONG i;
@@ -276,7 +276,7 @@ static BOOL wb_arguments(const struct WBStartup *wbs, ULONG *count,
 
 /* Output() and the error stream into a T: file for the requester, NIL: when
    T: is not there. */
-static VOID wb_capture_begin(VOID)
+static __attribute__((noinline)) VOID wb_capture_begin(VOID)
 {
     struct Process *pr = (struct Process *)FindTask(NULL);
 
@@ -296,7 +296,7 @@ static VOID wb_capture_begin(VOID)
     pr->pr_CES       = addif_wb_out;
 }
 
-static VOID wb_capture_end(LONG rc)
+static __attribute__((noinline)) VOID wb_capture_end(LONG rc)
 {
     struct Process *pr = (struct Process *)FindTask(NULL);
     static char     text[512];
@@ -354,7 +354,7 @@ static VOID wb_capture_end(LONG rc)
  * the name.  A bare name's icon is looked for where its file is.  Insertion
  * sort: the list is at most AMI_CFG_MAX_ATTACHED long.
  */
-static VOID sort_names(STRPTR *names, ULONG count)
+static __attribute__((noinline)) VOID sort_names(STRPTR *names, ULONG count)
 {
     static char path[ADDIF_MATCH_PATH];
     ULONG       i;
@@ -883,9 +883,11 @@ int main(int argc, char **argv)
     return (int)rc;
 }
 
+/* Static: this command is one process, and 4 KB of Shell stack. */
+static LONG args[ARG_COUNT];
+
 static int addif_main(int argc, char **argv)
 {
-    LONG            args[ARG_COUNT];
     struct RDArgs  *rda;
     AmiIfConfig     ifc;
     STRPTR         *arguments;
