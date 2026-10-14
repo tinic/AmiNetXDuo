@@ -17,6 +17,9 @@ are history.
   arp <address> SET <mac> form is removed.
 - ping accepts -v, which shows ICMP errors, and DONTROUTE; traceroute
   takes the packet size without its keyword.
+- AddNetInterface waits 60 seconds by default and starts from an
+  interface's Workbench icon, honouring its QUIET, TIMEOUT and PRI
+  tool types.
 - ConfigureNetInterface accepts every AmigaDOS Command Reference keyword.
   ALIASADDR and DELETEADDR add and remove additional IPv4 addresses;
   ADDRESS=DHCP and CONFIGURE=AUTO are accepted; a failed ONLINE
