@@ -218,25 +218,13 @@ VOID ami_sana2_tx_lazy_stop(AmiSana2If *iface)
  */
 static VOID ami_sana2_tx_complete(AmiSana2If *iface, AmiTxSlot *slot);
 
-VOID ami_sana2_tx_reap(AmiSana2If *iface)
+static VOID __attribute__((noinline))
+ami_sana2_tx_reap_pending(AmiSana2If *iface)
 {
     struct Message *msg;
     struct List     batch;
     struct Node    *node;
     struct Node    *next;
-
-    /*
-     * NOT A GetMsg() PER REPLY, AND NOT ONE AT ALL WHEN THERE IS NOTHING.
-     * This runs at the head of every send, and GetMsg() is a Disable() pair
-     * around one unlink -- on Emu68 a 5.5 us trap, paid even for an empty
-     * port: 8% of a transmit profile sat here.  The emptiness test is one
-     * load with no lock (a reply landing after it is picked up by the next
-     * send, or by the reader); when there is something, the whole list is
-     * spliced off under one Disable() and walked from here, the shape
-     * ami_sana2_rx_drain() uses for the read replies.
-     */
-    if (iface->tx_port.mp_MsgList.lh_Head->ln_Succ == NULL)
-        return;
 
     NewList(&batch);
     Disable();
@@ -274,6 +262,17 @@ VOID ami_sana2_tx_reap(AmiSana2If *iface)
        for. */
     if (iface->tx_pend_count != 0)
         ami_sana2_tx_kick(iface);
+}
+
+VOID ami_sana2_tx_reap(AmiSana2If *iface)
+{
+    /* Keep the empty-port check small enough to inline into the send path.
+       A reply arriving after it is picked up by the next send or reader.
+       Only a nonempty port needs the batch frame and Disable()/Enable();
+       the pending helper rechecks under Disable() because another reaper
+       may have drained the port meanwhile. */
+    if (iface->tx_port.mp_MsgList.lh_Head->ln_Succ != NULL)
+        ami_sana2_tx_reap_pending(iface);
 }
 
 /*
@@ -898,6 +897,18 @@ UINT ami_sana2_tx_send_now(AmiSana2If *iface, NX_PACKET *packet,
                                dst_lsw);
 }
 
+#ifdef AMINETXDUO_BPF
+/* LTO otherwise reserves the capture view and synthetic link header in
+   every launch, even when no capture channel is bound. */
+static VOID __attribute__((noinline))
+ami_sana2_tx_capture(AmiSana2If *iface, AmiTxSlot *slot, NX_PACKET *packet,
+                      UWORD ether_type, ULONG dst_msw, ULONG dst_lsw)
+{
+    ami_bpf_tap_tx(iface, packet, slot->hdr_len != 0, ether_type,
+                   dst_msw, dst_lsw, iface->mac);
+}
+#endif
+
 /*
  * One write into a claimed slot: the link header where the wire needs it,
  * the pad, the tap, the request, BeginIO(), and the completion when the
@@ -993,8 +1004,7 @@ static UINT ami_sana2_tx_launch(AmiSana2If *iface, AmiTxSlot *slot,
      * packet, which is often a segment handed back for retransmission.
      */
     if (ami_bpf_bound_channels != 0)
-        ami_bpf_tap_tx(iface, packet, slot->hdr_len != 0, ether_type,
-                       dst_msw, dst_lsw, iface->mac);
+        ami_sana2_tx_capture(iface, slot, packet, ether_type, dst_msw, dst_lsw);
 #endif
 
     length = packet->nx_packet_length;
