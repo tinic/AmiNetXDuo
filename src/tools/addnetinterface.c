@@ -13,6 +13,9 @@ const char *const tool_name = "AddNetInterface";
 static const char version_tag[] __attribute__((used)) =
     TOOL_VERSTAG("AddNetInterface");
 
+/* The AmigaDOS Command Reference's template; test_refcompat holds TEMPLATE
+   to it. */
+#define REFERENCE_TEMPLATE "INTERFACE/M,QUIET/S,TIMEOUT/K/N"
 #define TEMPLATE    "INTERFACE/M,QUIET/S,TIMEOUT/K/N"
 
 enum
@@ -649,7 +652,14 @@ static BOOL wait_for_interface_ready(LONG index, const AmiIfConfig *ifc,
     }
 }
 
+static int addif_main(int argc, char **argv);
+
 int main(int argc, char **argv)
+{
+    return (int)tool_quiet_end(addif_main(argc, argv));
+}
+
+static int addif_main(int argc, char **argv)
 {
     LONG            args[ARG_COUNT];
     struct RDArgs  *rda;
@@ -693,6 +703,8 @@ int main(int argc, char **argv)
     arguments = (STRPTR *)args[ARG_INTERFACE];
     names     = addif_names;
     quiet   = (args[ARG_QUIET] != 0) ? TRUE : FALSE;
+    if (quiet)
+        tool_quiet_begin();
     timeout = ADDIF_TIMEOUT;
 
     if (args[ARG_TIMEOUT] != 0)

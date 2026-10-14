@@ -15,6 +15,9 @@ const char *const tool_name = "DeleteNetRoute";
 static const char version_tag[] __attribute__((used)) =
     TOOL_VERSTAG("DeleteNetRoute");
 
+/* The AmigaDOS Command Reference's template; test_refcompat holds TEMPLATE
+   to it. */
+#define REFERENCE_TEMPLATE "QUIET/S,DST=DESTINATION/K,DEFAULT=DEFAULTGATEWAY/K"
 #define TEMPLATE    "QUIET/S,DST=DESTINATION/K,DEFAULT=DEFAULTGATEWAY/K"
 
 enum
@@ -30,6 +33,12 @@ const char *const tool_name = "AddNetRoute";
 static const char version_tag[] __attribute__((used)) =
     TOOL_VERSTAG("AddNetRoute");
 
+/* The AmigaDOS Command Reference's template; test_refcompat holds TEMPLATE
+   to it. */
+#define REFERENCE_TEMPLATE "QUIET/S,DST=DESTINATION/K,"              \
+                    "HOSTDST=HOSTDESTINATION/K,"             \
+                    "NETDST=NETDESTINATION/K,VIA=GATEWAY/K," \
+                    "DEFAULT=DEFAULTGATEWAY/K"
 #define TEMPLATE    "QUIET/S,DST=DESTINATION/K,HOSTDST=HOSTDESTINATION/K," \
                     "NETDST=NETDESTINATION/K,VIA=GATEWAY/K," \
                     "DEFAULT=DEFAULTGATEWAY/K"
@@ -738,7 +747,6 @@ static LONG run_ipv6(const LONG *args, BOOL have_default)
         return RETURN_ERROR;
     }
 
-    /* FALSE: QUIET drops the route that was set, never why it was not. */
     base = tool_netstatus_open(FALSE);
     if (base == NULL)
         return RETURN_FAIL;
@@ -962,7 +970,7 @@ int main(int argc, char **argv)
     int rc = addnetroute_main(argc, argv);
 
     ami_netdb_free();
-    return rc;
+    return (int)tool_quiet_end(rc);
 }
 
 static int addnetroute_main(int argc, char **argv)
@@ -1002,6 +1010,8 @@ static int addnetroute_main(int argc, char **argv)
     }
 
     nr_quiet = (args[ARG_QUIET] != 0) ? TRUE : FALSE;
+    if (nr_quiet)
+        tool_quiet_begin();
 
     have_default = (args[ARG_DEFAULT] != 0) ? TRUE : FALSE;
     have_dest    = (args[ARG_DST] != 0) ? TRUE : FALSE;
@@ -1133,7 +1143,6 @@ static int addnetroute_main(int argc, char **argv)
         return RETURN_ERROR;
     }
 
-    /* FALSE: QUIET drops the route that was set, never why it was not. */
     base = tool_netstatus_open(FALSE);
     if (base == NULL)
     {

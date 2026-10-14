@@ -64,6 +64,16 @@ VOID tool_hint(const char *fmt, ...);      /* ONE line under a refusal       */
 VOID tool_fault(LONG code);                /* PrintFault(code, tool_name)    */
 
 /*
+ * QUIET for the commands whose reference QUIET is Roadshow's (toolquiet.h):
+ * from tool_quiet_begin() on, Output() and the error stream are NIL:, so no
+ * message of any kind is printed; tool_quiet_end() restores them and turns the
+ * return code into RETURN_WARN when it is worse.  Every exit goes through
+ * tool_quiet_end(), which is a no-op when QUIET was not given.
+ */
+VOID tool_quiet_begin(VOID);
+LONG tool_quiet_end(LONG rc);
+
+/*
  * THE IDENTIFIER, not a translation of it.
  *
  * A refusal prints the operation and then one of these, so the first line

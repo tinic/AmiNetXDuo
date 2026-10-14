@@ -542,7 +542,14 @@ static VOID say_addresses6(struct Library *base, LONG index, const char *name)
         say("%s: no IPv6 address\n", (LONG)name);
 }
 
+static int cni_main(int argc, char **argv);
+
 int main(int argc, char **argv)
+{
+    return (int)tool_quiet_end(cni_main(argc, argv));
+}
+
+static int cni_main(int argc, char **argv)
 {
     struct RDArgs   *rda;
     struct Library  *base;
@@ -614,6 +621,8 @@ int main(int argc, char **argv)
     }
 
     cni_quiet = (args[ARG_QUIET] != 0) ? TRUE : FALSE;
+    if (cni_quiet)
+        tool_quiet_begin();
 
     /* The same spelling AddNetInterface and RemoveNetInterface accept: a name,
        or the path of the file it was configured from. */
@@ -870,8 +879,6 @@ int main(int argc, char **argv)
         return RETURN_WARN;
     }
 
-    /* FALSE: QUIET drops the report of what changed, never the reason it
-       could not. */
     base = tool_netstatus_open(FALSE);
     if (base == NULL)
     {
