@@ -1530,8 +1530,7 @@ typedef struct
 {
     char      name[NETSTATUS_NAME_LEN];
     ULONG     rx_peak, tx_peak;
-    ULONG     rx_hi, rx_lo, tx_hi, tx_lo;
-    ULONG     ms;
+    NmSpan    span;
     uint32_t  rx_hist[NM_TUI_HIST], tx_hist[NM_TUI_HIST];
     uint32_t  head, count;
 } NmConIf;
@@ -1558,15 +1557,6 @@ typedef struct
 static VOID nm_con_write(void *ctx, const char *s, uint32_t n)
 {
     (VOID)Write((BPTR)ctx, (APTR)s, (LONG)n);
-}
-
-static VOID nm_add64(ULONG *hi, ULONG *lo, ULONG v)
-{
-    ULONG was = *lo;
-
-    *lo += v;
-    if (*lo < was)
-        (*hi)++;
 }
 
 /* The session's numbers follow each interface by name, as nm_sample's do. */
@@ -1601,13 +1591,7 @@ static VOID nm_con_sample(NmCon *c)
         /* The average is bytes over the time they were counted in, the
            actual intervals between samples. */
         if (f->measured)
-        {
-            nm_add64(&ci->rx_hi, &ci->rx_lo, f->rx_delta);
-            nm_add64(&ci->tx_hi, &ci->tx_lo, f->tx_delta);
-            /* 49.7 days of milliseconds: the average then stays put. */
-            ci->ms = (ci->ms > 0xFFFFFFFFUL - nm.sample_ms) ? 0xFFFFFFFFUL
-                                                           : ci->ms + nm.sample_ms;
-        }
+            nm_span_add(&ci->span, f->rx_delta, f->tx_delta, nm.sample_ms);
         ci->rx_hist[ci->head] = f->rx_rate;
         ci->tx_hist[ci->head] = f->tx_rate;
         ci->head = (ci->head + 1u) % NM_TUI_HIST;
@@ -1627,8 +1611,7 @@ static VOID nm_con_reset(NmCon *c)
         NmConIf *ci = &c->ifs[i];
 
         ci->rx_peak = ci->tx_peak = 0;
-        ci->rx_hi = ci->rx_lo = ci->tx_hi = ci->tx_lo = 0;
-        ci->ms = 0;
+        memset(&ci->span, 0, sizeof(ci->span));
         ci->head = ci->count = 0;
     }
     c->session_ms = 0;
@@ -1650,8 +1633,8 @@ static VOID nm_con_draw(NmCon *c)
         t->up = f->up;            t->bps = f->bps;     t->have_bytes = f->have_bytes;
         t->rx_rate = f->rx_rate;  t->tx_rate = f->tx_rate;
         t->rx_peak = ci->rx_peak; t->tx_peak = ci->tx_peak;
-        t->rx_avg = nm_average(ci->rx_hi, ci->rx_lo, ci->ms);
-        t->tx_avg = nm_average(ci->tx_hi, ci->tx_lo, ci->ms);
+        t->rx_avg = nm_average(ci->span.rx_hi, ci->span.rx_lo, ci->span.ms);
+        t->tx_avg = nm_average(ci->span.tx_hi, ci->span.tx_lo, ci->span.ms);
         t->rx_hi = f->rx_hi;      t->rx_lo = f->rx_lo;
         t->tx_hi = f->tx_hi;      t->tx_lo = f->tx_lo;
         t->rx_pkts = f->rx_pkts;  t->tx_pkts = f->tx_pkts;
@@ -1762,8 +1745,9 @@ static BOOL nm_con_input(NmCon *c, BOOL *redraw)
     return quit;
 }
 
-/* The console's own size, asked for once before the first frame. */
-static VOID nm_con_first_bounds(NmCon *c)
+/* The console's own size, asked for once before the first frame.  TRUE
+   when a quit key or Ctrl-C came first. */
+static BOOL nm_con_first_bounds(NmCon *c)
 {
     BOOL  redraw = FALSE;
     UWORD k;
@@ -1771,10 +1755,14 @@ static VOID nm_con_first_bounds(NmCon *c)
     nm_tui_ask_bounds(&c->o);
     for (k = 0; k < 10 && !redraw; k++)
     {
+        if (SetSignal(0, 0) & SIGBREAKF_CTRL_C)
+            return TRUE;                /* the main loop's Wait() takes it */
         if (!WaitForChar(c->in, 50000L))
             continue;
-        (VOID)nm_con_input(c, &redraw);
+        if (nm_con_input(c, &redraw))
+            return TRUE;
     }
+    return FALSE;
 }
 
 static int nm_console(VOID)
@@ -1805,10 +1793,12 @@ static int nm_console(VOID)
 
     (VOID)SetMode(c->in, 1);            /* keys as they are pressed */
     nm_tui_enter(&c->o);
-    nm_con_first_bounds(c);
-    nm_con_draw(c);
-
-    nm_timer_arm();
+    done = nm_con_first_bounds(c);
+    if (!done)
+    {
+        nm_con_draw(c);
+        nm_timer_arm();
+    }
     while (!done)
     {
         ULONG got = Wait(tsig | SIGBREAKF_CTRL_C);

@@ -35,6 +35,18 @@ uint32_t nm_rate(uint32_t bytes, uint32_t ms);
    division: the 68000 has none. */
 uint32_t nm_average(uint32_t hi, uint32_t lo, uint32_t ms);
 
+/* A session's bytes each way and the milliseconds they were counted over. */
+typedef struct NmSpan
+{
+    uint32_t rx_hi, rx_lo, tx_hi, tx_lo;
+    uint32_t ms;
+} NmSpan;
+
+/* One interval's bytes and length into the span.  An interval that would
+   take the time past 0xFFFFFFFF ms (49.7 days) is not counted at all, bytes
+   nor time, so from then on the average stays where it was. */
+void nm_span_add(NmSpan *s, uint32_t rx, uint32_t tx, uint32_t ms);
+
 /* The full-scale after one more second: a peak above it raises it with some
    headroom at once, otherwise it falls by a sixteenth, never below
    NM_SCALE_FLOOR. */

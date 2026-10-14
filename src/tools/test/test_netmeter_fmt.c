@@ -124,9 +124,35 @@ static void t_average(void)
     /* 4 GB + 1 GB over 1 ms is past 32 bits; so is anything that large. */
     expect(nm_average(1, 0x40000000u, 1) == 0xFFFFFFFFu, "past 32 bits saturates");
     expect(nm_average(0xFFFFFFFFu, 0, 0xFFFFFFFFu) == 0xFFFFFFFFu, "past 2^64/1000 saturates");
+    /* The low word's carry overflows the high product: 4294967999 + 1. */
+    expect(nm_average(0x418937u, 0xFFFFFFFFu, 0xFFFFFFFFu) == 0xFFFFFFFFu,
+           "the carry into the high product saturates");
     /* The edge: the largest total whose average still fits, exact. */
     expect(nm_average(0x418937u, 0x4B439581u, 0xFFFFFFFFu) == 4294967294u,
            "the largest average, exact");
+}
+
+static void t_span(void)
+{
+    NmSpan s;
+
+    memset(&s, 0, sizeof(s));
+    nm_span_add(&s, 1000, 10, 1000);
+    nm_span_add(&s, 3000, 30, 2500);            /* a late sample */
+    expect(s.ms == 3500 && s.rx_lo == 4000 && s.tx_lo == 40, "span: the intervals add");
+    expect(nm_average(s.rx_hi, s.rx_lo, s.ms) == 1142, "span: bytes over measured time");
+
+    s.rx_lo = 0xFFFFFF00u;
+    nm_span_add(&s, 0x200, 0, 1000);
+    expect(s.rx_hi == 1 && s.rx_lo == 0x100, "span: the carry into the high word");
+
+    /* Near 49.7 days: what fits is counted; past it neither bytes nor time. */
+    s.ms = 0xFFFFFFFFu - 1000u;
+    nm_span_add(&s, 5, 5, 1000);
+    expect(s.ms == 0xFFFFFFFFu && s.rx_lo == 0x105, "span: the last interval that fits");
+    nm_span_add(&s, 7777, 7777, 1000);
+    expect(s.ms == 0xFFFFFFFFu && s.rx_hi == 1 && s.rx_lo == 0x105 && s.tx_lo == 45,
+           "span: frozen past 49.7 days, bytes and time");
 }
 
 static void t_text(void)
@@ -473,6 +499,7 @@ int main(void)
     t_scale();
     t_bar();
     t_average();
+    t_span();
     t_text();
     t_frame_80x25();
     t_frame_small();

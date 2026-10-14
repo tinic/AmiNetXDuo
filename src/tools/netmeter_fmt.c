@@ -172,7 +172,11 @@ uint32_t nm_average(uint32_t hi, uint32_t lo, uint32_t ms)
     p0  = (lo & 0xFFFFu) * 1000u;
     p1  = (lo >> 16) * 1000u;
     mlo = p0 + (p1 << 16);
-    mhi = hi * 1000u + (p1 >> 16) + (mlo < p0 ? 1u : 0u);
+    mhi = hi * 1000u;                   /* fits: hi <= 0xFFFFFFFF / 1000 */
+    p1  = (p1 >> 16) + (mlo < p0 ? 1u : 0u);
+    if (mhi > 0xFFFFFFFFu - p1)
+        return 0xFFFFFFFFu;       /* the low word's carry overflows it   */
+    mhi += p1;
     if (mhi >= ms)
         return 0xFFFFFFFFu;       /* the quotient needs more than 32 bits */
 
@@ -191,6 +195,24 @@ uint32_t nm_average(uint32_t hi, uint32_t lo, uint32_t ms)
         }
     }
     return q;
+}
+
+static void nm_add64(uint32_t *hi, uint32_t *lo, uint32_t v)
+{
+    uint32_t was = *lo;
+
+    *lo += v;
+    if (*lo < was)
+        (*hi)++;
+}
+
+void nm_span_add(NmSpan *s, uint32_t rx, uint32_t tx, uint32_t ms)
+{
+    if (s->ms > 0xFFFFFFFFu - ms)
+        return;
+    nm_add64(&s->rx_hi, &s->rx_lo, rx);
+    nm_add64(&s->tx_hi, &s->tx_lo, tx);
+    s->ms += ms;
 }
 
 uint32_t nm_scale_next(uint32_t scale, uint32_t rx_rate, uint32_t tx_rate)
