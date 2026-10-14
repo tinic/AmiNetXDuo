@@ -676,23 +676,6 @@ ULONG                       svc_i;
     for (svc_i = 0UL; svc_i < r -> tr_backlog; svc_i++)
     {
 
-        /* Checked between ticks, so the burst under Forbid() can overrun
-           the budget by one tick; the rest of the backlog waits.  */
-        if (svc_i > 0UL)
-        {
-            struct EClockVal budget_now;
-
-            (VOID) ReadEClock(&budget_now);
-            if ((ULONG) (budget_now.ev_lo - svc_now.ev_lo) >
-                (r -> tr_eclock_per_ms * (ULONG) TX_AMIGA_TIMER_BUDGET_MS))
-            {
-                _tx_amiga_tick.tx_amiga_tick_over_budget++;
-                _tx_amiga_tick.tx_amiga_tick_deferred +=
-                    r -> tr_backlog - svc_i;
-                break;
-            }
-        }
-
         /* Enter "interrupt" context, run the tick, leave it.  */
         _tx_thread_context_save();
         _tx_timer_interrupt();
@@ -701,8 +684,6 @@ ULONG                       svc_i;
 
     r -> tr_backlog -=  svc_i;
     _tx_amiga_tick.tx_amiga_tick_delivered +=  svc_i;
-    _tx_amiga_tick.tx_amiga_tick_skew =
-        r -> tr_backlog + _tx_amiga_tick.tx_amiga_tick_lost;
 
     /* Poke the scheduler when it could actually dispatch.  Pointless from
        the realm: it IS the scheduler, mid-pass.  */
@@ -1072,10 +1053,10 @@ UINT                 armed;
 
     if (_tx_amiga_tick.tx_amiga_tick_clipped != 0UL)
     {
-        AMI_WARN("tick: %ld stalls clipped, wheel %ld ticks behind the clock "
-                "(worst %ld)",
+        AMI_WARN("tick: %ld stalls clipped, %ld ticks lost "
+                "(wheel worst %ld behind)",
                 (LONG) _tx_amiga_tick.tx_amiga_tick_clipped,
-                (LONG) _tx_amiga_tick.tx_amiga_tick_skew,
+                (LONG) _tx_amiga_tick.tx_amiga_tick_lost,
                 (LONG) _tx_amiga_tick.tx_amiga_tick_skew_peak);
     }
     AMI_INFO("tick: %ld wakeups -> %ld ticks in %ld ms (%ld empty, %ld caught up)",

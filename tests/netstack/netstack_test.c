@@ -400,11 +400,9 @@ TX_AMIGA_TICK_STATS  s;
     t_log("tick: %lu us in-task, worst stall %lu ms with %lu us service",
           s.tx_amiga_tick_service_us, s.tx_amiga_tick_worst_stall_ms,
           s.tx_amiga_tick_worst_service_us);
-    t_log("tick: %lu clipped, %lu lost, %lu over budget, %lu deferred",
-          s.tx_amiga_tick_clipped, s.tx_amiga_tick_lost,
-          s.tx_amiga_tick_over_budget, s.tx_amiga_tick_deferred);
-    t_log("tick: wheel %lu ticks late, worst %lu",
-          s.tx_amiga_tick_skew, s.tx_amiga_tick_skew_peak);
+    t_log("tick: %lu clipped, %lu lost",
+          s.tx_amiga_tick_clipped, s.tx_amiga_tick_lost);
+    t_log("tick: wheel worst %lu ticks late", s.tx_amiga_tick_skew_peak);
 }
 
 
