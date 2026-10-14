@@ -72,8 +72,8 @@
  *    0  normal programs
  *
  * The tick may sit above console.device, trackdisk.device and IDE drivers
- * because its work is small: at most TX_AMIGA_TIMER_MAX_CATCHUP ticks of tens
- * of microseconds each. The TCP: processes share 5 with
+ * because one service delivers at most TX_AMIGA_TIMER_MAX_CATCHUP ticks; their
+ * cost is whatever the timer callbacks cost. The TCP: processes share 5 with
  * console.device and round-robin with it. SANA-II driver tasks (anxwifipi
  * unit 10, receiver 5) are hardware drivers and are not on this ladder.
  */

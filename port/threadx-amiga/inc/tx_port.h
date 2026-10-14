@@ -422,8 +422,9 @@ void    _tx_amiga_start_interrupts(void);
    it preempts the baton holder; below the filesystem handlers and disk
    drivers (10) and input.device (20), so a tick burst never delays a pointer
    move or a disk request.  It may outrank console.device, trackdisk.device and
-   IDE drivers (5-6): one service is at most TX_AMIGA_TIMER_MAX_CATCHUP ticks
-   of tens of microseconds each.  Ladder asserted in
+   IDE drivers (5-6): one service delivers at most TX_AMIGA_TIMER_MAX_CATCHUP
+   ticks; measured ticks cost 20-170 us, but timer callbacks set the real
+   cost.  Ladder asserted in
    src/thread_priorities.h.  */
 
 #ifndef TX_AMIGA_TIMER_PRIORITY
