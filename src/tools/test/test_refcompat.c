@@ -336,6 +336,24 @@ static void check_reference(void)
 
 /* ------------------------------------------------------------- arp FILE --- */
 
+/* A character source for arpfile_drain(): the text, then -1 or -2. */
+typedef struct DrainSrc
+{
+    const char *text;
+    long        end;
+    int         reads;
+} DrainSrc;
+
+static long drain_get(void *ctx)
+{
+    DrainSrc *d = (DrainSrc *)ctx;
+
+    d->reads++;
+    if (*d->text == '\0')
+        return d->end;
+    return (unsigned char)*d->text++;
+}
+
 static void check_arpfile(void)
 {
     char  l1[] = "oberon 00:30:ab:0e:d5:ee TEMP\n";
@@ -368,6 +386,20 @@ static void check_arpfile(void)
     memcpy(big, "oberon 00:30:\n", 14);
     CHECK(!arpfile_partial(big, 14), "a full chunk ending the line is whole");
     CHECK(!arpfile_partial(l6, 14 + 64), "and so is a short last line");
+
+    {
+        DrainSrc d1 = { "tail TEMP PUB\nnext 00:11:22:33:44:55\n", -1, 0 };
+        DrainSrc d2 = { "tail with no newline", -1, 0 };
+        DrainSrc d3 = { "tail", -2, 0 };
+
+        CHECK(arpfile_drain(drain_get, &d1) == ARPFILE_DRAINED &&
+              strncmp(d1.text, "next", 4) == 0,
+              "the drain stops after the newline, the next line intact");
+        CHECK(arpfile_drain(drain_get, &d2) == ARPFILE_DRAINED,
+              "the end of the file ends the drain");
+        CHECK(arpfile_drain(drain_get, &d3) == ARPFILE_READERR &&
+              d3.reads == 5, "a read error is reported, not taken for the end");
+    }
 }
 
 int main(int argc, char **argv)

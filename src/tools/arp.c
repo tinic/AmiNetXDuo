@@ -648,6 +648,18 @@ static LONG delete_entry(struct Library *base, const char *host)
     return RETURN_OK;
 }
 
+/* FGetC() for arpfile_drain(): -2 when the -1 it returned was an error. */
+static long arp_getc(void *fh)
+{
+    LONG c;
+
+    SetIoErr(0);
+    c = FGetC((BPTR)fh);
+    if (c == -1 && IoErr() != 0)
+        return -2;
+    return (long)c;
+}
+
 /*
  * FILE: one `<host> <hardware address> [TEMP] [PUB]` per line, as SET takes
  * them (arpfile.h).  Every line is tried; the return code is the worst.  A
@@ -689,16 +701,17 @@ static LONG set_from_file(struct Library *base, const char *path)
 
         if (arpfile_partial(arp_line, sizeof(arp_line) - 2))
         {
-            LONG c;
-
-            /* The rest of this line, so it is not read as the next one. */
-            do
-                c = FGetC(fh);
-            while (c != -1 && c != '\n');
-
             tool_error("%s line %ld: longer than %ld characters", (LONG)path,
                        line, (LONG)(sizeof(arp_line) - 2));
             worst = RETURN_ERROR;
+
+            /* The rest of this line, so it is not read as the next one.  A
+               read error there ends the file: nothing after it is set. */
+            if (arpfile_drain(arp_getc, (void *)fh) == ARPFILE_READERR)
+            {
+                tool_error("%s: read error in line %ld", (LONG)path, line);
+                break;
+            }
             continue;
         }
 

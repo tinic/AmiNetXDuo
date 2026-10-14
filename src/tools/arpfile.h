@@ -61,6 +61,28 @@ static inline char *arpfile_word(char **cursor)
     return word;
 }
 
+/*
+ * The rest of an overlong line.  `get` returns the next character, -1 at the
+ * end of the file, -2 on a read error.  ARPFILE_DRAINED at the newline or the
+ * end, ARPFILE_READERR on an error: the caller stops there, because what is
+ * left cannot be told apart from the line it belongs to.
+ */
+#define ARPFILE_DRAINED  0
+#define ARPFILE_READERR  (-1)
+
+static inline int arpfile_drain(long (*get)(void *), void *ctx)
+{
+    for (;;)
+    {
+        long c = get(ctx);
+
+        if (c == -2)
+            return ARPFILE_READERR;
+        if (c == -1 || c == '\n')
+            return ARPFILE_DRAINED;
+    }
+}
+
 /* One whole record, split in place. */
 static inline int arpfile_parse(char *line, char **host, char **mac,
                                 int *temp, char **bad)
