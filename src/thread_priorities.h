@@ -66,24 +66,22 @@
  *   20  input.device
  *   10+ filesystem handlers, scsi.device and other disk drivers
  *    9  AmiNetXDuo tick (TX_AMIGA_TIMER_PRIORITY, tx_port.h)
- *    7  a ThreadX Task parked for the baton (TX_AMIGA_HANDOFF_PRIORITY)
- *    6  ThreadX band (TX_AMIGA_TASK_PRIORITY), SANA-II readers included;
- *       TCP: handler and its sessions; ehide.device (seen on the A3000)
- *    5  console.device, trackdisk.device, CON:, SD0 (seen on the A1200)
- *    0  normal programs; adopted callers keep their own priority
+ *    6  ehide.device (seen on the A3000)
+ *    5  console.device, trackdisk.device, TCP: handler and its sessions
+ *  1-2  ThreadX band (TX_AMIGA_TASK_PRIORITY, TX_AMIGA_HANDOFF_PRIORITY)
+ *    0  normal programs
  *
- * The stack's own work sits above console.device, so heavy console output
- * does not starve it. The tick may sit above console.device, trackdisk.device
- * and IDE drivers because its work is bounded: microseconds per tick plus at
- * most TX_AMIGA_TIMER_BUDGET_MS of catch-up. Driver tasks of our own SANA-II
- * devices (anxwifipi unit 10, receiver 5, anxgenet link 0) are hardware
- * drivers and are not on this ladder.
+ * The tick may sit above console.device, trackdisk.device and IDE drivers
+ * because its work is bounded: microseconds per tick plus at most
+ * TX_AMIGA_TIMER_BUDGET_MS of catch-up. The TCP: processes share 5 with
+ * console.device and round-robin with it. SANA-II driver tasks (anxwifipi
+ * unit 10, receiver 5) are hardware drivers and are not on this ladder.
  */
 #define AMI_EXEC_INPUT_PRIORITY    20      /* input.device                   */
 #define AMI_EXEC_HANDLER_PRIORITY  10      /* filesystem handlers, disks     */
 #define AMI_EXEC_CONSOLE_PRIORITY   5      /* console.device, trackdisk      */
 #define AMI_EXEC_PROGRAM_PRIORITY   0      /* normal programs                */
-#define AMI_EXEC_TCP_PRIORITY       6      /* TCP: handler and sessions      */
+#define AMI_EXEC_TCP_PRIORITY       5      /* TCP: handler and sessions      */
 
 /*
  * The invariants, so that the next edit to the numbers above fails to compile
@@ -120,24 +118,24 @@
 #if AMI_EXEC_TCP_PRIORITY >= AMI_EXEC_HANDLER_PRIORITY
 #error "the TCP: processes must stay below the filesystem handlers"
 #endif
-#if AMI_EXEC_TCP_PRIORITY <= AMI_EXEC_CONSOLE_PRIORITY
-#error "the TCP: processes must outrank console.device"
+#if AMI_EXEC_TCP_PRIORITY > AMI_EXEC_CONSOLE_PRIORITY
+#error "the TCP: processes must not outrank console.device"
+#endif
+#if AMI_EXEC_TCP_PRIORITY <= AMI_EXEC_PROGRAM_PRIORITY
+#error "the TCP: processes must outrank normal programs"
 #endif
 #if defined(TX_AMIGA_TIMER_PRIORITY)
 #if TX_AMIGA_TIMER_PRIORITY >= AMI_EXEC_HANDLER_PRIORITY
 #error "the tick must stay below the filesystem handlers and input.device"
 #endif
-#if TX_AMIGA_TIMER_PRIORITY <= TX_AMIGA_HANDOFF_PRIORITY
-#error "the tick must outrank a Task parked for the baton"
-#endif
 #if TX_AMIGA_TIMER_PRIORITY <= AMI_EXEC_TCP_PRIORITY
 #error "the tick must outrank the TCP: processes"
 #endif
-#if TX_AMIGA_TASK_PRIORITY <= AMI_EXEC_CONSOLE_PRIORITY
-#error "the ThreadX band must outrank console.device"
+#if TX_AMIGA_HANDOFF_PRIORITY >= AMI_EXEC_TCP_PRIORITY
+#error "the ThreadX band must stay below the TCP: processes"
 #endif
-#if TX_AMIGA_TASK_PRIORITY > AMI_EXEC_TCP_PRIORITY
-#error "the ThreadX band must not outrank the TCP: processes it serves"
+#if TX_AMIGA_TASK_PRIORITY <= AMI_EXEC_PROGRAM_PRIORITY
+#error "the ThreadX band must outrank normal programs"
 #endif
 #endif
 

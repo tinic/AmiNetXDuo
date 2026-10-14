@@ -391,13 +391,10 @@ void    _tx_amiga_start_interrupts(void);
 
 /* Exec priority for Tasks that ThreadX creates.  ThreadX, not Exec, picks
    which of them runs, so they all share one priority; making it depend on the
-   ThreadX priority would put Exec's scheduler in competition with ours.
-   Above console.device and trackdisk.device (5), so console output does not
-   starve the stack; below the filesystem handlers and disk drivers (10).
-   Ladder asserted in src/thread_priorities.h.  */
+   ThreadX priority would put Exec's scheduler in competition with ours.  */
 
 #ifndef TX_AMIGA_TASK_PRIORITY
-#define TX_AMIGA_TASK_PRIORITY                  6
+#define TX_AMIGA_TASK_PRIORITY                  1
 #endif
 
 /* Exec priority of a Task parked in _tx_amiga_thread_park(), and only while it is
@@ -424,9 +421,8 @@ void    _tx_amiga_start_interrupts(void);
 /* Exec priority of the periodic tick Task.  Above every ThreadX task, so that
    it preempts the baton holder; below the filesystem handlers and disk
    drivers (10) and input.device (20), so a tick burst never delays a pointer
-   move or a disk request; above TX_AMIGA_HANDOFF_PRIORITY.  It may outrank
-   console.device, trackdisk.device and IDE drivers (5-6): one service is
-   microseconds plus at most
+   move or a disk request.  It may outrank console.device, trackdisk.device and
+   IDE drivers (5-6): one service is microseconds plus at most
    TX_AMIGA_TIMER_BUDGET_MS of catch-up.  Ladder asserted in
    src/thread_priorities.h.  */
 
