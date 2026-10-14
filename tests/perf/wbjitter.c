@@ -5,8 +5,8 @@
  *   WbJitter [PRI/N/K] [SECS/N/K]
  *
  * AmiTCP_NG #9 is a Workbench that freezes for the length of a transfer on
- * Emu68.  Our reader runs at priority 1, which is Workbench's own, and the IP
- * thread at 2, so the question is measurable and this measures it: a task at
+ * Emu68.  When this was written the stack ran at Exec 1-2, beside Workbench's
+ * own 1; it is TX_AMIGA_TASK_PRIORITY now.  This measures it: a task at
  * PRI (default 1, Workbench) asks for one tick with Delay(1) and reads the
  * E-clock each time it gets the CPU back.  A gap much longer than the 20 ms it
  * asked for is time Workbench would have spent not repainting, not taking a
