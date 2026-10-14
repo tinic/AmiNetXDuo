@@ -825,6 +825,21 @@ if(NOT CMAKE_CROSSCOMPILING)
     # an empty `case ROUTE_ENOSYS: break;` compiles, and a message that lost
     # its second half is a shorter string.  The file's header names the three
     # that 4d9791be left behind.
+    # The AmigaDOS Command Reference: QUIET's return code, and every
+    # REFERENCE_TEMPLATE a command carries against its TEMPLATE.
+    add_executable(test_refcompat
+        test/test_refcompat.c)
+
+    target_compile_definitions(test_refcompat PRIVATE
+        AMINETXDUO_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+        _GNU_SOURCE)
+
+    target_include_directories(test_refcompat PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+
+    target_compile_options(test_refcompat PRIVATE -Wall -Wextra)
+    set_target_properties(test_refcompat PROPERTIES C_STANDARD 11)
+
     add_executable(test_refusals
         test/test_refusals.c)
 
@@ -1296,6 +1311,8 @@ if(NOT CMAKE_CROSSCOMPILING)
     add_test(NAME tools_arg_usage     COMMAND test_argtemplates usage)
     add_test(NAME tools_arg_docs      COMMAND test_argtemplates docs)
     add_test(NAME tools_refusals      COMMAND test_refusals)
+    add_test(NAME tools_refcompat_quiet     COMMAND test_refcompat quiet)
+    add_test(NAME tools_refcompat_reference COMMAND test_refcompat reference)
     add_test(NAME httpterm_gate       COMMAND test_httpterm)
     add_test(NAME statusreport_allowlist COMMAND test_statusreport allowlist)
     add_test(NAME statusreport_passive   COMMAND test_statusreport passive)

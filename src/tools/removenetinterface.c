@@ -110,7 +110,14 @@ static LONG find_index(struct Library *base, const char *name)
     return -1;
 }
 
+static int rni_main(int argc, char **argv);
+
 int main(int argc, char **argv)
+{
+    return (int)tool_quiet_end(rni_main(argc, argv));
+}
+
+static int rni_main(int argc, char **argv)
 {
     LONG             args[ARG_COUNT];
     struct RDArgs   *rda;
@@ -143,6 +150,8 @@ int main(int argc, char **argv)
     }
 
     rni_quiet = (args[ARG_QUIET] != 0) ? TRUE : FALSE;
+    if (rni_quiet)
+        tool_quiet_begin();
     force     = (args[ARG_FORCE] != 0) ? TRUE : FALSE;
     names     = (STRPTR *)args[ARG_INTERFACE];
 
@@ -155,7 +164,6 @@ int main(int argc, char **argv)
         return RETURN_WARN;
     }
 
-    /* FALSE: QUIET drops what was removed, never why it could not be. */
     base = tool_netstatus_open(FALSE);
     if (base == NULL)
     {

@@ -998,10 +998,11 @@
 
   replacing eth0 with the name of the interface file. The command reads
   the configuration, starts the physical network, brings the interface
-  online, and keeps it up until the next reboot. QUIET suppresses the report of
-  what came up, so a boot that works prints nothing and a boot that
-  fails still prints why. To see the report of a start that works,
-  omit QUIET while the configuration is still being written.
+  online, and keeps it up until the next reboot. QUIET suppresses every
+  message, the reasons for a failure included, and turns a failure into
+  WARN (5), as on Roadshow: the boot script goes on, and IF WARN after
+  the line detects the failure. To see the report and the reasons, omit
+  QUIET while the configuration is still being written.
 
   Add a line to start a second card. To start every definition in
   DEVS:NetInterfaces, which is what Roadshow's own S:Network-Startup does,
@@ -1266,6 +1267,11 @@
      10   ERROR -- the stack is not running, or a lookup failed
      20   FAIL -- the configuration or the driver is wrong
 
+  With QUIET, AddNetInterface, RemoveNetInterface, ConfigureNetInterface,
+  AddNetRoute and DeleteNetRoute print no message at all and return WARN
+  (5) in place of ERROR or FAIL, as the AmigaDOS Command Reference
+  specifies.
+
   @{b}Asking for a template with "?"@{ub}
 
   A command followed by ? prints its template and waits for the
@@ -1320,9 +1326,9 @@
              This enumeration happens only because that command asks
              for it; opening bsdsocket.library never scans the drawer.
 
-  @{b}QUIET@{ub}      Suppress the report of what worked. For S:Network-Startup.
-             Errors are still printed, and the return code is
-             unchanged, so a boot that fails still reports why.
+  @{b}QUIET@{ub}      Print nothing, errors included, and return WARN (5)
+             for any failure. For S:Network-Startup: a failure does
+             not stop the script, and IF WARN detects it.
   @{b}TIMEOUT@{ub}    Seconds to wait for an interface that asks for its
              address to be given one. Default 10, which is also the
              smallest value accepted -- a DHCP exchange given less time
