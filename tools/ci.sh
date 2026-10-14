@@ -509,7 +509,9 @@ host_test_targets() { # builddir
 #      AmigaDOS Command Reference QUIET return code and templates.
 #      570 with tools_refcompat_arpfile: arp FILE's record rules.
 #      571 with tools_refcompat_onlink: DONTROUTE's on-link rule, 127/8.
-HOST_TESTS_EXPECTED=571
+#      572 with tools_refcompat_addif: AddNetInterface's TIMEOUT tool type
+#      and its per-launch Workbench log name.
+HOST_TESTS_EXPECTED=572
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,

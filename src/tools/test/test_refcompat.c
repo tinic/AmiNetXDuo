@@ -20,6 +20,7 @@
 #include <string.h>
 
 #include "toolquiet.h"
+#include "addif_wb.h"
 #include "onlink.h"
 #include "arpfile.h"
 
@@ -418,6 +419,36 @@ static void check_onlink(void)
           "an interface with no address reaches nothing");
 }
 
+/* ---------------------------------------------------------------- addif --- */
+
+static void check_addif(void)
+{
+    long v = 99;
+    char a[32];
+    char b[32];
+
+    CHECK(addif_seconds("60", &v) && v == 60, "TIMEOUT=60 reads 60");
+    CHECK(addif_seconds("5", &v) && v == 5,
+          "TIMEOUT=5 reads 5; the floor of 10 is the caller's, as for the Shell");
+    CHECK(addif_seconds("-1", &v) && v == -1, "a negative value is read, to be refused");
+    CHECK(!addif_seconds("", &v), "an empty TIMEOUT is refused");
+    CHECK(!addif_seconds("10s", &v), "TIMEOUT=10s is refused, not read as 10");
+    CHECK(!addif_seconds("abc", &v), "TIMEOUT=abc is refused");
+    CHECK(!addif_seconds("-", &v), "a lone sign is refused");
+    CHECK(!addif_seconds("99999999999", &v), "past a LONG is refused");
+    CHECK(addif_seconds("2147483647", &v) && v == 2147483647L,
+          "LONG_MAX is a LONG");
+    CHECK(addif_seconds("2147483640", &v) && v == 2147483640L,
+          "and so is 2147483640");
+    CHECK(!addif_seconds("2147483648", &v), "LONG_MAX + 1 is refused");
+    CHECK(!addif_seconds("21474836470", &v), "and so is ten times LONG_MAX");
+
+    addif_log_name(a, sizeof(a), 0x0012a4c0UL);
+    addif_log_name(b, sizeof(b), 0x0012a5c0UL);
+    CHECK(strcmp(a, "T:AddNetInterface.0012a4c0") == 0, "the log is named by the process: %s", a);
+    CHECK(strcmp(a, b) != 0, "and two launches do not share one");
+}
+
 int main(int argc, char **argv)
 {
     const char *group = (argc > 1) ? argv[1] : NULL;
@@ -428,6 +459,8 @@ int main(int argc, char **argv)
         check_reference();
     if (group == NULL || strcmp(group, "onlink") == 0)
         check_onlink();
+    if (group == NULL || strcmp(group, "addif") == 0)
+        check_addif();
     if (group == NULL || strcmp(group, "arpfile") == 0)
         check_arpfile();
 
