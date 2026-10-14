@@ -1201,7 +1201,7 @@
     @{"Offline         " link OFFLINE}  take an interface off the network
     NetSetup          write the configuration files from a Shell
     NetPrefs          edit interfaces and boot policy from Workbench
-    NetMeter          addresses and live rates in a small Workbench window
+    NetMeter          addresses and live rates, in a window or in a Shell
     NetWirelessPrefs  Wi-Fi networks in range, joining one, link state
     NetWireless       Wi-Fi state and signal as an AppIcon and in ENV:WiFi
     CheckNetConfig    read the configuration files back and report faults
@@ -3356,8 +3356,8 @@
   labels. Save & Start and Online/Offline run the command to completion
   with the busy pointer up, up to a minute with DHCP.
 
-  NetMeter is installed in SYS:Utilities by a system installation. Its
-  window lists each running interface: a dot that is green while the link
+  NetMeter is installed in SYS:Utilities by a system installation. Started
+  from Workbench, it opens a window that lists each running interface: a dot that is green while the link
   is up, the name, the IPv4 address and one IPv6 address (the global one
   when there is one), and a receive and a send bar with the rate in bytes a
   second. The bars scale to the recent peak. Rest the pointer on a name for
@@ -3370,10 +3370,30 @@
   Project > Snapshot (Right-Amiga S) keeps the window where it is: the
   position and size go into NetMeter's own icon as the ToolTypes LEFT, TOP,
   WIDTH and HEIGHT, which are read the next time it starts, and every other
-  ToolType is left alone. From a Shell the same four are arguments, and
-  they win over the icon:
+  ToolType is left alone. The same four are arguments when the window is
+  opened from a Shell, and they win over the icon:
 
-      NetMeter LEFT=400 TOP=30 WIDTH=380 HEIGHT=100
+      Run >NIL: NetMeter LEFT=400 TOP=30 WIDTH=380 HEIGHT=100
+
+  Started from a Shell, NetMeter draws in the Shell's own window instead,
+  in place once a second. The title line gives the host name and the time
+  since NetMeter started. For each interface it shows the name, the link
+  state and speed, the IPv4 address, the device and unit and one IPv6
+  address; the receive (RX) and send (TX) rates, each with a bar, its peak
+  and its average since NetMeter started; the bytes and packets received
+  and sent since the interface was added, the errors and the dropped
+  frames; and a graph with one column a second, receive above the middle
+  line and send below it, each half to its own scale. The layout follows
+  the window size: a narrow window omits the peaks, the averages and any
+  field that does not fit whole, and a short one omits the graph. A
+  resized window is redrawn at once. The colours are the first four screen
+  pens, which every Workbench screen has.
+
+  Q, Esc or Ctrl-C ends NetMeter and clears the window. R resets the
+  peaks, the averages and the graph. Space stops the display and starts it
+  again; the measurement continues while it is stopped. With output that
+  is not a console window, as with Run >NIL: NetMeter, NetMeter opens the
+  Workbench window instead.
 
   To start it with Workbench, put a copy of its icon in SYS:WBStartup. The
   icon carries the ToolType DONOTWAIT, which tells Workbench not to wait

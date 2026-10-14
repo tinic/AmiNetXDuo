@@ -69,6 +69,9 @@ are history.
 - X-Surf 100 with anxnet.device supports LINKSPEED=10; AUTO remains the
   default. The guide covers switch PAUSE settings and TCP receive windows.
 - httpd's file browser accepts Return in the New drawer and Rename dialogs.
+- NetMeter started from a Shell shows a full-window display with rates,
+  peaks, averages, totals, errors and a history graph per interface;
+  started from Workbench or with redirected output it opens its window.
 - NetMeter starts from SYS:WBStartup without a "not responding" requester.
   Existing WBStartup icons need DONOTWAIT added in their Information window.
 
