@@ -24,9 +24,12 @@ static inline int addif_seconds(const char *text, long *out)
 
     for (; *text >= '0' && *text <= '9'; text++)
     {
-        if (v > 214748363UL)
-            return 0;                       /* past a LONG */
-        v = v * 10UL + (unsigned long)(*text - '0');
+        unsigned long d = (unsigned long)(*text - '0');
+
+        /* Digit-exact: 2147483647 is a LONG, 2147483648 is not. */
+        if (v > 214748364UL || (v == 214748364UL && d > 7UL))
+            return 0;
+        v = v * 10UL + d;
         digits++;
     }
 

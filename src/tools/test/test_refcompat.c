@@ -351,6 +351,12 @@ static void check_addif(void)
     CHECK(!addif_seconds("abc", &v), "TIMEOUT=abc is refused");
     CHECK(!addif_seconds("-", &v), "a lone sign is refused");
     CHECK(!addif_seconds("99999999999", &v), "past a LONG is refused");
+    CHECK(addif_seconds("2147483647", &v) && v == 2147483647L,
+          "LONG_MAX is a LONG");
+    CHECK(addif_seconds("2147483640", &v) && v == 2147483640L,
+          "and so is 2147483640");
+    CHECK(!addif_seconds("2147483648", &v), "LONG_MAX + 1 is refused");
+    CHECK(!addif_seconds("21474836470", &v), "and so is ten times LONG_MAX");
 
     addif_log_name(a, sizeof(a), 0x0012a4c0UL);
     addif_log_name(b, sizeof(b), 0x0012a5c0UL);

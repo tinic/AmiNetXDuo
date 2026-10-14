@@ -270,6 +270,8 @@ static __attribute__((noinline)) LONG wb_arguments(const struct WBStartup *wbs, 
         {
             *quiet      = TRUE;
             addif_quiet = TRUE;
+            /* The refusals below then return WARN, as the Shell's do. */
+            tool_quiet_begin();
         }
         v = icon_tool_type(path, "TIMEOUT", &dob);
         if (v != NULL)
