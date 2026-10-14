@@ -42,8 +42,11 @@ Use a 16,384-byte stack from a Shell, or the supplied installation icons.
 Binary SHA-256:
   c6dc78f6e95c8b47204150fa3ff8d0e235866851301a5f1f8ddd05d97ba53137
 
-Measured on a 68000 A500, Kickstart/Workbench 2.04, 512 KiB chip plus
+Measured on the prior build, SHA-256
+c99b79f4506e547545dde81df435ac1782e8a49674bf4a6814aacdc720bd3111, not on
+the build above: 68000 A500, Kickstart/Workbench 2.04, 512 KiB chip plus
 512 KiB trapdoor RAM, normal Workbench desktop and the complete monolithic
 AmiNetXDuo script: 302,784 bytes free at the welcome page, compared with
 42,560 bytes using Installer 43.3. Same-source memory changes save 171,280
-bytes. Installation, cancellation and malformed-script cleanup were checked.
+bytes. Installation, cancellation and malformed-script cleanup were checked
+on that build.
