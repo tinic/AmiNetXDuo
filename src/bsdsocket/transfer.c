@@ -488,7 +488,9 @@ static LONG bsd_send_tcp_run(struct AmiSocketBase *base, AmiSocket *sock,
                 if (aborted)
                 {
                     sent += bsd_send_consumed(packet, filled);
-                    nx_packet_release(packet);
+                    /* Roll back the interrupted wait; preserve its partial
+                       byte count or EINTR result. */
+                    AMI_NX_CLEANUP(nx_packet_release(packet));
                     return (sent > 0) ? sent : bsd_fail(base, AMI_EINTR);
                 }
             }

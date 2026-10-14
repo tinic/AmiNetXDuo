@@ -177,10 +177,22 @@ failure; no ancestry checks or test coverage are relaxed.
 
 Native CI's `netx_tcp_race_condition_test2` exposed a missing state check in
 checksum-disabled/offloaded sends: segmentation allocation and data append also
-release IP protection. Socket state is now revalidated after segmentation or a
-software checksum. An unadjusted offloaded send retains protection throughout
-and still skips the redundant recheck. The native test is unchanged; the
+release IP protection. The original per-segment socket-state check is retained: partial-send
+continuation also releases protection before its final direct segment. The
+checksum-offload path still skips the mutex release/reacquire and checksum
+sequence retry work. The native test is unchanged; the
 existing host cork/send fixture injects disconnects during both allocation and
 append, checking failure status, no transmission, unsent bytes, packet release
 and balanced protection. Its added cases fail against the original change and
 pass with the correction. NetX Duo correction: tinic/netxduo#19.
+
+The partial-send regression sends one MSS, disconnects during the continuation
+handoff, then attempts a final direct segment. The conditional state check fails
+four assertions; retaining the original per-segment check passes all 112 host
+fixture assertions. NetX correction: tinic/netxduo#20. Historical ARM evidence
+about skipping the state recheck predates this correctness correction.
+
+CI also identified a new unclassified packet-release status on the BSD
+interrupted-wait rollback. That site now uses the existing `AMI_NX_CLEANUP`
+classification, preserving partial-write/EINTR semantics. The status-discard
+baseline and checker remain unchanged.
