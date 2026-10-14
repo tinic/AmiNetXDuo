@@ -20,6 +20,7 @@
 #include <string.h>
 
 #include "toolquiet.h"
+#include "onlink.h"
 #include "addif_wb.h"
 
 #ifndef AMINETXDUO_SOURCE_DIR
@@ -364,6 +365,21 @@ static void check_addif(void)
     CHECK(strcmp(a, b) != 0, "and two launches do not share one");
 }
 
+/* --------------------------------------------------------------- onlink --- */
+
+static void check_onlink(void)
+{
+    CHECK(onlink_loopback(0x7F000001UL), "127.0.0.1 is on the loopback net");
+    CHECK(onlink_loopback(0x7F0A0B0CUL), "and so is all of 127/8");
+    CHECK(!onlink_loopback(0x80000001UL), "128.0.0.1 is not");
+    CHECK(onlink_subnet(0x0A000202UL, 0x0A00020FUL, 0xFFFFFF00UL),
+          "10.0.2.2 is on 10.0.2.15/24");
+    CHECK(!onlink_subnet(0x08080808UL, 0x0A00020FUL, 0xFFFFFF00UL),
+          "8.8.8.8 is not");
+    CHECK(!onlink_subnet(0x08080808UL, 0UL, 0UL),
+          "an interface with no address reaches nothing");
+}
+
 int main(int argc, char **argv)
 {
     const char *group = (argc > 1) ? argv[1] : NULL;
@@ -372,6 +388,8 @@ int main(int argc, char **argv)
         check_quiet();
     if (group == NULL || strcmp(group, "reference") == 0)
         check_reference();
+    if (group == NULL || strcmp(group, "onlink") == 0)
+        check_onlink();
     if (group == NULL || strcmp(group, "addif") == 0)
         check_addif();
 

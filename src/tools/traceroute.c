@@ -21,13 +21,22 @@ static const char version_tag[] __attribute__((used)) =
     TOOL_VERSTAG("traceroute");
 
 /*
- * Roadshow options not implemented here: -p PORT (no UDP probes), -r DONTROUTE
- * (bsdsocket.library does not implement SO_DONTROUTE), -s SOURCE (the route
- * chooses a raw datagram's source address). Each would parse and do nothing.
+ * The AmigaDOS Command Reference's template; test_refcompat holds TEMPLATE to
+ * it.  Of its options, -d DEBUG does nothing (SO_DEBUG shows nothing here),
+ * -p PORT is ignored with a warning (the probes are ICMP echo, not UDP),
+ * -s SOURCE likewise (the route chooses a raw datagram's source address), and
+ * -r DONTROUTE refuses a host no interface reaches directly, since
+ * bsdsocket.library has no SO_DONTROUTE.
  */
+#define REFERENCE_TEMPLATE                                                 \
+    "-d=DEBUG/S,-m=MAXTTL/K/N,-n=NUMERIC/S,-p=PORT/K/N,-q=QUERIES/K/N,"    \
+    "-r=DONTROUTE/S,-s=SOURCE/K,-t=TOS/K/N,-v=VERBOSE/S,-w=WAIT/K/N,"      \
+    "HOST/A,PACKETSIZE/N"
+
 #define TEMPLATE                                                        \
     "MAXTTL=-m/N/K,NUMERIC=-n/S,QUERIES=-q/N/K,TOS=-t/N/K,WAIT=-w/N/K," \
-    "VERBOSE=-v/S,HOST/A,PACKETSIZE/N/K,IPV4=-4/S,IPV6=-6/S"
+    "VERBOSE=-v/S,HOST/A,PACKETSIZE/N,DEBUG=-d/S,PORT=-p/N/K,"          \
+    "DONTROUTE=-r/S,SOURCE=-s/K,IPV4=-4/S,IPV6=-6/S"
 
 enum
 {
@@ -39,6 +48,10 @@ enum
     ARG_VERBOSE,
     ARG_HOST,
     ARG_PACKETSIZE,
+    ARG_DEBUG,
+    ARG_PORT,
+    ARG_DONTROUTE,
+    ARG_SOURCE,
     ARG_IPV4,
     ARG_IPV6,
     ARG_COUNT
@@ -448,6 +461,7 @@ int main(int argc, char **argv)
     BOOL            done = FALSE;
     BOOL            interrupted = FALSE;
     ULONG           i;
+    ULONG           source = 0;
     char            dotted[TOOL_ADDR_STRLEN];
 
     (VOID)argv;
@@ -464,7 +478,7 @@ int main(int argc, char **argv)
     if (rda == NULL)
     {
         tool_fault(IoErr());
-        tool_usage("<host>",
+        tool_usage("<host> [<packet size>]",
                    "Reports every router between here and a host.");
         return RETURN_ERROR;
     }
@@ -522,6 +536,19 @@ int main(int argc, char **argv)
         return RETURN_ERROR;
     }
 
+    if (args[ARG_SOURCE] != 0 &&
+        !ami_config_parse_ip((const char *)args[ARG_SOURCE], &source))
+    {
+        tool_error("\"%s\" is not an address", (LONG)args[ARG_SOURCE]);
+        FreeArgs(rda);
+        return RETURN_ERROR;
+    }
+
+    if (args[ARG_PORT] != 0)
+        tool_error("PORT ignored: the probes are ICMP echo");
+    if (args[ARG_SOURCE] != 0)
+        tool_error("SOURCE ignored: the route chooses the source address");
+
     sb = tool_socket_open();
     if (sb == NULL)
     {
@@ -537,6 +564,19 @@ int main(int argc, char **argv)
     }
 
     v6 = TOOL_ADDR_IS6(&address);
+
+    if (args[ARG_DONTROUTE] != 0)
+    {
+        if (v6)
+            tool_error("DONTROUTE ignored for IPv6");
+        else if (!tool_on_link(address.ta_V4))
+        {
+            tool_error("DONTROUTE: %s is not on a local network", (LONG)host);
+            CloseLibrary(sb);
+            FreeArgs(rda);
+            return RETURN_ERROR;
+        }
+    }
 
     /* PACKETSIZE is the whole datagram, and an IPv6 header is twice an IPv4
        one, so what is left for the payload depends on the family. */

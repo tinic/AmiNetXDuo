@@ -1774,10 +1774,10 @@
 
                                 @{b}ping@{ub}
 
-      ping -c=COUNT/K/N,-i=INTERVAL/K/N,-l=LOAD/K/N,
+      ping -c=COUNT/K/N,-d=DEBUG/S,-i=INTERVAL/K/N,-l=LOAD/K/N,
            -n=NUMERICONLY=NUMERIC/S,-o=ONEREPLY/S,-q=QUIET/S,
-           -s=SIZE/K/N,-t=TIMEOUT/K/N,BELL/S,HOST/A,
-           IPV4=-4/S,IPV6=-6/S
+           -R=RECORDROUTE/S,DONTROUTE/S,-s=SIZE/K/N,-t=TIMEOUT/K/N,
+           -v=VERBOSE/S,BELL/S,HOST/A,IPV4=-4/S,IPV6=-6/S
 
   Sends ICMP echo requests and reports what comes back. Tests whether
   two machines can reach each other.
@@ -1796,10 +1796,17 @@
   @{b}-n@{ub} or @{b}NUMERIC@{ub}         Do not put a name to the address given.
   @{b}-o@{ub} or @{b}ONEREPLY@{ub}        Stop as soon as one reply comes back.
   @{b}-q@{ub} or @{b}QUIET@{ub}           Print only the summary.
-  @{b}-s@{ub} or @{b}SIZE@{ub}            Payload bytes, up to 1400. Default 56.
+  @{b}-s@{ub} or @{b}SIZE@{ub}            Payload bytes, up to 65467. Default 56.
   @{b}-t@{ub} or @{b}TIMEOUT@{ub}         Give up after this many seconds whatever
                           state the run is in. 0, the default, imposes
                           no such limit.
+  @{b}-v@{ub} or @{b}VERBOSE@{ub}         Also list every other ICMP message that
+                          arrives: unreachable, time exceeded, redirect.
+  @{b}DONTROUTE@{ub}               Refuse a host that is not on the network
+                          of an interface. IPv4 only.
+  @{b}-d@{ub} or @{b}DEBUG@{ub}           Accepted. Has no effect.
+  @{b}-R@{ub} or @{b}RECORDROUTE@{ub}     Accepted with a warning. The route is
+                          not recorded.
   @{b}BELL@{ub}                    Ring the console bell for each reply.
   @{b}-4@{ub}, @{b}-6@{ub}                  Resolve the name to an IPv4 or an IPv6
                           address only. Without either, the first
@@ -1812,14 +1819,6 @@
   between requests and while waiting between them, so in the worst case
   -- a request that gets no reply at all -- it takes five seconds to
   take effect.
-
-  @{b}Options this ping does not have@{ub}
-
-  DEBUG, RECORDROUTE, DONTROUTE and VERBOSE are absent rather than
-  accepted and ignored. The first three need a socket, an IP option and
-  a routing bypass that the echo call underneath does not offer.
-  VERBOSE lists inbound ICMP that is not an echo reply, which that call
-  never returns.
 
   @{b}Examples@{ub}
 
