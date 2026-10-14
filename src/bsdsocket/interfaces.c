@@ -701,6 +701,10 @@ LONG bsd_ConfigureInterfaceTagList(register STRPTR name __asm("a0"),
 
         status = nx_ip_interface_mtu_set(ip, (UINT)index, limit);
 
+        /* Its aliases carry the same frames. */
+        if (status == NX_SUCCESS && sana != NULL)
+            ami_sana2_alias_sync(sana);
+
         bsd_nx_leave(SocketBase);
 
         if (status != NX_SUCCESS)

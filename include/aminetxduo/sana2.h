@@ -53,6 +53,7 @@ VOID ami_sana2_driver_entry(NX_IP_DRIVER *driver_req);
 #define AMI_SANA2_ALIASES       3
 VOID ami_sana2_alias_driver_entry(NX_IP_DRIVER *driver_req);
 VOID ami_sana2_alias_bind(AmiSana2If *iface);
+VOID ami_sana2_alias_sync(AmiSana2If *iface);
 BOOL ami_sana2_alias_publish(AmiSana2If *iface, NX_INTERFACE *alias, BOOL on);
 
 /* NX_LINK_DISABLE without the S2_OFFLINE, so other stacks on the same device

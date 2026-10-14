@@ -344,7 +344,11 @@ VOID ami_sana2_driver_entry(NX_IP_DRIVER *driver_req)
 
     if (iface->detaching &&
         ami_sana2_detaching_entry(driver_req, iface, interface_ptr))
+    {
+        if (iface->alias_count != 0U)
+            ami_sana2_alias_sync(iface);
         return;
+    }
 
     if (driver_req->nx_ip_driver_command == NX_LINK_PACKET_SEND)
     {
@@ -616,6 +620,10 @@ static VOID __attribute__((noinline, cold)) ami_sana2_driver_command(
         driver_req->nx_ip_driver_status = NX_UNHANDLED_COMMAND;
         break;
     }
+
+    /* The aliases follow this interface's link and MTU. */
+    if (iface->alias_count != 0U)
+        ami_sana2_alias_sync(iface);
 }
 
 /* --------------------------------------------------------------- aliases */
@@ -627,6 +635,32 @@ static AmiSana2If *ami_sana2_alias_pending;
 VOID ami_sana2_alias_bind(AmiSana2If *iface)
 {
     ami_sana2_alias_pending = iface;
+}
+
+/*
+ * An alias has no state of its own: its link is up exactly when its
+ * interface's is, and its MTU is its interface's.  Called after every change
+ * to either -- the driver commands, an out-of-service device, an MTU set --
+ * and when the alias is enabled.
+ */
+VOID ami_sana2_alias_sync(AmiSana2If *iface)
+{
+    const NX_INTERFACE *parent = iface->interface_ptr;
+    UWORD               i;
+
+    for (i = 0; i < (UWORD)AMI_SANA2_ALIASES; i++)
+    {
+        NX_INTERFACE *a = iface->alias[i];
+
+        if (a == NULL)
+            continue;
+
+        a->nx_interface_link_up = (parent != NULL &&
+                                   parent->nx_interface_link_up &&
+                                   !iface->detaching) ? NX_TRUE : NX_FALSE;
+        if (parent != NULL)
+            a->nx_interface_ip_mtu_size = parent->nx_interface_ip_mtu_size;
+    }
 }
 
 BOOL ami_sana2_alias_publish(AmiSana2If *iface, NX_INTERFACE *alias, BOOL on)
@@ -713,8 +747,13 @@ VOID ami_sana2_alias_driver_entry(NX_IP_DRIVER *driver_req)
 #endif
         return;
 
+    /* The interface's link, not "up": an alias made on an interface that is
+       down is down too. */
     case NX_LINK_ENABLE:
-        alias->nx_interface_link_up = (iface != NULL) ? NX_TRUE : NX_FALSE;
+        alias->nx_interface_link_up =
+            (iface != NULL && iface->interface_ptr != NULL &&
+             iface->interface_ptr->nx_interface_link_up && !iface->detaching)
+                ? NX_TRUE : NX_FALSE;
         return;
 
     case NX_LINK_DISABLE:

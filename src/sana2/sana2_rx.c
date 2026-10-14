@@ -1765,6 +1765,8 @@ AMI_SANA2_BATCH_LINKAGE UWORD ami_sana2_rx_drain_batch(AmiSana2Reader *rd,
         iface->online = FALSE;
         if (iface->interface_ptr != NULL)
             iface->interface_ptr->nx_interface_link_up = NX_FALSE;
+        if (iface->alias_count != 0U)
+            ami_sana2_alias_sync(iface);
         ami_event(NETEVENT_OUT_OF_SERVICE, (UWORD)iface->index, 0UL);
         AMI_WARN("sana2: %s went out of service. The link is marked down",
                  iface->device);
@@ -1988,6 +1990,8 @@ static UWORD ami_sana2_rx_drain(AmiSana2Reader *rd, UWORD budget)
 
             if (iface->interface_ptr != NULL)
                 iface->interface_ptr->nx_interface_link_up = NX_FALSE;
+            if (iface->alias_count != 0U)
+                ami_sana2_alias_sync(iface);
 
             ami_event(NETEVENT_OUT_OF_SERVICE, (UWORD)iface->index, 0UL);
 

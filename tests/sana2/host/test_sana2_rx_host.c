@@ -284,6 +284,12 @@ static VOID h_saw_input(NX_PACKET *packet_ptr, Destination where)
     h_record(packet_ptr, where);
 }
 
+/* sana2_driver.c is not linked here; the out-of-service paths call it. */
+VOID ami_sana2_alias_sync(AmiSana2If *iface)
+{
+    (VOID)iface;
+}
+
 VOID _nx_ip_packet_receive(NX_IP *ip_ptr, NX_PACKET *packet_ptr)
 {
     (VOID)ip_ptr;
