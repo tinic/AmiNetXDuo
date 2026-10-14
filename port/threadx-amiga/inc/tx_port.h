@@ -399,7 +399,7 @@ void    _tx_amiga_start_interrupts(void);
 
 /* Exec priority of a Task parked in _tx_amiga_thread_park(), and only while it is
    parked.  One above the band, because Exec reschedules on a Signal() only for a
-   STRICTLY higher priority; still far below TX_AMIGA_TIMER_PRIORITY.
+   STRICTLY higher priority; still below TX_AMIGA_TIMER_PRIORITY.
 
    The boost is not free: _tx_thread_system_return() pays SetTaskPri() twice per
    park, once to raise and once to restore, and SetTaskPri is 1.8% of the wire
@@ -418,11 +418,16 @@ void    _tx_amiga_start_interrupts(void);
 #endif
 #endif
 
-/* Exec priority of the periodic tick Task.  It must out-prioritise every
-   ThreadX task so that it really does preempt the baton holder.  */
+/* Exec priority of the periodic tick Task.  Above every ThreadX task, so that
+   it preempts the baton holder; below the filesystem handlers and disk
+   drivers (10) and input.device (20), so a tick burst never delays a pointer
+   move or a disk request.  It may outrank console.device, trackdisk.device and
+   IDE drivers (5-6): one service is microseconds plus about
+   TX_AMIGA_TIMER_BUDGET_MS of catch-up.  Ladder asserted in
+   src/thread_priorities.h.  */
 
 #ifndef TX_AMIGA_TIMER_PRIORITY
-#define TX_AMIGA_TIMER_PRIORITY                 20
+#define TX_AMIGA_TIMER_PRIORITY                 9
 #endif
 
 /* ----------------------------------------------------------- the tick ---- */
@@ -452,11 +457,14 @@ void    _tx_amiga_start_interrupts(void);
 #endif
 
 /* Milliseconds of a tick period the tick task may spend delivering before it gives
-   the machine back.  The burst runs under Forbid(), so this bounds how long one
-   wakeup stops every other task.  Nothing is lost here, only deferred.  */
+   the machine back.  The burst runs under Forbid(), stopping every other task.
+   The check runs between ticks, so it is a target, not a hard cap: the first
+   tick of a service always runs, and a service can overshoot by one tick.  The
+   rest of the backlog carries over to the next service, and only
+   TX_AMIGA_TIMER_MAX_CATCHUP throws ticks away.  */
 
 #ifndef TX_AMIGA_TIMER_BUDGET_MS
-#define TX_AMIGA_TIMER_BUDGET_MS                16UL
+#define TX_AMIGA_TIMER_BUDGET_MS                2UL
 #endif
 
 /* Startup validation window for the wakeup source, in milliseconds, and the rate

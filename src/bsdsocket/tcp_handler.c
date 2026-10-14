@@ -5,6 +5,7 @@
 
 #include "bsdsocket_vectors.h"
 #include "tcp_handler.h"
+#include "../thread_priorities.h"
 
 #include "aminetxduo/config.h"
 #include "aminetxduo/netstack.h"
@@ -21,8 +22,8 @@
 #define TCP_CTRL_STACK      8192UL
 #define TCP_SESSION_STACK   16384UL
 
-#define TCP_CTRL_PRI        5
-#define TCP_SESSION_PRI     5
+#define TCP_CTRL_PRI        AMI_EXEC_TCP_PRIORITY
+#define TCP_SESSION_PRI     AMI_EXEC_TCP_PRIORITY
 
 #define TCP_NAME_MAX        256
 #define TCP_HOST_MAX        128
