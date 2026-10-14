@@ -7,6 +7,7 @@
  */
 
 #include "tools.h"
+#include "onlink.h"
 #include "toolsock.h"                  /* TOOL_EINVAL */
 
 #include <exec/execbase.h>
@@ -1423,11 +1424,16 @@ BOOL tool_on_link(ULONG addr)
         NetStatusHeader    hdr;
         NetStatusInterface e[NX_MAX_PHYSICAL_INTERFACES];
     } table;
-    struct Library *base = tool_netstatus_open(TRUE);
+    struct Library *base;
     BOOL            yes  = FALSE;
     LONG            n;
     LONG            i;
 
+    /* The loopback network is this machine, reached without a router. */
+    if (onlink_loopback(addr))
+        return TRUE;
+
+    base = tool_netstatus_open(TRUE);
     if (base == NULL)
         return FALSE;
 
@@ -1436,8 +1442,8 @@ BOOL tool_on_link(ULONG addr)
 
     for (i = 0; i < n && i < (LONG)NX_MAX_PHYSICAL_INTERFACES; i++)
     {
-        if (table.e[i].nsi_Address != 0 &&
-            ((table.e[i].nsi_Address ^ addr) & table.e[i].nsi_NetMask) == 0)
+        if (onlink_subnet(addr, table.e[i].nsi_Address,
+                          table.e[i].nsi_NetMask))
             yes = TRUE;
     }
 

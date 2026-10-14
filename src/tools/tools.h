@@ -448,7 +448,8 @@ VOID tool_explain_no_netstatus(struct Library *base);
 /*
  * DONTROUTE for ping and traceroute.  bsdsocket.library has no SO_DONTROUTE,
  * so a command refuses what no interface reaches directly instead: TRUE when
- * the IPv4 `addr` is inside the subnet of an interface holding an address.
+ * the IPv4 `addr` is inside the subnet of an interface holding an address,
+ * or on the loopback network, 127/8.
  */
 BOOL tool_on_link(ULONG addr);
 
