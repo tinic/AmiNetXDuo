@@ -580,7 +580,9 @@
     "parser": "readargs",
     "source": "src/tools/ping.c",
     "values": {
+      "-R": true,
       "-c": "1",
+      "-d": true,
       "-i": "1",
       "-l": "1",
       "-n": true,
@@ -588,7 +590,9 @@
       "-q": true,
       "-s": "32",
       "-t": "1",
+      "-v": true,
       "BELL": true,
+      "DONTROUTE": true,
       "HOST": "127.0.0.1",
       "IPV4": true,
       "IPV6": true
@@ -776,13 +780,17 @@
     "parser": "readargs",
     "source": "src/tools/traceroute.c",
     "values": {
+      "DEBUG": true,
+      "DONTROUTE": true,
       "HOST": "127.0.0.1",
       "IPV4": true,
       "IPV6": true,
       "MAXTTL": "1",
       "NUMERIC": true,
       "PACKETSIZE": "32",
+      "PORT": "33434",
       "QUERIES": "1",
+      "SOURCE": "127.0.0.1",
       "TOS": "1",
       "VERBOSE": true,
       "WAIT": "1"
