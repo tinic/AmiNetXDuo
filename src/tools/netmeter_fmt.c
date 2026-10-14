@@ -160,27 +160,37 @@ uint32_t nm_rate(uint32_t bytes, uint32_t ms)
 
 uint32_t nm_average(uint32_t hi, uint32_t lo, uint32_t ms)
 {
-    uint32_t v, r, shift;
+    uint32_t p0, p1, mlo, mhi, rem, q = 0, top;
+    int      i;
 
     if (ms == 0)
         return 0;
-    if (hi == 0)
-        return (ms >= 1000u) ? lo / (ms / 1000u) : nm_rate(lo, ms);
-    /* In KB below 4 TB, in MB above it, as nm_format_total. */
-    if ((hi >> 10) == 0)
+    if (hi > 0xFFFFFFFFu / 1000u)
+        return 0xFFFFFFFFu;       /* over 2^64 / 1000 bytes: past 32 bits */
+
+    /* (hi:lo) * 1000, from the 16-bit halves of lo. */
+    p0  = (lo & 0xFFFFu) * 1000u;
+    p1  = (lo >> 16) * 1000u;
+    mlo = p0 + (p1 << 16);
+    mhi = hi * 1000u + (p1 >> 16) + (mlo < p0 ? 1u : 0u);
+    if (mhi >= ms)
+        return 0xFFFFFFFFu;       /* the quotient needs more than 32 bits */
+
+    /* (mhi:mlo) / ms a bit at a time; mhi < ms keeps the quotient in 32. */
+    rem = mhi;
+    for (i = 0; i < 32; i++)
     {
-        v     = (hi << 22) | (lo >> 10);
-        shift = 10;
+        top = rem >> 31;
+        rem = (rem << 1) | (mlo >> 31);
+        mlo <<= 1;
+        q <<= 1;
+        if (top != 0 || rem >= ms)
+        {
+            rem -= ms;
+            q |= 1u;
+        }
     }
-    else if ((hi >> 20) == 0)
-    {
-        v     = (hi << 12) | (lo >> 20);
-        shift = 20;
-    }
-    else
-        return 0xFFFFFFFFu;
-    r = (ms >= 1000u) ? v / (ms / 1000u) : nm_rate(v, ms);
-    return (r > (0xFFFFFFFFu >> shift)) ? 0xFFFFFFFFu : r << shift;
+    return q;
 }
 
 uint32_t nm_scale_next(uint32_t scale, uint32_t rx_rate, uint32_t tx_rate)

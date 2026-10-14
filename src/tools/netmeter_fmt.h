@@ -31,7 +31,8 @@ uint32_t nm_delta(uint32_t hi, uint32_t lo, uint32_t prev_hi, uint32_t prev_lo);
 uint32_t nm_rate(uint32_t bytes, uint32_t ms);
 
 /* Bytes a second over a whole session: a count in two halves over
-   milliseconds, saturating. */
+   milliseconds, rounded down, 0xFFFFFFFF when it does not fit.  No 64-bit
+   division: the 68000 has none. */
 uint32_t nm_average(uint32_t hi, uint32_t lo, uint32_t ms);
 
 /* The full-scale after one more second: a peak above it raises it with some

@@ -149,6 +149,8 @@ typedef struct
     BOOL    have_prev;
     ULONG   rx_hi, rx_lo, tx_hi, tx_lo;
     ULONG   rx_rate, tx_rate;
+    ULONG   rx_delta, tx_delta;    /* bytes since the last sample        */
+    BOOL    measured;              /* the deltas span the last interval  */
     ULONG   scale;
     ULONG   rx_pkts, tx_pkts, errors, dropped;
     /* Where the last full draw put things; the hover and the click test them. */
@@ -417,16 +419,19 @@ static BOOL nm_sample(VOID)
         out->dropped    = in->stats.overruns + in->stats.alloc_failures +
                           in->stats.tx_queue_full;
 
-        out->rx_rate = out->tx_rate = 0;
-        out->scale   = (was != NULL) ? was->scale : NM_SCALE_FLOOR;
+        out->rx_rate  = out->tx_rate  = 0;
+        out->rx_delta = out->tx_delta = 0;
+        out->measured = FALSE;
+        out->scale    = (was != NULL) ? was->scale : NM_SCALE_FLOOR;
         if (was != NULL && was->have_prev && in->have_bytes)
         {
-            out->rx_rate = nm_rate(nm_delta(in->stats.rx_bytes_hi,
-                                            in->stats.rx_bytes,
-                                            was->rx_hi, was->rx_lo), ms);
-            out->tx_rate = nm_rate(nm_delta(in->stats.tx_bytes_hi,
-                                            in->stats.tx_bytes,
-                                            was->tx_hi, was->tx_lo), ms);
+            out->rx_delta = nm_delta(in->stats.rx_bytes_hi, in->stats.rx_bytes,
+                                     was->rx_hi, was->rx_lo);
+            out->tx_delta = nm_delta(in->stats.tx_bytes_hi, in->stats.tx_bytes,
+                                     was->tx_hi, was->tx_lo);
+            out->rx_rate  = nm_rate(out->rx_delta, ms);
+            out->tx_rate  = nm_rate(out->tx_delta, ms);
+            out->measured = TRUE;
         }
         out->scale     = nm_scale_next(out->scale, out->rx_rate, out->tx_rate);
         out->rx_hi     = in->stats.rx_bytes_hi;
@@ -1593,9 +1598,16 @@ static VOID nm_con_sample(NmCon *c)
         }
         if (f->rx_rate > ci->rx_peak) ci->rx_peak = f->rx_rate;
         if (f->tx_rate > ci->tx_peak) ci->tx_peak = f->tx_rate;
-        nm_add64(&ci->rx_hi, &ci->rx_lo, nm_rate(f->rx_rate, 1000));
-        nm_add64(&ci->tx_hi, &ci->tx_lo, nm_rate(f->tx_rate, 1000));
-        ci->ms += nm.sample_ms;
+        /* The average is bytes over the time they were counted in, the
+           actual intervals between samples. */
+        if (f->measured)
+        {
+            nm_add64(&ci->rx_hi, &ci->rx_lo, f->rx_delta);
+            nm_add64(&ci->tx_hi, &ci->tx_lo, f->tx_delta);
+            /* 49.7 days of milliseconds: the average then stays put. */
+            ci->ms = (ci->ms > 0xFFFFFFFFUL - nm.sample_ms) ? 0xFFFFFFFFUL
+                                                           : ci->ms + nm.sample_ms;
+        }
         ci->rx_hist[ci->head] = f->rx_rate;
         ci->tx_hist[ci->head] = f->tx_rate;
         ci->head = (ci->head + 1u) % NM_TUI_HIST;

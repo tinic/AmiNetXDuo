@@ -111,9 +111,22 @@ static void t_average(void)
 {
     expect(nm_average(0, 5000, 0) == 0, "average of no time");
     expect(nm_average(0, 2700000, 1000) == 2700000, "average below 4 GB");
-    /* 8 GB over 4000 s: 2 MB/s, counted in KB. */
-    expect(nm_average(2, 0, 4000000) == 2147328, "average across the carry");
-    expect(nm_average(0xFFFFFFFFu, 0, 1) == 0xFFFFFFFFu, "average saturates");
+    /* Samples 1000 ms and a late 2500 ms apart: 1000 + 3000 bytes over
+       3500 ms, not the two rates over two seconds. */
+    expect(nm_average(0, 4000, 3500) == 1142, "unequal intervals");
+    expect(nm_average(0, 1500, 1500) == 1000, "a fractional second");
+    expect(nm_average(0, 999, 1999) == 499, "rounded down");
+    /* 8 GiB over 4000 s, exactly. */
+    expect(nm_average(2, 0, 4000000) == 2147483, "average across the carry");
+    /* 16 GiB over an hour, and 1 TiB over 49.7 days (ULONG milliseconds). */
+    expect(nm_average(4, 0, 3600000) == 4772185, "16 GiB over an hour");
+    expect(nm_average(256, 0, 0xFFFFFFFFu) == 256000, "1 TiB over 49.7 days");
+    /* 4 GB + 1 GB over 1 ms is past 32 bits; so is anything that large. */
+    expect(nm_average(1, 0x40000000u, 1) == 0xFFFFFFFFu, "past 32 bits saturates");
+    expect(nm_average(0xFFFFFFFFu, 0, 0xFFFFFFFFu) == 0xFFFFFFFFu, "past 2^64/1000 saturates");
+    /* The edge: the largest total whose average still fits, exact. */
+    expect(nm_average(0x418937u, 0x4B439581u, 0xFFFFFFFFu) == 4294967294u,
+           "the largest average, exact");
 }
 
 static void t_text(void)
