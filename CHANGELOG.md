@@ -7,6 +7,8 @@ are history.
 
 ## Unreleased
 
+- WatchTasks keeps selection on the same task as the live list reorders
+  and asks for confirmation before sending Ctrl-C.
 - New ShowTasks and WatchTasks commands list Exec tasks and DOS
   processes, and show live CPU and memory use per task in a Shell.
 - With QUIET, AddNetInterface, AddNetRoute, DeleteNetRoute,
