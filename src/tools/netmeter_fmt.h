@@ -27,8 +27,37 @@ void nm_format_total(uint32_t hi, uint32_t lo, char *out, uint32_t outlen);
    removed and added again) and reads zero. */
 uint32_t nm_delta(uint32_t hi, uint32_t lo, uint32_t prev_hi, uint32_t prev_lo);
 
+/* The longest interval between two samples taken as one: past it, or
+   backwards, the clock was set (SNTP, a date change) and the interval is not
+   measured. */
+#define NM_INTERVAL_MAX 30000u
+
+/* Milliseconds from one DateStamp (days, minutes, 50 Hz ticks) to the next;
+   0 for a clock that went back or jumped past NM_INTERVAL_MAX. */
+uint32_t nm_interval_ms(int32_t days0, int32_t min0, int32_t tick0,
+                        int32_t days1, int32_t min1, int32_t tick1);
+
 /* Bytes a second from bytes over milliseconds; zero for no time. */
 uint32_t nm_rate(uint32_t bytes, uint32_t ms);
+
+/* Bytes a second over a whole session: a count in two halves over
+   milliseconds, rounded down, 0xFFFFFFFF when it does not fit.  No 64-bit
+   division: the 68000 has none. */
+uint32_t nm_average(uint32_t hi, uint32_t lo, uint32_t ms);
+
+/* A session's bytes each way and the milliseconds they were counted over. */
+typedef struct NmSpan
+{
+    uint32_t rx_hi, rx_lo, tx_hi, tx_lo;
+    uint32_t ms;
+    int      frozen;        /* the time would have passed 0xFFFFFFFF ms */
+} NmSpan;
+
+/* One interval's bytes and length into the span.  The first interval that
+   would take the time past 0xFFFFFFFF ms (49.7 days) freezes the span: from
+   then on nothing is counted, bytes nor time, and the average stays where it
+   was until the span is cleared. */
+void nm_span_add(NmSpan *s, uint32_t rx, uint32_t tx, uint32_t ms);
 
 /* The full-scale after one more second: a peak above it raises it with some
    headroom at once, otherwise it falls by a sixteenth, never below
