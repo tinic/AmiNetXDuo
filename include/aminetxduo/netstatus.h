@@ -464,8 +464,6 @@ typedef struct NetStatusHealth
     ULONG   nsl_TickUptimeMs;
     ULONG   nsl_TickWorstStallMs;
     ULONG   nsl_TickWorstServiceUs;
-    ULONG   nsl_TickOverBudget;
-    ULONG   nsl_TickDeferred;
     ULONG   nsl_TickSkew;
     ULONG   nsl_TickSkewPeak;
 

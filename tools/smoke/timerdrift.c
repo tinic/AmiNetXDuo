@@ -187,10 +187,10 @@ int main(int argc, char **argv)
     /* Printed beside the arms because they are what a reader checks first, and
        on the machine this was written for they say nothing is wrong. */
     Printf((CONST_STRPTR)"ticks=%lu uptime_ms=%lu clipped=%lu lost=%lu "
-                         "deferred=%lu skew=%lu skew_peak=%lu\n",
+                         "skew=%lu skew_peak=%lu\n",
            (LONG)s.tx_amiga_tick_delivered, (LONG)tx_amiga_uptime_ms(&s),
            (LONG)s.tx_amiga_tick_clipped, (LONG)s.tx_amiga_tick_lost,
-           (LONG)s.tx_amiga_tick_deferred, (LONG)s.tx_amiga_tick_skew,
+           (LONG)s.tx_amiga_tick_skew,
            (LONG)s.tx_amiga_tick_skew_peak);
 
     if (solo > (LONG)TOLERANCE || solo < -(LONG)TOLERANCE)

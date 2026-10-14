@@ -676,23 +676,6 @@ ULONG                       svc_i;
     for (svc_i = 0UL; svc_i < r -> tr_backlog; svc_i++)
     {
 
-        /* Checked between ticks, so the burst under Forbid() can overrun
-           the budget by one tick; the rest of the backlog waits.  */
-        if (svc_i > 0UL)
-        {
-            struct EClockVal budget_now;
-
-            (VOID) ReadEClock(&budget_now);
-            if ((ULONG) (budget_now.ev_lo - svc_now.ev_lo) >
-                (r -> tr_eclock_per_ms * (ULONG) TX_AMIGA_TIMER_BUDGET_MS))
-            {
-                _tx_amiga_tick.tx_amiga_tick_over_budget++;
-                _tx_amiga_tick.tx_amiga_tick_deferred +=
-                    r -> tr_backlog - svc_i;
-                break;
-            }
-        }
-
         /* Enter "interrupt" context, run the tick, leave it.  */
         _tx_thread_context_save();
         _tx_timer_interrupt();
