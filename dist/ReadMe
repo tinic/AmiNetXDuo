@@ -162,7 +162,8 @@ It puts
      ping, netstat, host, nslookup, arp,
      fetch, nc, telnet, tftp, sntp, traceroute,
      whois, ssh, scp, scp-runner, httpd, iperf,
-     NetCapture, NetTrace                      into C:
+     NetCapture, NetTrace,
+     ShowTasks, WatchTasks                     into C:
      NetPrefs and its icon (system layout)     into SYS:Prefs
      NetMeter and its icon (system layout)     into SYS:Utilities
      NetWirelessPrefs and its icon (system)    into SYS:Prefs
