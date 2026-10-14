@@ -49,7 +49,8 @@ static ToolSnapshot   arp_snap;
 static ToolNeighbours arp_nd;
 static ToolRoutes6    arp_routes6;
 static NetStatusControl arp_ctl;    /* static for the Shell's 4K stack */
-static char           arp_line[128];  /* a FILE line, or a formatted MAC  */
+static char           arp_line[128];  /* a FILE line                      */
+static char           arp_mac[24];    /* a formatted MAC: host may be in arp_line */
 static BOOL           arp_quiet;
 
 static VOID zero_control(NetStatusControl *ctl)
@@ -599,8 +600,8 @@ static LONG set_entry(struct Library *base, const char *host,
 
     if (!arp_quiet)
     {
-        tool_format_mac(mac, arp_line, sizeof(arp_line));
-        tool_printf("%s: %s, %s\n", (LONG)host, (LONG)arp_line,
+        tool_format_mac(mac, arp_mac, sizeof(arp_mac));
+        tool_printf("%s: %s, %s\n", (LONG)host, (LONG)arp_mac,
                     (LONG)((temp && !is6) ? "temporary" : "permanent"));
     }
 
