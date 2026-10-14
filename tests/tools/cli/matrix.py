@@ -45,7 +45,7 @@ def readargs_template(root, spec):
         if index >= len(defines):
             raise ValueError('missing template variant: ' + spec['source'])
         return ''.join(re.findall(r'"([^"\n]*)"', defines[index]))
-    match = re.search(r'ReadArgs\(\s*\(CONST_STRPTR\)\s*"([^"]+)"', text)
+    match = re.search(r'ReadArgs\(\s*(?:\(CONST_STRPTR\)\s*)?"([^"]+)"', text)
     if not match:
         raise ValueError('ReadArgs template not found: ' + spec['source'])
     return match.group(1)

@@ -395,6 +395,36 @@
       "USERS": true
     }
   },
+  "ShowTasks": {
+    "binary": "src/tools/ShowTasks",
+    "parser": "readargs",
+    "source": "third_party/shelltools/src/show_tasks.cpp",
+    "values": {
+      "CLI": "1",
+      "DETAIL": true,
+      "HELP": true,
+      "MACHINE": true,
+      "TASK": "FFFFFFFF"
+    }
+  },
+  "WatchTasks": {
+    "base": {
+      "COUNT": "1",
+      "TICKS": "1"
+    },
+    "binary": "src/tools/WatchTasks",
+    "mode": "interrupt",
+    "parser": "readargs",
+    "source": "third_party/shelltools/src/watch_tasks.cpp",
+    "values": {
+      "COLS": "80",
+      "COUNT": "1",
+      "HELP": true,
+      "MACHINE": true,
+      "ROWS": "24",
+      "TICKS": "1"
+    }
+  },
   "WirelessManager": {
     "binary": "@WirelessManager",
     "source": "third_party/wirelessmanager/WirelessManager",

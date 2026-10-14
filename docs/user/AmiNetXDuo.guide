@@ -1228,6 +1228,11 @@
     NetTrace          the same, for a transfer it runs itself
     arp               the machines on this network
 
+  @{b}Looking at this Amiga@{ub}
+
+    @{"ShowTasks       " link SHOWTASKS}  the Exec tasks and AmigaDOS processes
+    @{"WatchTasks      " link WATCHTASKS}  the same, live, with processor use
+
   @{b}Asking other machines things@{ub}
 
     @{"ping            " link PING}  test whether a machine answers
@@ -1910,7 +1915,7 @@
 @node SSH "ssh"
 @toc COMMANDS
 @prev HOST
-@next CHECKNETDEVICE
+@next SHOWTASKS
 
                                 @{b}ssh@{ub}
 
@@ -1946,9 +1951,95 @@
 @endnode
 
 
-@node CHECKNETDEVICE "CheckNetDevice"
+@node SHOWTASKS "ShowTasks"
 @toc COMMANDS
 @prev SSH
+@next WATCHTASKS
+
+                             @{b}ShowTasks@{ub}
+
+      ShowTasks MACHINE/S,DETAIL/S,TASK/K,CLI/N/K,HELP/S
+
+  Lists the Exec tasks and AmigaDOS processes, one row each: P for a
+  process or T for a task, the task address in hex, the CLI number, the
+  priority, the state, the stack size and the name. A process that runs
+  a command with a different name has the command on an indented line
+  below it.
+
+  @{b}TASK@{ub}     One task, by the address the table shows. A $ or 0x
+           prefix is accepted.
+  @{b}CLI@{ub}      One process, by its CLI number, which must be positive.
+           TASK and CLI cannot be used together.
+  @{b}DETAIL@{ub}   Adds the signal masks, the stack addresses, the process
+           fields and the arguments.
+  @{b}MACHINE@{ub}  One JSON object per task, with every field.
+  @{b}HELP@{ub}     The version and a summary of the options.
+
+  The list is a snapshot of at most 96 tasks. The saved stack pointer of
+  a running task can be out of date. An address can be used again by a
+  new task after the task ends.
+
+  Return codes: 0 OK; 5 no matching task, more than 96 tasks, or Ctrl-C;
+  10 an incorrect TASK or CLI.
+
+      1> ShowTasks CLI=1 DETAIL
+
+@endnode
+
+
+@node WATCHTASKS "WatchTasks"
+@toc COMMANDS
+@prev SHOWTASKS
+@next CHECKNETDEVICE
+
+                             @{b}WatchTasks@{ub}
+
+      WatchTasks TICKS/N/K,COUNT/N/K,ROWS/N/K,COLS/N/K,MACHINE/S,HELP/S
+
+  Shows the tasks and processes in the Shell window and updates the list
+  until q is pressed. Each row has T or P, the task address, the CLI
+  number, the priority, the processor use, the state and the name.
+
+  The processor use is a sample: at each vertical blank, 50 or 60 times a
+  second, WatchTasks records which task runs. A task with fewer than ten
+  samples shows no value. The sampling stops when WatchTasks ends.
+
+  @{b}TICKS@{ub}    Vertical blanks between updates. The default is 50.
+  @{b}COUNT@{ub}    Updates before WatchTasks ends. The default is no limit.
+  @{b}ROWS@{ub}     The height of the window, when the console does not
+           report it.
+  @{b}COLS@{ub}     The width of the window, when the console does not
+           report it.
+  @{b}MACHINE@{ub}  JSON lines. cpu_tenths is the processor use in tenths of a
+           percent, or null when there is no value.
+  @{b}HELP@{ub}     The version and a summary of the options.
+
+  When the output is not a console window, WatchTasks prints the list
+  again at each update.
+
+  @{b}Keys@{ub}
+
+      j, k, cursor keys     select a task
+      n, u                  page down, page up
+      t, p, s, c, a         sort by processor use, priority, state, CLI
+                            number, name
+      /                     filter the list
+      Space                 stop and start the updates
+      Return                details of the selected task; Return or Esc
+                            closes them
+      b                     send Ctrl-C to the selected task
+      h                     help
+      q                     quit
+
+  Before b sends Ctrl-C, WatchTasks checks the address and the name of
+  the task again. The task decides what Ctrl-C does.
+
+@endnode
+
+
+@node CHECKNETDEVICE "CheckNetDevice"
+@toc COMMANDS
+@prev WATCHTASKS
 @next STATUSREPORT
 
                           @{b}CheckNetDevice@{ub}
@@ -3610,6 +3701,8 @@
   BSD licence: Copyright (c) 2003-2010 Jouni Malinen and contributors,
   (c) 2011-2025 Neil Cafferkey. The licence text is installed with it as
   WirelessManager-LICENSE in the AmiNetXDuo drawer.
+
+  ShowTasks and WatchTasks are built from github.com/tinic/shelltools.
 
   codesets.library is the work of the codesets.library Open Source Team,
   built unmodified from github.com/jens-maus/libcodesets and distributed

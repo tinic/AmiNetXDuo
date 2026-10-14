@@ -1299,6 +1299,48 @@ if(NOT CMAKE_CROSSCOMPILING)
     add_test(NAME statusreport_passive   COMMAND test_statusreport passive)
 endif()
 
+# ShowTasks and WatchTasks, from third_party/shelltools (C++23).  Its own
+# CMakeLists keeps its flags, -Werror included, and its MinSizeRel presets;
+# this tree supplies only the pinned toolchain, the CPU and the $VER: suffix.
+# The suffix puts the name AmiNetXDuo in each file, which dist/make-dist.sh
+# requires and the installer's P_is_ours reads.
+if(CMAKE_CROSSCOMPILING)
+    include(ExternalProject)
+    if(AMINETXDUO_CPU MATCHES "^680[246]0")
+        set(_shelltools_cpu 68020-60)
+    else()
+        set(_shelltools_cpu 68000)
+    endif()
+    set(_shelltools_bin "${CMAKE_CURRENT_BINARY_DIR}/shelltools/C")
+    set(_shelltools_install
+        COMMAND "${CMAKE_COMMAND}" -E copy
+                "${_shelltools_bin}/ShowTasks" "${_shelltools_bin}/WatchTasks"
+                "${CMAKE_CURRENT_BINARY_DIR}")
+    # One file per strip: the pinned m68k-amigaos-strip segfaults when it is
+    # given two hunk files at once.
+    if(CMAKE_STRIP AND NOT AMINETXDUO_KEEP_SYMBOLS)
+        list(APPEND _shelltools_install
+            COMMAND "${CMAKE_STRIP}" "${CMAKE_CURRENT_BINARY_DIR}/ShowTasks"
+            COMMAND "${CMAKE_STRIP}" "${CMAKE_CURRENT_BINARY_DIR}/WatchTasks")
+    endif()
+    ExternalProject_Add(shelltools
+        SOURCE_DIR "${PROJECT_SOURCE_DIR}/third_party/shelltools"
+        BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/shelltools"
+        CMAKE_CACHE_ARGS
+            "-DCMAKE_TOOLCHAIN_FILE:FILEPATH=${CMAKE_TOOLCHAIN_FILE}"
+            "-DAMIGA_TOOLCHAIN_ROOT:PATH=${AMIGA_TOOLCHAIN_ROOT}"
+            "-DAMINETXDUO_CPU:STRING=${AMINETXDUO_CPU}"
+            "-DCMAKE_BUILD_TYPE:STRING=MinSizeRel"
+            "-DSHELLTOOLS_CPU:STRING=${_shelltools_cpu}"
+            "-DSHELLTOOLS_VERSION_SUFFIX:STRING= AmiNetXDuo ${AMINETXDUO_VERSION}"
+        BUILD_ALWAYS ON
+        INSTALL_COMMAND ${_shelltools_install}
+        BUILD_BYPRODUCTS
+            "${CMAKE_CURRENT_BINARY_DIR}/ShowTasks"
+            "${CMAKE_CURRENT_BINARY_DIR}/WatchTasks")
+    add_dependencies(tools shelltools)
+endif()
+
 # The commands this configuration builds, one file name per line, for
 # dist/make-dist.sh's shipping check: what it scanned before was the build
 # directory, and a binary left there by a tree that no longer builds it

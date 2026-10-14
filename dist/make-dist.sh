@@ -85,7 +85,8 @@ CMDS=(AddNetInterface NetSetup NetPrefs NetMeter NetWireless NetWirelessPrefs On
       GetNetStatus NetShutdown RemoveNetInterface
       ConfigureNetInterface
       AddNetRoute DeleteNetRoute
-      NetDevStats)
+      NetDevStats
+      ShowTasks WatchTasks)   # these two from third_party/shelltools
 
 # ------------------------------------------------------------- the builds --
 #

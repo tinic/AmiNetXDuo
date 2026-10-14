@@ -24,3 +24,7 @@
 [submodule "third_party/libcodesets"]
 	path = third_party/libcodesets
 	url = https://github.com/jens-maus/libcodesets
+[submodule "third_party/shelltools"]
+	path = third_party/shelltools
+	url = https://github.com/tinic/shelltools.git
+	branch = main
