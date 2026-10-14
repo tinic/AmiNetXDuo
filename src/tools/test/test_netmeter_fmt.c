@@ -167,6 +167,15 @@ static void t_span(void)
     nm_span_add(&s, 7777, 7777, 1000);
     expect(s.ms == 0xFFFFFFFFu && s.rx_hi == 1 && s.rx_lo == 0x105 && s.tx_lo == 45,
            "span: frozen past 49.7 days, bytes and time");
+
+    /* Latched: 500 ms short, a 1000 ms interval freezes it and a later 400 ms
+       one that would fit is not counted either. */
+    memset(&s, 0, sizeof(s));
+    s.ms = 0xFFFFFFFFu - 500u;
+    nm_span_add(&s, 100, 100, 1000);
+    nm_span_add(&s, 200, 200, 400);
+    expect(s.frozen && s.ms == 0xFFFFFFFFu - 500u && s.rx_lo == 0 && s.tx_lo == 0,
+           "span: the freeze is latched");
 }
 
 static void t_text(void)

@@ -224,8 +224,11 @@ static void nm_add64(uint32_t *hi, uint32_t *lo, uint32_t v)
 
 void nm_span_add(NmSpan *s, uint32_t rx, uint32_t tx, uint32_t ms)
 {
-    if (s->ms > 0xFFFFFFFFu - ms)
+    if (s->frozen || s->ms > 0xFFFFFFFFu - ms)
+    {
+        s->frozen = 1;
         return;
+    }
     nm_add64(&s->rx_hi, &s->rx_lo, rx);
     nm_add64(&s->tx_hi, &s->tx_lo, tx);
     s->ms += ms;

@@ -50,11 +50,13 @@ typedef struct NmSpan
 {
     uint32_t rx_hi, rx_lo, tx_hi, tx_lo;
     uint32_t ms;
+    int      frozen;        /* the time would have passed 0xFFFFFFFF ms */
 } NmSpan;
 
-/* One interval's bytes and length into the span.  An interval that would
-   take the time past 0xFFFFFFFF ms (49.7 days) is not counted at all, bytes
-   nor time, so from then on the average stays where it was. */
+/* One interval's bytes and length into the span.  The first interval that
+   would take the time past 0xFFFFFFFF ms (49.7 days) freezes the span: from
+   then on nothing is counted, bytes nor time, and the average stays where it
+   was until the span is cleared. */
 void nm_span_add(NmSpan *s, uint32_t rx, uint32_t tx, uint32_t ms);
 
 /* The full-scale after one more second: a peak above it raises it with some
