@@ -950,7 +950,8 @@ typedef struct NetStatusRxBudget
    table size. */
 #define NETCTRL_ROUTE_ADD       5   /* nsc_Destination/NetMask/Gateway       */
 #define NETCTRL_ROUTE_DELETE    6   /* nsc_Destination/NetMask               */
-#define NETCTRL_ARP_ADD         7   /* nsc_Destination, nsc_HwAddress        */
+/* NETCTRL_F_TEMPORARY makes the entry dynamic, not static. */
+#define NETCTRL_ARP_ADD         7   /* nsc_Destination, nsc_HwAddress, nsc_Flags */
 #define NETCTRL_ARP_DELETE      8   /* nsc_Destination                       */
 #define NETCTRL_ARP_FLUSH       9   /*,                                    */
 
@@ -1037,6 +1038,9 @@ typedef struct NetStatusRxBudget
 /* NETCTRL_INTERFACE_ADD: Online requested the interface, so STATE=DOWN in
  * the stored definition does not leave it down. */
 #define NETCTRL_F_UP            0x00000020
+/* NETCTRL_ARP_ADD: a dynamic entry, which traffic replaces and
+   NETCTRL_ARP_FLUSH removes; a library that predates it makes it static. */
+#define NETCTRL_F_TEMPORARY     0x00000040
 
 typedef struct NetStatusControl
 {

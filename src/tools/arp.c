@@ -15,13 +15,29 @@ const char *const tool_name = "arp";
 static const char version_tag[] __attribute__((used)) =
     TOOL_VERSTAG("arp");
 
-#define TEMPLATE    "ADDRESS,DELETE/S,SET/K,UNIT/K/N,STATS/S,QUIET/S"
+/* The AmigaDOS Command Reference's template, with one correction: it writes
+   -n=NONAMES/S=NUMBERS/S, which puts NUMBERS among the modifiers where
+   ReadArgs never matches it.  test_refcompat holds TEMPLATE to this. */
+#define REFERENCE_TEMPLATE "-a=ALL/S,-d=DELETE/S,-s=SET/S,HOSTNAME,ADDRESS," \
+                           "TEMP/S,PUB=PUBLISH/S,PRO=PROXY/S,-f=FILE/K,"     \
+                           "-n=NONAMES=NUMBERS/S"
+
+#define TEMPLATE    "-a=ALL/S,-d=DELETE/S,-s=SET/S,HOSTNAME,ADDRESS,TEMP/S,"  \
+                    "PUB=PUBLISH/S,PRO=PROXY/S,-f=FILE/K,"                    \
+                    "-n=NONAMES=NUMBERS/S,UNIT/K/N,STATS/S,QUIET/S"
 
 enum
 {
-    ARG_ADDRESS = 0,
+    ARG_ALL = 0,
     ARG_DELETE,
     ARG_SET,
+    ARG_HOSTNAME,
+    ARG_ADDRESS,
+    ARG_TEMP,
+    ARG_PUB,
+    ARG_PRO,
+    ARG_FILE,
+    ARG_NONAMES,
     ARG_UNIT,
     ARG_STATS,
     ARG_QUIET,
@@ -33,6 +49,8 @@ static ToolSnapshot   arp_snap;
 static ToolNeighbours arp_nd;
 static ToolRoutes6    arp_routes6;
 static NetStatusControl arp_ctl;    /* static for the Shell's 4K stack */
+static char           arp_line[128];  /* a FILE line, or a formatted MAC  */
+static BOOL           arp_quiet;
 
 static VOID zero_control(NetStatusControl *ctl)
 {
@@ -454,20 +472,328 @@ static VOID print_stats(const ToolStats *s)
     }
 }
 
+/* ------------------------------------------------------ host and changes, */
+
+/* A host as the reference takes it: a name or a number.  An IPv6 address is
+   written with colons and is never looked up.  RETURN_OK, or the code to exit
+   with after the message has been printed. */
+static LONG resolve_host(const char *text, ULONG *want, ULONG want6[4],
+                         BOOL *is6)
+{
+    *is6 = FALSE;
+
+    if (is_written_as_ip6(text))
+    {
+        struct Library *pb;
+        BOOL            has6;
+
+        if (!tool_parse_ip6(text, want6))
+        {
+            tool_error("\"%s\" is not an address", (LONG)text);
+            return RETURN_ERROR;
+        }
+
+        /*
+         * Asked before anything is printed, because every later answer would be
+         * "not in the cache" and read as a fact about the address.
+         */
+        pb = tool_netstatus_open(FALSE);
+        if (pb == NULL)
+            return RETURN_ERROR;
+
+        has6 = stack_has_ipv6(pb);
+        tool_netstatus_close(pb);
+
+        if (!has6)
+        {
+            tool_error("%s: stack has no IPv6", (LONG)text);
+            return RETURN_FAIL;
+        }
+
+        *is6 = TRUE;
+        return RETURN_OK;
+    }
+
+    if (ami_config_parse_ip(text, want))
+        return RETURN_OK;
+
+    /* The running stack's resolver: DEVS:Internet/hosts, then DNS. */
+    if (!tool_stack_library_running())
+    {
+        tool_error("%s: network not started, names cannot be looked up",
+                   (LONG)text);
+        return RETURN_ERROR;
+    }
+
+    if (!tool_stack_lookup(text, want))
+    {
+        tool_error("%s: unknown host", (LONG)text);
+        return RETURN_ERROR;
+    }
+
+    return RETURN_OK;
+}
+
+/* One SET: the cache that matches how the host was written.  TEMP makes an
+   IPv4 entry dynamic -- replaced by later traffic, gone with a flush --
+   rather than permanent. */
+static LONG set_entry(struct Library *base, const char *host,
+                      const char *mac_text, BOOL temp, const LONG *unit)
+{
+    UBYTE mac[AMI_ETH_ADDR_SIZE];
+    ULONG want = 0;
+    ULONG want6[4];
+    BOOL  is6;
+    LONG  err = 0;
+    LONG  rc;
+    ULONG i;
+
+    if (!parse_mac(mac_text, mac))
+    {
+        tool_error("\"%s\" is not a hardware address", (LONG)mac_text);
+        return RETURN_ERROR;
+    }
+
+    rc = resolve_host(host, &want, want6, &is6);
+    if (rc != RETURN_OK)
+        return rc;
+
+    /*
+     * The IPv4 ARP cache is one table, not one per interface: the static-ARP
+     * call takes no interface and derives it from the address's route, so a
+     * UNIT on an IPv4 SET would be read nowhere.  Refuse it rather than drop
+     * it.  The IPv6 path is per-interface and its add reads the index.
+     */
+    if (!is6 && unit != NULL)
+    {
+        tool_error("UNIT cannot be used with an IPv4 SET");
+        return RETURN_ERROR;
+    }
+
+    zero_control(&arp_ctl);
+
+    if (is6)
+    {
+        for (i = 0; i < 4UL; i++)
+            arp_ctl.nsc_Destination6[i] = want6[i];
+        if (unit != NULL)
+            arp_ctl.nsc_Index = (UWORD)*unit;
+    }
+    else
+    {
+        arp_ctl.nsc_Destination = want;
+        if (temp)
+            arp_ctl.nsc_Flags = NETCTRL_F_TEMPORARY;
+    }
+
+    for (i = 0; i < (ULONG)AMI_ETH_ADDR_SIZE; i++)
+        arp_ctl.nsc_HwAddress[i] = mac[i];
+
+    if (tool_netstatus_control(base, is6 ? (ULONG)NETCTRL_ND_ADD
+                                         : (ULONG)NETCTRL_ARP_ADD,
+                               &arp_ctl, &err) != 0)
+    {
+        tool_error("%s was not added to the cache", (LONG)host);
+        return RETURN_FAIL;
+    }
+
+    if (!arp_quiet)
+    {
+        tool_format_mac(mac, arp_line, sizeof(arp_line));
+        tool_printf("%s: %s, %s\n", (LONG)host, (LONG)arp_line,
+                    (LONG)((temp && !is6) ? "temporary" : "permanent"));
+    }
+
+    return RETURN_OK;
+}
+
+static LONG delete_entry(struct Library *base, const char *host)
+{
+    ULONG want = 0;
+    ULONG want6[4];
+    BOOL  is6;
+    LONG  err = 0;
+    LONG  rc;
+    ULONG i;
+
+    rc = resolve_host(host, &want, want6, &is6);
+    if (rc != RETURN_OK)
+        return rc;
+
+    zero_control(&arp_ctl);
+
+    if (is6)
+    {
+        for (i = 0; i < 4UL; i++)
+            arp_ctl.nsc_Destination6[i] = want6[i];
+    }
+    else
+    {
+        arp_ctl.nsc_Destination = want;
+    }
+
+    if (tool_netstatus_control(base, is6 ? (ULONG)NETCTRL_ND_DELETE
+                                         : (ULONG)NETCTRL_ARP_DELETE,
+                               &arp_ctl, &err) != 0)
+    {
+        tool_error("%s was not removed from the cache", (LONG)host);
+        return RETURN_FAIL;
+    }
+
+    if (!arp_quiet)
+        tool_printf("%s: deleted\n", (LONG)host);
+
+    return RETURN_OK;
+}
+
+/* The next word of a FILE line, terminated in place, or NULL. */
+static char *next_word(char **cursor)
+{
+    char *p = *cursor;
+    char *word;
+
+    while (*p == ' ' || *p == '\t')
+        p++;
+    if (*p == '\0' || *p == '\n' || *p == '\r')
+        return NULL;
+
+    word = p;
+    while (*p != '\0' && *p != ' ' && *p != '\t' && *p != '\n' && *p != '\r')
+        p++;
+    if (*p != '\0')
+        *p++ = '\0';
+
+    *cursor = p;
+    return word;
+}
+
+/*
+ * FILE: one `<host> <hardware address> [TEMP] [PUB]` per line, as SET takes
+ * them.  Blank lines and lines starting with # or ; are skipped.  Every line
+ * is tried; the return code is the worst.
+ */
+static LONG set_from_file(struct Library *base, const char *path)
+{
+    BPTR fh = Open((CONST_STRPTR)path, MODE_OLDFILE);
+    LONG worst = RETURN_OK;
+    LONG line = 0;
+
+    if (fh == (BPTR)0)
+    {
+        tool_error("%s cannot be opened", (LONG)path);
+        return RETURN_ERROR;
+    }
+
+    while (FGets(fh, (STRPTR)arp_line, sizeof(arp_line) - 1) != NULL)
+    {
+        char *cursor = arp_line;
+        char *host;
+        char *mac;
+        char *word;
+        BOOL  temp = FALSE;
+        LONG  rc   = RETURN_OK;
+
+        line++;
+
+        host = next_word(&cursor);
+        if (host == NULL || host[0] == '#' || host[0] == ';')
+            continue;
+
+        mac = next_word(&cursor);
+        if (mac == NULL)
+        {
+            tool_error("%s line %ld: no hardware address", (LONG)path, line);
+            rc = RETURN_ERROR;
+        }
+
+        while (rc == RETURN_OK && (word = next_word(&cursor)) != NULL)
+        {
+            if (tool_stricmp(word, "TEMP") == 0)
+                temp = TRUE;
+            else if (tool_stricmp(word, "PUB") == 0 ||
+                     tool_stricmp(word, "PUBLISH") == 0)
+            {
+                tool_error("%s line %ld: published entries are not supported",
+                           (LONG)path, line);
+                rc = RETURN_ERROR;
+            }
+            else
+            {
+                tool_error("%s line %ld: \"%s\" is not TEMP or PUB",
+                           (LONG)path, line, (LONG)word);
+                rc = RETURN_ERROR;
+            }
+        }
+
+        if (rc == RETURN_OK)
+            rc = set_entry(base, host, mac, temp, NULL);
+
+        if (rc > worst)
+            worst = rc;
+
+        if (tool_break())
+        {
+            tool_fault(ERROR_BREAK);
+            if (worst < RETURN_WARN)
+                worst = RETURN_WARN;
+            break;
+        }
+    }
+
+    Close(fh);
+    return worst;
+}
+
+static VOID usage(VOID)
+{
+    tool_usage("[ALL] | <host> | DELETE <host> | SET <host> <hardware address> "
+               "[TEMP] | FILE <file>",
+               "List or change the address resolution cache.");
+}
+
+/* What is wrong with this combination, or NULL. */
+static const char *misuse(const LONG *args)
+{
+    BOOL set  = (BOOL)(args[ARG_SET] != 0);
+    BOOL del  = (BOOL)(args[ARG_DELETE] != 0);
+    BOOL file = (BOOL)(args[ARG_FILE] != 0);
+    BOOL host = (BOOL)(args[ARG_HOSTNAME] != 0);
+
+    if (set && del)
+        return "SET and DELETE cannot be combined";
+    if (args[ARG_ALL] != 0 && (set || del || file))
+        return "ALL lists the cache; it does not go with SET, DELETE or FILE";
+    if (file && (set || del || host))
+        return "FILE cannot be combined with SET, DELETE or a host";
+    if ((args[ARG_TEMP] != 0 || args[ARG_PUB] != 0 || args[ARG_PRO] != 0) &&
+        !set)
+        return "TEMP, PUBLISH and PROXY go with SET";
+    if (args[ARG_PUB] != 0 || args[ARG_PRO] != 0)
+        return "published and proxy entries are not supported";
+    if (args[ARG_ADDRESS] != 0 && !set)
+        return "ADDRESS is the hardware address for SET";
+    if (set && (!host || args[ARG_ADDRESS] == 0))
+        return "SET needs a host and a hardware address";
+    if (del && !host)
+        return "DELETE needs a host";
+
+    return NULL;
+}
+
 int main(int argc, char **argv)
 {
     LONG              args[ARG_COUNT];
     struct RDArgs    *rda;
     struct Library   *base;
     const char       *address_text = NULL;
+    const char       *wrong;
     ULONG             want         = 0;
     ULONG             want6[4]     = { 0, 0, 0, 0 };
     BOOL              want_one     = FALSE;
     BOOL              want_one6    = FALSE;
-    BOOL              quiet;
+    BOOL              is6          = FALSE;
     BOOL              have_snapshot;
     BOOL              have_routes6 = FALSE;
-    LONG              err          = 0;
     LONG              rc           = RETURN_OK;
     ULONG             i;
     UWORD             shown        = 0;
@@ -487,11 +813,11 @@ int main(int argc, char **argv)
     if (rda == NULL)
     {
         tool_fault(IoErr());
+        usage();
         return RETURN_ERROR;
     }
 
-    quiet        = (BOOL)(args[ARG_QUIET] != 0);
-    address_text = (const char *)args[ARG_ADDRESS];
+    arp_quiet = (BOOL)(args[ARG_QUIET] != 0);
 
     if (args[ARG_UNIT] != 0)
     {
@@ -505,70 +831,58 @@ int main(int argc, char **argv)
         }
     }
 
-    if (address_text != NULL && is_written_as_ip6(address_text))
+    wrong = misuse(args);
+    if (wrong != NULL)
     {
-        struct Library *pb;
-        BOOL            has6;
-
-        if (!tool_parse_ip6(address_text, want6))
-        {
-            tool_error("\"%s\" is not an address", (LONG)address_text);
-            FreeArgs(rda);
-            return RETURN_ERROR;
-        }
-
-        /*
-         * Asked before anything is printed, because every later answer would be
-         * "not in the cache" and read as a fact about the address.
-         */
-        /* FALSE: QUIET drops the listing, never the reason there is none. */
-        pb = tool_netstatus_open(FALSE);
-        if (pb == NULL)
-        {
-            FreeArgs(rda);
-            return RETURN_ERROR;
-        }
-
-        has6 = stack_has_ipv6(pb);
-        tool_netstatus_close(pb);
-
-        if (!has6)
-        {
-            tool_error("%s: stack has no IPv6", (LONG)address_text);
-            FreeArgs(rda);
-            return RETURN_FAIL;
-        }
-
-        want_one6 = TRUE;
-    }
-    else if (address_text != NULL)
-    {
-        if (!ami_config_parse_ip(address_text, &want))
-        {
-            tool_error("\"%s\" is not an address", (LONG)address_text);
-            FreeArgs(rda);
-            return RETURN_ERROR;
-        }
-        want_one = TRUE;
-    }
-    else if (args[ARG_DELETE] != 0 || args[ARG_SET] != 0)
-    {
-        tool_error("DELETE and SET each need an address");
+        tool_error("%s", (LONG)wrong);
+        usage();
         FreeArgs(rda);
         return RETURN_ERROR;
     }
 
-    /*
-     * The IPv4 ARP cache is one table, not one per interface: the static-ARP
-     * call takes no interface and derives it from the address's route, so a
-     * UNIT on an IPv4 SET would be read nowhere.  Refuse it rather than drop
-     * it.  The IPv6 path is per-interface and its add reads the index.
-     */
-    if (args[ARG_SET] != 0 && !want_one6 && args[ARG_UNIT] != 0)
+    /* ALL is the listing with no host, as on Roadshow.  -n changes nothing:
+       the listing is numeric already. */
+    if (args[ARG_ALL] == 0)
+        address_text = (const char *)args[ARG_HOSTNAME];
+
+    /* ------------------------------------------- SET, DELETE and FILE --- */
+    if (args[ARG_SET] != 0 || args[ARG_DELETE] != 0 || args[ARG_FILE] != 0)
     {
-        tool_error("UNIT cannot be used with an IPv4 SET");
+        /* Changing the cache needs the library, but still must not start it.
+           FALSE: the reason there is none is printed. */
+        base = tool_netstatus_open(FALSE);
+        if (base == NULL)
+        {
+            FreeArgs(rda);
+            return RETURN_ERROR;
+        }
+
+        if (args[ARG_FILE] != 0)
+            rc = set_from_file(base, (const char *)args[ARG_FILE]);
+        else if (args[ARG_SET] != 0)
+            rc = set_entry(base, address_text,
+                           (const char *)args[ARG_ADDRESS],
+                           (BOOL)(args[ARG_TEMP] != 0),
+                           (const LONG *)args[ARG_UNIT]);
+        else
+            rc = delete_entry(base, address_text);
+
+        tool_netstatus_close(base);
         FreeArgs(rda);
-        return RETURN_ERROR;
+        return rc;
+    }
+
+    if (address_text != NULL)
+    {
+        rc = resolve_host(address_text, &want, want6, &is6);
+        if (rc != RETURN_OK)
+        {
+            FreeArgs(rda);
+            return rc;
+        }
+
+        want_one6 = is6;
+        want_one  = (BOOL)!is6;
     }
 
     /*
@@ -581,94 +895,6 @@ int main(int argc, char **argv)
        ever be a neighbour. Empty on a machine without IPv6. */
     have_routes6  = (BOOL)(tool_routes6(&arp_routes6) == 0);
     tool_nx_quiet(FALSE);
-
-    /* ------------------------------------------------- SET and DELETE --- */
-    if (args[ARG_SET] != 0 || args[ARG_DELETE] != 0)
-    {
-        UBYTE mac[AMI_ETH_ADDR_SIZE];
-        char  text[24];
-
-        if (args[ARG_SET] != 0 && !parse_mac((const char *)args[ARG_SET], mac))
-        {
-            tool_error("\"%s\" is not a hardware address",
-                       (LONG)args[ARG_SET]);
-            FreeArgs(rda);
-            return RETURN_ERROR;
-        }
-
-        /* Changing the cache needs the library, but still must not start it.
-           FALSE: QUIET drops the message, never the reason there is none. */
-        base = tool_netstatus_open(FALSE);
-        if (base == NULL)
-        {
-            FreeArgs(rda);
-            return RETURN_ERROR;
-        }
-
-        zero_control(&arp_ctl);
-
-        /* One command, two caches: which one is changed follows from how the
-           address was written. */
-        if (want_one6)
-        {
-            arp_ctl.nsc_Destination6[0] = want6[0];
-            arp_ctl.nsc_Destination6[1] = want6[1];
-            arp_ctl.nsc_Destination6[2] = want6[2];
-            arp_ctl.nsc_Destination6[3] = want6[3];
-        }
-        else
-        {
-            arp_ctl.nsc_Destination = want;
-        }
-
-        if (args[ARG_SET] != 0)
-        {
-            ULONG op = want_one6 ? (ULONG)NETCTRL_ND_ADD
-                                 : (ULONG)NETCTRL_ARP_ADD;
-
-            if (args[ARG_UNIT] != 0)
-                arp_ctl.nsc_Index = (UWORD)(*(LONG *)args[ARG_UNIT]);
-
-            for (i = 0; i < (ULONG)AMI_ETH_ADDR_SIZE; i++)
-                arp_ctl.nsc_HwAddress[i] = mac[i];
-
-            if (tool_netstatus_control(base, op, &arp_ctl, &err) != 0)
-            {
-                tool_error("%s was not added to the cache",
-                           (LONG)address_text);
-
-                tool_netstatus_close(base);
-                FreeArgs(rda);
-                return RETURN_FAIL;
-            }
-
-            tool_format_mac(mac, text, sizeof(text));
-            if (!quiet)
-                tool_printf("%s: %s, permanent\n",
-                            (LONG)address_text, (LONG)text);
-        }
-        else
-        {
-            ULONG op = want_one6 ? (ULONG)NETCTRL_ND_DELETE
-                                 : (ULONG)NETCTRL_ARP_DELETE;
-
-            if (tool_netstatus_control(base, op, &arp_ctl, &err) != 0)
-            {
-                tool_error("%s was not removed from the cache",
-                           (LONG)address_text);
-                tool_netstatus_close(base);
-                FreeArgs(rda);
-                return RETURN_FAIL;
-            }
-
-            if (!quiet)
-                tool_printf("%s: deleted\n", (LONG)address_text);
-        }
-
-        tool_netstatus_close(base);
-        FreeArgs(rda);
-        return RETURN_OK;
-    }
 
     /* ------------------------------------------------------------ list --- */
     if (tool_stats(&arp_stats) != 0)
@@ -697,7 +923,7 @@ int main(int argc, char **argv)
             if (want_one && arp_stats.arp[i].address != want)
                 continue;
 
-            if (shown == 0 && !quiet)
+            if (shown == 0 && !arp_quiet)
                 tool_printf("Address          Hardware address\n");
 
             print_entry(&arp_stats.arp[i], have_snapshot);
@@ -722,7 +948,7 @@ int main(int argc, char **argv)
             if (want_one6 && !same_address6(e->addr, want6))
                 continue;
 
-            if (shown6 == 0 && !quiet)
+            if (shown6 == 0 && !arp_quiet)
             {
                 if (shown != 0)
                     tool_printf("\n");
@@ -733,7 +959,7 @@ int main(int argc, char **argv)
             shown6++;
         }
 
-        if (shown6 != 0 && !quiet)
+        if (shown6 != 0 && !arp_quiet)
             explain_states(&arp_nd, want6, want_one6);
     }
 
@@ -759,7 +985,7 @@ int main(int argc, char **argv)
             tool_printf("The address cache is empty.\n");
         }
     }
-    else if ((arp_stats.arp_truncated || arp_nd.truncated) && !quiet)
+    else if ((arp_stats.arp_truncated || arp_nd.truncated) && !arp_quiet)
     {
         /*
          * The snapshot holds TOOL_MAX_ARP entries and the stack can report more

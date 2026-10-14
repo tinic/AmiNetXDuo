@@ -102,7 +102,7 @@ for t in $NEEDED; do cp "$TOOLS/$t" "$STAGE/$t"; done
     echo "SYS:NetTrace WIRE HOST 127.0.0.1 PORT 21 NOCAPTURE"
     # 33 permanent entries: one more than TOOL_MAX_ARP.
     for i in $(seq 1 33); do
-        printf 'SYS:arp 10.77.0.%d SET=02:11:22:33:44:%02x\n' "$((100 + i))" "$i"
+        printf 'SYS:arp SET 10.77.0.%d 02:11:22:33:44:%02x\n' "$((100 + i))" "$i"
     done
     echo "SYS:arp"
 } > "$STAGE/commands.txt"
