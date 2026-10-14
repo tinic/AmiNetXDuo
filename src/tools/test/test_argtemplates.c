@@ -554,12 +554,39 @@ static ArgUse classify_use(const char *src, const char *at, size_t len)
 
 /* ------------------------------------------------------------- contract --- */
 
-/* An option that parses and is then never read. One exception, named in the
-   file's own header. */
-static int deliberately_ignored(const char *cmd, const char *arg)
+/* An option that parses and is then never read.  One exception named in the
+   file's own header, and the AmigaDOS Command Reference's: a keyword in the
+   source's REFERENCE_TEMPLATE is accepted so a Roadshow script parses, even
+   where it has nothing to do here (test_refcompat holds the template). */
+static int deliberately_ignored(const char *cmd, const char *src,
+                                const char *arg)
 {
+    const char *ref = strstr(src, "#define REFERENCE_TEMPLATE");
+
     /* host: the timeout is the resolver's, set in DEVS:Internet/resolv.conf. */
-    return strcmp(cmd, "host") == 0 && strcmp(arg, "TIMEOUT") == 0;
+    if (strcmp(cmd, "host") == 0 && strcmp(arg, "TIMEOUT") == 0)
+        return 1;
+
+    while (ref != NULL)
+    {
+        char     tmpl[1024];
+        TmplItem items[MAX_ITEMS];
+        int      n;
+        int      i;
+        int      a;
+
+        if (read_template(ref, tmpl, sizeof(tmpl)))
+        {
+            n = parse_items(tmpl, items, MAX_ITEMS);
+            for (i = 0; i < n; i++)
+                for (a = 0; a < items[i].naliases; a++)
+                    if (strcmp(items[i].alias[a], arg) == 0)
+                        return 1;
+        }
+        ref = strstr(ref + 1, "#define REFERENCE_TEMPLATE");
+    }
+
+    return 0;
 }
 
 static void contract_pair(const char *name, int pair, const char *src,
@@ -669,7 +696,7 @@ static void contract_pair(const char *name, int pair, const char *src,
 
             /* Read somewhere.  The enum declaration and the clearing do not
                count, and a helper taking the index (arg_or) does. */
-            if (reads == 0 && !deliberately_ignored(name, args[i]))
+            if (reads == 0 && !deliberately_ignored(name, src, args[i]))
                 CHECK(token_uses(src, token) - 1 - zeroed > 0,
                       "%s[%d]: %s is in the template and ARG_%s is never "
                       "read, so the option parses and does nothing",
