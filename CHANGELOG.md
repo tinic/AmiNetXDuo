@@ -7,6 +7,18 @@ are history.
 
 ## Unreleased
 
+- With QUIET, AddNetInterface, AddNetRoute, DeleteNetRoute,
+  ConfigureNetInterface and RemoveNetInterface print nothing and return
+  5 on any failure, as in Roadshow.
+- arp uses the AmigaDOS Command Reference template: SET host mac with
+  TEMP, DELETE, ALL or -a, and FILE; host names are resolved. The
+  arp <address> SET <mac> form is removed.
+- ping accepts -v, which shows ICMP errors, and DONTROUTE; traceroute
+  takes the packet size without its keyword.
+- ConfigureNetInterface accepts every AmigaDOS Command Reference keyword.
+  ALIASADDR and DELETEADDR add and remove additional IPv4 addresses;
+  ADDRESS=DHCP and CONFIGURE=AUTO are accepted; a failed ONLINE
+  returns 5.
 - ssh converts between UTF-8 and the system character set in console
   windows, through codesets.library when installed and ISO-8859-1
   otherwise. Server window titles set the console title. CHARSET selects
