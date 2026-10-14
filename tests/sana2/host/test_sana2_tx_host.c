@@ -650,6 +650,26 @@ static void test_chip_checksum_declines(void)
             "and the flag is taken");
 }
 
+static void test_pseudo_header_carries(void)
+{
+    UCHAR *ip;
+    packet_init(ack_frame, ACK_LEN);
+    memmove(pkt.nx_packet_prepend_ptr + 1, pkt.nx_packet_prepend_ptr, ACK_LEN);
+    pkt.nx_packet_prepend_ptr++;
+    pkt.nx_packet_append_ptr++;
+    ip = pkt.nx_packet_prepend_ptr;
+    memset(ip + 12, 0xff, 8);
+    h_check(ami_sana2_tx_pseudo_sum(&pkt) == TRUE &&
+            ip[36] == 0 && ip[37] == 26,
+            "odd-address pseudo-header loads retain address carries");
+    ip[14] = 0xff;
+    ip[15] = 0xe6;
+    memset(ip + 16, 0, 4);
+    h_check(ami_sana2_tx_pseudo_sum(&pkt) == TRUE &&
+            ip[36] == 0 && ip[37] == 1,
+            "a carry produced by the first fold is folded again");
+}
+
 static void test_pad_raw(void)
 {
     printf("sana2: a short raw frame is padded to 60, header included\n");
@@ -1253,6 +1273,7 @@ int main(void)
     test_chip_checksum_needs_the_tag();
     test_chip_checksum_raw_takes_the_stack();
     test_chip_checksum_declines();
+    test_pseudo_header_carries();
     test_pad_raw();
     test_high_ethertype_goes_raw();
     test_high_ethertype_checksum_first();

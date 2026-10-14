@@ -276,11 +276,33 @@ VOID ami_sana2_quiesce(AmiSana2If *iface)
 
 /* --------------------------------------------------------------- the entry */
 
+static inline VOID __attribute__((always_inline)) ami_sana2_driver_send(
+    NX_IP_DRIVER *driver_req, AmiSana2If *iface)
+{
+    NX_PACKET *packet = driver_req->nx_ip_driver_packet;
+
+    if (packet == NULL)
+    {
+        driver_req->nx_ip_driver_status = NX_PTR_ERROR;
+        return;
+    }
+
+    driver_req->nx_ip_driver_status =
+        ami_sana2_tx_send(iface, packet,
+                          ami_sana2_ether_type(driver_req, packet),
+                          driver_req->nx_ip_driver_physical_address_msw,
+                          driver_req->nx_ip_driver_physical_address_lsw);
+}
+
+/* Control commands have large locals (notably IOSana2Req).  Keep their
+   frame and general switch out of the normal packet-send entry. */
+static VOID __attribute__((noinline, cold)) ami_sana2_driver_command(
+    NX_IP_DRIVER *driver_req, AmiSana2If *iface);
+
 VOID ami_sana2_driver_entry(NX_IP_DRIVER *driver_req)
 {
     AmiSana2If   *iface;
     NX_INTERFACE *interface_ptr;
-    NX_IP        *ip_ptr;
 
     if (driver_req == NULL)
         return;
@@ -291,7 +313,6 @@ VOID ami_sana2_driver_entry(NX_IP_DRIVER *driver_req)
        NX_SUCCESS from AMI_LINK_DETACH_BEGIN as "detaching is set". */
     driver_req->nx_ip_driver_status = NX_SUCCESS;
 
-    ip_ptr        = driver_req->nx_ip_driver_ptr;
     interface_ptr = driver_req->nx_ip_driver_interface;
 
     iface = ami_sana2_lookup(driver_req);
@@ -324,6 +345,21 @@ VOID ami_sana2_driver_entry(NX_IP_DRIVER *driver_req)
     if (iface->detaching &&
         ami_sana2_detaching_entry(driver_req, iface, interface_ptr))
         return;
+
+    if (driver_req->nx_ip_driver_command == NX_LINK_PACKET_SEND)
+    {
+        ami_sana2_driver_send(driver_req, iface);
+        return;
+    }
+
+    ami_sana2_driver_command(driver_req, iface);
+}
+
+static VOID __attribute__((noinline, cold)) ami_sana2_driver_command(
+    NX_IP_DRIVER *driver_req, AmiSana2If *iface)
+{
+    NX_INTERFACE *interface_ptr = driver_req->nx_ip_driver_interface;
+    NX_IP *ip_ptr = driver_req->nx_ip_driver_ptr;
 
     switch (driver_req->nx_ip_driver_command)
     {
@@ -460,31 +496,12 @@ VOID ami_sana2_driver_entry(NX_IP_DRIVER *driver_req)
         iface->detaching = TRUE;
         break;
 
-    case NX_LINK_PACKET_SEND:
     case NX_LINK_PACKET_BROADCAST:
     case NX_LINK_ARP_SEND:
     case NX_LINK_ARP_RESPONSE_SEND:
     case NX_LINK_RARP_SEND:
-    {
-        NX_PACKET *packet = driver_req->nx_ip_driver_packet;
-
-        if (packet == NULL)
-        {
-            driver_req->nx_ip_driver_status = NX_PTR_ERROR;
-            break;
-        }
-
-        /* What one transmitted frame costs on the CPU -- the push leg of
-           earlier probe builds -- is dissected inside ami_sana2_tx_send()
-           into reap, stuff and post legs; sana2_tx.c says what each spans.
-           Nothing in this case outside that call is worth a clock read. */
-        driver_req->nx_ip_driver_status =
-            ami_sana2_tx_send(iface, packet,
-                              ami_sana2_ether_type(driver_req, packet),
-                              driver_req->nx_ip_driver_physical_address_msw,
-                              driver_req->nx_ip_driver_physical_address_lsw);
+        ami_sana2_driver_send(driver_req, iface);
         break;
-    }
 
     case NX_LINK_MULTICAST_JOIN:
         if (ami_sana2_multicast(iface, S2_ADDMULTICASTADDRESS,

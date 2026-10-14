@@ -187,7 +187,27 @@ static LONG bsd_packet_append_iov(NX_PACKET *packet, BsdIovCursor *cur,
         if (chunk > want - done)
             chunk = want - done;
 
-        status = nx_packet_data_append(packet, src, chunk, pool, wait);
+        /* The private, single-buffer packet needs no tail walk or allocation.
+           Keep the native routine in instrumented builds so its events and
+           debug provenance still describe the append. */
+#if !defined(TX_ENABLE_EVENT_TRACE) && !defined(NX_ENABLE_PACKET_DEBUG_INFO)
+#ifndef NX_DISABLE_PACKET_CHAIN
+        if (packet->nx_packet_next == NX_NULL &&
+            packet->nx_packet_last == NX_NULL &&
+#else
+        if (
+#endif
+            chunk <= (ULONG)(packet->nx_packet_data_end -
+                             packet->nx_packet_append_ptr))
+        {
+            memcpy(packet->nx_packet_append_ptr, src, chunk);
+            packet->nx_packet_append_ptr += chunk;
+            packet->nx_packet_length += chunk;
+            status = NX_SUCCESS;
+        }
+        else
+#endif
+            status = nx_packet_data_append(packet, src, chunk, pool, wait);
         if (status != NX_SUCCESS)
         {
             if (why != NULL)
@@ -369,6 +389,15 @@ static ULONG bsd_budget_left(const BsdWaitBudget *b)
     return (spent >= b->bwb_Wait) ? NX_NO_WAIT : b->bwb_Wait - spent;
 }
 
+/* Successful sends call NetX directly.  Keep the sliced wait machinery on
+   the resource-shortage path, and the owner's break check before each actor. */
+static inline BOOL __attribute__((always_inline)) bsd_send_aborted(
+    struct AmiSocketBase *base, ULONG wait)
+{
+    return wait != NX_NO_WAIT && base->sb_BreakMask != 0 &&
+           (bsd_break_signals(base) & base->sb_BreakMask) != 0;
+}
+
 static LONG bsd_send_tcp_run(struct AmiSocketBase *base, AmiSocket *sock,
                              BsdIovCursor *cur, LONG len,
                              AmiSana2If *run, const BsdWaitBudget *tb)
@@ -405,22 +434,21 @@ static LONG bsd_send_tcp_run(struct AmiSocketBase *base, AmiSocket *sock,
             chunk = mss;
 
         {
-            BsdAllocArgs aargs;
-            BOOL         aborted;
+            ULONG left = (wait == NX_NO_WAIT) ? NX_NO_WAIT : bsd_budget_left(tb);
 
-            aargs.pool   = pool;
-            aargs.packet = &packet;
-            aargs.run    = run;
+            if (bsd_send_aborted(base, left))
+                return (sent > 0) ? sent : bsd_fail(base, AMI_EINTR);
 
-            status = bsd_wait_sliced(base,
-                                     (wait == NX_NO_WAIT) ? NX_NO_WAIT
-                                                          : bsd_budget_left(tb),
-                                     bsd_alloc_once, &aargs, &aborted);
-            if (aborted)
+            status = nx_packet_allocate(pool, &packet, NX_TCP_PACKET, NX_NO_WAIT);
+            if (status == NX_NO_PACKET && left != NX_NO_WAIT)
             {
-                if (sent > 0)
-                    return sent;        /* short write, as BSD allows */
-                return bsd_fail(base, AMI_EINTR);
+                BsdAllocArgs aargs = { pool, &packet, run };
+                BOOL aborted;
+
+                status = bsd_wait_sliced(base, bsd_budget_left(tb),
+                                         bsd_alloc_once, &aargs, &aborted);
+                if (aborted)
+                    return (sent > 0) ? sent : bsd_fail(base, AMI_EINTR);
             }
         }
         if (status != NX_SUCCESS)
@@ -440,24 +468,29 @@ static LONG bsd_send_tcp_run(struct AmiSocketBase *base, AmiSocket *sock,
         }
 
         {
-            BsdSendArgs sargs;
-            BOOL        aborted;
+            ULONG left = (wait == NX_NO_WAIT) ? NX_NO_WAIT : bsd_budget_left(tb);
 
-            sargs.tcp    = &sock->as_Nx.tcp;
-            sargs.packet = packet;
-            sargs.run    = run;
-
-            status = bsd_wait_sliced(base,
-                                     (wait == NX_NO_WAIT) ? NX_NO_WAIT
-                                                          : bsd_budget_left(tb),
-                                     bsd_send_once, &sargs, &aborted);
-            if (aborted)
+            if (bsd_send_aborted(base, left))
             {
-                sent += bsd_send_consumed(packet, filled);
                 nx_packet_release(packet);
-                if (sent > 0)
-                    return sent;        /* short write, as BSD allows */
-                return bsd_fail(base, AMI_EINTR);
+                return (sent > 0) ? sent : bsd_fail(base, AMI_EINTR);
+            }
+
+            status = nx_tcp_socket_send(&sock->as_Nx.tcp, packet, NX_NO_WAIT);
+            if ((status == NX_WINDOW_OVERFLOW || status == NX_TX_QUEUE_DEPTH ||
+                 status == NX_NO_PACKET) && left != NX_NO_WAIT)
+            {
+                BsdSendArgs sargs = { &sock->as_Nx.tcp, packet, run };
+                BOOL aborted;
+
+                status = bsd_wait_sliced(base, bsd_budget_left(tb),
+                                         bsd_send_once, &sargs, &aborted);
+                if (aborted)
+                {
+                    sent += bsd_send_consumed(packet, filled);
+                    nx_packet_release(packet);
+                    return (sent > 0) ? sent : bsd_fail(base, AMI_EINTR);
+                }
             }
         }
         if (status != NX_SUCCESS)

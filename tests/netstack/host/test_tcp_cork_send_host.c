@@ -70,6 +70,7 @@ ULONG _nx_tcp_ack_timer_rate;
 ULONG _nx_tcp_transmit_timer_rate;
 
 static NX_IP h_ip;
+static NX_TCP_SOCKET h_sock;
 
 /*
  * nx_ip_protection, modelled: an owner and a count.  A get by a thread that
@@ -80,6 +81,8 @@ static NX_IP h_ip;
 static TX_THREAD *h_mutex_owner;
 static ULONG      h_mutex_count;
 static ULONG      h_mutex_low;
+static ULONG      h_mutex_gets, h_mutex_puts;
+static UINT       h_checksum_calls, h_checksum_race;
 static UINT       h_suspends;
 static UINT       h_alloc_waits;         /* allocations asked to wait     */
 
@@ -98,6 +101,7 @@ UINT _tx_mutex_get(TX_MUTEX *mutex_ptr, ULONG wait_option)
 
     h_mutex_owner = _tx_thread_current_ptr;
     h_mutex_count++;
+    h_mutex_gets++;
     return TX_SUCCESS;
 }
 
@@ -114,6 +118,7 @@ UINT _tx_mutex_put(TX_MUTEX *mutex_ptr)
     }
 
     h_mutex_count--;
+    h_mutex_puts++;
     if (h_mutex_count < h_mutex_low)
         h_mutex_low = h_mutex_count;
     if (h_mutex_count == 0)
@@ -263,6 +268,13 @@ USHORT _nx_ip_checksum_compute(NX_PACKET *packet_ptr, ULONG protocol,
 {
     (void)packet_ptr; (void)protocol; (void)data_length;
     (void)src_ip_addr; (void)dest_ip_addr;
+    h_checksum_calls++;
+    h_check_eq(h_mutex_count, 1, "software checksum gives back the send's nested hold");
+    if (h_checksum_race == 1)
+        h_sock.nx_tcp_socket_tx_sequence += 100;
+    else if (h_checksum_race == 2)
+        h_sock.nx_tcp_socket_state = NX_TCP_CLOSED;
+    h_checksum_race = 0;
     return 0;
 }
 
@@ -338,7 +350,6 @@ VOID _nx_tcp_socket_retransmit_queue_flush(NX_TCP_SOCKET *socket_ptr)
 #define H_ISN_RX        0x20000000UL
 
 static NX_INTERFACE   h_iface;
-static NX_TCP_SOCKET  h_sock;
 
 static NX_PACKET      h_pkt;
 static UCHAR          h_pkt_buf[H_BUF];
@@ -398,6 +409,8 @@ static void h_fixture(void)
     h_mutex_count = 0;
     (void)_tx_mutex_get(&h_ip.nx_ip_protection, TX_WAIT_FOREVER);
     h_mutex_low = h_mutex_count;
+    h_mutex_gets = h_mutex_puts = 0;
+    h_checksum_calls = h_checksum_race = 0;
 }
 
 /* The cork's segment: NX_TCP_PACKET headroom, `bytes` of payload, prepend
@@ -572,6 +585,58 @@ static void e_not_connected(void)
     printf("  closed connection   NX_NOT_CONNECTED\n");
 }
 
+/* Same send with an offloaded checksum, and races while the software
+   checksum has released the send's hold.  No synthetic driver is involved. */
+static void f_checksum_protection(void)
+{
+    NX_PACKET *p;
+    ULONG word;
+
+    h_fixture();
+    h_iface.nx_interface_capability_flag = NX_INTERFACE_CAPABILITY_TCP_TX_CHECKSUM;
+    p = h_segment(300, 0);
+    h_check_eq(_nx_tcp_socket_send_internal(&h_sock, p, NX_NO_WAIT), NX_SUCCESS,
+               "offloaded send succeeds");
+    h_check_eq(h_checksum_calls, 0, "offloaded send skips software checksum");
+    h_check_eq(h_mutex_gets, 1, "offloaded send only acquires its initial hold");
+    h_check_eq(h_mutex_puts, 1, "offloaded send only returns its final hold");
+    h_check((p -> nx_packet_interface_capability_flag &
+             NX_INTERFACE_CAPABILITY_TCP_TX_CHECKSUM) != 0,
+             "offloaded checksum remains owed to the interface");
+    h_pass_invariants("offloaded checksum");
+
+    h_fixture();
+    p = h_segment(300, 0);
+    h_check_eq(_nx_tcp_socket_send_internal(&h_sock, p, NX_NO_WAIT), NX_SUCCESS,
+               "software checksum send succeeds");
+    h_check_eq(h_checksum_calls, 1, "software send computes its checksum");
+    h_check_eq(h_mutex_gets, 2, "software send reacquires after checksum");
+    h_check_eq(h_mutex_puts, 2, "software send returns its hold during checksum");
+    h_pass_invariants("software checksum");
+
+    h_fixture();
+    h_checksum_race = 1;
+    p = h_segment(300, 0);
+    h_check_eq(_nx_tcp_socket_send_internal(&h_sock, p, NX_NO_WAIT), NX_SUCCESS,
+               "sequence race retries the software checksum");
+    h_check_eq(h_checksum_calls, 2, "changed sequence is checksummed again");
+    h_check_eq(h_datagrams, 1, "sequence race sends exactly once");
+    word = ((NX_TCP_HEADER *)p -> nx_packet_prepend_ptr) -> nx_tcp_sequence_number;
+    NX_CHANGE_ULONG_ENDIAN(word);
+    h_check_eq(word, H_ISN + 100, "header uses the new sequence");
+    h_check(h_wire_bytes == 300 && memcmp(h_wire, h_data, 300) == 0,
+            "retry preserves the payload and header headroom");
+    h_pass_invariants("checksum sequence race");
+
+    h_fixture();
+    h_checksum_race = 2;
+    p = h_segment(300, 0);
+    h_check_eq(_nx_tcp_socket_send_internal(&h_sock, p, NX_NO_WAIT), NX_NOT_CONNECTED,
+               "disconnect during software checksum is detected");
+    h_check_eq(h_datagrams, 0, "disconnected socket puts no data on the wire");
+    h_pass_invariants("checksum disconnect race");
+}
+
 int main(void)
 {
     printf("cork: the IP thread's NX_NO_WAIT send\n");
@@ -581,6 +646,7 @@ int main(void)
     c_closed_window_and_queue();
     d_no_segment_packet();
     e_not_connected();
+    f_checksum_protection();
 
     printf("%lu checks, %lu failures\n", h_checks, h_failures);
 
