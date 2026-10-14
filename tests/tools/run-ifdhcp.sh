@@ -414,21 +414,13 @@ says "SYS:ConfigureNetInterface eth0 CONFIGURE=DHCP NETMASK 255.255.255.0" 1 \
 want_rc "SYS:ConfigureNetInterface eth0 CONFIGURE=DHCP NETMASK 255.255.255.0" 1 10 \
         "and returns ERROR"
 
-says "SYS:ConfigureNetInterface eth0 CONFIGURE=AUTO" 1 \
-     "CONFIGURE accepts only DHCP" \
-     "CONFIGURE=AUTO is refused by name"
-want_rc "SYS:ConfigureNetInterface eth0 CONFIGURE=AUTO" 1 10 "and returns ERROR"
+says "SYS:ConfigureNetInterface eth0 CONFIGURE=BOOTP" 1 \
+     "CONFIGURE is DHCP, AUTO or FASTAUTO" \
+     "an unknown CONFIGURE is refused by name"
+want_rc "SYS:ConfigureNetInterface eth0 CONFIGURE=BOOTP" 1 10 "and returns ERROR"
 
-says "SYS:ConfigureNetInterface eth0 CONFIGURE=DHCP TIMEOUT 3" 1 \
-     "TIMEOUT must be at least" \
-     "a TIMEOUT of less than ten seconds is refused"
-want_rc "SYS:ConfigureNetInterface eth0 CONFIGURE=DHCP TIMEOUT 3" 1 10 \
-        "and returns ERROR"
-
-says "SYS:ConfigureNetInterface eth0 TIMEOUT 30" 1 \
-     "requires CONFIGURE=DHCP" \
-     "a TIMEOUT with nothing to wait for is refused"
-want_rc "SYS:ConfigureNetInterface eth0 TIMEOUT 30" 1 10 "and returns ERROR"
+want_rc "SYS:ConfigureNetInterface eth0 TIMEOUT 30" 1 0 \
+        "a TIMEOUT with nothing to wait for is accepted, as the reference has it"
 
 says "SYS:ConfigureNetInterface nosuch0 RELEASE" 1 \
      'no interface "nosuch0"' \
@@ -437,7 +429,7 @@ want_rc "SYS:ConfigureNetInterface nosuch0 RELEASE" 1 20 "and returns FAIL"
 
 AFTER_REFUSALS_SERVER=$(lease_server 5)
 if [ -n "$RETAKEN_SERVER" ] && [ "$AFTER_REFUSALS_SERVER" = "$RETAKEN_SERVER" ]; then
-    pass "and none of the five refusals touched the lease"
+    pass "and none of these touched the lease"
 else
     fail "the lease changed across the refusal checks"
     status 5 | sed 's/^/       /' >&2

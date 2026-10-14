@@ -284,6 +284,12 @@ static VOID h_saw_input(NX_PACKET *packet_ptr, Destination where)
     h_record(packet_ptr, where);
 }
 
+/* sana2_driver.c is not linked here; the out-of-service paths call it. */
+VOID ami_sana2_alias_sync(AmiSana2If *iface)
+{
+    (VOID)iface;
+}
+
 VOID _nx_ip_packet_receive(NX_IP *ip_ptr, NX_PACKET *packet_ptr)
 {
     (VOID)ip_ptr;
@@ -602,6 +608,54 @@ static void test_header_strip(void)
     h_check(h_seen_interface == &interface_obj,
             "and the packet names the interface it arrived on");
     h_check(iface.stats.packets_received == 1, "and it is counted as received");
+}
+
+/*
+ * An alias address is an NX_INTERFACE of its own on this device, and NetX Duo
+ * accepts a datagram, and answers ARP, only for the address of the interface
+ * a frame arrived on.  frame_init() fills the payload with 0x40 + i, so an
+ * IPv4 destination reads 0x50515253 and an ARP target 0x58595a5b.
+ */
+static void test_alias_takes_its_frames(void)
+{
+    static NX_INTERFACE alias_a;
+    static NX_INTERFACE alias_b;
+
+    printf("sana2: a frame for an alias address goes to the alias\n");
+
+    fixture_init();
+    memset(&alias_a, 0, sizeof(alias_a));
+    memset(&alias_b, 0, sizeof(alias_b));
+    alias_a.nx_interface_ip_address = 0x50515253UL;
+    alias_b.nx_interface_ip_address = 0x58595a5bUL;
+    iface.alias[1]    = &alias_a;
+    iface.alias[2]    = &alias_b;
+    iface.alias_count = 2;
+
+    frame_init(AMI_ETHERTYPE_IPV4, 40);
+    h_deliver();
+    h_check(h_went == TO_IP && h_seen_interface == &alias_a,
+            "an IPv4 datagram for the alias reaches IP on the alias");
+
+    frame_init(AMI_ETHERTYPE_ARP, 40);
+    h_deliver();
+    h_check(h_went == TO_ARP && h_seen_interface == &alias_b,
+            "an ARP message for the alias reaches ARP on the alias");
+
+    alias_a.nx_interface_ip_address = 0x0a000002UL;
+    frame_init(AMI_ETHERTYPE_IPV4, 40);
+    h_deliver();
+    h_check(h_seen_interface == &interface_obj,
+            "a datagram for no alias stays on the interface");
+
+    frame_init(AMI_ETHERTYPE_IPV6, 40);
+    h_deliver();
+    h_check(h_seen_interface == &interface_obj, "and so does IPv6");
+
+    frame_init(AMI_ETHERTYPE_IPV4, 10);
+    h_deliver();
+    h_check(h_seen_interface == &interface_obj,
+            "and a datagram too short to name a destination");
 }
 
 /*
@@ -2379,6 +2433,7 @@ int main(void)
 #endif
     test_demux();
     test_header_strip();
+    test_alias_takes_its_frames();
     test_multicast_is_counted();
     test_payload_alignment();
     test_runt();

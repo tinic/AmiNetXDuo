@@ -271,6 +271,9 @@ UINT _nxe_ip_static_route_delete(NX_IP *ip, ULONG n, ULONG m)
 UINT _nxe_arp_static_entry_create(NX_IP *ip, ULONG a, ULONG msw, ULONG lsw)
 { (VOID)ip; (VOID)a; (VOID)msw; (VOID)lsw;
   h_unreachable("nx_arp_static_entry_create"); return 1; }
+UINT _nxe_arp_dynamic_entry_set(NX_IP *ip, ULONG a, ULONG msw, ULONG lsw)
+{ (VOID)ip; (VOID)a; (VOID)msw; (VOID)lsw;
+  h_unreachable("nx_arp_dynamic_entry_set"); return 1; }
 UINT _nxe_arp_entry_delete(NX_IP *ip, ULONG a)
 { (VOID)ip; (VOID)a; h_unreachable("nx_arp_entry_delete"); return 1; }
 UINT _nxe_arp_dynamic_entries_invalidate(NX_IP *ip)
@@ -324,6 +327,10 @@ LONG netstack_iface_mdns_set(UWORD i, BOOL on)
 { (VOID)i; (VOID)on; h_unreachable("netstack_iface_mdns_set"); return -1; }
 LONG netstack_interface_priority_set(UWORD i, LONG p)
 { (VOID)i; (VOID)p; h_unreachable("netstack_interface_priority_set"); return -1; }
+LONG netstack_interface_autoip_start(UWORD i)
+{ (VOID)i; h_unreachable("netstack_interface_autoip_start"); return -1; }
+BOOL netstack_interface_alias_name(UWORD slot, char *out, ULONG len)
+{ (VOID)slot; (VOID)out; (VOID)len; return FALSE; }
 LONG netstack_mdns_browse_start(const char *t)
 { (VOID)t; h_unreachable("netstack_mdns_browse_start"); return -1; }
 LONG netstack_mdns_browse_stop(const char *t)

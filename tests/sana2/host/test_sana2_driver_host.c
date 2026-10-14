@@ -784,6 +784,84 @@ static void test_enable_unwinds_on_a_failed_reader(void)
     ami_sana2_unbind(&iface);
 }
 
+/* Drive the alias's own driver entry. */
+static void drive_alias(NX_INTERFACE *alias, UINT command)
+{
+    ULONG ret = 0;
+
+    memset(&req, 0, sizeof(req));
+    req.nx_ip_driver_command    = command;
+    req.nx_ip_driver_ptr        = &ip;
+    req.nx_ip_driver_interface  = alias;
+    req.nx_ip_driver_return_ptr = &ret;
+
+    ami_sana2_alias_driver_entry(&req);
+}
+
+/*
+ * An alias address has no link or MTU of its own: made on an interface that
+ * is down it is down, and every later change to the interface -- online,
+ * offline, SM_Down, an MTU -- reaches it.
+ */
+static void test_alias_follows_its_interface(void)
+{
+    static NX_INTERFACE alias_obj;
+
+    printf("sana2: an alias follows its interface's link and MTU\n");
+
+    fixture_init(AMI_ETH_ADDR_SIZE);
+    ami_sana2_attach(&iface, &ip, 0);
+    drive(NX_LINK_INTERFACE_ATTACH);
+    interface_obj.nx_interface_ip_mtu_size = 1500;
+    interface_obj.nx_interface_link_up     = NX_FALSE;
+
+    memset(&alias_obj, 0, sizeof(alias_obj));
+    alias_obj.nx_interface_index = 1;
+    ami_sana2_alias_bind(&iface);
+    drive_alias(&alias_obj, NX_LINK_INTERFACE_ATTACH);
+    drive_alias(&alias_obj, NX_LINK_INITIALIZE);
+    drive_alias(&alias_obj, NX_LINK_ENABLE);
+    h_check(alias_obj.nx_interface_additional_link_info == &iface,
+            "the alias shares the interface's device");
+    h_check(alias_obj.nx_interface_link_up == NX_FALSE,
+            "made on an interface that is down, the alias is down");
+    h_check(alias_obj.nx_interface_ip_mtu_size == 1500,
+            "and has the interface's MTU");
+    h_check(ami_sana2_alias_publish(&iface, &alias_obj, TRUE),
+            "it is published on the device");
+
+    drive(NX_LINK_ENABLE);
+    h_check(interface_obj.nx_interface_link_up == NX_TRUE &&
+            alias_obj.nx_interface_link_up == NX_TRUE,
+            "the interface comes online, and the alias with it");
+
+    drive(NX_LINK_DISABLE);
+    h_check(alias_obj.nx_interface_link_up == NX_FALSE,
+            "the interface goes offline, and the alias with it");
+
+    drive(NX_LINK_ENABLE);
+    h_check(alias_obj.nx_interface_link_up == NX_TRUE, "and back");
+
+    drive(AMI_LINK_STACK_DISABLE);
+    h_check(alias_obj.nx_interface_link_up == NX_FALSE,
+            "SM_Down takes the alias down too");
+
+    drive(NX_LINK_ENABLE);
+    interface_obj.nx_interface_ip_mtu_size = 1400;
+    ami_sana2_alias_sync(&iface);
+    h_check(alias_obj.nx_interface_ip_mtu_size == 1400,
+            "an MTU set on the interface reaches the alias");
+
+    drive(AMI_LINK_DETACH_BEGIN);
+    h_check(alias_obj.nx_interface_link_up == NX_FALSE,
+            "an interface being removed takes its alias down at once");
+
+    h_check(ami_sana2_alias_publish(&iface, &alias_obj, FALSE) &&
+            iface.alias_count == 0, "and the alias is withdrawn");
+
+    ami_sana2_unbind(&iface);
+}
+
 static void test_stack_disable_leaves_the_readers(void)
 {
     printf("sana2: SM_Down stops transmitting and nothing else\n");
@@ -1125,6 +1203,7 @@ int main(void)
     test_initialize_addressless();
     test_enable_unwinds_on_a_failed_reader();
     test_stack_disable_leaves_the_readers();
+    test_alias_follows_its_interface();
     test_uninitialize();
     test_detach_unbinds();
     test_detach_begin_leaves_the_device_alone();

@@ -1444,7 +1444,8 @@ static VOID nx_learn_slot_names(VOID)
     {
         const NetStatusInterface *src = &names.e[i];
 
-        if (!(src->nsi_Flags & NETSTATUS_IF_NAMED) ||
+        /* An alias row carries its own name, eth0:1. */
+        if (!(src->nsi_Flags & (NETSTATUS_IF_NAMED | NETSTATUS_IF_ALIAS)) ||
             src->nsi_Index >= (UWORD)TOOL_MAX_IF)
             continue;
 

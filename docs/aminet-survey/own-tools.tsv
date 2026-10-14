@@ -59,7 +59,7 @@ offset	lvo	aminet_callers	our_tool_mentions
 -432	FreeRouteInfo	0	0
 -438	GetRouteInfo	0	0
 -444	AddInterfaceTagList	0	0
--450	ConfigureInterfaceTagList	0	3
+-450	ConfigureInterfaceTagList	0	4
 -456	ReleaseInterfaceList	11	0
 -462	ObtainInterfaceList	10	0
 -468	QueryInterfaceTagList	10	0

@@ -1207,8 +1207,9 @@
     CheckNetConfig    read the configuration files back and report faults
     NetShutdown       stop the network and the programs using it
     RemoveNetInterface  remove one interface from the stack
-    ConfigureNetInterface  change a running interface's address, or
-                      renew and release its DHCP lease
+    ConfigureNetInterface  change a running interface's address, add
+                      or remove an alias address (ALIASADDR,
+                      DELETEADDR), or renew and release its DHCP lease
     hostname          what this machine is called, and where the name
                       came from; with a name, set it
     AddNetRoute       add a route by hand
