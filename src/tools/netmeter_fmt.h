@@ -30,6 +30,10 @@ uint32_t nm_delta(uint32_t hi, uint32_t lo, uint32_t prev_hi, uint32_t prev_lo);
 /* Bytes a second from bytes over milliseconds; zero for no time. */
 uint32_t nm_rate(uint32_t bytes, uint32_t ms);
 
+/* Bytes a second over a whole session: a count in two halves over
+   milliseconds, saturating. */
+uint32_t nm_average(uint32_t hi, uint32_t lo, uint32_t ms);
+
 /* The full-scale after one more second: a peak above it raises it with some
    headroom at once, otherwise it falls by a sixteenth, never below
    NM_SCALE_FLOOR. */

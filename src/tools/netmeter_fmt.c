@@ -158,6 +158,31 @@ uint32_t nm_rate(uint32_t bytes, uint32_t ms)
     return (bytes / ms) * 1000u;
 }
 
+uint32_t nm_average(uint32_t hi, uint32_t lo, uint32_t ms)
+{
+    uint32_t v, r, shift;
+
+    if (ms == 0)
+        return 0;
+    if (hi == 0)
+        return (ms >= 1000u) ? lo / (ms / 1000u) : nm_rate(lo, ms);
+    /* In KB below 4 TB, in MB above it, as nm_format_total. */
+    if ((hi >> 10) == 0)
+    {
+        v     = (hi << 22) | (lo >> 10);
+        shift = 10;
+    }
+    else if ((hi >> 20) == 0)
+    {
+        v     = (hi << 12) | (lo >> 20);
+        shift = 20;
+    }
+    else
+        return 0xFFFFFFFFu;
+    r = (ms >= 1000u) ? v / (ms / 1000u) : nm_rate(v, ms);
+    return (r > (0xFFFFFFFFu >> shift)) ? 0xFFFFFFFFu : r << shift;
+}
+
 uint32_t nm_scale_next(uint32_t scale, uint32_t rx_rate, uint32_t tx_rate)
 {
     uint32_t peak = (rx_rate > tx_rate) ? rx_rate : tx_rate;
