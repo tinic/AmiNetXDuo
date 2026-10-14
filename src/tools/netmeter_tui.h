@@ -113,4 +113,20 @@ int nm_tui_feed(NmTuiIn *in, unsigned char c, NmTuiEvent *ev);
 /* Nothing more to read: an Esc on its own was the key. */
 int nm_tui_idle(NmTuiIn *in, NmTuiEvent *ev);
 
+/* What a run of the console's input asks for, added up; zero it first. */
+typedef struct NmTuiKeys
+{
+    int       quit;         /* q, Esc, Ctrl-C                             */
+    int       reset;        /* r                                          */
+    uint32_t  pauses;       /* Space presses: odd toggles                 */
+    int       bounds;       /* a bounds report came: rows and cols        */
+    uint32_t  rows, cols;
+    int       resized;      /* the window changed: ask for its bounds     */
+} NmTuiKeys;
+
+/* `n` bytes of input into `k`; other keys are ignored.  With `idle` the
+   input is all read, and an Esc left alone is the key. */
+void nm_tui_keys(NmTuiIn *in, const unsigned char *b, uint32_t n, int idle,
+                 NmTuiKeys *k);
+
 #endif /* NETMETER_TUI_H */

@@ -149,6 +149,22 @@ uint32_t nm_delta(uint32_t hi, uint32_t lo, uint32_t prev_hi, uint32_t prev_lo)
     return 0xFFFFFFFFu;
 }
 
+uint32_t nm_interval_ms(int32_t days0, int32_t min0, int32_t tick0,
+                        int32_t days1, int32_t min1, int32_t tick1)
+{
+    int32_t dd = days1 - days0, mins, ms;
+
+    if (dd < 0 || dd > 1)
+        return 0;
+    mins = dd * 1440 + (min1 - min0);
+    if (mins < 0 || mins > 1 + (int32_t)(NM_INTERVAL_MAX / 60000u))
+        return 0;
+    ms = mins * 60000 + (tick1 - tick0) * 20;
+    if (ms < 0 || (uint32_t)ms > NM_INTERVAL_MAX)
+        return 0;
+    return (uint32_t)ms;
+}
+
 uint32_t nm_rate(uint32_t bytes, uint32_t ms)
 {
     if (ms == 0)

@@ -132,6 +132,20 @@ static void t_average(void)
            "the largest average, exact");
 }
 
+static void t_interval(void)
+{
+    expect(nm_interval_ms(100, 10, 0, 100, 10, 50) == 1000, "interval: a second");
+    expect(nm_interval_ms(100, 10, 2995, 100, 11, 55) == 1200, "interval: across a minute");
+    expect(nm_interval_ms(100, 1439, 2990, 101, 0, 40) == 1000, "interval: across midnight");
+    expect(nm_interval_ms(100, 10, 50, 100, 10, 0) == 0, "interval: a clock set back a second");
+    expect(nm_interval_ms(100, 600, 0, 99, 600, 0) == 0, "interval: a clock set back a day");
+    expect(nm_interval_ms(100, 10, 0, 100, 10, 0) == 0, "interval: no time");
+    expect(nm_interval_ms(100, 10, 0, 100, 10, 1500) == NM_INTERVAL_MAX, "interval: the longest kept");
+    expect(nm_interval_ms(100, 10, 0, 100, 10, 1501) == 0, "interval: a clock set forward 30 s");
+    expect(nm_interval_ms(100, 10, 0, 100, 70, 0) == 0, "interval: a clock set forward an hour");
+    expect(nm_interval_ms(100, 10, 0, 9000, 10, 0) == 0, "interval: a clock set forward years");
+}
+
 static void t_span(void)
 {
     NmSpan s;
@@ -489,6 +503,43 @@ static void t_input(void)
     expect(feed(&in, "\2330 v", ev, 4) == 0, "Right Amiga V ignored");
 }
 
+/* Startup: what was typed after the command, read before the bounds reply
+   or with it, through the same path as the running display. */
+static void keys_of(const char *s, NmTuiKeys *k)
+{
+    NmTuiIn in;
+
+    memset(&in, 0, sizeof(in));
+    memset(k, 0, sizeof(*k));
+    /* In two reads, the second ending the input. */
+    nm_tui_keys(&in, (const unsigned char *)s, (uint32_t)(strlen(s) / 2), 0, k);
+    nm_tui_keys(&in, (const unsigned char *)s + strlen(s) / 2,
+                (uint32_t)(strlen(s) - strlen(s) / 2), 1, k);
+}
+
+static void t_keys(void)
+{
+    NmTuiKeys k;
+
+    keys_of("q", &k);
+    expect(k.quit && !k.bounds, "typed ahead: q alone quits");
+    keys_of("q\2331;1;25;80 r", &k);
+    expect(k.quit && k.bounds && k.rows == 25 && k.cols == 80, "typed ahead: q before the bounds reply");
+    keys_of("\033", &k);
+    expect(k.quit, "typed ahead: Esc alone quits");
+    keys_of("\033\2331;1;25;80 r", &k);
+    expect(k.quit, "typed ahead: Esc before the bounds reply");
+    keys_of("ls -la\2331;1;30;77 r", &k);
+    expect(!k.quit && !k.reset && k.pauses == 1 && k.bounds && k.rows == 30 && k.cols == 77,
+           "typed ahead: other text is keys, the bounds still read");
+    keys_of("\2331;1;25;80 r", &k);
+    expect(!k.quit && !k.pauses && !k.reset && k.bounds, "the bounds reply alone");
+    keys_of("r  \23312;0;0;0;0;0;0;0|", &k);
+    expect(k.reset && k.pauses == 2 && k.resized && !k.quit, "reset, two pauses, a resize");
+    keys_of("\003", &k);
+    expect(k.quit, "Ctrl-C as a character quits");
+}
+
 int main(void)
 {
     printf("NetMeter arithmetic\n");
@@ -500,11 +551,13 @@ int main(void)
     t_bar();
     t_average();
     t_span();
+    t_interval();
     t_text();
     t_frame_80x25();
     t_frame_small();
     t_enter_leave();
     t_input();
+    t_keys();
     printf("netmeter_fmt checks=%lu failures=%lu\n", checks, failures);
     return failures == 0 ? 0 : 1;
 }

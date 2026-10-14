@@ -631,3 +631,43 @@ int nm_tui_idle(NmTuiIn *in, NmTuiEvent *ev)
     ev->key   = 27;
     return 1;
 }
+
+void nm_tui_keys(NmTuiIn *in, const unsigned char *b, uint32_t n, int idle,
+                 NmTuiKeys *k)
+{
+    NmTuiEvent ev;
+    uint32_t   i;
+    int        got;
+
+    for (i = 0; i <= n; i++)
+    {
+        if (i < n)
+            got = nm_tui_feed(in, b[i], &ev);
+        else
+            got = idle && nm_tui_idle(in, &ev);
+        if (!got)
+            continue;
+        switch (ev.kind)
+        {
+        case NM_IN_KEY:
+            switch (ev.key)
+            {
+            case 'q': case 'Q': case 27: case 3: k->quit = 1;  break;
+            case 'r': case 'R':                  k->reset = 1; break;
+            case ' ':                            k->pauses++;  break;
+            default:                                           break;
+            }
+            break;
+        case NM_IN_BOUNDS:
+            k->bounds = 1;
+            k->rows   = ev.rows;
+            k->cols   = ev.cols;
+            break;
+        case NM_IN_RESIZE:
+            k->resized = 1;
+            break;
+        default:
+            break;
+        }
+    }
+}

@@ -27,6 +27,16 @@ void nm_format_total(uint32_t hi, uint32_t lo, char *out, uint32_t outlen);
    removed and added again) and reads zero. */
 uint32_t nm_delta(uint32_t hi, uint32_t lo, uint32_t prev_hi, uint32_t prev_lo);
 
+/* The longest interval between two samples taken as one: past it, or
+   backwards, the clock was set (SNTP, a date change) and the interval is not
+   measured. */
+#define NM_INTERVAL_MAX 30000u
+
+/* Milliseconds from one DateStamp (days, minutes, 50 Hz ticks) to the next;
+   0 for a clock that went back or jumped past NM_INTERVAL_MAX. */
+uint32_t nm_interval_ms(int32_t days0, int32_t min0, int32_t tick0,
+                        int32_t days1, int32_t min1, int32_t tick1);
+
 /* Bytes a second from bytes over milliseconds; zero for no time. */
 uint32_t nm_rate(uint32_t bytes, uint32_t ms);
 

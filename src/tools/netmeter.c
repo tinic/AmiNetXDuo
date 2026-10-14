@@ -365,11 +365,11 @@ static BOOL nm_sample(VOID)
     UWORD            i, n = 0;
 
     /* DateStamp's 20 ms is resolution enough for a rate over a second, and
-       it needs no timer.device base of its own. */
+       it needs no timer.device base of its own.  A clock that was set
+       between two samples gives 0: that interval measures nothing. */
     DateStamp(&now);
-    ms = (ULONG)((now.ds_Days - nm.last.ds_Days) * 1440L +
-                 (now.ds_Minute - nm.last.ds_Minute)) * 60000UL +
-         (ULONG)(now.ds_Tick - nm.last.ds_Tick) * (1000UL / TICKS_PER_SECOND);
+    ms = nm_interval_ms(nm.last.ds_Days, nm.last.ds_Minute, nm.last.ds_Tick,
+                        now.ds_Days, now.ds_Minute, now.ds_Tick);
     nm.last = now;
     nm.sample_ms = ms;
 
@@ -423,7 +423,7 @@ static BOOL nm_sample(VOID)
         out->rx_delta = out->tx_delta = 0;
         out->measured = FALSE;
         out->scale    = (was != NULL) ? was->scale : NM_SCALE_FLOOR;
-        if (was != NULL && was->have_prev && in->have_bytes)
+        if (was != NULL && was->have_prev && in->have_bytes && ms != 0)
         {
             out->rx_delta = nm_delta(in->stats.rx_bytes_hi, in->stats.rx_bytes,
                                      was->rx_hi, was->rx_lo);
@@ -1549,6 +1549,7 @@ typedef struct
     NmTuiIn   ip;
     ULONG     rows, cols;
     BOOL      paused;
+    BOOL      have_bounds;
 } NmCon;
 
 #define NM_CON_ROWS     24      /* until the console says otherwise */
@@ -1687,73 +1688,57 @@ static VOID nm_con_host(NmCon *c)
         c->host[0] = '\0';
 }
 
-/* Whatever the console has sent: keys and reports.  TRUE to quit; `*redraw`
-   when the window changed. */
+/* Whatever the console has sent, without waiting for more: keys and
+   reports.  TRUE to quit; `*redraw` when the window changed. */
 static BOOL nm_con_input(NmCon *c, BOOL *redraw)
 {
-    UBYTE      b[32];
-    LONG       n, k;
-    NmTuiEvent ev;
-    BOOL       quit = FALSE;
+    UBYTE     b[32];
+    LONG      n;
+    NmTuiKeys k;
 
+    memset(&k, 0, sizeof(k));
     while (WaitForChar(c->in, 0))
     {
         n = Read(c->in, b, sizeof(b));
         if (n <= 0)
             break;
-        for (k = 0; k < n; k++)
+        nm_tui_keys(&c->ip, b, (uint32_t)n, 0, &k);
+    }
+    nm_tui_keys(&c->ip, b, 0, 1, &k);
+    if (k.reset)
+    {
+        nm_con_reset(c);
+        *redraw = TRUE;
+    }
+    if (k.pauses & 1u)
+    {
+        c->paused = !c->paused;
+        *redraw = TRUE;
+    }
+    if (k.bounds)
+    {
+        c->have_bounds = TRUE;
+        if (k.rows != c->rows || k.cols != c->cols)
         {
-            if (!nm_tui_feed(&c->ip, b[k], &ev))
-                continue;
-            switch (ev.kind)
-            {
-            case NM_IN_KEY:
-                switch (ev.key)
-                {
-                case 'q': case 'Q': case 27: case 3:
-                    quit = TRUE;
-                    break;
-                case 'r': case 'R':
-                    nm_con_reset(c);
-                    *redraw = TRUE;
-                    break;
-                case ' ':
-                    c->paused = !c->paused;
-                    *redraw = TRUE;
-                    break;
-                default:
-                    break;
-                }
-                break;
-            case NM_IN_BOUNDS:
-                if (ev.rows != c->rows || ev.cols != c->cols)
-                {
-                    nm_con_size(c, ev.rows, ev.cols);
-                    *redraw = TRUE;
-                }
-                break;
-            case NM_IN_RESIZE:
-                nm_tui_ask_bounds(&c->o);
-                break;
-            default:
-                break;
-            }
+            nm_con_size(c, k.rows, k.cols);
+            *redraw = TRUE;
         }
     }
-    if (nm_tui_idle(&c->ip, &ev) && ev.kind == NM_IN_KEY)
-        quit = TRUE;
-    return quit;
+    if (k.resized)
+        nm_tui_ask_bounds(&c->o);
+    return (BOOL)k.quit;
 }
 
-/* The console's own size, asked for once before the first frame.  TRUE
-   when a quit key or Ctrl-C came first. */
+/* The console's own size, asked for once before the first frame, a quarter
+   of a second at most: without an answer the frame is NM_CON_ROWS by
+   NM_CON_COLS.  TRUE when a quit key or Ctrl-C came first. */
 static BOOL nm_con_first_bounds(NmCon *c)
 {
     BOOL  redraw = FALSE;
     UWORD k;
 
     nm_tui_ask_bounds(&c->o);
-    for (k = 0; k < 10 && !redraw; k++)
+    for (k = 0; k < 5 && !c->have_bounds; k++)
     {
         if (SetSignal(0, 0) & SIGBREAKF_CTRL_C)
             return TRUE;                /* the main loop's Wait() takes it */
@@ -1791,7 +1776,17 @@ static int nm_console(VOID)
     }
     nm_con_host(c);
 
-    (VOID)SetMode(c->in, 1);            /* keys as they are pressed */
+    /* Keys as they are pressed; whatever is readable already is taken as
+       keys before anything is drawn. */
+    (VOID)SetMode(c->in, 1);
+    redraw = FALSE;
+    if (nm_con_input(c, &redraw))
+    {
+        (VOID)SetMode(c->in, 0);
+        FreeVec(c->buf);
+        FreeVec(c);
+        return RETURN_OK;
+    }
     nm_tui_enter(&c->o);
     done = nm_con_first_bounds(c);
     if (!done)
