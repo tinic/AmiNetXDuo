@@ -507,7 +507,8 @@ host_test_targets() { # builddir
 #      567 with text_codeset: the shared codeset <-> UTF-8 module (all hosts).
 #      569 with tools_refcompat_quiet and tools_refcompat_reference: the
 #      AmigaDOS Command Reference QUIET return code and templates.
-HOST_TESTS_EXPECTED=569
+#      570 with tools_refcompat_arpfile: arp FILE's record rules.
+HOST_TESTS_EXPECTED=570
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,

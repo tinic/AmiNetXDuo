@@ -9,6 +9,7 @@
 
 #include "tools.h"
 #include "tools_nx.h"
+#include "arpfile.h"
 
 const char *const tool_name = "arp";
 
@@ -647,31 +648,11 @@ static LONG delete_entry(struct Library *base, const char *host)
     return RETURN_OK;
 }
 
-/* The next word of a FILE line, terminated in place, or NULL. */
-static char *next_word(char **cursor)
-{
-    char *p = *cursor;
-    char *word;
-
-    while (*p == ' ' || *p == '\t')
-        p++;
-    if (*p == '\0' || *p == '\n' || *p == '\r')
-        return NULL;
-
-    word = p;
-    while (*p != '\0' && *p != ' ' && *p != '\t' && *p != '\n' && *p != '\r')
-        p++;
-    if (*p != '\0')
-        *p++ = '\0';
-
-    *cursor = p;
-    return word;
-}
-
 /*
  * FILE: one `<host> <hardware address> [TEMP] [PUB]` per line, as SET takes
- * them.  Blank lines and lines starting with # or ; are skipped.  Every line
- * is tried; the return code is the worst.
+ * them (arpfile.h).  Every line is tried; the return code is the worst.  A
+ * line longer than the buffer is refused whole, before any of it is set, and
+ * a read error is an error rather than the end of the file.
  */
 static LONG set_from_file(struct Library *base, const char *path)
 {
@@ -685,49 +666,65 @@ static LONG set_from_file(struct Library *base, const char *path)
         return RETURN_ERROR;
     }
 
-    while (FGets(fh, (STRPTR)arp_line, sizeof(arp_line) - 1) != NULL)
+    for (;;)
     {
-        char *cursor = arp_line;
         char *host;
         char *mac;
-        char *word;
-        BOOL  temp = FALSE;
-        LONG  rc   = RETURN_OK;
+        char *bad = NULL;
+        int   temp;
+        LONG  rc = RETURN_OK;
+
+        SetIoErr(0);
+        if (FGets(fh, (STRPTR)arp_line, sizeof(arp_line) - 1) == NULL)
+        {
+            if (IoErr() != 0)
+            {
+                tool_error("%s: read error after line %ld", (LONG)path, line);
+                worst = RETURN_ERROR;
+            }
+            break;
+        }
 
         line++;
 
-        host = next_word(&cursor);
-        if (host == NULL || host[0] == '#' || host[0] == ';')
-            continue;
-
-        mac = next_word(&cursor);
-        if (mac == NULL)
+        if (arpfile_partial(arp_line, sizeof(arp_line) - 2))
         {
-            tool_error("%s line %ld: no hardware address", (LONG)path, line);
-            rc = RETURN_ERROR;
+            LONG c;
+
+            /* The rest of this line, so it is not read as the next one. */
+            do
+                c = FGetC(fh);
+            while (c != -1 && c != '\n');
+
+            tool_error("%s line %ld: longer than %ld characters", (LONG)path,
+                       line, (LONG)(sizeof(arp_line) - 2));
+            worst = RETURN_ERROR;
+            continue;
         }
 
-        while (rc == RETURN_OK && (word = next_word(&cursor)) != NULL)
+        switch (arpfile_parse(arp_line, &host, &mac, &temp, &bad))
         {
-            if (tool_stricmp(word, "TEMP") == 0)
-                temp = TRUE;
-            else if (tool_stricmp(word, "PUB") == 0 ||
-                     tool_stricmp(word, "PUBLISH") == 0)
-            {
+            case ARPFILE_SKIP:
+                continue;
+            case ARPFILE_NOMAC:
+                tool_error("%s line %ld: no hardware address", (LONG)path,
+                           line);
+                rc = RETURN_ERROR;
+                break;
+            case ARPFILE_PUB:
                 tool_error("%s line %ld: published entries are not supported",
                            (LONG)path, line);
                 rc = RETURN_ERROR;
-            }
-            else
-            {
+                break;
+            case ARPFILE_WORD:
                 tool_error("%s line %ld: \"%s\" is not TEMP or PUB",
-                           (LONG)path, line, (LONG)word);
+                           (LONG)path, line, (LONG)bad);
                 rc = RETURN_ERROR;
-            }
+                break;
+            default:
+                rc = set_entry(base, host, mac, (BOOL)temp, NULL);
+                break;
         }
-
-        if (rc == RETURN_OK)
-            rc = set_entry(base, host, mac, temp, NULL);
 
         if (rc > worst)
             worst = rc;

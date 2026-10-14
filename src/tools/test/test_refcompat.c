@@ -20,6 +20,7 @@
 #include <string.h>
 
 #include "toolquiet.h"
+#include "arpfile.h"
 
 #ifndef AMINETXDUO_SOURCE_DIR
 #define AMINETXDUO_SOURCE_DIR "."
@@ -333,6 +334,42 @@ static void check_reference(void)
     CHECK(carried >= 3, "%d reference templates found", carried);
 }
 
+/* ------------------------------------------------------------- arp FILE --- */
+
+static void check_arpfile(void)
+{
+    char  l1[] = "oberon 00:30:ab:0e:d5:ee TEMP\n";
+    char  l2[] = "  # a comment\n";
+    char  l3[] = "oberon\n";
+    char  l4[] = "oberon 00:30:ab:0e:d5:ee temp pub\n";
+    char  l5[] = "oberon 00:30:ab:0e:d5:ee PROXY\n";
+    char  l6[] = "titania 00:30:ab:0e:d5:ef";
+    char  big[16];
+    char *h, *m, *bad = NULL;
+    int   t;
+
+    CHECK(arpfile_parse(l1, &h, &m, &t, &bad) == ARPFILE_OK && t == 1 &&
+          strcmp(h, "oberon") == 0 && strcmp(m, "00:30:ab:0e:d5:ee") == 0,
+          "host, hardware address and TEMP");
+    CHECK(arpfile_parse(l2, &h, &m, &t, &bad) == ARPFILE_SKIP, "a comment");
+    CHECK(arpfile_parse(l3, &h, &m, &t, &bad) == ARPFILE_NOMAC,
+          "a host alone has no hardware address");
+    CHECK(arpfile_parse(l4, &h, &m, &t, &bad) == ARPFILE_PUB,
+          "PUB after TEMP refuses the line, in any case");
+    CHECK(arpfile_parse(l5, &h, &m, &t, &bad) == ARPFILE_WORD &&
+          strcmp(bad, "PROXY") == 0, "an unknown word is named");
+    CHECK(arpfile_parse(l6, &h, &m, &t, &bad) == ARPFILE_OK && t == 0,
+          "a last line with no newline is whole");
+
+    /* FGets() into 16 bytes gives at most 14 characters plus the NUL. */
+    memset(big, 0, sizeof(big));
+    memcpy(big, "oberon 00:30:ab", 14);
+    CHECK(arpfile_partial(big, 14), "a full chunk with no newline is partial");
+    memcpy(big, "oberon 00:30:\n", 14);
+    CHECK(!arpfile_partial(big, 14), "a full chunk ending the line is whole");
+    CHECK(!arpfile_partial(l6, 14 + 64), "and so is a short last line");
+}
+
 int main(int argc, char **argv)
 {
     const char *group = (argc > 1) ? argv[1] : NULL;
@@ -341,6 +378,8 @@ int main(int argc, char **argv)
         check_quiet();
     if (group == NULL || strcmp(group, "reference") == 0)
         check_reference();
+    if (group == NULL || strcmp(group, "arpfile") == 0)
+        check_arpfile();
 
     printf("%d checks, %d failure(s)\n", checks, failures);
     return failures == 0 ? 0 : 1;
