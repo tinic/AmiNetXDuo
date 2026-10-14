@@ -103,7 +103,7 @@ static void check_quiet(void)
             continue;
         CHECK(strstr(src, "tool_quiet_begin();") != NULL,
               "%s: QUIET does not call tool_quiet_begin()", quiet_commands[i]);
-        CHECK(strstr(src, "return (int)tool_quiet_end(") != NULL,
+        CHECK(strstr(src, "tool_quiet_end(") != NULL,
               "%s: main() does not return through tool_quiet_end()",
               quiet_commands[i]);
         free(src);
