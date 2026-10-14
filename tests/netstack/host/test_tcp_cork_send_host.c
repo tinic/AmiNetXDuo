@@ -86,12 +86,16 @@ static UINT       h_checksum_calls, h_checksum_race;
 static UINT       h_suspends;
 static UINT       h_alloc_waits;         /* allocations asked to wait     */
 
+static void h_disconnect_between_segments(void);
+
 UINT _tx_mutex_get(TX_MUTEX *mutex_ptr, ULONG wait_option)
 {
     (void)wait_option;
 
     if (mutex_ptr != &h_ip.nx_ip_protection)
         return TX_SUCCESS;
+
+    h_disconnect_between_segments();
 
     if (h_mutex_count != 0 && h_mutex_owner != _tx_thread_current_ptr)
     {
@@ -298,6 +302,16 @@ USHORT _nx_ip_checksum_compute(NX_PACKET *packet_ptr, ULONG protocol,
 static UINT  h_datagrams;
 static ULONG h_wire_bytes;
 static UCHAR h_wire[4096];
+
+static void h_disconnect_between_segments(void)
+{
+    if (h_packet_race == 3 && h_datagrams == 1 && h_mutex_count == 0)
+    {
+        h_sock.nx_tcp_socket_state = NX_TCP_CLOSED;
+        h_packet_race = 0;
+    }
+}
+
 
 VOID _nx_ip_packet_send(NX_IP *ip_ptr, NX_PACKET *packet_ptr,
                         ULONG destination_ip, ULONG type_of_service,
@@ -681,6 +695,27 @@ static void g_disconnect_during_packet_work(void)
     }
 }
 
+static void h_disconnect_after_partial_send(void)
+{
+    NX_PACKET *p;
+    h_fixture();
+    (void)_tx_mutex_put(&h_ip.nx_ip_protection);
+    h_mutex_gets = h_mutex_puts = 0;
+    h_iface.nx_interface_capability_flag = NX_INTERFACE_CAPABILITY_TCP_TX_CHECKSUM;
+    h_packet_race = 3;
+    p = h_segment(H_MSS + 100, 0);
+    h_check_eq(_nx_tcp_socket_send_internal(&h_sock, p, NX_NO_WAIT), NX_NOT_CONNECTED,
+               "disconnect between segments is detected on the final direct segment");
+    h_check_eq(h_datagrams, 1, "no second segment is sent after disconnect");
+    h_check_eq(h_wire_bytes, H_MSS, "only the first segment reaches the wire");
+    h_check_eq(h_sock.nx_tcp_socket_tx_sequence, H_ISN + H_MSS,
+               "the unsent remainder does not advance the sequence");
+    h_check(memcmp(p->nx_packet_append_ptr - 100, h_data + H_MSS, 100) == 0,
+            "the remaining payload is preserved for the caller");
+    h_check_eq(h_mutex_count, 0, "partial application send returns IP protection");
+    h_check_eq(h_mutex_gets, h_mutex_puts, "partial application send balances protection");
+}
+
 int main(void)
 {
     printf("cork: the IP thread's NX_NO_WAIT send\n");
@@ -692,6 +727,7 @@ int main(void)
     e_not_connected();
     f_checksum_protection();
     g_disconnect_during_packet_work();
+    h_disconnect_after_partial_send();
 
     printf("%lu checks, %lu failures\n", h_checks, h_failures);
 
