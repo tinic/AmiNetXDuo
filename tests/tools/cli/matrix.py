@@ -175,10 +175,10 @@ def tool_cases(tool, spec, root=ROOT):
                 add('invalid-switch:' + name, line({name: val}) + ' "invalid-value"', syntax_mode)
             else:
                 if parser == 'installer' and name == 'SCRIPT':
-                    # Direct NP_Arguments with a 104-character path reboots
-                    # the pinned Installer at both tested stack sizes. The
-                    # argument fits a standard 512-character Shell line;
-                    # keep this focused case beside the 2 KB stress case.
+                    # A 104-character path once overflowed the window title
+                    # and rebooted the guest. The argument fits a standard
+                    # 512-character Shell line; keep this focused case beside
+                    # the 2 KB stress case.
                     add('short-path:' + name, line({name: 'x' * 104}))
                 # The quoted value names RAM:, which every guest has. A volume
                 # that is not mounted puts up "Please insert volume", the

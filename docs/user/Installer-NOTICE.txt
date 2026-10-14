@@ -26,7 +26,13 @@ Memory changes:
   - Adapt SAS/C declarations and register callbacks to GCC/NDK, and align
     catalog strings containing word-length prefixes for the 68000.
 
-Build: GCC 16.2.0b m68k-amigaos and vasmm68k_mot, 68000 stack ABI.
+Argument changes:
+  - Reject SCRIPT over 255, APPNAME over 39 and LOGFILE over 127 characters,
+    from a Shell or a tooltype, with a message and return code 10.
+  - Bound the window title to its buffer for long script paths.
+
+Build: GCC 16.2.0b m68k-amigaos (AmigaPorts v16.2-rc16) and vasmm68k_mot,
+       68000 stack ABI.
 Compiler flags: -m68000 -Os -std=gnu89 -funsigned-char
                 -fno-strict-aliasing -DONLY2_0
 Modified compile.c: -DPRIVATE_NODE_ARENA -DPRIVATE_PARSE_RELEASE
@@ -34,7 +40,7 @@ Link libraries: -lamiga -ldebug; final binary stripped with m68k-amigaos-strip.
 Use a 16,384-byte stack from a Shell, or the supplied installation icons.
 
 Binary SHA-256:
-  c99b79f4506e547545dde81df435ac1782e8a49674bf4a6814aacdc720bd3111
+  c6dc78f6e95c8b47204150fa3ff8d0e235866851301a5f1f8ddd05d97ba53137
 
 Measured on a 68000 A500, Kickstart/Workbench 2.04, 512 KiB chip plus
 512 KiB trapdoor RAM, normal Workbench desktop and the complete monolithic
