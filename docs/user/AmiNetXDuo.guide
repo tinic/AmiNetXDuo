@@ -1281,7 +1281,8 @@
       INTERFACES=-i/S,ROUTES=-r/S,ALL=-a/S,STATS=-s/S,HEALTH=-h/S:
 
   These are Shell commands. Started from Workbench, each one reports
-  that and does nothing else.
+  that and does nothing else. AddNetInterface is the exception: see
+  @{"AddNetInterface" link ADDNETINTERFACE}.
 
 @endnode
 
@@ -1315,9 +1316,10 @@
              file: if it is not there, the answer is "not there",
              never the drawer's file of the same name.
 
-             More than one can be given. They are sorted by name
-             before any of them is used, and the files are all read
-             and checked before anything is started. AmigaDOS patterns
+             More than one can be given. They are sorted before any
+             of them is used: by the PRI (or PRIORITY) tool type of
+             each file's icon, highest first, then by name. The files
+             are all read and checked before anything is started. AmigaDOS patterns
              are expanded explicitly, so the Roadshow and AmiTCP_NG
              Network-Startup form starts every non-icon definition:
 
@@ -1330,9 +1332,9 @@
              for any failure. For S:Network-Startup: a failure does
              not stop the script, and IF WARN detects it.
   @{b}TIMEOUT@{ub}    Seconds to wait for an interface that asks for its
-             address to be given one. Default 10, which is also the
-             smallest value accepted -- a DHCP exchange given less time
-             than that reports a failure that is not one. For DHCP, the
+             address to be given one. Default 60. The smallest value
+             accepted is 10 -- a DHCP exchange given less time than
+             that reports a failure that is not one. For DHCP, the
              wait ends when that interface's lease is BOUND and its route
              and name-server options have been installed, not merely when
              some address appears. An interface with its address in its
@@ -1347,7 +1349,7 @@
 
   The first line names the driver the file specifies. The second line
   appears only when the stack was not running already, because the wait
-  for an address lasts up to half a minute. The third line reports the
+  for an address lasts up to a minute. The third line reports the
   address the interface @{b}holds@{ub}, not the one written in the file.
 
   An interface that came up without an address says so:
@@ -1415,6 +1417,20 @@
   AddNetInterface does not shut the stack down when it exits. The
   reference it takes is what keeps the stack alive after the boot
   script has finished.
+
+  @{b}From Workbench@{ub}
+
+  An interface file with a project icon whose default tool is
+  AddNetInterface starts that interface when the icon is opened, or at
+  boot from WBStartup. The icon needs a stack of at least 4000 bytes.
+  Tool types:
+
+      QUIET          no requester, whatever happens
+      TIMEOUT=<n>    as the TIMEOUT argument
+      PRI=<n>        the order among several selected icons
+
+  A start that does not succeed shows the messages the Shell form
+  prints in a requester.
 
 @endnode
 
