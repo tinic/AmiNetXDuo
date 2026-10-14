@@ -157,6 +157,9 @@ typedef struct NetStatusSystem
 #define NETSTATUS_IF_ONLINE     0x0008  /* and that device reports online    */
 #define NETSTATUS_IF_NAMED      0x0010  /* nsi_Name came from the config     */
 #define NETSTATUS_IF_MDNS       0x0020  /* answering .local here             */
+/* An alias address (ConfigureNetInterface ALIASADDR): nsi_Name is
+   "<interface>:<slot>", the counters are the interface's row's. */
+#define NETSTATUS_IF_ALIAS      0x0040
 
 typedef struct NetStatusInterface
 {
@@ -1025,6 +1028,10 @@ typedef struct NetStatusRxBudget
    The route lookup and the default gateway follow at once; the interface
    file is not rewritten.  EINVAL out of range, ENXIO for no such interface. */
 #define NETCTRL_INTERFACE_PRIORITY 27 /* nsc_Index, nsc_Priority               */
+
+/* RFC 3927 link-local addressing, ConfigureNetInterface CONFIGURE=AUTO.  Not
+   waited for.  EBUSY when it already serves another interface. */
+#define NETCTRL_INTERFACE_AUTOIP 28 /* nsc_Index                              */
 
 /* Flags for nsc_Flags. Zero unless an operation above says otherwise. */
 #define NETCTRL_F_FORCE         0x00000001

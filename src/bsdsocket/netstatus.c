@@ -1025,6 +1025,15 @@ static VOID ns_fill_interfaces(NX_IP *ip, NsWriter *w)
                           out->nsi_HwAddress);
 
         sana = (AmiSana2If *)nxif->nx_interface_additional_link_info;
+
+        /* The device is the interface's, and so are its counters. */
+        if (netstack_interface_alias_name((UWORD)i, out->nsi_Name,
+                                          sizeof(out->nsi_Name)))
+        {
+            out->nsi_Flags |= NETSTATUS_IF_ALIAS;
+            sana = NULL;
+        }
+
         if (sana != NULL)
         {
             out->nsi_Flags |= NETSTATUS_IF_SANA2;
@@ -1073,7 +1082,7 @@ static VOID ns_fill_interfaces(NX_IP *ip, NsWriter *w)
             ns_copy_name(out->nsi_Device, sizeof(out->nsi_Device), cfg->device);
             out->nsi_Unit = cfg->unit;
         }
-        else
+        else if (!(out->nsi_Flags & NETSTATUS_IF_ALIAS))
         {
             ns_copy_name(out->nsi_Name, sizeof(out->nsi_Name),
                          (const char *)nxif->nx_interface_name);
@@ -2243,6 +2252,22 @@ LONG bsd_NetStackControl(register ULONG magic __asm("d0"),
         case NETCTRL_STACK_RELEASE:
             return (bsd_stack_unhold(SocketBase) == 0)
                        ? 0 : bsd_fail(SocketBase, AMI_EBUSY);
+
+        case NETCTRL_INTERFACE_AUTOIP:
+        {
+            LONG st;
+
+            if (ctl->nsc_Index >= (UWORD)NX_MAX_PHYSICAL_INTERFACES)
+                return bsd_fail(SocketBase, AMI_ENXIO);
+
+            st = netstack_interface_autoip_start(ctl->nsc_Index);
+            if (st == AMI_NET_OK)
+                return 0;
+            return bsd_fail(SocketBase,
+                            (st == AMI_NET_ERR_NOMEM)  ? AMI_ENOBUFS :
+                            (st == AMI_NET_ERR_KERNEL) ? AMI_EIO     :
+                                                         AMI_EBUSY);
+        }
 
         case NETCTRL_INTERFACE_PRIORITY:
         {
