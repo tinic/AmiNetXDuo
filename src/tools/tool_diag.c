@@ -7,6 +7,7 @@
  */
 
 #include "tools.h"
+#include "onlink.h"
 #include "toolsock.h"                  /* TOOL_EINVAL */
 
 #include <exec/execbase.h>
@@ -1415,6 +1416,41 @@ struct Library *tool_netstatus_open(BOOL quiet)
  * for one -- and run that library's init and open before the IdString
  * check closes it.  Neither opens a driver of ours.
  */
+BOOL tool_on_link(ULONG addr)
+{
+    /* Static: a Shell command's stack is 4 KB. */
+    static struct
+    {
+        NetStatusHeader    hdr;
+        NetStatusInterface e[NX_MAX_PHYSICAL_INTERFACES];
+    } table;
+    struct Library *base;
+    BOOL            yes  = FALSE;
+    LONG            n;
+    LONG            i;
+
+    /* The loopback network is this machine, reached without a router. */
+    if (onlink_loopback(addr))
+        return TRUE;
+
+    base = tool_netstatus_open(TRUE);
+    if (base == NULL)
+        return FALSE;
+
+    n = tool_netstatus_query(base, NETSTATUS_INTERFACES, &table,
+                             sizeof(table), sizeof(NetStatusInterface));
+
+    for (i = 0; i < n && i < (LONG)NX_MAX_PHYSICAL_INTERFACES; i++)
+    {
+        if (onlink_subnet(addr, table.e[i].nsi_Address,
+                          table.e[i].nsi_NetMask))
+            yes = TRUE;
+    }
+
+    tool_netstatus_close(base);
+    return yes;
+}
+
 struct Library *tool_netstatus_open_resident(VOID)
 {
     struct Library *lib;
