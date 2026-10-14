@@ -5752,6 +5752,12 @@ static BOOL httpd_find_app_page(const char *named,
     }
     else
     {
+        /* The built-in places start with an assign that need not exist:
+           no "Please insert volume AmiNetXDuo" on an unattended server. */
+        struct Process *me = (struct Process *)FindTask(NULL);
+        APTR            saved = me->pr_WindowPtr;
+
+        me->pr_WindowPtr = (APTR)-1L;
         for (i = 0; i < place_count; i++)
         {
             page = Open((CONST_STRPTR)places[i], MODE_OLDFILE);
@@ -5761,6 +5767,7 @@ static BOOL httpd_find_app_page(const char *named,
                 break;
             }
         }
+        me->pr_WindowPtr = saved;
 
         if (named == NULL)
         {

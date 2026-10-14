@@ -4,7 +4,7 @@ The four changes build on the RX branch at `e628d0d` (NetX Duo `65862f4`).
 Comparison uses the actual linked bsdsocket.library, with `-O2 -m68020-60
 -mregparm=3 -flto`, symbols retained, and the existing Linux Emu68 emitter
 on the Pi. ARM is emitted, not executed. These are code-generation results;
-throughput has not been measured for this candidate.
+hardware measurements are recorded below.
 
 ## Changes and generated ARM
 
@@ -77,7 +77,8 @@ runtime environment is added to either repository.
 
 Based on the TX branch at `df8511eb`, using the same linked build profile and
 existing Pi Emu68 emission tools. No harness changes are required. NetX Duo
-remains pinned at `fb53e83e`; these changes belong in AmiNetXDuo's integration.
+contains the same source tree as `fb53e83e`, now landed on `master` at
+`a6872a20`; these changes belong in AmiNetXDuo's integration.
 
 | Selected ARM work | Before | After |
 | --- | ---: | ---: |
@@ -141,4 +142,32 @@ odd-address pseudo headers and a carry requiring a second fold.
 Both linked-binary PC-relative checks pass with zero mismatches or unscanned
 branches. All requested final Emu68 dumps succeed. Compact annotated evidence
 and image hashes are retained in `/Users/turo/ai/evidence/emu68-tx-followup`.
-No hardware throughput result is claimed for these changes.
+Hardware throughput for these changes is recorded below.
+
+
+## A1200 hardware results and integration
+
+The existing `hwab.py` and `iperfpeer.py` were used unchanged on the A1200 +
+PiStorm32/Emu68 with GENET gigabit networking. Two 12-second RX/TX pairs per
+version ran in AB then BA order, with fresh boots and RAM-only library/driver
+staging. Control was `df8511eb`; candidate was `8a53aa83`. Both used the same
+build options and installed companion libraries/test tools.
+
+| Mean throughput | Control | Candidate | Change |
+| --- | ---: | ---: | ---: |
+| TX | 576.4 Mbit/s | 565.5 Mbit/s | -1.9% |
+| RX | 842.5 Mbit/s | 855.7 Mbit/s | +1.6% |
+
+TX samples were 578.5 / 574.3 Mbit/s for control and 556.7 / 574.3 for the
+candidate. This demonstrates no TX gain: the first comparison was slower,
+while the reverse-order comparison was effectively tied. RX samples were
+835.7 / 849.3 versus 854.1 / 857.4 Mbit/s. Two runs do not establish a durable
+RX gain; the user accepted retaining the changes after seeing these results.
+Guest/peer byte totals matched in every run. The installed stack was restored,
+all 13 installed-file hashes matched, and temporary build/staging files were
+removed. Evidence: `/Users/turo/ai/evidence/emu68-tx-followup-hardware`.
+
+NetX TX changes landed through tinic/netxduo#18 at `a6872a20`. Its tree matches
+`fb53e83e`; AmiNetXDuo pins the master merge commit to satisfy the existing
+first-parent gitlink ancestry check. The previous RX topic pin caused CI's
+failure; no ancestry checks or test coverage are relaxed.
