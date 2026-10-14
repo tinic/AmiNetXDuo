@@ -149,6 +149,22 @@ uint32_t nm_delta(uint32_t hi, uint32_t lo, uint32_t prev_hi, uint32_t prev_lo)
     return 0xFFFFFFFFu;
 }
 
+uint32_t nm_interval_ms(int32_t days0, int32_t min0, int32_t tick0,
+                        int32_t days1, int32_t min1, int32_t tick1)
+{
+    int32_t dd = days1 - days0, mins, ms;
+
+    if (dd < 0 || dd > 1)
+        return 0;
+    mins = dd * 1440 + (min1 - min0);
+    if (mins < 0 || mins > 1 + (int32_t)(NM_INTERVAL_MAX / 60000u))
+        return 0;
+    ms = mins * 60000 + (tick1 - tick0) * 20;
+    if (ms < 0 || (uint32_t)ms > NM_INTERVAL_MAX)
+        return 0;
+    return (uint32_t)ms;
+}
+
 uint32_t nm_rate(uint32_t bytes, uint32_t ms)
 {
     if (ms == 0)
@@ -156,6 +172,66 @@ uint32_t nm_rate(uint32_t bytes, uint32_t ms)
     if (bytes <= 0xFFFFFFFFu / 1000u)
         return (bytes * 1000u) / ms;
     return (bytes / ms) * 1000u;
+}
+
+uint32_t nm_average(uint32_t hi, uint32_t lo, uint32_t ms)
+{
+    uint32_t p0, p1, mlo, mhi, rem, q = 0, top;
+    int      i;
+
+    if (ms == 0)
+        return 0;
+    if (hi > 0xFFFFFFFFu / 1000u)
+        return 0xFFFFFFFFu;       /* over 2^64 / 1000 bytes: past 32 bits */
+
+    /* (hi:lo) * 1000, from the 16-bit halves of lo. */
+    p0  = (lo & 0xFFFFu) * 1000u;
+    p1  = (lo >> 16) * 1000u;
+    mlo = p0 + (p1 << 16);
+    mhi = hi * 1000u;                   /* fits: hi <= 0xFFFFFFFF / 1000 */
+    p1  = (p1 >> 16) + (mlo < p0 ? 1u : 0u);
+    if (mhi > 0xFFFFFFFFu - p1)
+        return 0xFFFFFFFFu;       /* the low word's carry overflows it   */
+    mhi += p1;
+    if (mhi >= ms)
+        return 0xFFFFFFFFu;       /* the quotient needs more than 32 bits */
+
+    /* (mhi:mlo) / ms a bit at a time; mhi < ms keeps the quotient in 32. */
+    rem = mhi;
+    for (i = 0; i < 32; i++)
+    {
+        top = rem >> 31;
+        rem = (rem << 1) | (mlo >> 31);
+        mlo <<= 1;
+        q <<= 1;
+        if (top != 0 || rem >= ms)
+        {
+            rem -= ms;
+            q |= 1u;
+        }
+    }
+    return q;
+}
+
+static void nm_add64(uint32_t *hi, uint32_t *lo, uint32_t v)
+{
+    uint32_t was = *lo;
+
+    *lo += v;
+    if (*lo < was)
+        (*hi)++;
+}
+
+void nm_span_add(NmSpan *s, uint32_t rx, uint32_t tx, uint32_t ms)
+{
+    if (s->frozen || s->ms > 0xFFFFFFFFu - ms)
+    {
+        s->frozen = 1;
+        return;
+    }
+    nm_add64(&s->rx_hi, &s->rx_lo, rx);
+    nm_add64(&s->tx_hi, &s->tx_lo, tx);
+    s->ms += ms;
 }
 
 uint32_t nm_scale_next(uint32_t scale, uint32_t rx_rate, uint32_t tx_rate)

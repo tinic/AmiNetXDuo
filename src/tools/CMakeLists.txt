@@ -281,7 +281,7 @@ aminetxduo_add_tool(tool_netsetup NetSetup SOURCES netsetup.c ${TOOLS_DEVDIAG})
 # for live changes rather than growing a second stack-control path.
 aminetxduo_add_tool(tool_netprefs NetPrefs SOURCES netprefs.c netprefs_text.c
     netprefs_layout.c)
-aminetxduo_add_tool(tool_netmeter NetMeter NX SOURCES netmeter.c netmeter_fmt.c)
+aminetxduo_add_tool(tool_netmeter NetMeter NX SOURCES netmeter.c netmeter_fmt.c netmeter_tui.c)
 
 # The Wi-Fi window.  Scans, joins through WirelessManager's
 # ENV:Sys/Wireless.prefs and restarts it; never joins or sets a key itself.
@@ -968,10 +968,12 @@ if(NOT CMAKE_CROSSCOMPILING)
     set_target_properties(test_clipftxt PROPERTIES C_STANDARD 11)
 
     # NetMeter's rate and total text, the delta of a byte count kept in two
-    # 32-bit halves across its carry, and the bar scale.
+    # 32-bit halves across its carry, the bar scale, and the Shell window
+    # frame and input (netmeter_tui.c).
     add_executable(test_netmeter_fmt
         test/test_netmeter_fmt.c
-        netmeter_fmt.c)
+        netmeter_fmt.c
+        netmeter_tui.c)
     target_include_directories(test_netmeter_fmt PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}")
     target_compile_options(test_netmeter_fmt PRIVATE -Wall -Wextra)

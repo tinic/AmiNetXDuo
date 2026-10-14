@@ -20,12 +20,19 @@
  * installed, NetMeter is told first: it closes its window and lets the screen
  * go, and opens again where it was once Workbench is back.
  *
+ * Started from a Shell whose output is a console window, it draws in that
+ * window instead, in place once a second like top: the same snapshot, more of
+ * it, and a graph of the last minute or two (netmeter_tui.c).  From
+ * Workbench, or with its output redirected (Run >NIL: NetMeter), it opens
+ * the window.
+ *
  * SPDX-License-Identifier: MIT
  */
 
 #include "tools.h"
 #include "tools_nx.h"
 #include "netmeter_fmt.h"
+#include "netmeter_tui.h"
 #include "aminetxduo/version.h"
 
 #include <exec/io.h>
@@ -54,6 +61,8 @@
 #include <proto/layers.h>
 #include <utility/tagitem.h>
 #include <inline/macros.h>
+
+#include <string.h>
 
 const char *const tool_name = "NetMeter";
 
@@ -140,7 +149,10 @@ typedef struct
     BOOL    have_prev;
     ULONG   rx_hi, rx_lo, tx_hi, tx_lo;
     ULONG   rx_rate, tx_rate;
+    ULONG   rx_delta, tx_delta;    /* bytes since the last sample        */
+    BOOL    measured;              /* the deltas span the last interval  */
     ULONG   scale;
+    ULONG   rx_pkts, tx_pkts, errors, dropped;
     /* Where the last full draw put things; the hover and the click test them. */
     NmRect  r_name, r_ip4, r_ip6, r_bars, r_rx, r_tx, r_rxt, r_txt;
 } NmIf;
@@ -166,6 +178,7 @@ static struct
     UWORD             count;
     BOOL              running;
     struct DateStamp  last;
+    ULONG             sample_ms;   /* the last sample's interval        */
 
     LONG              zone_if;
     UWORD             zone;
@@ -352,12 +365,13 @@ static BOOL nm_sample(VOID)
     UWORD            i, n = 0;
 
     /* DateStamp's 20 ms is resolution enough for a rate over a second, and
-       it needs no timer.device base of its own. */
+       it needs no timer.device base of its own.  A clock that was set
+       between two samples gives 0: that interval measures nothing. */
     DateStamp(&now);
-    ms = (ULONG)((now.ds_Days - nm.last.ds_Days) * 1440L +
-                 (now.ds_Minute - nm.last.ds_Minute)) * 60000UL +
-         (ULONG)(now.ds_Tick - nm.last.ds_Tick) * (1000UL / TICKS_PER_SECOND);
+    ms = nm_interval_ms(nm.last.ds_Days, nm.last.ds_Minute, nm.last.ds_Tick,
+                        now.ds_Days, now.ds_Minute, now.ds_Tick);
     nm.last = now;
+    nm.sample_ms = ms;
 
     for (i = 0; i < nm.count; i++)
         prev[i] = nm.ifs[i];
@@ -399,17 +413,25 @@ static BOOL nm_sample(VOID)
         out->bps        = in->bps;
         out->up         = (BOOL)(in->link_up && in->sana2_online);
         out->have_bytes = in->have_bytes;
+        out->rx_pkts    = in->stats.packets_received;
+        out->tx_pkts    = in->stats.packets_sent;
+        out->errors     = in->stats.rx_errors + in->stats.tx_errors;
+        out->dropped    = in->stats.overruns + in->stats.alloc_failures +
+                          in->stats.tx_queue_full;
 
-        out->rx_rate = out->tx_rate = 0;
-        out->scale   = (was != NULL) ? was->scale : NM_SCALE_FLOOR;
-        if (was != NULL && was->have_prev && in->have_bytes)
+        out->rx_rate  = out->tx_rate  = 0;
+        out->rx_delta = out->tx_delta = 0;
+        out->measured = FALSE;
+        out->scale    = (was != NULL) ? was->scale : NM_SCALE_FLOOR;
+        if (was != NULL && was->have_prev && in->have_bytes && ms != 0)
         {
-            out->rx_rate = nm_rate(nm_delta(in->stats.rx_bytes_hi,
-                                            in->stats.rx_bytes,
-                                            was->rx_hi, was->rx_lo), ms);
-            out->tx_rate = nm_rate(nm_delta(in->stats.tx_bytes_hi,
-                                            in->stats.tx_bytes,
-                                            was->tx_hi, was->tx_lo), ms);
+            out->rx_delta = nm_delta(in->stats.rx_bytes_hi, in->stats.rx_bytes,
+                                     was->rx_hi, was->rx_lo);
+            out->tx_delta = nm_delta(in->stats.tx_bytes_hi, in->stats.tx_bytes,
+                                     was->tx_hi, was->tx_lo);
+            out->rx_rate  = nm_rate(out->rx_delta, ms);
+            out->tx_rate  = nm_rate(out->tx_delta, ms);
+            out->measured = TRUE;
         }
         out->scale     = nm_scale_next(out->scale, out->rx_rate, out->tx_rate);
         out->rx_hi     = in->stats.rx_bytes_hi;
@@ -1500,6 +1522,317 @@ static VOID nm_loop(VOID)
     }
 }
 
+/* --------------------------------------------------------- console, */
+
+/* What the window shows of an interface beyond the snapshot: this
+   session's peaks, bytes and time, and the graph's history. */
+typedef struct
+{
+    char      name[NETSTATUS_NAME_LEN];
+    ULONG     rx_peak, tx_peak;
+    NmSpan    span;
+    uint32_t  rx_hist[NM_TUI_HIST], tx_hist[NM_TUI_HIST];
+    uint32_t  head, count;
+} NmConIf;
+
+typedef struct
+{
+    NmConIf   ifs[TOOL_MAX_IF];
+    NmConIf   was[TOOL_MAX_IF];
+    NmTuiIf   view[TOOL_MAX_IF];
+    char      host[64];
+    ULONG     session_ms;
+    BPTR      in, out;
+    char     *buf;
+    ULONG     bufsize;
+    NmTuiOut  o;
+    NmTuiIn   ip;
+    ULONG     rows, cols;
+    BOOL      paused;
+    BOOL      have_bounds;
+} NmCon;
+
+#define NM_CON_ROWS     24      /* until the console says otherwise */
+#define NM_CON_COLS     80
+
+static VOID nm_con_write(void *ctx, const char *s, uint32_t n)
+{
+    (VOID)Write((BPTR)ctx, (APTR)s, (LONG)n);
+}
+
+/* The session's numbers follow each interface by name, as nm_sample's do. */
+static VOID nm_con_sample(NmCon *c)
+{
+    UWORD i, j;
+
+    CopyMem(c->ifs, c->was, sizeof(c->ifs));
+    c->session_ms += nm.sample_ms;
+    for (i = 0; i < nm.count; i++)
+    {
+        const NmIf *f = &nm.ifs[i];
+        NmConIf    *ci = &c->ifs[i];
+
+        for (j = 0; j < TOOL_MAX_IF; j++)
+            if (c->was[j].name[0] != '\0' &&
+                tool_stricmp(c->was[j].name, f->name) == 0)
+                break;
+        if (j < TOOL_MAX_IF)
+        {
+            if (j != i)
+                CopyMem(&c->was[j], ci, sizeof(*ci));
+            c->was[j].name[0] = '\0';
+        }
+        else
+        {
+            memset(ci, 0, sizeof(*ci));
+            tool_copy_string(ci->name, sizeof(ci->name), f->name);
+        }
+        if (f->rx_rate > ci->rx_peak) ci->rx_peak = f->rx_rate;
+        if (f->tx_rate > ci->tx_peak) ci->tx_peak = f->tx_rate;
+        /* The average is bytes over the time they were counted in, the
+           actual intervals between samples. */
+        if (f->measured)
+            nm_span_add(&ci->span, f->rx_delta, f->tx_delta, nm.sample_ms);
+        ci->rx_hist[ci->head] = f->rx_rate;
+        ci->tx_hist[ci->head] = f->tx_rate;
+        ci->head = (ci->head + 1u) % NM_TUI_HIST;
+        if (ci->count < NM_TUI_HIST)
+            ci->count++;
+    }
+    for (; i < TOOL_MAX_IF; i++)
+        c->ifs[i].name[0] = '\0';
+}
+
+static VOID nm_con_reset(NmCon *c)
+{
+    UWORD i;
+
+    for (i = 0; i < TOOL_MAX_IF; i++)
+    {
+        NmConIf *ci = &c->ifs[i];
+
+        ci->rx_peak = ci->tx_peak = 0;
+        memset(&ci->span, 0, sizeof(ci->span));
+        ci->head = ci->count = 0;
+    }
+    c->session_ms = 0;
+}
+
+static VOID nm_con_draw(NmCon *c)
+{
+    NmTuiView v;
+    UWORD     i;
+
+    for (i = 0; i < nm.count; i++)
+    {
+        const NmIf    *f  = &nm.ifs[i];
+        const NmConIf *ci = &c->ifs[i];
+        NmTuiIf       *t  = &c->view[i];
+
+        t->name = f->name;        t->ip4 = f->ip4;     t->ip6 = f->ip6;
+        t->device = f->device;    t->unit = f->unit;
+        t->up = f->up;            t->bps = f->bps;     t->have_bytes = f->have_bytes;
+        t->rx_rate = f->rx_rate;  t->tx_rate = f->tx_rate;
+        t->rx_peak = ci->rx_peak; t->tx_peak = ci->tx_peak;
+        t->rx_avg = nm_average(ci->span.rx_hi, ci->span.rx_lo, ci->span.ms);
+        t->tx_avg = nm_average(ci->span.tx_hi, ci->span.tx_lo, ci->span.ms);
+        t->rx_hi = f->rx_hi;      t->rx_lo = f->rx_lo;
+        t->tx_hi = f->tx_hi;      t->tx_lo = f->tx_lo;
+        t->rx_pkts = f->rx_pkts;  t->tx_pkts = f->tx_pkts;
+        t->errors = f->errors;    t->dropped = f->dropped;
+        t->scale = f->scale;
+        t->rx_hist = ci->rx_hist; t->tx_hist = ci->tx_hist;
+        t->hist_head = ci->head;  t->hist_count = ci->count;
+    }
+    v.version   = AMINETXDUO_VERSION;
+    v.host      = c->host;
+    v.running   = nm.running;
+    v.paused    = c->paused;
+    v.session_s = c->session_ms / 1000UL;
+    v.n         = nm.count;
+    v.ifs       = c->view;
+    v.rows      = c->rows;
+    v.cols      = c->cols;
+    nm_tui_frame(&c->o, &v);
+}
+
+/* A frame's worth of buffer for this window, so it goes out in one Write();
+   without the memory, a smaller one flushed as it fills. */
+static VOID nm_con_size(NmCon *c, ULONG rows, ULONG cols)
+{
+    ULONG want;
+    char *buf;
+
+    if (rows > 200UL) rows = 200UL;
+    if (cols > 250UL) cols = 250UL;
+    c->rows = rows;
+    c->cols = cols;
+    want = rows * cols * 2UL + 512UL;
+    if (want <= c->bufsize)
+        return;
+    buf = AllocVec(want, MEMF_ANY);
+    if (buf == NULL)
+        return;
+    FreeVec(c->buf);
+    c->buf = buf;
+    c->bufsize = want;
+    c->o.buf  = buf;
+    c->o.size = want;
+}
+
+static VOID nm_con_host(NmCon *c)
+{
+    ULONG addr;
+
+    if (!tool_stack_query(&addr, c->host, sizeof(c->host)))
+        c->host[0] = '\0';
+}
+
+/* Whatever the console has sent, without waiting for more: keys and
+   reports.  TRUE to quit; `*redraw` when the window changed. */
+static BOOL nm_con_input(NmCon *c, BOOL *redraw)
+{
+    UBYTE     b[32];
+    LONG      n;
+    NmTuiKeys k;
+
+    memset(&k, 0, sizeof(k));
+    while (WaitForChar(c->in, 0))
+    {
+        n = Read(c->in, b, sizeof(b));
+        if (n <= 0)
+            break;
+        nm_tui_keys(&c->ip, b, (uint32_t)n, 0, &k);
+    }
+    nm_tui_keys(&c->ip, b, 0, 1, &k);
+    if (k.reset)
+    {
+        nm_con_reset(c);
+        *redraw = TRUE;
+    }
+    if (k.pauses & 1u)
+    {
+        c->paused = !c->paused;
+        *redraw = TRUE;
+    }
+    if (k.bounds)
+    {
+        c->have_bounds = TRUE;
+        if (k.rows != c->rows || k.cols != c->cols)
+        {
+            nm_con_size(c, k.rows, k.cols);
+            *redraw = TRUE;
+        }
+    }
+    if (k.resized)
+        nm_tui_ask_bounds(&c->o);
+    return (BOOL)k.quit;
+}
+
+/* The console's own size, asked for once before the first frame, a quarter
+   of a second at most: without an answer the frame is NM_CON_ROWS by
+   NM_CON_COLS.  TRUE when a quit key or Ctrl-C came first. */
+static BOOL nm_con_first_bounds(NmCon *c)
+{
+    BOOL  redraw = FALSE;
+    UWORD k;
+
+    nm_tui_ask_bounds(&c->o);
+    for (k = 0; k < 5 && !c->have_bounds; k++)
+    {
+        if (SetSignal(0, 0) & SIGBREAKF_CTRL_C)
+            return TRUE;                /* the main loop's Wait() takes it */
+        if (!WaitForChar(c->in, 50000L))
+            continue;
+        if (nm_con_input(c, &redraw))
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static int nm_console(VOID)
+{
+    ULONG  tsig = 1UL << nm.tport->mp_SigBit;
+    NmCon *c;
+    BOOL   done = FALSE, redraw;
+    UWORD  k;
+
+    c = AllocVec(sizeof(NmCon), MEMF_ANY | MEMF_CLEAR);
+    if (c == NULL)
+    {
+        tool_error("not enough memory");
+        return RETURN_FAIL;
+    }
+    c->out = Output();
+    c->in  = IsInteractive(Input()) ? Input() : c->out;
+    c->o.flush = nm_con_write;
+    c->o.ctx   = (void *)c->out;
+    nm_con_size(c, NM_CON_ROWS, NM_CON_COLS);
+    if (c->buf == NULL)
+    {
+        FreeVec(c);
+        tool_error("not enough memory");
+        return RETURN_FAIL;
+    }
+    nm_con_host(c);
+
+    /* Keys as they are pressed; whatever is readable already is taken as
+       keys before anything is drawn. */
+    (VOID)SetMode(c->in, 1);
+    redraw = FALSE;
+    if (nm_con_input(c, &redraw))
+    {
+        (VOID)SetMode(c->in, 0);
+        FreeVec(c->buf);
+        FreeVec(c);
+        return RETURN_OK;
+    }
+    nm_tui_enter(&c->o);
+    done = nm_con_first_bounds(c);
+    if (!done)
+    {
+        nm_con_draw(c);
+        nm_timer_arm();
+    }
+    while (!done)
+    {
+        ULONG got = Wait(tsig | SIGBREAKF_CTRL_C);
+
+        if (got & SIGBREAKF_CTRL_C)
+            done = TRUE;
+        if ((got & tsig) && GetMsg(nm.tport) != NULL)
+        {
+            nm.timer_armed = FALSE;
+            redraw = FALSE;
+            if (nm_con_input(c, &redraw))
+                done = TRUE;
+            if (++nm.ticks >= NM_TICKS_SEC)
+            {
+                nm.ticks = 0;
+                if (nm_sample())
+                    nm_con_host(c);
+                nm_con_sample(c);
+                nm_tui_ask_bounds(&c->o);   /* in case no resize was told */
+                if (!c->paused)
+                    redraw = TRUE;
+            }
+            if (redraw && !done)
+                nm_con_draw(c);
+            if (!done)
+                nm_timer_arm();
+        }
+    }
+
+    nm_tui_leave(&c->o);
+    /* A bounds report still on its way would land at the Shell's prompt. */
+    for (k = 0; k < 4 && WaitForChar(c->in, 20000L); k++)
+        (VOID)Read(c->in, c->buf, 64);
+    (VOID)SetMode(c->in, 0);
+    FreeVec(c->buf);
+    FreeVec(c);
+    return RETURN_OK;
+}
+
 static int netmeter_run(VOID)
 {
     int rc = RETURN_FAIL;
@@ -1524,6 +1857,12 @@ static int netmeter_run(VOID)
         goto out;
     DateStamp(&nm.last);
     (VOID)nm_sample();
+
+    if (nm.wbs == NULL && Output() != 0 && IsInteractive(Output()))
+    {
+        rc = nm_console();
+        goto out;
+    }
 
     if (!nm_screen_attach())
         goto out;
