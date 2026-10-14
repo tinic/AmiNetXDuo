@@ -617,3 +617,129 @@ static VOID __attribute__((noinline, cold)) ami_sana2_driver_command(
         break;
     }
 }
+
+/* --------------------------------------------------------------- aliases */
+
+/* The device an alias being attached shares, until its NX_LINK_INTERFACE_ATTACH
+   records it: nx_ip_interface_attach() calls the driver before it returns. */
+static AmiSana2If *ami_sana2_alias_pending;
+
+VOID ami_sana2_alias_bind(AmiSana2If *iface)
+{
+    ami_sana2_alias_pending = iface;
+}
+
+BOOL ami_sana2_alias_publish(AmiSana2If *iface, NX_INTERFACE *alias, BOOL on)
+{
+    UWORD i;
+
+    if (iface == NULL || alias == NULL)
+        return FALSE;
+
+    for (i = 0; i < (UWORD)AMI_SANA2_ALIASES; i++)
+    {
+        if (on && iface->alias[i] == NULL)
+        {
+            iface->alias[i] = alias;
+            iface->alias_count++;
+            return TRUE;
+        }
+        if (!on && iface->alias[i] == alias)
+        {
+            iface->alias[i] = NULL;
+            iface->alias_count--;
+            return TRUE;
+        }
+    }
+
+    return FALSE;
+}
+
+/*
+ * The alias's driver.  It owns no device: a frame goes out through the
+ * interface's, and every command that would open, start or stop that device
+ * is answered here without one.
+ */
+VOID ami_sana2_alias_driver_entry(NX_IP_DRIVER *driver_req)
+{
+    NX_INTERFACE *alias = driver_req->nx_ip_driver_interface;
+    AmiSana2If   *iface = (alias != NULL)
+                        ? (AmiSana2If *)alias->nx_interface_additional_link_info
+                        : NULL;
+
+    driver_req->nx_ip_driver_status = NX_SUCCESS;
+
+    switch (driver_req->nx_ip_driver_command)
+    {
+    case NX_LINK_PACKET_SEND:
+    case NX_LINK_PACKET_BROADCAST:
+    case NX_LINK_ARP_SEND:
+    case NX_LINK_ARP_RESPONSE_SEND:
+    case NX_LINK_RARP_SEND:
+        if (iface == NULL || iface->detaching || !iface->admin_up)
+        {
+            if (driver_req->nx_ip_driver_packet != NULL)
+                nx_packet_transmit_release(driver_req->nx_ip_driver_packet);
+            driver_req->nx_ip_driver_status = NX_INVALID_INTERFACE;
+            return;
+        }
+        ami_sana2_driver_send(driver_req, iface);
+        return;
+
+    case NX_LINK_INTERFACE_ATTACH:
+        alias->nx_interface_additional_link_info = ami_sana2_alias_pending;
+        ami_sana2_alias_pending = NULL;
+        return;
+
+    case NX_LINK_INITIALIZE:
+        if (iface == NULL || iface->interface_ptr == NULL)
+        {
+            driver_req->nx_ip_driver_status = NX_INVALID_INTERFACE;
+            return;
+        }
+        /* The interface's own settings, which the attach left empty. */
+        alias->nx_interface_ip_mtu_size =
+            iface->interface_ptr->nx_interface_ip_mtu_size;
+        alias->nx_interface_physical_address_msw =
+            iface->interface_ptr->nx_interface_physical_address_msw;
+        alias->nx_interface_physical_address_lsw =
+            iface->interface_ptr->nx_interface_physical_address_lsw;
+        alias->nx_interface_address_mapping_needed =
+            iface->interface_ptr->nx_interface_address_mapping_needed;
+#ifdef NX_ENABLE_INTERFACE_CAPABILITY
+        alias->nx_interface_capability_flag =
+            iface->interface_ptr->nx_interface_capability_flag;
+#endif
+        return;
+
+    case NX_LINK_ENABLE:
+        alias->nx_interface_link_up = (iface != NULL) ? NX_TRUE : NX_FALSE;
+        return;
+
+    case NX_LINK_DISABLE:
+    case NX_LINK_UNINITIALIZE:
+    case AMI_LINK_STACK_DISABLE:
+    case AMI_LINK_DETACH_BEGIN:
+        alias->nx_interface_link_up = NX_FALSE;
+        return;
+
+    case NX_LINK_INTERFACE_DETACH:
+        alias->nx_interface_link_up = NX_FALSE;
+        alias->nx_interface_additional_link_info = NULL;
+        return;
+
+    case NX_LINK_GET_STATUS:
+        *(driver_req->nx_ip_driver_return_ptr) =
+            (ULONG)alias->nx_interface_link_up;
+        return;
+
+    /* The interface's device joins the groups. */
+    case NX_LINK_MULTICAST_JOIN:
+    case NX_LINK_MULTICAST_LEAVE:
+        return;
+
+    default:
+        driver_req->nx_ip_driver_status = NX_UNHANDLED_COMMAND;
+        return;
+    }
+}

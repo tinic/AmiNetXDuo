@@ -67,7 +67,7 @@ cold|Offline|bad-timeout|5|re:TIMEOUT cannot be negative|-|SYS:Offline eth0 TIME
 cold|RemoveNetInterface|unknown-name|5|re:nothing to remove|-|SYS:RemoveNetInterface nosuchif
 cold|ConfigureNetInterface|no-stack|5|re:no interface to configure|-|SYS:ConfigureNetInterface eth0 ADDRESS 10.0.2.20
 cold|ConfigureNetInterface|bad-address|5|re:is not an address|-|SYS:ConfigureNetInterface eth0 ADDRESS notanaddress
-cold|ConfigureNetInterface|bad-configure|5|re:CONFIGURE accepts only DHCP|-|SYS:ConfigureNetInterface eth0 CONFIGURE=AUTO
+cold|ConfigureNetInterface|bad-configure|5|re:CONFIGURE is DHCP, AUTO or FASTAUTO|-|SYS:ConfigureNetInterface eth0 CONFIGURE=BOOTP
 cold|ConfigureNetInterface|bad-mdns|5|re:MDNS is YES or NO|-|SYS:ConfigureNetInterface eth0 MDNS=MAYBE
 cold|ConfigureNetInterface|bad-timeout|5|re:a TIMEOUT of less than 10 seconds|-|SYS:ConfigureNetInterface eth0 CONFIGURE=DHCP TIMEOUT=-1
 cold|AddNetInterface|unknown-name|5|re:no interface|-|SYS:AddNetInterface nosuchinterface

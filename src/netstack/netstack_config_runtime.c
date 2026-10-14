@@ -16,7 +16,8 @@ const AmiIfConfig *netstack_iface_config(UWORD nx_index)
     UWORD              slot;
 
     if (ns == NULL || nx_index >= ns->ns_IfaceCount ||
-        nx_index >= (UWORD)AMI_CFG_MAX_ATTACHED)
+        nx_index >= (UWORD)AMI_CFG_MAX_ATTACHED ||
+        ns->ns_AliasOf[nx_index] != 0)
         return NULL;
 
     slot = ns->ns_IfaceCfg[nx_index];

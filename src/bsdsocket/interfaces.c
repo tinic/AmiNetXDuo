@@ -417,7 +417,57 @@ typedef struct BsdIfConfigReq
     ULONG   bcr_MTU;
     BOOL    bcr_HaveState;
     LONG    bcr_State;
+    BOOL    bcr_HaveAlias;
+    ULONG   bcr_Alias;
+    ULONG   bcr_AliasMask;          /* 0: the interface's own            */
+    BOOL    bcr_HaveUnalias;
+    ULONG   bcr_Unalias;
+    ULONG   bcr_UnaliasMask;        /* parsed, not used: the address names it */
 } BsdIfConfigReq;
+
+#ifdef AMINETXDUO_NETADMIN
+/* An alias: "a.b.c.d" or "a.b.c.d/bits".  A number only: an alias is an
+   address this machine answers to, not a name to look up. */
+static BOOL bsd_if_parse_alias(const char *text, ULONG *addr, ULONG *mask)
+{
+    char  copy[20];
+    ULONG i;
+    ULONG bits = 0;
+
+    *mask = 0;
+    if (text == NULL)
+        return FALSE;
+
+    for (i = 0; text[i] != '\0' && text[i] != '/'; i++)
+    {
+        if (i + 1 >= (ULONG)sizeof(copy))
+            return FALSE;
+        copy[i] = text[i];
+    }
+    copy[i] = '\0';
+
+    if (text[i] == '/')
+    {
+        const char *p = &text[i + 1];
+
+        if (*p == '\0')
+            return FALSE;
+        for (; *p != '\0'; p++)
+        {
+            if (*p < '0' || *p > '9')
+                return FALSE;
+            bits = bits * 10UL + (ULONG)(*p - '0');
+            if (bits > 32UL)
+                return FALSE;
+        }
+        if (bits == 0)
+            return FALSE;
+        *mask = 0xFFFFFFFFUL << (32UL - bits);
+    }
+
+    return (ami_config_parse_ip(copy, addr) && *addr != 0UL) ? TRUE : FALSE;
+}
+#endif /* AMINETXDUO_NETADMIN */
 
 #ifdef AMINETXDUO_NETADMIN
 static BOOL bsd_if_parse_address(const char *text, ULONG *out)
@@ -550,10 +600,22 @@ static LONG bsd_if_parse_config(struct AmiSocketBase *SocketBase,
                     return bsd_fail(SocketBase, AMI_EOPNOTSUPP);
                 break;
 
+            case IFC_AddAliasAddress:
+                if (!bsd_if_parse_alias(text, &req->bcr_Alias,
+                                        &req->bcr_AliasMask))
+                    return bsd_fail(SocketBase, AMI_EINVAL);
+                req->bcr_HaveAlias = TRUE;
+                break;
+
+            case IFC_DeleteAliasAddress:
+                if (!bsd_if_parse_alias(text, &req->bcr_Unalias,
+                                        &req->bcr_UnaliasMask))
+                    return bsd_fail(SocketBase, AMI_EINVAL);
+                req->bcr_HaveUnalias = TRUE;
+                break;
+
             case IFC_DestinationAddress:
             case IFC_BroadcastAddress:
-            case IFC_AddAliasAddress:
-            case IFC_DeleteAliasAddress:
                 return bsd_fail(SocketBase, AMI_EOPNOTSUPP);
 
             default:
@@ -652,6 +714,33 @@ LONG bsd_ConfigureInterfaceTagList(register STRPTR name __asm("a0"),
                                req.bcr_HaveNetMask, req.bcr_NetMask) != 0)
         {
             result = -1;
+            goto out;
+        }
+    }
+
+    /* The aliases after the address, as Roadshow's ALIAS keyword is applied:
+       a delete first, so one call can replace an alias. */
+    if (req.bcr_HaveUnalias)
+    {
+        rc = netstack_interface_alias_delete(index, req.bcr_Unalias);
+        if (rc != AMI_NET_OK)
+        {
+            result = bsd_fail(SocketBase, (rc == AMI_NET_ERR_NONAME)
+                                              ? AMI_EADDRNOTAVAIL : AMI_ENXIO);
+            goto out;
+        }
+    }
+
+    if (req.bcr_HaveAlias)
+    {
+        rc = netstack_interface_alias_add(index, req.bcr_Alias,
+                                          req.bcr_AliasMask);
+        if (rc != AMI_NET_OK)
+        {
+            result = bsd_fail(SocketBase,
+                              (rc == AMI_NET_ERR_NOSLOT) ? AMI_ENOSPC :
+                              (rc == AMI_NET_ERR_BUSY)   ? AMI_EEXIST :
+                                                           AMI_ENXIO);
             goto out;
         }
     }

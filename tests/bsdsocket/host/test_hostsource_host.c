@@ -285,6 +285,10 @@ LONG netstack_iface_mdns_set(UWORD i, BOOL on)
 { (VOID)i; (VOID)on; h_unreachable("netstack_iface_mdns_set"); return -1; }
 LONG netstack_interface_priority_set(UWORD i, LONG p)
 { (VOID)i; (VOID)p; h_unreachable("netstack_interface_priority_set"); return -1; }
+LONG netstack_interface_autoip_start(UWORD i)
+{ (VOID)i; h_unreachable("netstack_interface_autoip_start"); return -1; }
+BOOL netstack_interface_alias_of(UWORD slot, UWORD *parent)
+{ (VOID)slot; (VOID)parent; return FALSE; }
 LONG netstack_mdns_browse_start(const char *t)
 { (VOID)t; h_unreachable("netstack_mdns_browse_start"); return -1; }
 LONG netstack_mdns_browse_stop(const char *t)

@@ -2271,6 +2271,226 @@ LONG netstack_interface_priority_set(UWORD index, LONG priority)
     return AMI_NET_OK;
 }
 
+/* ------------------------------------------------------------- aliases */
+
+static LONG ami_ns_vacant_interface_slot(AmiNetStack *ns);
+
+/* Withdraw and detach one alias slot.  Inside a caller bracket. */
+static VOID ami_ns_alias_detach(AmiNetStack *ns, UWORD slot)
+{
+    UWORD parent = (UWORD)(ns->ns_AliasOf[slot] - 1U);
+
+    if (ns->ns_Iface[parent] != NULL)
+        (VOID)ami_sana2_alias_publish(ns->ns_Iface[parent],
+                                      &ns->ns_Ip.nx_ip_interface[slot], FALSE);
+    (VOID)nx_ip_interface_detach(&ns->ns_Ip, (UINT)slot);
+    ns->ns_AliasOf[slot]      = 0;
+    ns->ns_AliasName[slot][0] = '\0';
+}
+
+/* Every alias of `index`, before the interface itself goes.  Inside a caller
+   bracket. */
+static VOID ami_ns_alias_drop(AmiNetStack *ns, UWORD index)
+{
+    UWORD slot;
+
+    for (slot = 0; slot < (UWORD)AMI_CFG_MAX_ATTACHED; slot++)
+        if (ns->ns_AliasOf[slot] == (UBYTE)(index + 1U))
+            ami_ns_alias_detach(ns, slot);
+}
+
+/* "eth0:2", cut so the suffix always fits. */
+static VOID ami_ns_alias_name(char *out, const char *parent, UWORD slot)
+{
+    ULONG n = 0;
+
+    while (parent[n] != '\0' && n < (ULONG)AMI_CFG_NAME_LEN - 4UL)
+    {
+        out[n] = parent[n];
+        n++;
+    }
+    out[n++] = ':';
+    out[n++] = (char)('0' + (slot % 10U));
+    out[n]   = '\0';
+}
+
+LONG netstack_interface_alias_add(UWORD index, ULONG address, ULONG netmask)
+{
+    AmiNetStack  *ns;
+    AmiNetCaller *caller;
+    LONG          slot;
+    LONG          rc = AMI_NET_OK;
+    UINT          status;
+    UWORD         i;
+
+    ami_ns_lock_obtain();
+    ns = ami_ns;
+
+    if (ns == NULL || !ns->ns_IpCreated ||
+        index >= (UWORD)AMI_CFG_MAX_ATTACHED || ns->ns_Iface[index] == NULL ||
+        address == 0UL)
+    {
+        ami_ns_lock_release();
+        return AMI_NET_ERR_STATE;
+    }
+
+    /* NetX Duo refuses an address another interface holds, alias or not. */
+    for (i = 0; i < (UWORD)NX_MAX_PHYSICAL_INTERFACES; i++)
+    {
+        if (ns->ns_Ip.nx_ip_interface[i].nx_interface_valid &&
+            ns->ns_Ip.nx_ip_interface[i].nx_interface_ip_address == address)
+        {
+            ami_ns_lock_release();
+            return AMI_NET_ERR_BUSY;
+        }
+    }
+
+    slot = ami_ns_vacant_interface_slot(ns);
+    if (slot < 0)
+    {
+        ami_ns_lock_release();
+        return AMI_NET_ERR_NOSLOT;
+    }
+
+    if (netmask == 0UL)
+        netmask = ns->ns_Ip.nx_ip_interface[index].nx_interface_ip_network_mask;
+    if (netmask == 0UL)
+        netmask = 0xFFFFFF00UL;
+
+    caller = ami_netstack_enter_alloc();
+    if (caller == NULL)
+    {
+        ami_ns_lock_release();
+        return AMI_NET_ERR_KERNEL;
+    }
+
+    ami_ns_alias_name(ns->ns_AliasName[slot],
+                      ns->ns_Config.interfaces[index].name, (UWORD)slot);
+
+    ami_sana2_alias_bind(ns->ns_Iface[index]);
+    status = nx_ip_interface_attach(&ns->ns_Ip,
+                                    (CHAR *)ns->ns_AliasName[slot],
+                                    address, netmask,
+                                    ami_sana2_alias_driver_entry);
+    ami_sana2_alias_bind(NULL);
+
+    if (status == NX_SUCCESS &&
+        ns->ns_Ip.nx_ip_interface[slot].nx_interface_valid == 0)
+        status = NX_INVALID_INTERFACE;
+
+    if (status == NX_SUCCESS)
+    {
+        NX_INTERFACE *alias = &ns->ns_Ip.nx_ip_interface[slot];
+
+        /* Below every interface, so a route the interface also matches stays
+           with the interface and its own address. */
+        alias->nx_interface_priority = -1000;
+        ns->ns_AliasOf[slot] = (UBYTE)(index + 1U);
+
+        if (!ami_sana2_alias_publish(ns->ns_Iface[index], alias, TRUE))
+        {
+            ami_ns_alias_detach(ns, (UWORD)slot);
+            rc = AMI_NET_ERR_NOSLOT;
+        }
+    }
+    else
+    {
+        ns->ns_AliasName[slot][0] = '\0';
+        rc = (status == NX_DUPLICATED_ENTRY) ? AMI_NET_ERR_BUSY
+                                             : AMI_NET_ERR_STATE;
+    }
+
+    ami_netstack_leave_free(caller);
+    ami_ns_lock_release();
+
+    return rc;
+}
+
+LONG netstack_interface_alias_delete(UWORD index, ULONG address)
+{
+    AmiNetStack  *ns;
+    AmiNetCaller *caller;
+    LONG          rc = AMI_NET_ERR_NONAME;
+    UWORD         slot;
+
+    ami_ns_lock_obtain();
+    ns = ami_ns;
+
+    if (ns == NULL || !ns->ns_IpCreated ||
+        index >= (UWORD)AMI_CFG_MAX_ATTACHED || ns->ns_Iface[index] == NULL)
+    {
+        ami_ns_lock_release();
+        return AMI_NET_ERR_STATE;
+    }
+
+    caller = ami_netstack_enter_alloc();
+    if (caller == NULL)
+    {
+        ami_ns_lock_release();
+        return AMI_NET_ERR_KERNEL;
+    }
+
+    for (slot = 0; slot < (UWORD)AMI_CFG_MAX_ATTACHED; slot++)
+    {
+        if (ns->ns_AliasOf[slot] == (UBYTE)(index + 1U) &&
+            ns->ns_Ip.nx_ip_interface[slot].nx_interface_ip_address == address)
+        {
+            ami_ns_alias_detach(ns, slot);
+            rc = AMI_NET_OK;
+            break;
+        }
+    }
+
+    ami_netstack_leave_free(caller);
+    ami_ns_lock_release();
+
+    return rc;
+}
+
+LONG netstack_interface_autoip_start(UWORD index)
+{
+    AmiNetStack  *ns;
+    AmiNetCaller *caller;
+    LONG          rc;
+
+    ami_ns_lock_obtain();
+    ns = ami_ns;
+
+    if (ns == NULL || !ns->ns_IpCreated ||
+        index >= (UWORD)AMI_CFG_MAX_ATTACHED || ns->ns_Iface[index] == NULL)
+    {
+        ami_ns_lock_release();
+        return AMI_NET_ERR_STATE;
+    }
+
+    caller = ami_netstack_enter_alloc();
+    if (caller == NULL)
+    {
+        ami_ns_lock_release();
+        return AMI_NET_ERR_KERNEL;
+    }
+
+    rc = ami_ns_start_autoip(ns, (LONG)index);
+
+    ami_netstack_leave_free(caller);
+    ami_ns_lock_release();
+
+    return rc;
+}
+
+BOOL netstack_interface_alias_of(UWORD slot, UWORD *parent)
+{
+    AmiNetStack *ns = ami_ns;
+
+    if (ns == NULL || slot >= (UWORD)AMI_CFG_MAX_ATTACHED ||
+        ns->ns_AliasOf[slot] == 0)
+        return FALSE;
+
+    if (parent != NULL)
+        *parent = (UWORD)(ns->ns_AliasOf[slot] - 1U);
+    return TRUE;
+}
+
 LONG netstack_interface_down(UWORD index)
 {
     ami_ns_release_dhcpv6(index);
@@ -2481,6 +2701,9 @@ static LONG ami_ns_interface_remove_finish(UWORD index)
     if (ns->ns_Dhcpv6WorkReady && (UWORD)ns->ns_Dhcpv6Iface == index)
         ami_netstack_dhcpv6_destroy(ns);
 #endif
+
+    /* Its aliases first: they send through its device. */
+    ami_ns_alias_drop(ns, index);
 
     status = nx_ip_interface_detach(&ns->ns_Ip, (UINT)index);
 

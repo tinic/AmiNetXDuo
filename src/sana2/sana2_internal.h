@@ -1025,6 +1025,13 @@ struct AmiSana2If
     NX_IP              *ip;
     UINT                index;
     NX_INTERFACE       *interface_ptr;
+    /* Alias addresses (ConfigureNetInterface ALIASADDR): NetX Duo holds one
+       IPv4 address per NX_INTERFACE, so each alias is an NX_INTERFACE of its
+       own on this device.  ami_sana2_rx_deliver() hands it the frames
+       addressed to it.  Written under nx_ip_protection, which the reader holds
+       while it delivers. */
+    NX_INTERFACE       *alias[AMI_SANA2_ALIASES];
+    UWORD               alias_count;
     /* The owning pool: every packet a slot pins came from here, and the
        retained sweep gives them back here, not to a later stack's pool. */
     NX_PACKET_POOL     *pool;

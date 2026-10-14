@@ -456,6 +456,52 @@ static VOID ami_sana2_rx_dispatch(NX_IP *ip, NX_PACKET *packet, UINT type)
 }
 
 /*
+ * An IPv4 datagram or an ARP message for one of this device's alias addresses
+ * belongs to the alias's NX_INTERFACE: NetX Duo accepts a datagram only for
+ * the address of the interface it arrived on, answers ARP only for that
+ * address, and replies from it.  Unicast destinations only; a broadcast stays
+ * with the interface.  `type` is the EtherType as the caller compares it.
+ */
+static VOID __attribute__((noinline))
+ami_sana2_rx_alias(AmiSana2If *iface, NX_PACKET *packet, UINT type)
+{
+    const UCHAR *p = packet->nx_packet_prepend_ptr + AMI_ETH_HEADER_SIZE;
+    ULONG        want;
+    UWORD        i;
+
+    if (type == (UINT)AMI_ETHERTYPE_IPV4)
+    {
+        if (packet->nx_packet_length < AMI_ETH_HEADER_SIZE + 20UL)
+            return;
+        p += 16;                        /* destination address */
+    }
+    else if (type == (UINT)AMI_ETHERTYPE_ARP)
+    {
+        if (packet->nx_packet_length < AMI_ETH_HEADER_SIZE + 28UL)
+            return;
+        p += 24;                        /* target protocol address */
+    }
+    else
+    {
+        return;
+    }
+
+    want = ((ULONG)p[0] << 24) | ((ULONG)p[1] << 16) |
+           ((ULONG)p[2] << 8) | (ULONG)p[3];
+
+    for (i = 0; i < (UWORD)AMI_SANA2_ALIASES; i++)
+    {
+        NX_INTERFACE *a = iface->alias[i];
+
+        if (a != NULL && a->nx_interface_ip_address == want)
+        {
+            packet->nx_packet_address.nx_packet_interface_ptr = a;
+            return;
+        }
+    }
+}
+
+/*
  * Both the cooked path (header synthesised) and the raw path (header off the
  * wire) end here, so the two modes must produce the same thing.  Input runs on
  * this thread, under the lock ami_sana2_rx_drain() is holding.
@@ -523,6 +569,10 @@ VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
 #endif
 
     packet->nx_packet_address.nx_packet_interface_ptr = iface->interface_ptr;
+
+    /* One test on a device without aliases. */
+    if (iface->alias_count != 0U)
+        ami_sana2_rx_alias(iface, packet, type);
 
     /* The group bit, before the header goes: what says the driver delivers
        multicast at all (AmiSana2Stats.rx_multicast).  One bit test on the
