@@ -505,7 +505,9 @@ host_test_targets() { # builddir
 #      566 with ssh_console_text: the ssh client's UTF-8 conversion and OSC
 #      filter (all hosts).
 #      567 with text_codeset: the shared codeset <-> UTF-8 module (all hosts).
-HOST_TESTS_EXPECTED=567
+#      569 with tools_refcompat_quiet and tools_refcompat_reference: the
+#      AmigaDOS Command Reference QUIET return code and templates.
+HOST_TESTS_EXPECTED=569
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,
