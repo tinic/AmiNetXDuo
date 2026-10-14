@@ -676,8 +676,8 @@ ULONG                       svc_i;
     for (svc_i = 0UL; svc_i < r -> tr_backlog; svc_i++)
     {
 
-        /* Half the period is the tick's, at most; the budget bounds the
-           burst, and the rest of the backlog waits for a later service.  */
+        /* The budget bounds the burst under Forbid(); the rest of the
+           backlog waits for a later service.  */
         if (svc_i > 0UL)
         {
             struct EClockVal budget_now;
