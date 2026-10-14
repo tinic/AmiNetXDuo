@@ -424,11 +424,18 @@
     "parser": "readargs",
     "source": "src/tools/arp.c",
     "values": {
-      "ADDRESS": "127.0.0.1",
-      "DELETE": true,
+      "-a": true,
+      "-d": true,
+      "-f": "RAM:arp-entries",
+      "-n": true,
+      "-s": true,
+      "ADDRESS": "02:11:22:33:44:55",
+      "HOSTNAME": "127.0.0.1",
+      "PRO": true,
+      "PUB": true,
       "QUIET": true,
-      "SET": "02:11:22:33:44:55",
       "STATS": true,
+      "TEMP": true,
       "UNIT": "1"
     }
   },

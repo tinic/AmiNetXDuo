@@ -274,6 +274,9 @@ UINT _nxe_ip_static_route_delete(NX_IP *ip, ULONG n, ULONG m)
 UINT _nxe_arp_static_entry_create(NX_IP *ip, ULONG a, ULONG msw, ULONG lsw)
 { (VOID)ip; (VOID)a; (VOID)msw; (VOID)lsw;
   h_unreachable("nx_arp_static_entry_create"); return 1; }
+UINT _nxe_arp_dynamic_entry_set(NX_IP *ip, ULONG a, ULONG msw, ULONG lsw)
+{ (VOID)ip; (VOID)a; (VOID)msw; (VOID)lsw;
+  h_unreachable("nx_arp_dynamic_entry_set"); return 1; }
 UINT _nxe_arp_entry_delete(NX_IP *ip, ULONG a)
 { (VOID)ip; (VOID)a; h_unreachable("nx_arp_entry_delete"); return 1; }
 UINT _nxe_arp_dynamic_entries_invalidate(NX_IP *ip)

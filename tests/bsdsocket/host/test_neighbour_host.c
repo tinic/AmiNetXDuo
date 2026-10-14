@@ -335,7 +335,17 @@ UINT _nxe_ip_static_route_delete(NX_IP *ip, ULONG n, ULONG m)
 /* The product disables NetX's checked wrappers.  This host call-out must
    not supply their validation: the control entry itself owns the contract. */
 static UINT h_arp_add_calls;
+static UINT h_arp_dynamic_calls;
 static ULONG h_arp_add_address, h_arp_add_msw, h_arp_add_lsw;
+UINT _nxe_arp_dynamic_entry_set(NX_IP *ip, ULONG a, ULONG msw, ULONG lsw)
+{
+    (VOID)ip;
+    h_arp_dynamic_calls++;
+    h_arp_add_address = a;
+    h_arp_add_msw = msw;
+    h_arp_add_lsw = lsw;
+    return NX_SUCCESS;
+}
 UINT _nxe_arp_static_entry_create(NX_IP *ip, ULONG a, ULONG msw, ULONG lsw)
 {
     (VOID)ip;
@@ -583,7 +593,14 @@ static void t_route_delete_errno(void)
           "an IPv6 prefix that is not there is ENOENT, as before");
 }
 
+static LONG h_arp_add_flags(ULONG destination, BOOL zero_mac, ULONG flags);
+
 static LONG h_arp_add(ULONG destination, BOOL zero_mac)
+{
+    return h_arp_add_flags(destination, zero_mac, 0UL);
+}
+
+static LONG h_arp_add_flags(ULONG destination, BOOL zero_mac, ULONG flags)
 {
     NetStatusControl ctl;
     static const UBYTE mac[6] = { 0x00, 0x11, 0x22, 0x33, 0x44, 0x55 };
@@ -594,7 +611,9 @@ static LONG h_arp_add(ULONG destination, BOOL zero_mac)
     ctl.nsc_Destination = destination;
     if (!zero_mac)
         memcpy(ctl.nsc_HwAddress, mac, sizeof mac);
+    ctl.nsc_Flags = flags;
     h_arp_add_calls = 0;
+    h_arp_dynamic_calls = 0;
     h_base.sb_Errno = 0;
     return bsd_NetStackControl(AMI_NETSTATUS_MAGIC, NETCTRL_ARP_ADD,
                                &ctl, sizeof ctl, &h_base);
@@ -627,6 +646,32 @@ static void t_arp_add_validation(void)
           "valid address and six hardware bytes are passed unchanged");
 }
 
+/* arp SET TEMP: NETCTRL_F_TEMPORARY makes the entry dynamic, its absence
+   static, each with the same address and hardware words; the refusals are
+   the same for both. */
+static void t_arp_add_temporary(void)
+{
+    h_reset();
+
+    CHECK(h_arp_add_flags(0xC0000207UL, FALSE, NETCTRL_F_TEMPORARY) == 0 &&
+          h_arp_dynamic_calls == 1 && h_arp_add_calls == 0,
+          "TEMP reaches nx_arp_dynamic_entry_set once, not the static add");
+    CHECK(h_arp_add_address == 0xC0000207UL &&
+          h_arp_add_msw == 0x0011UL && h_arp_add_lsw == 0x22334455UL,
+          "with the address and six hardware bytes unchanged");
+
+    CHECK(h_arp_add_flags(0xC0000207UL, FALSE, 0UL) == 0 &&
+          h_arp_add_calls == 1 && h_arp_dynamic_calls == 0,
+          "without it the entry is static");
+
+    CHECK(h_arp_add_flags(0xE0000001UL, FALSE, NETCTRL_F_TEMPORARY) == -1 &&
+          h_base.sb_Errno == AMI_EINVAL && h_arp_dynamic_calls == 0,
+          "a multicast destination is EINVAL for TEMP too");
+    CHECK(h_arp_add_flags(0xC0000207UL, TRUE, NETCTRL_F_TEMPORARY) == -1 &&
+          h_base.sb_Errno == AMI_EINVAL && h_arp_dynamic_calls == 0,
+          "and so is a zero hardware address");
+}
+
 int main(void)
 {
     printf("NETSTATUS host tests\n");
@@ -640,6 +685,7 @@ int main(void)
     t_stats_wait_revalidates_interface();
     t_route_delete_errno();
     t_arp_add_validation();
+    t_arp_add_temporary();
 
     printf("netstatus checks=%lu failures=%lu\n", h_checks, h_failures);
     return h_failures == 0 ? 0 : 1;

@@ -21,6 +21,7 @@
 
 #include "toolquiet.h"
 #include "onlink.h"
+#include "arpfile.h"
 
 #ifndef AMINETXDUO_SOURCE_DIR
 #define AMINETXDUO_SOURCE_DIR "."
@@ -334,6 +335,74 @@ static void check_reference(void)
     CHECK(carried >= 3, "%d reference templates found", carried);
 }
 
+/* ------------------------------------------------------------- arp FILE --- */
+
+/* A character source for arpfile_drain(): the text, then -1 or -2. */
+typedef struct DrainSrc
+{
+    const char *text;
+    long        end;
+    int         reads;
+} DrainSrc;
+
+static long drain_get(void *ctx)
+{
+    DrainSrc *d = (DrainSrc *)ctx;
+
+    d->reads++;
+    if (*d->text == '\0')
+        return d->end;
+    return (unsigned char)*d->text++;
+}
+
+static void check_arpfile(void)
+{
+    char  l1[] = "oberon 00:30:ab:0e:d5:ee TEMP\n";
+    char  l2[] = "  # a comment\n";
+    char  l3[] = "oberon\n";
+    char  l4[] = "oberon 00:30:ab:0e:d5:ee temp pub\n";
+    char  l5[] = "oberon 00:30:ab:0e:d5:ee PROXY\n";
+    char  l6[] = "titania 00:30:ab:0e:d5:ef";
+    char  big[16];
+    char *h, *m, *bad = NULL;
+    int   t;
+
+    CHECK(arpfile_parse(l1, &h, &m, &t, &bad) == ARPFILE_OK && t == 1 &&
+          strcmp(h, "oberon") == 0 && strcmp(m, "00:30:ab:0e:d5:ee") == 0,
+          "host, hardware address and TEMP");
+    CHECK(arpfile_parse(l2, &h, &m, &t, &bad) == ARPFILE_SKIP, "a comment");
+    CHECK(arpfile_parse(l3, &h, &m, &t, &bad) == ARPFILE_NOMAC,
+          "a host alone has no hardware address");
+    CHECK(arpfile_parse(l4, &h, &m, &t, &bad) == ARPFILE_PUB,
+          "PUB after TEMP refuses the line, in any case");
+    CHECK(arpfile_parse(l5, &h, &m, &t, &bad) == ARPFILE_WORD &&
+          strcmp(bad, "PROXY") == 0, "an unknown word is named");
+    CHECK(arpfile_parse(l6, &h, &m, &t, &bad) == ARPFILE_OK && t == 0,
+          "a last line with no newline is whole");
+
+    /* FGets() into 16 bytes gives at most 14 characters plus the NUL. */
+    memset(big, 0, sizeof(big));
+    memcpy(big, "oberon 00:30:ab", 14);
+    CHECK(arpfile_partial(big, 14), "a full chunk with no newline is partial");
+    memcpy(big, "oberon 00:30:\n", 14);
+    CHECK(!arpfile_partial(big, 14), "a full chunk ending the line is whole");
+    CHECK(!arpfile_partial(l6, 14 + 64), "and so is a short last line");
+
+    {
+        DrainSrc d1 = { "tail TEMP PUB\nnext 00:11:22:33:44:55\n", -1, 0 };
+        DrainSrc d2 = { "tail with no newline", -1, 0 };
+        DrainSrc d3 = { "tail", -2, 0 };
+
+        CHECK(arpfile_drain(drain_get, &d1) == ARPFILE_DRAINED &&
+              strncmp(d1.text, "next", 4) == 0,
+              "the drain stops after the newline, the next line intact");
+        CHECK(arpfile_drain(drain_get, &d2) == ARPFILE_DRAINED,
+              "the end of the file ends the drain");
+        CHECK(arpfile_drain(drain_get, &d3) == ARPFILE_READERR &&
+              d3.reads == 5, "a read error is reported, not taken for the end");
+    }
+}
+
 /* --------------------------------------------------------------- onlink --- */
 
 static void check_onlink(void)
@@ -359,6 +428,8 @@ int main(int argc, char **argv)
         check_reference();
     if (group == NULL || strcmp(group, "onlink") == 0)
         check_onlink();
+    if (group == NULL || strcmp(group, "arpfile") == 0)
+        check_arpfile();
 
     printf("%d checks, %d failure(s)\n", checks, failures);
     return failures == 0 ? 0 : 1;

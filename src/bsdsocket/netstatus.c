@@ -2416,13 +2416,23 @@ LONG bsd_NetStackControl(register ULONG magic __asm("d0"),
                 rc = bsd_fail(SocketBase, AMI_EINVAL);
                 break;
             }
-            status = nx_arp_static_entry_create(ip, ctl->nsc_Destination,
-                        ((ULONG)ctl->nsc_HwAddress[0] << 8) |
-                         (ULONG)ctl->nsc_HwAddress[1],
-                        ((ULONG)ctl->nsc_HwAddress[2] << 24) |
-                        ((ULONG)ctl->nsc_HwAddress[3] << 16) |
-                        ((ULONG)ctl->nsc_HwAddress[4] << 8) |
-                         (ULONG)ctl->nsc_HwAddress[5]);
+            {
+                ULONG msw = ((ULONG)ctl->nsc_HwAddress[0] << 8) |
+                             (ULONG)ctl->nsc_HwAddress[1];
+                ULONG lsw = ((ULONG)ctl->nsc_HwAddress[2] << 24) |
+                            ((ULONG)ctl->nsc_HwAddress[3] << 16) |
+                            ((ULONG)ctl->nsc_HwAddress[4] << 8) |
+                             (ULONG)ctl->nsc_HwAddress[5];
+
+                /* arp SET TEMP. */
+                if (ctl->nsc_Flags & NETCTRL_F_TEMPORARY)
+                    status = nx_arp_dynamic_entry_set(ip, ctl->nsc_Destination,
+                                                      msw, lsw);
+                else
+                    status = nx_arp_static_entry_create(ip,
+                                                        ctl->nsc_Destination,
+                                                        msw, lsw);
+            }
             rc = ns_map_status(SocketBase, status);
             break;
 
