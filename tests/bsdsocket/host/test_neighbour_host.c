@@ -336,6 +336,9 @@ UINT _nxe_ip_static_route_delete(NX_IP *ip, ULONG n, ULONG m)
    not supply their validation: the control entry itself owns the contract. */
 static UINT h_arp_add_calls;
 static ULONG h_arp_add_address, h_arp_add_msw, h_arp_add_lsw;
+UINT _nxe_arp_dynamic_entry_set(NX_IP *ip, ULONG a, ULONG msw, ULONG lsw)
+{ (VOID)ip; (VOID)a; (VOID)msw; (VOID)lsw;
+  h_unreachable("nx_arp_dynamic_entry_set"); return 1; }
 UINT _nxe_arp_static_entry_create(NX_IP *ip, ULONG a, ULONG msw, ULONG lsw)
 {
     (VOID)ip;

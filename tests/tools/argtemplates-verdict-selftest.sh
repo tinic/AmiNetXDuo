@@ -100,8 +100,8 @@ case_red contract src/tools/tftp.c \
     'the same alias on two items'
 
 case_red contract src/tools/arp.c \
-    '#define TEMPLATE    "ADDRESS,DELETE/S,SET/K,UNIT/K/N,STATS/S,QUIET/S"' \
-    '#define TEMPLATE    "ADDRESS,DELETE/X,SET/K,UNIT/K/N,STATS/S,QUIET/S"' \
+    '#define TEMPLATE    "-a=ALL/S,-d=DELETE/S,-s=SET/S,' \
+    '#define TEMPLATE    "-a=ALL/S,-d=DELETE/X,-s=SET/S,' \
     'a modifier ReadArgs has no letter for'
 
 case_red contract src/tools/shownetstatus.c \
