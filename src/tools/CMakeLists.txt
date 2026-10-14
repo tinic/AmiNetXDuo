@@ -1312,9 +1312,16 @@ if(CMAKE_CROSSCOMPILING)
         set(_shelltools_cpu 68000)
     endif()
     set(_shelltools_bin "${CMAKE_CURRENT_BINARY_DIR}/shelltools/C")
+    # A linker map beside each image, as for every other command, for
+    # tools/check-rt-helpers.sh.  -Map=<dir>/ names it <image>.map.
+    set(_shelltools_maps "${CMAKE_CURRENT_BINARY_DIR}/shelltools/maps")
+    file(MAKE_DIRECTORY "${_shelltools_maps}")
     set(_shelltools_install
         COMMAND "${CMAKE_COMMAND}" -E copy
                 "${_shelltools_bin}/ShowTasks" "${_shelltools_bin}/WatchTasks"
+                "${CMAKE_CURRENT_BINARY_DIR}"
+        COMMAND "${CMAKE_COMMAND}" -E copy
+                "${_shelltools_maps}/ShowTasks.map" "${_shelltools_maps}/WatchTasks.map"
                 "${CMAKE_CURRENT_BINARY_DIR}")
     # One file per strip: the pinned m68k-amigaos-strip segfaults when it is
     # given two hunk files at once.
@@ -1333,11 +1340,14 @@ if(CMAKE_CROSSCOMPILING)
             "-DCMAKE_BUILD_TYPE:STRING=MinSizeRel"
             "-DSHELLTOOLS_CPU:STRING=${_shelltools_cpu}"
             "-DSHELLTOOLS_VERSION_SUFFIX:STRING= AmiNetXDuo ${AMINETXDUO_VERSION}"
+            "-DCMAKE_EXE_LINKER_FLAGS:STRING=-Wl,-Map=${_shelltools_maps}/"
         BUILD_ALWAYS ON
         INSTALL_COMMAND ${_shelltools_install}
         BUILD_BYPRODUCTS
             "${CMAKE_CURRENT_BINARY_DIR}/ShowTasks"
-            "${CMAKE_CURRENT_BINARY_DIR}/WatchTasks")
+            "${CMAKE_CURRENT_BINARY_DIR}/WatchTasks"
+            "${CMAKE_CURRENT_BINARY_DIR}/ShowTasks.map"
+            "${CMAKE_CURRENT_BINARY_DIR}/WatchTasks.map")
     add_dependencies(tools shelltools)
 endif()
 
