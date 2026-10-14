@@ -247,12 +247,6 @@ struct AmiNetStack
     UWORD               ns_IfaceCfg[AMI_CFG_MAX_ATTACHED];
     UWORD               ns_IfaceCount;
 
-    /* An alias address's slot: the slot of the interface it belongs to plus
-       one, 0 for a slot that is not an alias, and the name NetX Duo keeps a
-       pointer to ("eth0:1").  netstack_interface_alias_add(). */
-    UBYTE               ns_AliasOf[AMI_CFG_MAX_ATTACHED];
-    char                ns_AliasName[AMI_CFG_MAX_ATTACHED][AMI_CFG_NAME_LEN];
-
     /*
      * WHO ASKED FOR THIS SLOT.  Set when something NAMED the interface, clear
      * when the start-up pass took the slot on its own.  A slot nobody asked

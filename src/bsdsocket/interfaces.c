@@ -83,6 +83,9 @@ static BOOL bsd_if_name_of(NX_IP *ip, UINT index, char *out, ULONG outlen)
 
     cfg = bsd_if_config(index);
 
+    if (netstack_interface_alias_name((UWORD)index, out, outlen))
+        return TRUE;
+
     if (cfg != NULL && cfg->name[0] != '\0')
     {
         bsd_strncpy(out, cfg->name, outlen);

@@ -460,12 +460,15 @@ static VOID ami_sana2_rx_dispatch(NX_IP *ip, NX_PACKET *packet, UINT type)
  * belongs to the alias's NX_INTERFACE: NetX Duo accepts a datagram only for
  * the address of the interface it arrived on, answers ARP only for that
  * address, and replies from it.  Unicast destinations only; a broadcast stays
- * with the interface.  `type` is the EtherType as the caller compares it.
+ * with the interface.  Two arguments and out of line: the per-frame cost on a
+ * device without aliases is the one test in the caller.
  */
-static VOID __attribute__((noinline))
-ami_sana2_rx_alias(AmiSana2If *iface, NX_PACKET *packet, UINT type)
+static VOID __attribute__((noinline, cold))
+ami_sana2_rx_alias(AmiSana2If *iface, NX_PACKET *packet)
 {
-    const UCHAR *p = packet->nx_packet_prepend_ptr + AMI_ETH_HEADER_SIZE;
+    const UCHAR *p    = packet->nx_packet_prepend_ptr + AMI_ETH_HEADER_SIZE;
+    UINT         type = ((UINT)packet->nx_packet_prepend_ptr[12] << 8) |
+                        (UINT)packet->nx_packet_prepend_ptr[13];
     ULONG        want;
     UWORD        i;
 
@@ -572,7 +575,7 @@ VOID ami_sana2_rx_deliver(AmiSana2If *iface, NX_PACKET *packet,
 
     /* One test on a device without aliases. */
     if (iface->alias_count != 0U)
-        ami_sana2_rx_alias(iface, packet, type);
+        ami_sana2_rx_alias(iface, packet);
 
     /* The group bit, before the header goes: what says the driver delivers
        multicast at all (AmiSana2Stats.rx_multicast).  One bit test on the

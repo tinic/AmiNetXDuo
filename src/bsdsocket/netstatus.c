@@ -1027,7 +1027,8 @@ static VOID ns_fill_interfaces(NX_IP *ip, NsWriter *w)
         sana = (AmiSana2If *)nxif->nx_interface_additional_link_info;
 
         /* The device is the interface's, and so are its counters. */
-        if (netstack_interface_alias_of((UWORD)i, NULL))
+        if (netstack_interface_alias_name((UWORD)i, out->nsi_Name,
+                                          sizeof(out->nsi_Name)))
         {
             out->nsi_Flags |= NETSTATUS_IF_ALIAS;
             sana = NULL;
@@ -1081,7 +1082,7 @@ static VOID ns_fill_interfaces(NX_IP *ip, NsWriter *w)
             ns_copy_name(out->nsi_Device, sizeof(out->nsi_Device), cfg->device);
             out->nsi_Unit = cfg->unit;
         }
-        else
+        else if (!(out->nsi_Flags & NETSTATUS_IF_ALIAS))
         {
             ns_copy_name(out->nsi_Name, sizeof(out->nsi_Name),
                          (const char *)nxif->nx_interface_name);

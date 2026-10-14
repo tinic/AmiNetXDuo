@@ -2275,17 +2275,41 @@ LONG netstack_interface_priority_set(UWORD index, LONG priority)
 
 static LONG ami_ns_vacant_interface_slot(AmiNetStack *ns);
 
-/* Withdraw and detach one alias slot.  Inside a caller bracket. */
-static VOID ami_ns_alias_detach(AmiNetStack *ns, UWORD slot)
+/*
+ * An alias slot is known by its driver, and its interface by the device the
+ * two share, so the stack keeps no table of them: nothing to clear when a
+ * slot is reused, and no bytes in AmiNetStack.
+ */
+static LONG ami_ns_alias_parent(const AmiNetStack *ns, UWORD slot)
 {
-    UWORD parent = (UWORD)(ns->ns_AliasOf[slot] - 1U);
+    const NX_INTERFACE *nxif;
+    UWORD               i;
 
-    if (ns->ns_Iface[parent] != NULL)
-        (VOID)ami_sana2_alias_publish(ns->ns_Iface[parent],
-                                      &ns->ns_Ip.nx_ip_interface[slot], FALSE);
+    if (slot >= (UWORD)NX_MAX_PHYSICAL_INTERFACES)
+        return -1;
+
+    nxif = &ns->ns_Ip.nx_ip_interface[slot];
+    if (!nxif->nx_interface_valid ||
+        nxif->nx_interface_link_driver_entry != ami_sana2_alias_driver_entry)
+        return -1;
+
+    for (i = 0; i < (UWORD)AMI_CFG_MAX_ATTACHED; i++)
+        if (ns->ns_Iface[i] != NULL &&
+            (VOID *)ns->ns_Iface[i] == nxif->nx_interface_additional_link_info)
+            return (LONG)i;
+
+    return -1;
+}
+
+/* What NetX Duo names every alias; listings call it <interface>:<slot>. */
+static CHAR ami_ns_alias_label[] = "alias";
+
+/* Withdraw and detach one alias slot.  Inside a caller bracket. */
+static VOID ami_ns_alias_detach(AmiNetStack *ns, UWORD slot, UWORD parent)
+{
+    (VOID)ami_sana2_alias_publish(ns->ns_Iface[parent],
+                                  &ns->ns_Ip.nx_ip_interface[slot], FALSE);
     (VOID)nx_ip_interface_detach(&ns->ns_Ip, (UINT)slot);
-    ns->ns_AliasOf[slot]      = 0;
-    ns->ns_AliasName[slot][0] = '\0';
 }
 
 /* Every alias of `index`, before the interface itself goes.  Inside a caller
@@ -2294,24 +2318,9 @@ static VOID ami_ns_alias_drop(AmiNetStack *ns, UWORD index)
 {
     UWORD slot;
 
-    for (slot = 0; slot < (UWORD)AMI_CFG_MAX_ATTACHED; slot++)
-        if (ns->ns_AliasOf[slot] == (UBYTE)(index + 1U))
-            ami_ns_alias_detach(ns, slot);
-}
-
-/* "eth0:2", cut so the suffix always fits. */
-static VOID ami_ns_alias_name(char *out, const char *parent, UWORD slot)
-{
-    ULONG n = 0;
-
-    while (parent[n] != '\0' && n < (ULONG)AMI_CFG_NAME_LEN - 4UL)
-    {
-        out[n] = parent[n];
-        n++;
-    }
-    out[n++] = ':';
-    out[n++] = (char)('0' + (slot % 10U));
-    out[n]   = '\0';
+    for (slot = 0; slot < (UWORD)NX_MAX_PHYSICAL_INTERFACES; slot++)
+        if (ami_ns_alias_parent(ns, slot) == (LONG)index)
+            ami_ns_alias_detach(ns, slot, index);
 }
 
 LONG netstack_interface_alias_add(UWORD index, ULONG address, ULONG netmask)
@@ -2364,12 +2373,8 @@ LONG netstack_interface_alias_add(UWORD index, ULONG address, ULONG netmask)
         return AMI_NET_ERR_KERNEL;
     }
 
-    ami_ns_alias_name(ns->ns_AliasName[slot],
-                      ns->ns_Config.interfaces[index].name, (UWORD)slot);
-
     ami_sana2_alias_bind(ns->ns_Iface[index]);
-    status = nx_ip_interface_attach(&ns->ns_Ip,
-                                    (CHAR *)ns->ns_AliasName[slot],
+    status = nx_ip_interface_attach(&ns->ns_Ip, ami_ns_alias_label,
                                     address, netmask,
                                     ami_sana2_alias_driver_entry);
     ami_sana2_alias_bind(NULL);
@@ -2385,17 +2390,15 @@ LONG netstack_interface_alias_add(UWORD index, ULONG address, ULONG netmask)
         /* Below every interface, so a route the interface also matches stays
            with the interface and its own address. */
         alias->nx_interface_priority = -1000;
-        ns->ns_AliasOf[slot] = (UBYTE)(index + 1U);
 
         if (!ami_sana2_alias_publish(ns->ns_Iface[index], alias, TRUE))
         {
-            ami_ns_alias_detach(ns, (UWORD)slot);
+            ami_ns_alias_detach(ns, (UWORD)slot, index);
             rc = AMI_NET_ERR_NOSLOT;
         }
     }
     else
     {
-        ns->ns_AliasName[slot][0] = '\0';
         rc = (status == NX_DUPLICATED_ENTRY) ? AMI_NET_ERR_BUSY
                                              : AMI_NET_ERR_STATE;
     }
@@ -2430,12 +2433,12 @@ LONG netstack_interface_alias_delete(UWORD index, ULONG address)
         return AMI_NET_ERR_KERNEL;
     }
 
-    for (slot = 0; slot < (UWORD)AMI_CFG_MAX_ATTACHED; slot++)
+    for (slot = 0; slot < (UWORD)NX_MAX_PHYSICAL_INTERFACES; slot++)
     {
-        if (ns->ns_AliasOf[slot] == (UBYTE)(index + 1U) &&
+        if (ami_ns_alias_parent(ns, slot) == (LONG)index &&
             ns->ns_Ip.nx_ip_interface[slot].nx_interface_ip_address == address)
         {
-            ami_ns_alias_detach(ns, slot);
+            ami_ns_alias_detach(ns, slot, index);
             rc = AMI_NET_OK;
             break;
         }
@@ -2481,13 +2484,43 @@ LONG netstack_interface_autoip_start(UWORD index)
 BOOL netstack_interface_alias_of(UWORD slot, UWORD *parent)
 {
     AmiNetStack *ns = ami_ns;
+    LONG         p;
 
-    if (ns == NULL || slot >= (UWORD)AMI_CFG_MAX_ATTACHED ||
-        ns->ns_AliasOf[slot] == 0)
+    if (ns == NULL || !ns->ns_IpCreated)
+        return FALSE;
+
+    p = ami_ns_alias_parent(ns, slot);
+    if (p < 0)
         return FALSE;
 
     if (parent != NULL)
-        *parent = (UWORD)(ns->ns_AliasOf[slot] - 1U);
+        *parent = (UWORD)p;
+    return TRUE;
+}
+
+BOOL netstack_interface_alias_name(UWORD slot, char *out, ULONG len)
+{
+    AmiNetStack *ns = ami_ns;
+    const char  *name;
+    LONG         p;
+    ULONG        n = 0;
+
+    if (ns == NULL || !ns->ns_IpCreated || out == NULL || len < 4UL)
+        return FALSE;
+
+    p = ami_ns_alias_parent(ns, slot);
+    if (p < 0)
+        return FALSE;
+
+    name = ns->ns_Config.interfaces[ns->ns_IfaceCfg[p]].name;
+    while (name[n] != '\0' && n + 3UL < len)
+    {
+        out[n] = name[n];
+        n++;
+    }
+    out[n++] = ':';
+    out[n++] = (char)('0' + (slot % 10U));
+    out[n]   = '\0';
     return TRUE;
 }
 
