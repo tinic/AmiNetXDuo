@@ -321,18 +321,17 @@ static VOID s_snapshot(struct Library *base, const char *why)
         {
             if (s_ask(base, NETSTATUS_HEALTH, h, sizeof(*h)) >= 0)
             {
-                LONG targs[7];
+                LONG targs[6];
 
                 targs[0] = (LONG)s_secs();
                 targs[1] = (LONG)why;
-                targs[2] = (LONG)h->e.nsl_TickSkew;
-                targs[3] = (LONG)h->e.nsl_TickSkewPeak;
-                targs[4] = (LONG)h->e.nsl_TickLost;
-                targs[5] = (LONG)h->e.nsl_TickUptimeMs;
-                targs[6] = (LONG)h->e.nsl_TickWorstServiceUs;
+                targs[2] = (LONG)h->e.nsl_TickSkewPeak;
+                targs[3] = (LONG)h->e.nsl_TickLost;
+                targs[4] = (LONG)h->e.nsl_TickUptimeMs;
+                targs[5] = (LONG)h->e.nsl_TickWorstServiceUs;
 
                 s_emit(F_EVENTS,
-                       "%lu TICK %s skew=%lu skewpeak=%lu lost=%lu "
+                       "%lu TICK %s skewpeak=%lu lost=%lu "
                        "uptime_ms=%lu worst_service_us=%lu\n", targs);
             }
             FreeVec((APTR)h);

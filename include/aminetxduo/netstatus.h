@@ -464,10 +464,10 @@ typedef struct NetStatusHealth
     ULONG   nsl_TickUptimeMs;
     ULONG   nsl_TickWorstStallMs;
     ULONG   nsl_TickWorstServiceUs;
-    /* Were the tick budget counters; always 0.  Kept so the record keeps its
-       version 16 shape. */
-    ULONG   nsl_TickPad[2];
-    ULONG   nsl_TickSkew;
+    /* Were the tick budget counters and the wheel lateness after a wakeup,
+       which always equalled nsl_TickLost; always 0.  Kept so the record keeps
+       its version 16 shape. */
+    ULONG   nsl_TickPad[3];
     ULONG   nsl_TickSkewPeak;
 
     ULONG   nsl_BatonLive;

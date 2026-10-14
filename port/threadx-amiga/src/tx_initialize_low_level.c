@@ -684,8 +684,6 @@ ULONG                       svc_i;
 
     r -> tr_backlog -=  svc_i;
     _tx_amiga_tick.tx_amiga_tick_delivered +=  svc_i;
-    _tx_amiga_tick.tx_amiga_tick_skew =
-        r -> tr_backlog + _tx_amiga_tick.tx_amiga_tick_lost;
 
     /* Poke the scheduler when it could actually dispatch.  Pointless from
        the realm: it IS the scheduler, mid-pass.  */
@@ -1055,10 +1053,10 @@ UINT                 armed;
 
     if (_tx_amiga_tick.tx_amiga_tick_clipped != 0UL)
     {
-        AMI_WARN("tick: %ld stalls clipped, wheel %ld ticks behind the clock "
-                "(worst %ld)",
+        AMI_WARN("tick: %ld stalls clipped, %ld ticks lost "
+                "(wheel worst %ld behind)",
                 (LONG) _tx_amiga_tick.tx_amiga_tick_clipped,
-                (LONG) _tx_amiga_tick.tx_amiga_tick_skew,
+                (LONG) _tx_amiga_tick.tx_amiga_tick_lost,
                 (LONG) _tx_amiga_tick.tx_amiga_tick_skew_peak);
     }
     AMI_INFO("tick: %ld wakeups -> %ld ticks in %ld ms (%ld empty, %ld caught up)",

@@ -402,8 +402,7 @@ TX_AMIGA_TICK_STATS  s;
           s.tx_amiga_tick_worst_service_us);
     t_log("tick: %lu clipped, %lu lost",
           s.tx_amiga_tick_clipped, s.tx_amiga_tick_lost);
-    t_log("tick: wheel %lu ticks late, worst %lu",
-          s.tx_amiga_tick_skew, s.tx_amiga_tick_skew_peak);
+    t_log("tick: wheel worst %lu ticks late", s.tx_amiga_tick_skew_peak);
 }
 
 

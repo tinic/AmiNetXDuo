@@ -71,8 +71,8 @@ typedef struct TX_AMIGA_TICK_STATS_STRUCT
     /* The longest gap between two wakeups, and what the wakeup before it spent. */
     ULONG   tx_amiga_tick_worst_stall_ms;
     ULONG   tx_amiga_tick_worst_service_us;
-    /* Ticks the wheel still owes plus everything clipped; the clock is not in it. */
-    ULONG   tx_amiga_tick_skew;
+    /* Most ticks the wheel owed at a wakeup, plus everything clipped by then;
+       the clock is not in it.  After a wakeup it owes nothing but the lost.  */
     ULONG   tx_amiga_tick_skew_peak;
 } TX_AMIGA_TICK_STATS;
 

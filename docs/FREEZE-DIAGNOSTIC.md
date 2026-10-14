@@ -38,7 +38,7 @@ started.
 |---|---|---|
 | `N ticks in N ms` | the stack's 50 Hz clock. Ticks divided by seconds should be 50 whatever else is happening. The ms figure is time since the stack started, so it also dates each block in a log | a rate under 50 |
 | `N clipped, N lost` | times the clock fell so far behind that the arrears were thrown away, and how many ticks that cost | above zero: something held the machine |
-| `timer wheel N ticks late, worst N` | how far behind the ThreadX timer wheel ran | a worst well above 1 |
+| `timer wheel worst N ticks late` | the most ticks the ThreadX timer wheel owed at one wakeup | well above 2 |
 | `worst stall N ms, service N us` | the longest gap between two clock ticks, and how long the clock's own work took on the wakeup before it | stall in the hundreds of ms with service in the hundreds of us: a priority-20 task went undispatched that long, so something else held the machine. Stall and service close together: the clock overran its own period, and that one is ours |
 | `baton: N transitions, N at once at the peak` | times a stack thread stepped aside for an Exec wait, and the greatest number of live wait brackets. The rate rises with packets, not bytes, so many small files are harder than one bulk transfer | a live count which never returns to zero after traffic stops |
 | `baton: N moved` | — | above zero: the stack suspended a thread and left itself with nothing to dispatch |
