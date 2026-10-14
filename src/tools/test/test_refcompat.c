@@ -20,6 +20,7 @@
 #include <string.h>
 
 #include "toolquiet.h"
+#include "addif_wb.h"
 
 #ifndef AMINETXDUO_SOURCE_DIR
 #define AMINETXDUO_SOURCE_DIR "."
@@ -333,6 +334,30 @@ static void check_reference(void)
     CHECK(carried >= 3, "%d reference templates found", carried);
 }
 
+/* ---------------------------------------------------------------- addif --- */
+
+static void check_addif(void)
+{
+    long v = 99;
+    char a[32];
+    char b[32];
+
+    CHECK(addif_seconds("60", &v) && v == 60, "TIMEOUT=60 reads 60");
+    CHECK(addif_seconds("5", &v) && v == 5,
+          "TIMEOUT=5 reads 5; the floor of 10 is the caller's, as for the Shell");
+    CHECK(addif_seconds("-1", &v) && v == -1, "a negative value is read, to be refused");
+    CHECK(!addif_seconds("", &v), "an empty TIMEOUT is refused");
+    CHECK(!addif_seconds("10s", &v), "TIMEOUT=10s is refused, not read as 10");
+    CHECK(!addif_seconds("abc", &v), "TIMEOUT=abc is refused");
+    CHECK(!addif_seconds("-", &v), "a lone sign is refused");
+    CHECK(!addif_seconds("99999999999", &v), "past a LONG is refused");
+
+    addif_log_name(a, sizeof(a), 0x0012a4c0UL);
+    addif_log_name(b, sizeof(b), 0x0012a5c0UL);
+    CHECK(strcmp(a, "T:AddNetInterface.0012a4c0") == 0, "the log is named by the process: %s", a);
+    CHECK(strcmp(a, b) != 0, "and two launches do not share one");
+}
+
 int main(int argc, char **argv)
 {
     const char *group = (argc > 1) ? argv[1] : NULL;
@@ -341,6 +366,8 @@ int main(int argc, char **argv)
         check_quiet();
     if (group == NULL || strcmp(group, "reference") == 0)
         check_reference();
+    if (group == NULL || strcmp(group, "addif") == 0)
+        check_addif();
 
     printf("%d checks, %d failure(s)\n", checks, failures);
     return failures == 0 ? 0 : 1;

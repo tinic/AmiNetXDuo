@@ -7,6 +7,7 @@
 
 #include "tools.h"
 #include "libfit.h"
+#include "addif_wb.h"
 
 #include <intuition/intuition.h>
 #include <workbench/startup.h>
@@ -192,7 +193,7 @@ static BPTR addif_wb_old_out;
 static BPTR addif_wb_old_ces;
 static BOOL addif_wb_temp;          /* addif_wb_out is the T: file          */
 
-#define ADDIF_WB_LOG    "T:AddNetInterface.log"
+static char addif_wb_log[32];       /* addif_log_name()                     */
 
 /* A tool type of the icon beside `path`, or NULL.  The caller frees *dob. */
 static const char *icon_tool_type(const char *path, const char *key,
@@ -229,9 +230,11 @@ static __attribute__((noinline)) LONG icon_priority(const char *path)
 
 /*
  * The project icons Workbench passed, as paths, with their QUIET and TIMEOUT.
- * QUIET in any of them makes the run quiet; the longest TIMEOUT wins.
+ * QUIET in any of them makes the run quiet; the longest TIMEOUT wins.  A
+ * TIMEOUT that is not a number, or is negative, is refused as the Shell
+ * refuses it; the floor of 10 is applied by the caller for both.
  */
-static __attribute__((noinline)) BOOL wb_arguments(const struct WBStartup *wbs, ULONG *count,
+static __attribute__((noinline)) LONG wb_arguments(const struct WBStartup *wbs, ULONG *count,
                          BOOL *quiet, LONG *timeout)
 {
     LONG i;
@@ -242,12 +245,11 @@ static __attribute__((noinline)) BOOL wb_arguments(const struct WBStartup *wbs, 
         struct DiskObject  *dob  = NULL;
         char               *path = addif_expanded[*count];
         const char         *v;
-        LONG                secs;
 
         if (*count >= (ULONG)AMI_CFG_MAX_ATTACHED)
         {
             tool_error("more than %ld interfaces", (LONG)AMI_CFG_MAX_ATTACHED);
-            return FALSE;
+            return RETURN_FAIL;
         }
 
         if (wa->wa_Lock == (BPTR)0 ||
@@ -255,7 +257,7 @@ static __attribute__((noinline)) BOOL wb_arguments(const struct WBStartup *wbs, 
             !AddPart((STRPTR)path, wa->wa_Name, ADDIF_MATCH_PATH))
         {
             tool_error("%s: path too long", (LONG)wa->wa_Name);
-            return FALSE;
+            return RETURN_FAIL;
         }
 
         addif_names[*count] = (STRPTR)path;
@@ -265,13 +267,30 @@ static __attribute__((noinline)) BOOL wb_arguments(const struct WBStartup *wbs, 
         if (icon_tool_type(path, "QUIET", &dob) != NULL)
             *quiet = TRUE;
         v = icon_tool_type(path, "TIMEOUT", &dob);
-        if (v != NULL && StrToLong((STRPTR)v, &secs) > 0 && secs > *timeout)
-            *timeout = secs;
+        if (v != NULL)
+        {
+            long given = 0;
+
+            if (!addif_seconds(v, &given))
+            {
+                tool_error("TIMEOUT \"%s\" is not a number", (LONG)v);
+                FreeDiskObject(dob);
+                return RETURN_ERROR;
+            }
+            if (given < 0)
+            {
+                tool_error("TIMEOUT cannot be negative");
+                FreeDiskObject(dob);
+                return RETURN_ERROR;
+            }
+            if ((LONG)given > *timeout)
+                *timeout = (LONG)given;
+        }
         if (dob != NULL)
             FreeDiskObject(dob);
     }
 
-    return TRUE;
+    return RETURN_OK;
 }
 
 /* Output() and the error stream into a T: file for the requester, NIL: when
@@ -284,7 +303,8 @@ static __attribute__((noinline)) VOID wb_capture_begin(VOID)
     IntuitionBase = (struct IntuitionBase *)
         OpenLibrary((CONST_STRPTR)"intuition.library", 37);
 
-    addif_wb_out  = Open((CONST_STRPTR)ADDIF_WB_LOG, MODE_NEWFILE);
+    addif_log_name(addif_wb_log, sizeof(addif_wb_log), (ULONG)pr);
+    addif_wb_out  = Open((CONST_STRPTR)addif_wb_log, MODE_NEWFILE);
     addif_wb_temp = (BOOL)(addif_wb_out != (BPTR)0);
     if (!addif_wb_temp)
         addif_wb_out = Open((CONST_STRPTR)"NIL:", MODE_NEWFILE);
@@ -315,7 +335,7 @@ static __attribute__((noinline)) VOID wb_capture_end(LONG rc)
         pr->pr_CES = addif_wb_old_ces;
         Close(addif_wb_out);
         if (addif_wb_temp)
-            (VOID)DeleteFile((CONST_STRPTR)ADDIF_WB_LOG);
+            (VOID)DeleteFile((CONST_STRPTR)addif_wb_log);
     }
 
     if (rc != RETURN_OK && !addif_quiet && IntuitionBase != NULL)
@@ -911,9 +931,11 @@ static int addif_main(int argc, char **argv)
 
     if (argc == 0)
     {
-        if (!wb_arguments((const struct WBStartup *)argv, &count, &quiet,
-                          &given))
-            return RETURN_FAIL;
+        LONG wrc = wb_arguments((const struct WBStartup *)argv, &count,
+                                &quiet, &given);
+
+        if (wrc != RETURN_OK)
+            return (int)wrc;
         have_timeout = (BOOL)(given >= 0);
     }
     else

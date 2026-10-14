@@ -1426,11 +1426,13 @@
   Tool types:
 
       QUIET          no requester, whatever happens
-      TIMEOUT=<n>    as the TIMEOUT argument
+      TIMEOUT=<n>    as the TIMEOUT argument; a value that is not a
+                     number, or is negative, is refused
       PRI=<n>        the order among several selected icons
 
   A start that does not succeed shows the messages the Shell form
-  prints in a requester.
+  prints in a requester. They are collected in a T: file named for the
+  launch and deleted afterwards.
 
 @endnode
 
