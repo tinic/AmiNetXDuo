@@ -171,3 +171,16 @@ NetX TX changes landed through tinic/netxduo#18 at `a6872a20`. Its tree matches
 `fb53e83e`; AmiNetXDuo pins the master merge commit to satisfy the existing
 first-parent gitlink ancestry check. The previous RX topic pin caused CI's
 failure; no ancestry checks or test coverage are relaxed.
+
+
+### Disconnect race correction
+
+Native CI's `netx_tcp_race_condition_test2` exposed a missing state check in
+checksum-disabled/offloaded sends: segmentation allocation and data append also
+release IP protection. Socket state is now revalidated after segmentation or a
+software checksum. An unadjusted offloaded send retains protection throughout
+and still skips the redundant recheck. The native test is unchanged; the
+existing host cork/send fixture injects disconnects during both allocation and
+append, checking failure status, no transmission, unsent bytes, packet release
+and balanced protection. Its added cases fail against the original change and
+pass with the correction. NetX Duo correction: tinic/netxduo#19.
