@@ -554,38 +554,31 @@ static ArgUse classify_use(const char *src, const char *at, size_t len)
 
 /* ------------------------------------------------------------- contract --- */
 
-/* An option that parses and is then never read.  One exception named in the
-   file's own header, and the AmigaDOS Command Reference's: a keyword in the
-   source's REFERENCE_TEMPLATE is accepted so a Roadshow script parses, even
-   where it has nothing to do here (test_refcompat holds the template). */
-static int deliberately_ignored(const char *cmd, const char *src,
-                                const char *arg)
+/*
+ * An option that parses and is then never read.  Named, one by one, with the
+ * reason: a template keyword nothing reads is otherwise a defect.
+ */
+static const struct
 {
-    const char *ref = strstr(src, "#define REFERENCE_TEMPLATE");
+    const char *cmd;
+    const char *arg;
+} ignored[] = {
+    /* the timeout is the resolver's, set in DEVS:Internet/resolv.conf */
+    { "host",       "TIMEOUT" },
+    /* AmigaDOS Command Reference compatibility, inert here: the listing is
+       numeric already, and SO_DEBUG shows nothing on this stack */
+    { "arp",        "NONAMES" },
+    { "ping",       "DEBUG" },
+    { "traceroute", "DEBUG" },
+};
 
-    /* host: the timeout is the resolver's, set in DEVS:Internet/resolv.conf. */
-    if (strcmp(cmd, "host") == 0 && strcmp(arg, "TIMEOUT") == 0)
-        return 1;
+static int deliberately_ignored(const char *cmd, const char *arg)
+{
+    size_t i;
 
-    while (ref != NULL)
-    {
-        char     tmpl[1024];
-        TmplItem items[MAX_ITEMS];
-        int      n;
-        int      i;
-        int      a;
-
-        if (read_template(ref, tmpl, sizeof(tmpl)))
-        {
-            n = parse_items(tmpl, items, MAX_ITEMS);
-            for (i = 0; i < n; i++)
-                for (a = 0; a < items[i].naliases; a++)
-                    if (strcmp(items[i].alias[a], arg) == 0)
-                        return 1;
-        }
-        ref = strstr(ref + 1, "#define REFERENCE_TEMPLATE");
-    }
-
+    for (i = 0; i < sizeof(ignored) / sizeof(ignored[0]); i++)
+        if (strcmp(ignored[i].cmd, cmd) == 0 && strcmp(ignored[i].arg, arg) == 0)
+            return 1;
     return 0;
 }
 
@@ -696,7 +689,7 @@ static void contract_pair(const char *name, int pair, const char *src,
 
             /* Read somewhere.  The enum declaration and the clearing do not
                count, and a helper taking the index (arg_or) does. */
-            if (reads == 0 && !deliberately_ignored(name, src, args[i]))
+            if (reads == 0 && !deliberately_ignored(name, args[i]))
                 CHECK(token_uses(src, token) - 1 - zeroed > 0,
                       "%s[%d]: %s is in the template and ARG_%s is never "
                       "read, so the option parses and does nothing",
