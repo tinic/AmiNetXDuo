@@ -7,6 +7,8 @@ are history.
 
 ## Unreleased
 
+- New NetSwitch takes network interfaces online and offline from
+  Workbench.
 - WatchTasks keeps selection on the same task as the live list reorders
   and asks for confirmation before sending Ctrl-C.
 - New ShowTasks and WatchTasks commands list Exec tasks and DOS
