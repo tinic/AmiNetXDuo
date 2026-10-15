@@ -234,15 +234,32 @@ static LONG               absent_seen = -1;
  * complete cleanly" with everything up to the copy correctly installed --
  * which reads exactly like a script that aborted, and is not.
  *
- * Twenty is not a licence to hang: MAX_POLLS still bounds the whole run, and a
- * genuinely stuck Installer keeps its window up, so it fails on the cap
- * instead.
+ * Twenty is not a licence to hang: STALL_POLLS and MAX_POLLS below still bound
+ * the run, and a genuinely stuck Installer keeps its window up.
  */
 #define GONE_LIMIT      20
-#define MAX_POLLS       150     /* hard cap: two and a half minutes */
+
+/*
+ * The wait is progress-based.  A run fails as stalled after STALL_POLLS with
+ * no page clicked and no change in the blocks used on DH0: or RAM: -- the
+ * Installer copying, or writing T:.  MAX_POLLS is only the backstop.
+ *
+ * A fixed 150 polls failed the A500 (68000, KS 3.1) run while the Installer
+ * was still copying: 50 polls to its first window, files written up to poll
+ * 160.  STALL_POLLS matches the host's own 300 s stall rule
+ * (AMINETXDUO_STALL_SECS); the run reports its longest quiet stretch, so the
+ * margin is measured, not assumed.
+ */
+#define STALL_POLLS     300
+#define MAX_POLLS       1800    /* backstop: half an hour per run */
 
 static struct MsgPort *reply_port;
 static BPTR            report;
+
+/* Blocks used after this program's last report write; see blocks_used(). */
+static BOOL            tracking;
+static ULONG           used_base;
+static ULONG blocks_used(void);
 
 static LONG clicks;
 static LONG saw_window;
@@ -260,6 +277,9 @@ static VOID say(const char *fmt, LONG a)
         /* Flushed line by line: if this run is killed by the harness
            timeout, the report so far is still on the host's disk. */
         Flush(report);
+        /* Our own write is not the Installer's progress. */
+        if (tracking)
+            used_base = blocks_used();
     }
 }
 
@@ -1330,6 +1350,35 @@ static LONG answer_wifi_window(VOID)
 }
 
 /*
+ * Blocks used on DH0: and RAM:, summed: the Installer's progress between
+ * pages.  Sampled after this program's own report writes, so those are not
+ * counted as progress.
+ */
+static ULONG blocks_used(void)
+{
+    static const char *const volumes[] = { "DH0:", "RAM:" };
+    struct InfoData *info;
+    ULONG            sum = 0;
+    LONG             i;
+
+    info = AllocMem(sizeof(*info), MEMF_PUBLIC | MEMF_CLEAR);
+    if (info == NULL)
+        return 0;
+    for (i = 0; i < (LONG)(sizeof(volumes) / sizeof(volumes[0])); i++)
+    {
+        BPTR lock = Lock((STRPTR)volumes[i], SHARED_LOCK);
+
+        if (lock == 0)
+            continue;
+        if (Info(lock, info))
+            sum += (ULONG)info->id_NumBlocksUsed;
+        UnLock(lock);
+    }
+    FreeMem(info, sizeof(*info));
+    return sum;
+}
+
+/*
  * One complete Installer run: start it, click Proceed on every page it puts
  * up, and return once its window has been gone for a few polls running.
  */
@@ -1340,6 +1389,8 @@ static BOOL drive_once(LONG run_number, BPTR nil_in, BPTR nil_out)
     LONG gone   = 0;
     LONG seen   = 0;
     LONG settle = 0;
+    LONG quiet  = 0;
+    LONG longest = 0;
 
     /* Per run, not per program: on a two-run drive every askchoice page comes
        up again.  Leaving the match ordinal and "already picked" flag from run
@@ -1402,12 +1453,32 @@ static BOOL drive_once(LONG run_number, BPTR nil_in, BPTR nil_out)
         return FALSE;
     }
 
+    used_base = blocks_used();
+    tracking  = TRUE;
     for (polls = 0; polls < MAX_POLLS; polls++)
     {
         struct Gadget *target = NULL;
         struct Window *window;
 
         Delay(POLL_TICKS);
+
+        {
+            ULONG now = blocks_used();
+
+            quiet = (now != used_base) ? 0 : quiet + 1;
+            used_base = now;
+            if (quiet > longest)
+                longest = quiet;
+            if (quiet >= STALL_POLLS)
+            {
+                tracking = FALSE;
+                say("installdrive: run_polls=%ld\n", polls);
+                say("installdrive: longest_quiet=%ld\n", longest);
+                say("installdrive: run %ld stalled: no page and no disk "
+                    "progress\n", run_number);
+                return FALSE;
+            }
+        }
 
         /* Before the Installer's own window: while this one is up the
            Installer is inside (run) and must not be clicked. */
@@ -1419,6 +1490,7 @@ static BOOL drive_once(LONG run_number, BPTR nil_in, BPTR nil_out)
             if (wifi > 0)
             {
                 gone = 0;
+                quiet = 0;
                 continue;
             }
         }
@@ -1454,6 +1526,7 @@ static BOOL drive_once(LONG run_number, BPTR nil_in, BPTR nil_out)
             seen++;
             saw_window++;
             gone = 0;
+            quiet = 0;
             say("installdrive: poll %ld: clicking\n", polls);
             say("installdrive:   gadget id %ld\n", (LONG)target->GadgetID);
             /* Which button, by name.  A run that answered the wrong question
@@ -1544,6 +1617,9 @@ static BOOL drive_once(LONG run_number, BPTR nil_in, BPTR nil_out)
         }
     }
 
+    tracking = FALSE;
+    say("installdrive: run_polls=%ld\n", polls);
+    say("installdrive: longest_quiet=%ld\n", longest);
     if (seen == 0)
     {
         say("installdrive: run %ld never put a window up\n", run_number);
@@ -1551,7 +1627,8 @@ static BOOL drive_once(LONG run_number, BPTR nil_in, BPTR nil_out)
     }
     if (gone < GONE_LIMIT)
     {
-        say("installdrive: run %ld timed out, still running\n", run_number);
+        say("installdrive: run %ld hit the MAX_POLLS backstop, still "
+            "running\n", run_number);
         return FALSE;
     }
 
