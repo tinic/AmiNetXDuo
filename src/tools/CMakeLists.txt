@@ -1046,15 +1046,19 @@ if(NOT CMAKE_CROSSCOMPILING)
     # here -- a failed read refuses, a removed interface or a reused slot
     # joins by name, and a partial bulk failure names the interface.
     #
-    # What it proves stops at the decision and the routing: the join, the
-    # gates, the wording of a refusal, and which op goes to which index.  The
-    # call itself -- the NETCTRL_INTERFACE_UP/DOWN and add_interface
-    # invocations -- is made in netswitch.c against the live table, and is
-    # checked by the emulator arm (run-wbgrab.sh -s netswitch-reverse), not
-    # here.  A test that passes here says nothing about the call's effect.
+    # What it proves is the decision and the call effect: the join, the gates,
+    # the wording of a refusal, which op goes to which index, and -- through
+    # ns_run_action() and ns_bulk_down() with recording stubs -- that a failed
+    # read and a moved/removed target send no call, that otherwise exactly one
+    # DOWN/UP/attach call goes out at the fresh index, and that a partial bulk
+    # reports the first failed interface and still switches the rest.  What
+    # remains to the emulator arm (run-wbgrab.sh -s netswitch-reverse) is the
+    # Amiga-side plumbing in netswitch.c: the hooks that hand refresh_rows()
+    # and control_switch() to the pure functions, and the repaint after a call.
     add_executable(test_netswitch_dispatch
         test/test_netswitch_dispatch.c
-        netswitch_dispatch.c)
+        netswitch_dispatch.c
+        netswitch_text.c)
     target_include_directories(test_netswitch_dispatch PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}")
     target_compile_options(test_netswitch_dispatch PRIVATE -Wall -Wextra)

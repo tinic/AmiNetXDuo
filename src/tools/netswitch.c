@@ -350,13 +350,49 @@ static BOOL take_all_enabled(void)
                                  online_count());
 }
 
+/* The action path's hooks into the live app, for ns_run_action().  They keep
+   the GUI's own state out of the dispatch module: the pure function decides
+   which call to make, and these make it against the live table. */
+static int action_reread(void *ctx, NsState *state, unsigned *index)
+{
+    (void)ctx;
+    refresh_rows();
+    if (ns.query_failed)
+        return 1;
+    *state = ns.row[ns.selected].state;
+    *index = ns.row[ns.selected].index;
+    return 0;
+}
+
+static const char *action_down(void *ctx, unsigned index)
+{
+    (void)ctx;
+    return control_switch(NETCTRL_INTERFACE_DOWN, (UWORD)index);
+}
+
+static const char *action_up(void *ctx, unsigned index)
+{
+    (void)ctx;
+    return control_switch(NETCTRL_INTERFACE_UP, (UWORD)index);
+}
+
+static long action_attach(void *ctx, const char *name)
+{
+    (void)ctx;
+    return tool_stack_add_interface(ns.base, name, NULL, TRUE);
+}
+
+static const char *action_errtext(long err)
+{
+    return tool_code_errno(err);
+}
+
 /* The one action button: takes the selected interface the other way. */
 static void do_action(void)
 {
-    NsRow       *r;
-    NsDispatchOp op;
-    NsCall       call;
-    const char  *err = NULL;
+    NsDispatchOp  op;
+    NsActionResult ar;
+    NsActionHooks  hooks;
 
     if (!action_enabled())
         return;
@@ -366,61 +402,18 @@ static void do_action(void)
        for the index, not for changing what the user asked for. */
     op = ns_op_for_state(ns.row[ns.selected].state);
 
-    /* The index answers from the live table, and another tool can have
-       removed the interface or reused its slot since the last read.  Re-read
-       and act on the fresh row, not on the cached index. */
-    refresh_rows();
-    if (ns.query_failed)
-    {
-        set_last_error(ns_query_failed_hint);
-        return;
-    }
+    hooks.ctx     = NULL;
+    hooks.reread  = action_reread;
+    hooks.down    = action_down;
+    hooks.up      = action_up;
+    hooks.attach  = action_attach;
+    hooks.errtext = action_errtext;
 
-    r = &ns.row[ns.selected];
-    call = ns_resolve_call(op, r->state, r->index);
-    if (call.op == NS_OP_NONE)
-    {
-        /* The state moved under the click: what the button said no longer
-           applies, and acting on the fresh state would reverse the request.
-           Refuse; the repaint shows the new action to click. */
-        set_last_error(ns_state_moved_error);
-        return;
-    }
+    ar = ns_run_action(op, ns.row[ns.selected].name, &hooks);
 
-    if (call.op == NS_OP_DOWN)
-    {
-        err = control_switch(NETCTRL_INTERFACE_DOWN, call.index);
-    }
-    else if (call.op == NS_OP_UP)
-    {
-        err = control_switch(NETCTRL_INTERFACE_UP, call.index);
-    }
-    else
-    {
-        /*
-         * Defined but never attached: Online attaches the definition and
-         * brings it up in one call, as AddNetInterface does.  EEXIST means
-         * another tool attached it in the meantime.
-         */
-        LONG e = tool_stack_add_interface(ns.base, r->name, NULL, TRUE);
-
-        if (e != 0 && e != EEXIST)
-        {
-            err = tool_code_errno(e);
-        }
-        else if (e == EEXIST)
-        {
-            refresh_rows();
-            r = &ns.row[ns.selected];
-            if (ns.query_failed)
-                err = ns_query_failed_hint;
-            else if (r->state != NS_STATE_DETACHED)
-                err = control_switch(NETCTRL_INTERFACE_UP, r->index);
-        }
-    }
-
-    set_last_error(err);
-    refresh_rows();
+    set_last_error(ar.acted ? ar.err : ar.hint);
+    if (ar.acted)
+        refresh_rows();
 }
 
 /* Yes-or-cancel, as netprefs.c's confirm().  The requester states what will
@@ -443,13 +436,47 @@ static BOOL confirm(const char *body, const char *yes)
 
 /* Take every online interface down, after asking.  Loopback is never a
  * definition file so it cannot be in the list, but skip it defensively. */
+/* The take-all path's hooks into the live app, for ns_bulk_down().  They
+   carry the fresh rows out of the GUI state and the switches into the live
+   table, the same way the action hooks do for ns_run_action(). */
+static int bulk_reread(void *ctx, NsBulkRow *rows, unsigned count)
+{
+    unsigned i;
+
+    (void)ctx;
+    refresh_rows();
+    if (ns.query_failed)
+        return 1;
+    for (i = 0; i < count; i++)
+    {
+        rows[i].name  = ns.row[i].name;
+        rows[i].state = ns.row[i].state;
+        rows[i].index = ns.row[i].index;
+    }
+    return 0;
+}
+
+static int bulk_is_loopback(void *ctx, const char *name)
+{
+    (void)ctx;
+    return tool_stricmp(name, "loopback") == 0;
+}
+
+static const char *bulk_down(void *ctx, unsigned index)
+{
+    (void)ctx;
+    return control_switch(NETCTRL_INTERFACE_DOWN, (UWORD)index);
+}
+
 static void take_all_offline(void)
 {
-    char         prompt[96];
-    char         body[160];
-    char         first_buf[sizeof(ns.last_error)];
-    const char  *first_err = NULL;
-    unsigned     n, i;
+    char          prompt[96];
+    char          body[160];
+    char          first_buf[sizeof(ns.last_error)];
+    NsBulkRow     rows[NS_MAX_INTERFACES];
+    NsBulkHooks   hooks;
+    NsActionResult ar;
+    unsigned      n;
 
     if (!take_all_enabled())
         return;
@@ -467,32 +494,17 @@ static void take_all_offline(void)
     /* The requester blocks this window, not the stack: an Online elsewhere
        could have come up while it was open.  Re-read and act on the fresh
        rows, not the state and indices captured before the ask. */
-    refresh_rows();
-    if (ns.query_failed)
-    {
-        set_last_error(ns_query_failed_hint);
-        return;
-    }
+    hooks.ctx         = NULL;
+    hooks.reread      = bulk_reread;
+    hooks.is_loopback = bulk_is_loopback;
+    hooks.down        = bulk_down;
 
-    for (i = 0; i < ns.count; i++)
-    {
-        const char *err;
+    ar = ns_bulk_down(&hooks, rows, ns.count, first_buf,
+                      sizeof(first_buf), &n);
 
-        if (ns.row[i].state != NS_STATE_UP ||
-            tool_stricmp(ns.row[i].name, "loopback") == 0)
-            continue;
-        err = control_switch(NETCTRL_INTERFACE_DOWN, ns.row[i].index);
-        if (err != NULL && first_err == NULL)
-        {
-            /* The first failure is the one reported; say which interface it
-               was, not just the errno text. */
-            ns_named_error(first_buf, sizeof(first_buf), ns.row[i].name, err);
-            first_err = first_buf;
-        }
-    }
-
-    set_last_error(first_err);
-    refresh_rows();
+    set_last_error(ar.acted ? ar.err : ar.hint);
+    if (ar.acted)
+        refresh_rows();
 }
 
 /* ------------------------------------------------- window and layout ----- */

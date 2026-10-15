@@ -95,4 +95,101 @@ typedef struct NsCall
 NsCall ns_resolve_call(NsDispatchOp intended, NsState fresh_state,
                        unsigned index);
 
+/*
+ * The action path's hooks into the live app.  No AmigaOS calls; the function
+ * pointers carry the GUI's own refresh_rows(), control_switch() and
+ * add_interface() so the whole path -- from the on-screen action to the
+ * device call -- runs here with recording stubs.  The emulator arm cannot
+ * fail a live-table read or remove an interface mid-click, so those call
+ * effects are driven on the host instead.
+ */
+typedef struct NsActionHooks
+{
+    void *ctx;                          /* first argument to every hook */
+
+    /* Re-read the live table and answer the selected row's fresh state and
+       index.  Returns 1 when the read failed (the rows are stale and the
+       action must be refused). */
+    int (*reread)(void *ctx, NsState *state, unsigned *index);
+
+    /* One control switch on a live index.  Returns errno text, or NULL. */
+    const char *(*down)(void *ctx, unsigned index);
+    const char *(*up)(void *ctx, unsigned index);
+
+    /* Attach a definition by name and bring it up, as
+       tool_stack_add_interface(..., NULL, TRUE) does.  Returns 0, the 4.4BSD
+       EEXIST (17) when another tool attached it in the meantime, or another
+       errno from that numbering. */
+    long (*attach)(void *ctx, const char *name);
+
+    /* Maps an attach errno to its text (tool_code_errno). */
+    const char *(*errtext)(long err);
+} NsActionHooks;
+
+/*
+ * What one action or bulk run did: either the device calls ran (acted) and
+ * err is the error text (NULL on success), or the run was refused
+ * (acted == 0) and hint says why.  The caller shows one of the two and
+ * repaints only after a call: a refusal leaves the on-screen state alone.
+ */
+typedef struct NsActionResult
+{
+    int         acted;
+    const char *hint;
+    const char *err;
+} NsActionResult;
+
+/*
+ * The production action path between the button and the device: re-read the
+ * fresh state, reconcile it against the action the button asked for, refuse a
+ * moved target, and otherwise make the one control or attach call.  The whole
+ * path runs here so test/test_netswitch_dispatch.c can assert its call
+ * effects -- no call after a failed read, no call for a moved target, one
+ * call with the right op and index otherwise.
+ */
+NsActionResult ns_run_action(NsDispatchOp intended, const char *name,
+                             const NsActionHooks *h);
+
+/*
+ * The take-all path's row view: the three fields its loop reads from a fresh
+ * join, kept a plain record so the bulk decision runs on the host.
+ */
+typedef struct NsBulkRow
+{
+    const char *name;
+    NsState     state;
+    unsigned    index;
+} NsBulkRow;
+
+/*
+ * The take-all path's hooks into the live app, same idea as NsActionHooks.
+ */
+typedef struct NsBulkHooks
+{
+    void *ctx;
+
+    /* Re-read the live table and fill rows[] (count entries) with the fresh
+       name/state/index of every configured interface.  Returns 1 when the
+       read failed (no switch may go out). */
+    int (*reread)(void *ctx, NsBulkRow *rows, unsigned count);
+
+    /* Whether a row is the loopback definition the bulk skips. */
+    int (*is_loopback)(void *ctx, const char *name);
+
+    /* One control switch down.  Returns errno text, or NULL. */
+    const char *(*down)(void *ctx, unsigned index);
+} NsBulkHooks;
+
+/*
+ * The take-all path: re-read, then take every up, non-loopback row down,
+ * continuing past a failure so a partial bulk still switches the rest.  The
+ * first failure is reported as "<name>: <err>" (ns_named_error) into first
+ * (cap), and *switched counts the switches that went out.  Returns the same
+ * shape as ns_run_action: refused (acted == 0, hint) on a failed re-read, or
+ * acted with err = the first-error line (NULL when every switch went down).
+ */
+NsActionResult ns_bulk_down(const NsBulkHooks *h, NsBulkRow *rows,
+                            unsigned count, char *first, size_t cap,
+                            unsigned *switched);
+
 #endif

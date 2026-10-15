@@ -190,17 +190,314 @@ static void dispatch(void)
            ns_resolve_call(NS_OP_DOWN, NS_STATE_DETACHED, 0), NS_OP_NONE, 0);
 }
 
-/* Coverage boundary: this unit asserts the *decision* (join, gates, error
-   format, op mapping) and the *routing* (which op, which index) of a control
-   call, not the call's side effect.  The actual NETCTRL_INTERFACE_UP/DOWN and
-   add_interface invocations happen in netswitch.c against the live table, and
-   are exercised by the emulator arm, not here. */
+/* Recording stubs for ns_run_action(): they stand in for refresh_rows() and
+   control_switch(), counting and capturing each call so the test asserts the
+   call effects the emulator arm cannot reach -- a failed read, a removed
+   target, a reused slot. */
+struct recorder
+{
+    NsState     state;                  /* first reread's answer */
+    unsigned    index;
+    NsState     second_state;           /* second reread's answer (EEXIST) */
+    unsigned    second_index;
+    int         read_fails;
+    int         second_read_fails;
+    long        attach_errno;
+    int         reads;
+    int         downs;
+    int         ups;
+    int         attaches;
+    unsigned    down_index;
+    unsigned    up_index;
+    const char *attach_name;
+    const char *down_err;
+    const char *up_err;
+};
+
+static int rec_reread(void *ctx, NsState *state, unsigned *index)
+{
+    struct recorder *r = ctx;
+
+    r->reads++;
+    if ((r->reads == 1 && r->read_fails) ||
+        (r->reads == 2 && r->second_read_fails))
+        return 1;
+    if (r->reads == 1)
+    {
+        *state = r->state;
+        *index = r->index;
+    }
+    else
+    {
+        *state = r->second_state;
+        *index = r->second_index;
+    }
+    return 0;
+}
+
+static const char *rec_down(void *ctx, unsigned index)
+{
+    struct recorder *r = ctx;
+
+    r->downs++;
+    r->down_index = index;
+    return r->down_err;
+}
+
+static const char *rec_up(void *ctx, unsigned index)
+{
+    struct recorder *r = ctx;
+
+    r->ups++;
+    r->up_index = index;
+    return r->up_err;
+}
+
+static long rec_attach(void *ctx, const char *name)
+{
+    struct recorder *r = ctx;
+
+    r->attaches++;
+    r->attach_name = name;
+    return r->attach_errno;
+}
+
+static const char *rec_errtext(long err)
+{
+    if (err == 17) return "EEXIST";
+    if (err == 16) return "EBUSY";
+    if (err == 22) return "EINVAL";
+    return "errno";
+}
+
+/* The call effect: which device call ns_run_action() turns an action into,
+   or that none goes out on a failed read or a moved target. */
+static void action(void)
+{
+    static const char *const name = "anxzz9000.device 0";
+    struct recorder rec;
+    NsActionHooks   hooks;
+    NsActionResult  ar;
+
+    hooks.ctx     = &rec;
+    hooks.reread  = rec_reread;
+    hooks.down    = rec_down;
+    hooks.up      = rec_up;
+    hooks.attach  = rec_attach;
+    hooks.errtext = rec_errtext;
+
+    /* A failed re-read refuses before any call: the rows are stale and
+       neither a switch nor an attach may go out on them. */
+    memset(&rec, 0, sizeof(rec));
+    rec.read_fails = 1;
+    ar = ns_run_action(NS_OP_DOWN, name, &hooks);
+    eqi("failed read refuses", ar.acted, 0);
+    eq("failed read says the read failed", ar.hint, ns_query_failed_hint);
+    eqi("failed read makes no call", rec.downs + rec.ups + rec.attaches, 0);
+
+    /* A target that moved under the click is refused: the button said Go
+       Offline, the fresh state is detached (the interface was removed), and
+       acting would be a guess. */
+    memset(&rec, 0, sizeof(rec));
+    rec.state = NS_STATE_DETACHED;
+    rec.index = 0xFFFF;
+    ar = ns_run_action(NS_OP_DOWN, name, &hooks);
+    eqi("moved target refuses", ar.acted, 0);
+    eq("moved target says it moved", ar.hint, ns_state_moved_error);
+    eqi("moved target makes no call", rec.downs + rec.ups + rec.attaches, 0);
+
+    /* A still-up row takes the intended Go Offline: one DOWN call at the
+       fresh index, nothing else. */
+    memset(&rec, 0, sizeof(rec));
+    rec.state = NS_STATE_UP;
+    rec.index = 3;
+    ar = ns_run_action(NS_OP_DOWN, name, &hooks);
+    eqi("Go Offline acts", ar.acted, 1);
+    eqi("Go Offline sends one DOWN", rec.downs, 1);
+    eqi("Go Offline sends the fresh index", (long)rec.down_index, 3);
+    eqi("Go Offline sends nothing else", rec.ups + rec.attaches, 0);
+
+    /* A still-down row takes Go Online: one UP call. */
+    memset(&rec, 0, sizeof(rec));
+    rec.state = NS_STATE_DOWN;
+    rec.index = 2;
+    ar = ns_run_action(NS_OP_UP, name, &hooks);
+    eqi("Go Online acts", ar.acted, 1);
+    eqi("Go Online sends one UP", rec.ups, 1);
+    eqi("Go Online sends the fresh index", (long)rec.up_index, 2);
+    eqi("Go Online sends nothing else", rec.downs + rec.attaches, 0);
+
+    /* A switch failure propagates its errno text. */
+    memset(&rec, 0, sizeof(rec));
+    rec.state = NS_STATE_UP;
+    rec.down_err = "EBUSY";
+    ar = ns_run_action(NS_OP_DOWN, name, &hooks);
+    eqi("switch error acts", ar.acted, 1);
+    eq("switch error propagates", ar.err, "EBUSY");
+
+    /* A still-detached row takes Online: one attach by name, no switch. */
+    memset(&rec, 0, sizeof(rec));
+    rec.state = NS_STATE_DETACHED;
+    rec.attach_errno = 0;
+    ar = ns_run_action(NS_OP_ADD, name, &hooks);
+    eqi("Online acts", ar.acted, 1);
+    eqi("Online sends one attach", rec.attaches, 1);
+    eq("Online attaches by name", rec.attach_name, name);
+    eqi("Online sends no switch", rec.downs + rec.ups, 0);
+    eqi("Online success has no error", ar.err == NULL, 1);
+
+    /* Attach reports EEXIST: another tool attached it in the meantime, so
+       the path re-reads for the fresh index and brings it up. */
+    memset(&rec, 0, sizeof(rec));
+    rec.state = NS_STATE_DETACHED;          /* first read: still detached */
+    rec.attach_errno = 17;                  /* 4.4BSD EEXIST */
+    rec.second_state = NS_STATE_UP;         /* second read: now attached */
+    rec.second_index = 5;
+    ar = ns_run_action(NS_OP_ADD, name, &hooks);
+    eqi("EEXIST re-reads", rec.reads, 2);
+    eqi("EEXIST then ups", rec.ups, 1);
+    eqi("EEXIST ups the fresh index", (long)rec.up_index, 5);
+    eqi("EEXIST attaches once", rec.attaches, 1);
+    eqi("EEXIST sends no down", rec.downs, 0);
+
+    /* A non-EEXIST attach failure names its errno and sends no switch. */
+    memset(&rec, 0, sizeof(rec));
+    rec.state = NS_STATE_DETACHED;
+    rec.attach_errno = 22;                  /* EINVAL */
+    ar = ns_run_action(NS_OP_ADD, name, &hooks);
+    eqi("attach error acts", ar.acted, 1);
+    eq("attach error names the errno", ar.err, "EINVAL");
+    eqi("attach error sends no switch", rec.downs + rec.ups, 0);
+
+    /* EEXIST then a failed re-read refuses the up with the read hint. */
+    memset(&rec, 0, sizeof(rec));
+    rec.state = NS_STATE_DETACHED;
+    rec.attach_errno = 17;
+    rec.second_read_fails = 1;
+    ar = ns_run_action(NS_OP_ADD, name, &hooks);
+    eqi("EEXIST failed re-read acts", ar.acted, 1);
+    eq("EEXIST failed re-read names the read", ar.err, ns_query_failed_hint);
+    eqi("EEXIST failed re-read sends no up", rec.ups, 0);
+}
+
+/* Recording stubs for ns_bulk_down(): the take-all loop's rows and switches,
+   so the test asserts the bulk call effects the emulator arm cannot reach --
+   a failed read, a removed row, a partial failure. */
+struct bulkrec
+{
+    NsBulkRow    rows[4];
+    unsigned     nrows;
+    int          read_fails;
+    int          reads;
+    int          downs;
+    unsigned     down_index[4];
+    const char  *down_errs[4];      /* per-call errno text, or NULL */
+};
+
+static int bulk_reread(void *ctx, NsBulkRow *rows, unsigned count)
+{
+    struct bulkrec *b = ctx;
+    unsigned        i;
+
+    b->reads++;
+    if (b->read_fails)
+        return 1;
+    for (i = 0; i < count && i < b->nrows; i++)
+        rows[i] = b->rows[i];
+    return 0;
+}
+
+static int bulk_is_loopback(void *ctx, const char *name)
+{
+    (void)ctx;
+    return strcmp(name, "loopback") == 0;
+}
+
+static const char *bulk_down(void *ctx, unsigned index)
+{
+    struct bulkrec *b = ctx;
+
+    b->down_index[b->downs] = index;
+    return b->down_errs[b->downs++];
+}
+
+/* The take-all call effect: which rows get a DOWN switch, and which one a
+   partial failure reports. */
+static void bulk(void)
+{
+    char           first[64];
+    NsBulkHooks    hooks;
+    NsActionResult ar;
+    unsigned       switched = 0;
+    struct bulkrec b;
+
+    hooks.ctx         = &b;
+    hooks.reread      = bulk_reread;
+    hooks.is_loopback = bulk_is_loopback;
+    hooks.down        = bulk_down;
+
+    /* A failed re-read refuses before any switch. */
+    memset(&b, 0, sizeof(b));
+    b.read_fails = 1;
+    ar = ns_bulk_down(&hooks, b.rows, 3, first, sizeof(first), &switched);
+    eqi("bulk failed read refuses", ar.acted, 0);
+    eq("bulk failed read says the read failed", ar.hint, ns_query_failed_hint);
+    eqi("bulk failed read makes no switch", b.downs, 0);
+
+    /* A removed interface re-reads detached and a down one is not up: both
+       are skipped, so no stale-index switch goes out. */
+    memset(&b, 0, sizeof(b));
+    b.nrows = 3;
+    b.rows[0] = (NsBulkRow){ "eth0", NS_STATE_UP, 0 };
+    b.rows[1] = (NsBulkRow){ "eth1", NS_STATE_DETACHED, 0xFFFF };
+    b.rows[2] = (NsBulkRow){ "eth2", NS_STATE_DOWN, 7 };
+    ar = ns_bulk_down(&hooks, b.rows, 3, first, sizeof(first), &switched);
+    eqi("bulk skips detached and down", b.downs, 1);
+    eqi("bulk switches only the up row", (long)b.down_index[0], 0);
+    eqi("bulk counts one switch", (long)switched, 1);
+    eqi("bulk reports no error", ar.err == NULL, 1);
+
+    /* The loopback definition is skipped even when up. */
+    memset(&b, 0, sizeof(b));
+    b.nrows = 2;
+    b.rows[0] = (NsBulkRow){ "loopback", NS_STATE_UP, 0 };
+    b.rows[1] = (NsBulkRow){ "eth0", NS_STATE_UP, 1 };
+    ar = ns_bulk_down(&hooks, b.rows, 2, first, sizeof(first), &switched);
+    eqi("bulk skips loopback", b.downs, 1);
+    eqi("bulk switches the real row", (long)b.down_index[0], 1);
+
+    /* A partial bulk continues past the first failure and reports it as
+       "name: err", keeping the first failed interface and dropping later
+       failures. */
+    memset(&b, 0, sizeof(b));
+    b.nrows = 3;
+    b.rows[0] = (NsBulkRow){ "eth0", NS_STATE_UP, 0 };
+    b.rows[1] = (NsBulkRow){ "eth1", NS_STATE_UP, 1 };
+    b.rows[2] = (NsBulkRow){ "eth2", NS_STATE_UP, 2 };
+    b.down_errs[0] = NULL;
+    b.down_errs[1] = "EBUSY";
+    b.down_errs[2] = "EPERM";
+    ar = ns_bulk_down(&hooks, b.rows, 3, first, sizeof(first), &switched);
+    eqi("partial bulk switches all three", b.downs, 3);
+    eqi("partial bulk counts all three", (long)switched, 3);
+    eq("partial bulk reports the first failure", ar.err, "eth1: EBUSY");
+}
+
+/* Coverage boundary: the join, gates, wording, and op/index routing are the
+   *decision*; ns_run_action() and ns_bulk_down() above are the *call effect*
+   -- which device calls the decision turns into, or that none goes out on a
+   failed read or a moved/removed target.  All run here.  What remains to the
+   emulator arm (run-wbgrab.sh -s netswitch-reverse) is the Amiga-side
+   plumbing in netswitch.c: the hooks that hand refresh_rows() and
+   control_switch() to the pure functions, and the repaint after a call. */
 int main(void)
 {
     join();
     named_error();
     gates();
     dispatch();
+    action();
+    bulk();
 
     if (failures == 0) printf("netswitch dispatch: all checks passed\n");
     return failures != 0;
