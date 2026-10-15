@@ -102,7 +102,8 @@
 #       a user edit that must survive; the replaced library is kept as .old.
 #       A C:.info there goes to Backup, with its Restore line, and out of C:.
 #   AMINETXDUO_PRIOR_CINFO=custom  with it, C:.info is given bytes of its own
-#       before the update, as a user's drawer icon would be.
+#       before the update, as a user's drawer icon would be; =marked gives it
+#       bytes that name AmiNetXDuo, which must not pass for ours.
 # At NOVICE the Installer's own boot default is accepted: micro, or 4 MB of
 # RAM or less, means no S:Network-Startup, and the check starts the
 # interface by hand, as a user would (boot_default=manual).
@@ -117,11 +118,9 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 BUILD="${AMINETXDUO_BUILD:-build/cm}"
 ARCHIVE=""
 LEVEL=NOVICE
-# A backstop.  installdrive fails a run with no progress for 300 s and the
-# boot loop below a guest that writes nothing for AMINETXDUO_STALL_SECS, so a
-# hang ends there; this only has to sit above installdrive's own 1800-poll cap
-# plus the boot, for a 68000 whose install is slow and still moving.
-INSTALL_TIMEOUT=2100
+# The absolute budget per install boot.  installdrive's own cap (MAX_POLLS)
+# and its stall rule fit inside it; a row that needs more is a finding.
+INSTALL_TIMEOUT=420
 BOOT_TIMEOUT=720
 KEEP=0
 TERMINAL=0
@@ -240,6 +239,12 @@ if [ -n "$PRIOR_ARCHIVE" ]; then
     esac
     [ -z "$FOREIGN_MODE" ] || { echo "AMINETXDUO_PRIOR_ARCHIVE and -f conflict" >&2; exit 2; }
 fi
+case "${AMINETXDUO_PRIOR_CINFO:-}" in
+    "") ;;
+    custom|marked) [ -n "$PRIOR_ARCHIVE" ] ||
+        { echo "AMINETXDUO_PRIOR_CINFO needs AMINETXDUO_PRIOR_ARCHIVE" >&2; exit 2; } ;;
+    *) echo "AMINETXDUO_PRIOR_CINFO is custom or marked" >&2; exit 2 ;;
+esac
 
 # More than one non-default answer is intentional now.  installdrive consumes
 # an ordered run-time answer file and fails if any requested page was not
@@ -564,23 +569,6 @@ if [ -z "$INSTALLER" ]; then
         [ -f "$candidate" ] && { INSTALLER="$candidate"; break; }
     done
 fi
-# The Installer in an unpacked AmiNetXDuo drawer $1: its own, or the
-# fallback; prints installer_source= for the log.
-stage_installer() {
-    if [ -f "$1/Installer" ]; then
-        echo "installer_source=archive bytes=$(wc -c < "$1/Installer" | tr -d ' ')" \
-             "sha256=$(shasum -a 256 "$1/Installer" | cut -d' ' -f1)"
-        return 0
-    fi
-    [ -n "$INSTALLER" ] && [ -f "$INSTALLER" ] || {
-        echo "The archive has no Installer and none was found." >&2
-        echo "Set AMINETXDUO_INSTALLER=<path>, or put one in build/Installer." >&2
-        exit 2
-    }
-    cp "$INSTALLER" "$1/Installer"
-    echo "installer_source=supplied bytes=$(wc -c < "$1/Installer" | tr -d ' ')" \
-         "sha256=$(shasum -a 256 "$1/Installer" | cut -d' ' -f1)"
-}
 
 # THE VENDOR DRIVER, not anxnet.device, and that is a statement about what this
 # gate is for.  The installer now DOES install anxnet.device into
@@ -797,6 +785,24 @@ esac
 # directories (they are named by the same tag), and it is held until the
 # script exits.  Drive before bridge, always: tools/emu-rig-lock.sh.
 rig_claim_drive "$HD" "run-workbench $TAG in $ROOT" "$BACKEND" || exit $?
+
+# The Installer in an unpacked AmiNetXDuo drawer $1: its own, or the
+# fallback; prints installer_source= for the log.
+stage_installer() {
+    if [ -f "$1/Installer" ]; then
+        echo "installer_source=archive bytes=$(wc -c < "$1/Installer" | tr -d ' ')" \
+             "sha256=$(shasum -a 256 "$1/Installer" | cut -d' ' -f1)"
+        return 0
+    fi
+    [ -n "$INSTALLER" ] && [ -f "$INSTALLER" ] || {
+        echo "The archive has no Installer and none was found." >&2
+        echo "Set AMINETXDUO_INSTALLER=<path>, or put one in build/Installer." >&2
+        exit 2
+    }
+    cp "$INSTALLER" "$1/Installer"
+    echo "installer_source=supplied bytes=$(wc -c < "$1/Installer" | tr -d ' ')" \
+         "sha256=$(shasum -a 256 "$1/Installer" | cut -d' ' -f1)"
+}
 
 # ONE MAC PER TAG, derived, not pinned.  A fixed address here put every run of
 # this harness on the bridge under 52:54:00:c0:ff:ee, beside the demo instance
@@ -2602,9 +2608,11 @@ Echo >DH0:.done "0"'
         done)
     # C:.info as the update finds it: the prior release's copy wrote one.
     _cdir=$(amiga_path C 2>/dev/null || true)
-    if [ "${AMINETXDUO_PRIOR_CINFO:-}" = custom ] && [ -n "$_cdir" ]; then
-        printf 'a user drawer icon for C:, not the Installer default\n' > "$_cdir/.info"
-    fi
+    case "${AMINETXDUO_PRIOR_CINFO:-}:$_cdir" in
+        :*|*:) ;;
+        custom:*) printf 'a user drawer icon for C:, not the Installer default\n' > "$_cdir/.info" ;;
+        marked:*) printf 'a user drawer icon for C: that names AmiNetXDuo\n' > "$_cdir/.info" ;;
+    esac
     [ -z "$_cdir" ] || [ ! -f "$_cdir/.info" ] ||
         PRIOR_CINFO_SUM=$(shasum < "$_cdir/.info" | cut -d' ' -f1)
     echo "prior_cinfo=${PRIOR_CINFO_SUM:-none} mode=${AMINETXDUO_PRIOR_CINFO:-release}"

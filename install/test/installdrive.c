@@ -246,12 +246,12 @@ static LONG               absent_seen = -1;
  *
  * A fixed 150 polls failed the A500 (68000, KS 3.1) run while the Installer
  * was still copying: 50 polls to its first window, files written up to poll
- * 160.  STALL_POLLS matches the host's own 300 s stall rule
- * (AMINETXDUO_STALL_SECS); the run reports its longest quiet stretch, so the
- * margin is measured, not assumed.
+ * 160; the whole install is about 180 polls.  MAX_POLLS fits the host's
+ * 420 s INSTALL_TIMEOUT with the boot; the run reports its longest quiet
+ * stretch, so the stall margin is measured, not assumed.
  */
-#define STALL_POLLS     300
-#define MAX_POLLS       1800    /* backstop: half an hour per run */
+#define STALL_POLLS     120
+#define MAX_POLLS       300     /* backstop: five minutes per run */
 
 static struct MsgPort *reply_port;
 static BPTR            report;
