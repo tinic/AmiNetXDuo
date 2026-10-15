@@ -34,7 +34,7 @@ struct Library       *GadToolsBase;
 #define NS_MAX_ROWS     16      /* as many interface files as Online scans */
 #define NS_NAME_CHARS   15      /* the live status ABI's name length */
 #define NS_STATE_CHARS  12      /* "not attached" */
-#define NS_ROW_CHARS    (NS_NAME_CHARS + 1 + NS_STATE_CHARS + 1 + 15)
+#define NS_ROW_CHARS    (NS_NAME_CHARS + 2 + NS_STATE_CHARS + 2 + 15)
 #define NS_LIST_ROWS    6
 
 /* Spacing in pixels, as NetPrefs has it; everything else is the font's. */
@@ -104,7 +104,8 @@ static VOID set_attr(struct Gadget *g, ULONG tag, ULONG value)
     GT_SetGadgetAttrsA(g, ns.window, NULL, tags);
 }
 
-/* `text` left-justified in a column of `width`, cut at the width. */
+/* `text` left-justified in a column of `width`, cut at the width, then a
+   two-space gutter. */
 static char *column(char *out, const char *text, ULONG width)
 {
     ULONG i;
@@ -112,7 +113,8 @@ static char *column(char *out, const char *text, ULONG width)
     for (i = 0; i < width && text[i] != '\0'; i++) out[i] = text[i];
     for (; i < width; i++) out[i] = ' ';
     out[width] = ' ';
-    return out + width + 1;
+    out[width + 1] = ' ';
+    return out + width + 2;
 }
 
 static VOID format_row(const NsRow *row, char *out)
