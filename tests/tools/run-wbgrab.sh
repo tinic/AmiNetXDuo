@@ -9,7 +9,9 @@
 # -f sets the Workbench screen font through ENVARC:Sys/font.prefs, e.g.
 # helvetica.font/13.  -V 32 boots Workbench 3.2 on its own Kickstart.  -s netprefs grabs NetPrefs on each of its pages as
 # netprefs.pfs, netprefs-1.pfs ... netprefs-4.pfs; netprefs_window is the
-# window's box for cropping.  -s netwireless grabs NetWirelessPrefs against
+# window's box for cropping.  -s netswitch runs NetSwitch with the stack down
+# and grabs netswitch.pfs: the legend, three not-attached rows, the "Network
+# is not running." hint and the two buttons, all disabled.  -s netwireless grabs NetWirelessPrefs against
 # tests/tools/wifistub.c's unit with the NetWireless AppIcon beside it, then
 # its join form and the Known networks window, as netwireless.pfs,
 # netwireless-1.pfs and netwireless-2.pfs; then, with ENVARC: alone, moves
@@ -66,6 +68,7 @@ WBGRAB="$BUILD/src/tools/wbgrab"
 }
 
 NETPREFS="$BUILD/src/tools/NetPrefs"
+NETSWITCH="$BUILD/src/tools/NetSwitch"
 NETWIRELESS="$BUILD/src/tools/NetWirelessPrefs"
 NETWIRELESSCX="$BUILD/src/tools/NetWireless"
 WIFISTUB="$BUILD/tests/tools/WifiStub"
@@ -85,6 +88,14 @@ for seq in "${SEQUENCES[@]}"; do
     [ -x "$NETPREFS" ] && [ -x "$WINCLICK" ] || {
         say error "no NetPrefs or WinClick under $BUILD"
         say hint "cmake --build $BUILD --parallel --target tool_netprefs test_winclick"
+        exit 2
+    }
+done
+for seq in "${SEQUENCES[@]}"; do
+    [ "$seq" = netswitch ] || continue
+    [ -x "$NETSWITCH" ] && [ -x "$WINCLICK" ] || {
+        say error "no NetSwitch or WinClick under $BUILD"
+        say hint "cmake --build $BUILD --parallel --target tool_netswitch test_winclick"
         exit 2
     }
 done
@@ -214,6 +225,23 @@ EOF
             > "$HD/Prefs/Env-Archive/Sys/Wireless.prefs"
     fi
 
+    if [ "$seq" = netswitch ] && [ -x "$NETSWITCH" ] && [ -x "$WINCLICK" ]; then
+        cp "$NETSWITCH" "$HD/C/NetSwitch"
+        cp "$WINCLICK" "$HD/C/WinClick"
+        chmod 755 "$HD/C/NetSwitch" "$HD/C/WinClick"
+        # Three definitions, so the list has three rows.  The stack is not
+        # running, so every row reads as "not attached" (hollow square).
+        mkdir -p "$HD/Devs/NetInterfaces"
+        printf '%s\n' "DEVICE=DEVS:Networks/a2065.device" "UNIT=0" \
+            "CONFIGURE=DHCP" "MTU=1500" > "$HD/Devs/NetInterfaces/ETH0"
+        printf '%s\n' "DEVICE=DEVS:Networks/a2065.device" "UNIT=1" \
+            "CONFIGURE=DHCP" "MTU=1500" > "$HD/Devs/NetInterfaces/ETH1"
+        printf '%s\n' "DEVICE=DEVS:Networks/a2065.device" "UNIT=2" \
+            "CONFIGURE=STATIC" "ADDRESS=192.168.1.50" \
+            "NETMASK=255.255.255.0" "MTU=1500" \
+            > "$HD/Devs/NetInterfaces/ETH2"
+    fi
+
     [ -n "$DEPTH" ] && wb31_screenmode_prefs "$HD" "$DEPTH"
     [ -n "$FONT" ] && font_prefs "$HD" "${FONT%/*}" "${FONT##*/}"
     return 0
@@ -307,6 +335,21 @@ C:wbgrab TO DH0:netprefs-3.pfs >NIL:
 C:WinClick "AmiNetXDuo Network" 2 >NIL:
 C:Wait 1
 C:wbgrab TO DH0:netprefs-4.pfs >NIL:
+Echo >DH0:.done "$RC"
+EOF
+        ;;
+    netswitch)
+        # The stack is not running: the window shows the legend, three
+        # not-attached rows, the "Network is not running." hint and the two
+        # buttons, all disabled.  The X/Y TIMES 0 click only reports the
+        # window's box.
+        cat <<'EOF'
+FailAt 9999
+C:Wait 6
+Run >NIL: C:NetSwitch
+C:Wait 4
+C:WinClick "AmiNetXDuo NetSwitch" X 5 Y 5 TIMES 0 >DH0:netswitch.txt
+C:wbgrab TO DH0:netswitch.pfs >>DH0:netswitch.txt
 Echo >DH0:.done "$RC"
 EOF
         ;;
