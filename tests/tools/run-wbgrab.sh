@@ -24,6 +24,13 @@
 # netswitch-live.pfs and -1.pfs ... -9.pfs.  The requester's Cancel is gadget
 # ID 0, which WinClick cannot name (its id is args[1] != 0 ? *(LONG *)args[1]
 # : -1, so 0 means "no gadget given"), so that one click is by coordinates.
+# -s netswitch-reverse moves the state under the window: one definition, so
+# the list has one row, attached and up with the focus on the action button;
+# C:Offline takes it down from another process and the click that follows is
+# refused -- the interface stays where the other tool put it, and the panel
+# says so -- as netswitch-reverse.pfs, -1.pfs ... -5.pfs (up, selected,
+# focused, down, after the click, past one poll), with the stack's own
+# INTERFACES listing before and after in netswitch-reverse.txt.
 # -s netswitch-takeall is the take-all again with a subject it cannot miss:
 # every definition is attached before the window opens, so every row that is
 # up is one the list can show, and after the confirmed take-all each of them
@@ -110,6 +117,7 @@ WMSTUB="$BUILD/tests/tools/WmStub"
 NC="$BUILD/src/tools/nc"
 SHOWNETSTATUS="$BUILD/src/tools/ShowNetStatus"
 ADDIF="$BUILD/src/tools/AddNetInterface"
+OFFLINE="$BUILD/src/tools/Offline"
 LIBSBSD="$BUILD/src/bsdsocket/bsdsocket.library"
 for seq in "${SEQUENCES[@]}"; do
     [ "$seq" = netwireless ] || [ "$seq" = screens ] || continue
@@ -145,7 +153,7 @@ for seq in "${SEQUENCES[@]}"; do
     }
 done
 for seq in "${SEQUENCES[@]}"; do
-    case "$seq" in netswitch-live | netswitch-takeall) ;; *) continue ;; esac
+    case "$seq" in netswitch-live | netswitch-takeall | netswitch-reverse) ;; *) continue ;; esac
     [ -n "$NETBOARD" ] || {
         say error "$seq needs a board: -N a2065"
         say hint "the stack has to come up for an interface to attach, and"
@@ -154,9 +162,9 @@ for seq in "${SEQUENCES[@]}"; do
     }
     [ -x "$NETSWITCH" ] && [ -x "$WINCLICK" ] && [ -x "$WINKEY" ] &&
         [ -x "$NC" ] && [ -x "$SHOWNETSTATUS" ] && [ -x "$ADDIF" ] &&
-        [ -f "$LIBSBSD" ] || {
-        say error "no NetSwitch, WinClick, WinKey, nc, ShowNetStatus, AddNetInterface or bsdsocket.library under $BUILD"
-        say hint "cmake --build $BUILD --parallel --target tool_netswitch test_winclick test_winkey tool_nc tool_shownetstatus tool_addnetinterface bsdsocket_library"
+        [ -x "$OFFLINE" ] && [ -f "$LIBSBSD" ] || {
+        say error "no NetSwitch, WinClick, WinKey, nc, ShowNetStatus, AddNetInterface, Offline or bsdsocket.library under $BUILD"
+        say hint "cmake --build $BUILD --parallel --target tool_netswitch test_winclick test_winkey tool_nc tool_shownetstatus tool_addnetinterface tool_offline bsdsocket_library"
         exit 2
     }
 done
@@ -328,7 +336,8 @@ EOF
         done
     fi
 
-    if { [ "$seq" = netswitch-live ] || [ "$seq" = netswitch-takeall ]; } &&
+    if { [ "$seq" = netswitch-live ] || [ "$seq" = netswitch-takeall ] ||
+         [ "$seq" = netswitch-reverse ]; } &&
        [ -n "$NETBOARD" ]; then
         cp "$NETSWITCH" "$HD/C/NetSwitch"
         cp "$WINCLICK" "$HD/C/WinClick"
@@ -336,8 +345,10 @@ EOF
         cp "$NC" "$HD/C/nc"
         cp "$SHOWNETSTATUS" "$HD/C/ShowNetStatus"
         cp "$ADDIF" "$HD/C/AddNetInterface"
+        cp "$OFFLINE" "$HD/C/Offline"
         chmod 755 "$HD/C/NetSwitch" "$HD/C/WinClick" "$HD/C/WinKey" \
-            "$HD/C/nc" "$HD/C/ShowNetStatus" "$HD/C/AddNetInterface"
+            "$HD/C/nc" "$HD/C/ShowNetStatus" "$HD/C/AddNetInterface" \
+            "$HD/C/Offline"
         # The stack itself, and the driver for the card in the machine.  It
         # starts when a socket program opens bsdsocket.library and goes away
         # with the last one, so the sequence keeps one listening.
@@ -352,13 +363,28 @@ EOF
         # take-all arm brings every one of them up instead, so that whatever
         # six rows the list is showing are all up whatever order the directory
         # hands them over in.
+        #
+        # netswitch-reverse gets ONE definition instead, and that is the whole
+        # point of it: a click can only be aimed at the interface that moves
+        # if the list has one row, and the directory's order is not the order
+        # the list shows, so with nine definitions the click lands on
+        # whichever one the scan happened to put second (run A, 2026-10-15:
+        # it landed on ETH4, which the click then brought up -- the interface
+        # that had moved was never touched).
         mkdir -p "$HD/Devs/NetInterfaces"
-        for i in 0 1 2 3 4 5 6 7 8; do
+        if [ "$seq" = netswitch-reverse ]; then
             printf '%s\n' "DEVICE=${SANA2_DEVICE:-a2065.device}" "UNIT=0" \
-                "CONFIGURE=STATIC" "ADDRESS=192.168.1.$((50 + i))" \
+                "CONFIGURE=STATIC" "ADDRESS=192.168.1.50" \
                 "NETMASK=255.255.255.0" "MTU=1500" \
-                > "$HD/Devs/NetInterfaces/ETH$i"
-        done
+                > "$HD/Devs/NetInterfaces/ETH0"
+        else
+            for i in 0 1 2 3 4 5 6 7 8; do
+                printf '%s\n' "DEVICE=${SANA2_DEVICE:-a2065.device}" "UNIT=0" \
+                    "CONFIGURE=STATIC" "ADDRESS=192.168.1.$((50 + i))" \
+                    "NETMASK=255.255.255.0" "MTU=1500" \
+                    > "$HD/Devs/NetInterfaces/ETH$i"
+            done
+        fi
     fi
 
 
@@ -649,6 +675,52 @@ C:wbgrab TO DH0:netswitch-live-8.pfs >NIL:
 C:Wait 8
 C:wbgrab TO DH0:netswitch-live-9.pfs >NIL:
 C:ShowNetStatus INTERFACES >>DH0:netswitch-live.txt
+Echo >DH0:.done "$RC"
+EOF
+        ;;
+    netswitch-reverse)
+        # The state moves under the window between the paint the click was
+        # aimed at and the click itself.  One definition, so the list has one
+        # row and the click cannot be aimed at anything else.  The stack is up
+        # with ETH0 attached and up, the window is open with that row selected
+        # and the focus on the action button, which reads "Go Offline"; then
+        # C:Offline takes ETH0 down from another process, the way any other
+        # tool or a shell would.  The click that follows was aimed at a row
+        # that is up, and what it must do is nothing -- the interface stays
+        # where the other tool put it and the panel says so.  Re-reading the
+        # row and taking it back up, because the fresh reading says "down" and
+        # the button says "Go Offline", is the defect this arm exists to
+        # catch, and the only frame that tells the two apart is the one after
+        # the click.  ShowNetStatus writes the stack's own answer before and
+        # after, so whether ETH0 is up at the end is the stack's word and not
+        # a reading of the picture.
+        cat <<'EOF'
+FailAt 9999
+C:Wait 6
+Run >NIL: C:nc -4 -l 4321
+C:Wait 2
+C:AddNetInterface DEVS:NetInterfaces/ETH0 >DH0:netswitch-reverse.txt
+C:Wait 3
+C:ShowNetStatus INTERFACES >>DH0:netswitch-reverse.txt
+Run >NIL: C:NetSwitch
+C:Wait 4
+C:WinClick "AmiNetXDuo NetSwitch" X 12 Y 28 TIMES 0 >>DH0:netswitch-reverse.txt
+C:wbgrab TO DH0:netswitch-reverse.pfs >>DH0:netswitch-reverse.txt
+C:WinClick "AmiNetXDuo NetSwitch" X 12 Y 28 >>DH0:netswitch-reverse.txt
+C:Wait 1
+C:wbgrab TO DH0:netswitch-reverse-1.pfs >NIL:
+C:WinKey TAB >>DH0:netswitch-reverse.txt
+C:Wait 1
+C:wbgrab TO DH0:netswitch-reverse-2.pfs >NIL:
+C:Offline ETH0 >>DH0:netswitch-reverse.txt
+C:wbgrab TO DH0:netswitch-reverse-3.pfs >NIL:
+C:WinKey RETURN >>DH0:netswitch-reverse.txt
+C:Wait 2
+C:wbgrab TO DH0:netswitch-reverse-4.pfs >NIL:
+C:ShowNetStatus INTERFACES >>DH0:netswitch-reverse.txt
+C:Wait 6
+C:wbgrab TO DH0:netswitch-reverse-5.pfs >NIL:
+C:ShowNetStatus INTERFACES >>DH0:netswitch-reverse.txt
 Echo >DH0:.done "$RC"
 EOF
         ;;
