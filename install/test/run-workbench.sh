@@ -2608,6 +2608,12 @@ Echo >DH0:.done "0"'
     [ -z "$_cdir" ] || [ ! -f "$_cdir/.info" ] ||
         PRIOR_CINFO_SUM=$(shasum < "$_cdir/.info" | cut -d' ' -f1)
     echo "prior_cinfo=${PRIOR_CINFO_SUM:-none} mode=${AMINETXDUO_PRIOR_CINFO:-release}"
+    if [ -z "$PRIOR_CINFO_SUM" ]; then
+        echo "!! the prior release left no C:.info: nothing below would cover its backup"
+        echo "workbench_e2e=FAIL board=$BOARD model=$MODEL driver=$SANA2_DRIVER" \
+             "stack=prior boot_status=prior-cinfo-none"
+        exit 1
+    fi
     # Run 1 meets the prior release's anxnet.device as the existing driver,
     # which the checks below expect kept as .old.
     if _p=$(amiga_path Devs/Networks/anxnet.device 2>/dev/null); then
@@ -4371,10 +4377,6 @@ if [ -n "$PRIOR_ARCHIVE" ]; then
             echo "!! C:.info is not in a Backup drawer, byte for byte, with its Restore line"
             fail=1
         fi
-    elif [ "${AMINETXDUO_PRIOR_CINFO:-}" = custom ]; then
-        echo "update_backup_cinfo=no"
-        echo "!! AMINETXDUO_PRIOR_CINFO=custom and no C:.info before the update"
-        fail=1
     fi
     _lib=$(amiga_path Libs/bsdsocket.library 2>/dev/null || true)
     _ver=$( { [ -n "$_lib" ] && LC_ALL=C strings "$_lib" | sed -n 's/^.*\$VER: *//p' | head -1; } || true)
