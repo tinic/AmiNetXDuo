@@ -132,6 +132,9 @@ int ns_layout(const NsFont *font, int max_w, int max_h, unsigned count,
     out->device_chars = DEVICE_CHARS;
     out->address_x = out->device_x + device_w + COL_GAP;
     out->address_chars = ADDRESS_CHARS;
+    out->name_px = name_w;
+    out->device_px = device_w;
+    out->address_px = address_w;
     out->panel_w = right - panel_x;
     if (out->panel_w < panel_min && fits) fits = 0;
 

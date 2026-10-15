@@ -74,6 +74,27 @@ int ns_take_all_prompt(char *out, size_t cap, unsigned count);
 int ns_elide(char *out, size_t cap, const char *text, unsigned chars);
 
 /*
+ * A font's width for len characters of text.  The same shape as NsMeasure in
+ * netswitch_layout.h, repeated here so this module needs nothing from the
+ * layout: a caller passes TextLength() and its RastPort as ctx.
+ */
+typedef int (*NsTextMeasure)(void *ctx, const char *text, int len);
+
+/*
+ * Cuts text to the longest prefix that, with "...", measures within px pixels
+ * -- the rule for a column whose width came from the font.  Counting
+ * characters cannot do this: a proportional font's "WWWW" is half again its
+ * "iiii", so a column sized for the average glyph overflows on the wide ones
+ * and runs into its neighbour.  A prefix that fits by itself is kept whole and
+ * without an ellipsis; when even "..." is too wide the prefix is cut without
+ * one; and when not one glyph fits, out is empty and the return is 0, which
+ * says less than any cut would.  Refuses (empty out) rather than truncating
+ * when cap cannot hold what fits.  Safe in place -- out may be text.
+ */
+int ns_fit(NsTextMeasure measure, void *ctx, char *out, size_t cap,
+           const char *text, int px);
+
+/*
  * The legend's word for a state, lowercase so it sits beside its shape:
  * "online", "offline", "not attached".  The panel uses ns_state_word()'s
  * capitals; the two differ on purpose.

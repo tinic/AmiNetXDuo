@@ -171,6 +171,77 @@ int ns_take_all_prompt(char *out, size_t cap, unsigned count)
     return 1;
 }
 
+int ns_fit(NsTextMeasure measure, void *ctx, char *out, size_t cap,
+           const char *text, int px)
+{
+    size_t len;
+    size_t keep;
+    size_t i;
+    int    whole;
+    int    dots;
+
+    if (out == NULL || cap == 0) return 0;
+    if (measure == NULL || text == NULL || px <= 0)
+    {
+        out[0] = '\0';
+        return 0;
+    }
+
+    len   = ns_len(text);
+    whole = measure(ctx, text, (int)len);
+    if (whole <= px)
+    {
+        if (cap < len + 1)
+        {
+            out[0] = '\0';
+            return 0;
+        }
+        for (i = 0; i < len; i++) out[i] = text[i];
+        out[len] = '\0';
+        return 1;
+    }
+
+    dots = measure(ctx, "...", 3);
+    if (dots <= px)
+    {
+        /* The longest prefix that still leaves room for the ellipsis.  Keep
+           at least one character of text: a column showing bare dots has said
+           nothing, and empty says less than the text and no more than the
+           column does. */
+        for (keep = 0; keep < len &&
+             measure(ctx, text, (int)keep + 1) + dots <= px; keep++)
+            ;
+
+        /* Nothing here clears out before the last read of text: this is the
+           call the renderer makes in place, out and text the same buffer. */
+        if (keep == 0 || cap < keep + 4)
+        {
+            out[0] = '\0';
+            return 0;
+        }
+        for (i = 0; i < keep; i++) out[i] = text[i];
+        out[keep] = '.';
+        out[keep + 1] = '.';
+        out[keep + 2] = '.';
+        out[keep + 3] = '\0';
+        return 1;
+    }
+
+    /* A column too narrow even for an ellipsis gets the longest prefix that
+       fits its pixels, and nothing at all when not one glyph does. */
+    for (keep = 0; keep < len && measure(ctx, text, (int)keep + 1) <= px; keep++)
+        ;
+
+    if (keep == 0 || cap < keep + 1)
+    {
+        out[0] = '\0';
+        return 0;
+    }
+    for (i = 0; i < keep; i++) out[i] = text[i];
+    out[keep] = '\0';
+    return 1;
+}
+
 int ns_elide(char *out, size_t cap, const char *text, unsigned chars)
 {
     size_t len = ns_len(text);

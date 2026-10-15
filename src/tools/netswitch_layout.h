@@ -56,6 +56,11 @@ typedef struct NsLayout
     int   address_x, address_chars; /* 15: a dotted quad, a v6 elides */
     int   panel_lead;               /* between the panel's lines */
 
+    /* The columns as the font measures them, for ns_fit(): a character count
+       bounds a monospace font and nothing else, so a cell fitted by count can
+       be wider than its column and reach into the next one. */
+    int   name_px, device_px, address_px;
+
     /* The panel's text column: the panel box is wider, this is what fits. */
     int   panel_w;
 } NsLayout;

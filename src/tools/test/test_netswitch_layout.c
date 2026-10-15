@@ -112,20 +112,36 @@ static void verify(const Fake *f, const NsLayout *l, unsigned count)
     check(l->scroll == ((unsigned)l->rows < count), f->name,
           "scroll flag disagrees with the rows", l->scroll, l->rows);
 
-    /* The columns run left to right inside the list, each as wide as it says
-       it is, and the last one ends inside the frame. */
+    /* The columns run left to right inside the list, each ending inside the
+       frame.  These are the widths in pixels, which is what the renderer fits
+       a cell to: a cell cut to its column's pixels cannot reach its neighbour,
+       which is what counting characters only guarantees for a monospace font.
+       The counts are the same numbers, kept for the renderer that still wants
+       one, so they must agree. */
     check(l->glyph_x >= 0 && l->name_x >= l->glyph_x + l->glyph_w,
           f->name, "name column over the glyph", l->name_x,
           l->glyph_x + l->glyph_w);
-    check(l->device_x >= l->name_x + l->name_chars * digit_w, f->name,
-          "device column over the name", l->device_x,
-          l->name_x + l->name_chars * digit_w);
-    check(l->address_x >= l->device_x + l->device_chars * digit_w, f->name,
-          "address column over the device", l->address_x,
-          l->device_x + l->device_chars * digit_w);
-    check(l->address_x + l->address_chars * digit_w <= list->w, f->name,
-          "address column leaves the list", l->address_x +
-          l->address_chars * digit_w, list->w);
+    check(l->name_px == l->name_chars * digit_w, f->name,
+          "name width is not its own count", l->name_px,
+          l->name_chars * digit_w);
+    check(l->device_px == l->device_chars * digit_w, f->name,
+          "device width is not its own count", l->device_px,
+          l->device_chars * digit_w);
+    check(l->address_px == l->address_chars * digit_w, f->name,
+          "address width is not its own count", l->address_px,
+          l->address_chars * digit_w);
+    check(l->name_x + l->name_px <= l->device_x, f->name,
+          "name column runs into the device", l->name_x + l->name_px,
+          l->device_x);
+    check(l->device_x + l->device_px <= l->address_x, f->name,
+          "device column runs into the address", l->device_x + l->device_px,
+          l->address_x);
+    check(l->address_x + l->address_px <= list->w - l->strip_w - l->cell_pad,
+          f->name, "address column leaves the list",
+          l->address_x + l->address_px, list->w - l->strip_w - l->cell_pad);
+    /* The panel's line is fitted to its own width, which is the address only
+       when the window could be as wide as the panel needs. */
+    check(l->panel_w > 0, f->name, "panel has no text column", l->panel_w, 0);
 
     /* Only a scrolling list pays for the strip. */
     check(l->scroll || list->w == l->box[NS_L_LEGEND].w, f->name,
