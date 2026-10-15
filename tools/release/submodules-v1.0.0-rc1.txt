@@ -21,7 +21,7 @@ third_party/netxduo 2d871dca099603e76487bd14fdabeacdc223b89e..8d13473471e24dd4ae
 +adc5200a3ec96c301f6c1fcae7b189704a7da923 reviewer=none-recorded merge of netxduo #19; scope=no independent review recorded
 +69f57159df78db2bebe5d5b061316fceb5b95785 reviewer=none-recorded netxduo #20 per-segment TCP state validation restored; scope=no independent review recorded; PR records test_tcp_cork_send 112 checks, fails four on the conditional recheck
 +90b5e4ca9c54957ee51bca3821976df8d340fa73 reviewer=none-recorded merge of netxduo #20; scope=no independent review recorded
-+447ff701e7b85e05f84c9f0781347c8e1e7d319f reviewer=codex-amiga netxduo #21 test-only: arp_dynamic_entry_fail sleeps one more periodic interval; scope=exact head GO (AgentNet 2026-10-13T18:55) after claudecode independent cause review; loaded reproducer 45/15 -> 60/0; no NetX code change
++447ff701e7b85e05f84c9f0781347c8e1e7d319f reviewer=codex-amiga netxduo #21 test-only: arp_dynamic_entry_fail sleeps one more periodic interval; scope=exact head GO (AgentNet 2026-10-13T18:55) after claudecode independent cause review; loaded reproducer: old 45/15 was an instrumented run with no retained instrumentation diff or hash, new 60/0 uninstrumented, so not a like-for-like before/after; no NetX code change
 +8d13473471e24dd4ae2a4a32027a71d155c44a82 reviewer=codex-amiga merge of netxduo #21 at reviewed head 447ff701; parent #281 records codex-amiga GO
 
 # New gitlink: tinic/shelltools main at the #3 merge. Its history carries #1 (c9b56529) and #2 (8241da04),
