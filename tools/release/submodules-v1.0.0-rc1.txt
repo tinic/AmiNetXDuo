@@ -33,10 +33,10 @@ third_party/netxduo 2d871dca099603e76487bd14fdabeacdc223b89e..8d13473471e24dd4ae
 third_party/shelltools 0000000000000000000000000000000000000000..6233692be8b6da9287f704e192c86c6b19b61d51
 +6233692be8b6da9287f704e192c86c6b19b61d51 reviewer=codex-amiga shelltools #4 merge: break confirmation re-checks CLI number and command at Y; scope=live post-merge source review of 8d0497e3 -> 6233692b clear (AgentNet 2026-10-15T06:20; the 05:54 pre-merge GO was the automatic responder); #3 below it reviewed by claude-independent, verdict CLEAR; WatchTasksStateTests PASS under vamos (author-reported, no shelltools CI); product release gates checked separately
 
-# Fast-forward by eighteen commits (WiFiPi.device #16-#21, maint/beta4).
+# Fast-forward by twenty commits (WiFiPi.device #16-#21 and #23, maint/beta4).
 # #16-#20: each PR body records an independent review run by claudecode, NO BLOCKER, should-fix items landed as later commits in the same PR; the reviewing agent instance is not named.
 # #21: claudecode reported the review in progress (AgentNet 2026-10-11T20:51); no outcome is recorded.
-third_party/wifipi 65946807da750eb189310b51b88f41a9bc1a56f9..441a662774e8c4111b78d53658c1a9d193cb7a90
+third_party/wifipi 65946807da750eb189310b51b88f41a9bc1a56f9..44857695ebeb50d00db90a183631cd775f7a4d3e
 +2f90ab655a24407dcbced3d16ab497511c8f5ed3 reviewer=claudecode WiFiPi #16 AbortIO unlinks only queued requests, request pointer checks; scope=PR-recorded independent review NO BLOCKER; test_abortio 37 PASS; no interface change
 +cf219a1b550a38a4d86a71d843f91c7d7791f1da reviewer=claudecode WiFiPi #16 10 s scan watchdog, the review's should-fix; scope=PR-recorded independent review NO BLOCKER
 +07406dd21d978f6db89df48af1769538a5469a47 reviewer=claudecode merge of WiFiPi #16; no source change beyond its two commits
@@ -53,5 +53,7 @@ third_party/wifipi 65946807da750eb189310b51b88f41a9bc1a56f9..441a662774e8c4111b7
 +87c34de9b4673abd13ab72dc01ca263189c93805 reviewer=claudecode WiFiPi #20 230 ms passive dwell, scan ends on event status, 20 s watchdog; scope=PR-recorded independent review NO BLOCKER
 +f62ce10bc2bf1a7094728bc022890dbfb89f1083 reviewer=claudecode WiFiPi #20 per-escan sync_id, stale ABORT ends nothing (review should-fix; re-review NO BLOCKER)
 +5fe507a63310788980659372cb900b3f68950633 reviewer=claudecode merge of WiFiPi #20; no source change beyond its two commits
-+31d77246ce004f8324212a72921ef509c8f5e5a7 reviewer=none-recorded WiFiPi #21 OpenDevice fails IOERR_OPENFAIL with no unit (not a Pi), Expunge NULL-safe; scope=review reported in progress, no outcome recorded; Pi path unchanged per PR
-+441a662774e8c4111b78d53658c1a9d193cb7a90 reviewer=none-recorded merge of WiFiPi #21; scope=no review outcome recorded; parent #237 tier 1 green
++31d77246ce004f8324212a72921ef509c8f5e5a7 reviewer=codex-amiga WiFiPi #21 OpenDevice fails IOERR_OPENFAIL with no unit (not a Pi), Expunge NULL-safe; scope=live source review 5fe507a6..441a6627 clear (AgentNet 2026-10-15T06:20); found a pre-existing Expunge timer defect, fixed by #23
++441a662774e8c4111b78d53658c1a9d193cb7a90 reviewer=codex-amiga merge of WiFiPi #21; scope=live source review clear (AgentNet 2026-10-15T06:20)
++d8f3b1464b47d0303e9b32abbd2fd9e55b671cef reviewer=codex-amiga WiFiPi #23 Expunge frees only what it created and closes timer.device only after a successful open; with a unit and no timer it sets LIBF_DELEXP and retries later; scope=source GO on exact head diff (AgentNet 2026-10-15T06:23); no Expunge test exists
++44857695ebeb50d00db90a183631cd775f7a4d3e reviewer=codex-amiga merge of WiFiPi #23; no source change beyond d8f3b146 (rc1-review/wifipi-pr23-record.txt)
