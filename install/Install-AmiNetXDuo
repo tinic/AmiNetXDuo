@@ -2456,10 +2456,12 @@
 ; nothing is there by then, so a file the user has since changed stays.
 (set BK_RESTORE "")
 (set BK_PART 0)
+(set BK_KEEP 0)
 (procedure P_backup
   (if (AND (= @pretend 0) (exists BK_SRC (noreq)))
     (
-      (P_is_ours)
+      ; BK_KEEP: kept whatever it names, a file this run deletes on a guess.
+      (if BK_KEEP (set IS_OURS 0) (P_is_ours))
       (if (= IS_OURS 0) (P_kept_before))
       (if (AND (= IS_OURS 0) (= KEPT 0))
         (
@@ -3200,7 +3202,9 @@
     (set BK_ARCH "")
     (if CINFO_OLD
       (
+        (set BK_KEEP 1)
         (set BK_SRC (tackon D_C ".info")) (P_backup)
+        (set BK_KEEP 0)
       ))
   ))
 
