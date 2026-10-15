@@ -65,6 +65,24 @@ static int px_of(const char *s)
     return px_measure(NULL, s, (int)strlen(s));
 }
 
+/* The hint line is drawn with text_at() and is never elided, into the panel
+   column: 200 px of box, and 208 px of room to the window's content edge.  On
+   a real 640x256 screen ns_hint_text's 26 characters measured 206 px of ink,
+   so a hint has to stay inside the box.  Measured with the fake font above,
+   this is a floor on the window's own limit rather than a substitute for it:
+   it fails the moment a phrase is added that cannot fit at all. */
+static void hint_width(const char *what, const char *text, int limit)
+{
+    int w = px_of(text);
+
+    if (w > limit)
+    {
+        fprintf(stderr, "FAIL: %s: %d px of %d: \"%s\"\n", what, w, limit,
+                text);
+        failures++;
+    }
+}
+
 static int wrap_error(char *out, size_t cap, const char *error)
 {
     return ns_last_error(out, cap, error);
@@ -285,6 +303,11 @@ int main(void)
           ns_take_all_warning[0] != '\0' && ns_stack_down_hint[0] != '\0' &&
           ns_query_failed_hint[0] != '\0' && ns_offline_button[0] != '\0',
           "the no-number phrases are not empty", ns_pending_word, "");
+
+    hint_width("hint fits the panel column", ns_hint_text, 200);
+    hint_width("stack-down hint fits the panel column", ns_stack_down_hint, 200);
+    hint_width("query-failed hint fits the panel column", ns_query_failed_hint,
+               200);
 
     if (failures == 0) printf("netswitch text: all checks passed\n");
     return failures != 0;

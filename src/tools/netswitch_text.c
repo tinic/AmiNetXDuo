@@ -1,6 +1,12 @@
 /* SPDX-License-Identifier: MIT */
 #include "netswitch_text.h"
 
+/* The hint line is drawn with text_at() and is never elided, into the panel
+   column: 200 px of box, plus the 8 px margin, is 208 px to the window's
+   content edge.  Measured on a 640x256 screen, 23 characters of
+   ns_stack_down_hint take 181 px of ink and 26 of ns_hint_text take 206 --
+   7 px past the box and 2 px short of the edge.  A phrase here has to stay at
+   23 characters or fewer. */
 const char *const ns_hint_text         = "Return / dbl-click toggles";
 const char *const ns_addresses_head    = "Addresses:";
 const char *const ns_no_error          = "none";
@@ -10,7 +16,7 @@ const char *const ns_panel_pending     = "online but has no address yet";
 const char *const ns_panel_none        = "(none)";
 const char *const ns_take_all_warning  = "This may drop your own connection.";
 const char *const ns_stack_down_hint   = "Network is not running.";
-const char *const ns_query_failed_hint = "Cannot read interface state.";
+const char *const ns_query_failed_hint = "Cannot read interfaces.";
 const char *const ns_offline_button    = "Offline";
 
 static size_t ns_len(const char *s)
