@@ -629,14 +629,14 @@ static void draw_row(struct RastPort *rp, const NsLayout *l, int slot,
     draw_glyph(rp, list->x + l->glyph_x + l->glyph_w / 2, cy, r->state, pen);
     SetAPen(rp, pen);
 
-    ns_elide(buf, sizeof(buf), r->name, (unsigned)l->name_chars);
+    ns_fit(measure_text, rp, buf, sizeof(buf), r->name, l->name_px);
     text_at(rp, list->x + l->name_x, ty, buf);
 
-    ns_elide(buf, sizeof(buf), r->devunit, (unsigned)l->device_chars);
+    ns_fit(measure_text, rp, buf, sizeof(buf), r->devunit, l->device_px);
     text_at(rp, list->x + l->device_x, ty, buf);
 
     ns_list_address(buf, sizeof(buf), r->ipv4, r->ipv6, r->state);
-    ns_elide(buf, sizeof(buf), buf, (unsigned)l->address_chars);
+    ns_fit(measure_text, rp, buf, sizeof(buf), buf, l->address_px);
     text_at(rp, list->x + l->address_x, ty, buf);
 }
 
