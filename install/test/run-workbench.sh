@@ -89,6 +89,24 @@
 # files, never to fat.
 # -p fat on a 68000/68010 model (AMINETXDUO_MODEL=A600) picks fat, requires
 # the refusal and the re-asked page, then picks the full stack there.
+# The machine, from the environment rather than flags:
+#   AMINETXDUO_WB=2.04|3.0|3.1|3.2  the Workbench booted (default 3.1).  Not
+#       3.1: its Kickstart from AMINETXDUO_KICKSTART_<MODEL>_<204|30|32>, its
+#       disks from AMINETXDUO_WB_ADF_DIR (2.04, 3.0) or the 3.2 SYS: tree
+#       run-smbmount.sh -o 32 uses.
+#   AMINETXDUO_EMU_CPU=68040|68060  the processor, on an A3000 or an A4000.
+#   AMINETXDUO_FASTMEM_MB, AMINETXDUO_CHIPMEM_KB, AMINETXDUO_SLOWMEM_KB  the
+#       memory; unset keeps the model's chip and slow RAM and the card's fast.
+#   AMINETXDUO_PRIOR_ARCHIVE=<lha>  installs that release first, boots it,
+#       then installs -a over it: an update.  Its kept interface file carries
+#       a user edit that must survive; the replaced library is kept as .old.
+#       A C:.info there goes to Backup, with its Restore line, and out of C:.
+#   AMINETXDUO_PRIOR_CINFO=custom  with it, C:.info is given bytes of its own
+#       before the update, as a user's drawer icon would be; =marked gives it
+#       bytes that name AmiNetXDuo, which must not pass for ours.
+# At NOVICE the Installer's own boot default is accepted: micro, or 4 MB of
+# RAM or less, means no S:Network-Startup, and the check starts the
+# interface by hand, as a user would (boot_default=manual).
 # Exit: 0 pass, 1 a failure under test, 2 an ingredient is missing (Workbench
 # 3.1 ADFs, Kickstart, Commodore's Installer, the card's driver, xdftool, lha
 # -- none of them ours to ship), 3 nothing could reach the Amiga from outside.
@@ -100,6 +118,8 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 BUILD="${AMINETXDUO_BUILD:-build/cm}"
 ARCHIVE=""
 LEVEL=NOVICE
+# The absolute budget per install boot.  installdrive's own cap (MAX_POLLS)
+# and its stall rule fit inside it; a row that needs more is a finding.
 INSTALL_TIMEOUT=420
 BOOT_TIMEOUT=720
 KEEP=0
@@ -185,6 +205,46 @@ while getopts "b:a:l:p:N:t:T:kHSDgRUEBIMq:x:f:e:c:m:CVzWs:P:Ow:nuX:" opt; do
            exit 2 ;;
     esac
 done
+
+WBVER="${AMINETXDUO_WB:-3.1}"
+case "$WBVER" in
+    2.04) WBTAG=204 ;;
+    3.0)  WBTAG=30 ;;
+    3.1)  WBTAG=31 ;;
+    3.2)  WBTAG=32 ;;
+    *) echo "AMINETXDUO_WB=$WBVER: 2.04, 3.0, 3.1 or 3.2" >&2; exit 2 ;;
+esac
+EMU_CPU="${AMINETXDUO_EMU_CPU:-}"
+case "$EMU_CPU" in
+    ""|68040|68060) ;;
+    *) echo "AMINETXDUO_EMU_CPU=$EMU_CPU: 68040 or 68060" >&2; exit 2 ;;
+esac
+FASTMEM_MB="${AMINETXDUO_FASTMEM_MB:-}"
+CHIPMEM_KB="${AMINETXDUO_CHIPMEM_KB:-}"
+SLOWMEM_KB="${AMINETXDUO_SLOWMEM_KB:-}"
+case "$FASTMEM_MB$CHIPMEM_KB$SLOWMEM_KB" in
+    *[!0-9]*) echo "memory sizes are whole numbers" >&2; exit 2 ;;
+esac
+[ -z "$CHIPMEM_KB" ] || [ $((CHIPMEM_KB % 512)) = 0 ] ||
+    { echo "AMINETXDUO_CHIPMEM_KB is a multiple of 512" >&2; exit 2; }
+[ -z "$SLOWMEM_KB" ] || [ $((SLOWMEM_KB % 256)) = 0 ] ||
+    { echo "AMINETXDUO_SLOWMEM_KB is a multiple of 256" >&2; exit 2; }
+PRIOR_ARCHIVE="${AMINETXDUO_PRIOR_ARCHIVE:-}"
+if [ -n "$PRIOR_ARCHIVE" ]; then
+    [ -f "$PRIOR_ARCHIVE" ] || { echo "no such archive: $PRIOR_ARCHIVE" >&2; exit 2; }
+    case "$TERMINAL$DRAWER$RERUN$RECONFIGURE$UNINSTALL$CONFIG_ONLY" in
+        000000) ;;
+        *) echo "AMINETXDUO_PRIOR_ARCHIVE is one plain update: no -H -D -R -U -u," \
+                "and no configuration-only mode" >&2; exit 2 ;;
+    esac
+    [ -z "$FOREIGN_MODE" ] || { echo "AMINETXDUO_PRIOR_ARCHIVE and -f conflict" >&2; exit 2; }
+fi
+case "${AMINETXDUO_PRIOR_CINFO:-}" in
+    "") ;;
+    custom|marked) [ -n "$PRIOR_ARCHIVE" ] ||
+        { echo "AMINETXDUO_PRIOR_CINFO needs AMINETXDUO_PRIOR_ARCHIVE" >&2; exit 2; } ;;
+    *) echo "AMINETXDUO_PRIOR_CINFO is custom or marked" >&2; exit 2 ;;
+esac
 
 # More than one non-default answer is intentional now.  installdrive consumes
 # an ordered run-time answer file and fails if any requested page was not
@@ -498,17 +558,17 @@ WORK="$ROOT/build/testwork-$TAG"
 
 # ------------------------------------------------------------ ingredients --
 
+# THE INSTALLER THE ARCHIVE SHIPS is the one under test: the release carries
+# its own (install/Installer, the low-memory build), and a user double-clicks
+# that one.  This one only fills in for an archive that has none; overwriting
+# the shipped one meant a 1 MB A500 ran a different, larger Installer and
+# failed with "Out of Memory" where the product's own was never tried.
 INSTALLER="${AMINETXDUO_INSTALLER:-}"
 if [ -z "$INSTALLER" ]; then
     for candidate in "$ROOT/build/Installer" "$HOME/amigaos/tools/Installer"; do
         [ -f "$candidate" ] && { INSTALLER="$candidate"; break; }
     done
 fi
-[ -n "$INSTALLER" ] && [ -f "$INSTALLER" ] || {
-    echo "No Commodore Installer found." >&2
-    echo "Set AMINETXDUO_INSTALLER=<path>, or put one in build/Installer." >&2
-    exit 2
-}
 
 # THE VENDOR DRIVER, not anxnet.device, and that is a statement about what this
 # gate is for.  The installer now DOES install anxnet.device into
@@ -624,7 +684,22 @@ emu_board_model_check "$BOARD" "$MODEL" || exit 2
 # own env.sh, which sets the A600 ROM two lines below it and annotates it "the
 # 68000 machines need a 68000 ROM".  Reading the generic one first threw that
 # away and put the AGA ROM back on the A600.
-eval "KICKSTART=\${AMINETXDUO_KICKSTART_$MODEL:-}"
+KICKSTART=""
+case "$EMU_CPU:$MODEL" in
+    :*|*:A3000*|*:A4000*) ;;
+    *) echo "AMINETXDUO_EMU_CPU=$EMU_CPU needs an A3000 or an A4000 (a 32-bit" \
+            "ROM and address space), not $MODEL" >&2; exit 2 ;;
+esac
+# Another Workbench, its own Kickstart, named per model, and never the 3.1
+# fallbacks below: a 3.1 ROM under a 2.04 Workbench is not a 2.04 machine.
+if [ "$WBVER" != 3.1 ]; then
+    eval "KICKSTART=\${AMINETXDUO_KICKSTART_${MODEL}_$WBTAG:-}"
+    [ -n "$KICKSTART" ] && [ -f "$KICKSTART" ] || {
+        echo "Workbench $WBVER on $MODEL needs AMINETXDUO_KICKSTART_${MODEL}_$WBTAG=<rom>" >&2
+        exit 2
+    }
+fi
+[ -n "${KICKSTART:-}" ] || eval "KICKSTART=\${AMINETXDUO_KICKSTART_$MODEL:-}"
 if [ -z "$KICKSTART" ]; then
     case "$MODEL" in
     A1200|A3000|A4000) KICKSTART="${AMINETXDUO_KICKSTART:-}" ;;
@@ -711,6 +786,24 @@ esac
 # script exits.  Drive before bridge, always: tools/emu-rig-lock.sh.
 rig_claim_drive "$HD" "run-workbench $TAG in $ROOT" "$BACKEND" || exit $?
 
+# The Installer in an unpacked AmiNetXDuo drawer $1: its own, or the
+# fallback; prints installer_source= for the log.
+stage_installer() {
+    if [ -f "$1/Installer" ]; then
+        echo "installer_source=archive bytes=$(wc -c < "$1/Installer" | tr -d ' ')" \
+             "sha256=$(shasum -a 256 "$1/Installer" | cut -d' ' -f1)"
+        return 0
+    fi
+    [ -n "$INSTALLER" ] && [ -f "$INSTALLER" ] || {
+        echo "The archive has no Installer and none was found." >&2
+        echo "Set AMINETXDUO_INSTALLER=<path>, or put one in build/Installer." >&2
+        exit 2
+    }
+    cp "$INSTALLER" "$1/Installer"
+    echo "installer_source=supplied bytes=$(wc -c < "$1/Installer" | tr -d ' ')" \
+         "sha256=$(shasum -a 256 "$1/Installer" | cut -d' ' -f1)"
+}
+
 # ONE MAC PER TAG, derived, not pinned.  A fixed address here put every run of
 # this harness on the bridge under 52:54:00:c0:ff:ee, beside the demo instance
 # and beside other checkouts' guests: two machines at two addresses sharing one
@@ -757,7 +850,9 @@ ADFDIR="${AMINETXDUO_ADF_DIR:-$HOME/amigaos/adf}"
 # reports infrastructure and fails; it never passes for want of a peer.
 PEER="${AMINETXDUO_PEER:-}"
 
-echo "==> model $MODEL on $(basename "$KICKSTART")"
+echo "==> model $MODEL${EMU_CPU:+/$EMU_CPU} on $(basename "$KICKSTART"), Workbench $WBVER"
+echo "machine_wb=$WBVER machine_cpu=${EMU_CPU:-default} machine_chipmem_kb=${CHIPMEM_KB:-default}" \
+     "machine_slowmem_kb=${SLOWMEM_KB:-default} machine_fastmem_mb=${FASTMEM_MB:-$(emu_board_fastmem "$BOARD" 8)}"
 echo "==> card $BOARD, driver $DRIVER_NAME from $DRIVER_PATH"
 
 # ------------------------------------------------------ Workbench 3.1 SYS: --
@@ -773,6 +868,94 @@ echo "==> card $BOARD, driver $DRIVER_NAME from $DRIVER_PATH"
 
 WB="$ROOT/build/wb31-sys"
 WBSTAMP="$ROOT/build/.wb31-sys.stamp"
+if [ "$WBVER" = 3.2 ]; then
+    # Workbench 3.2 as install/test/run-smbmount.sh -o 32 boots it: the lab's
+    # unpacked tree, else tools/mkwb32.sh from the CD's ADFs.
+    WB="$ROOT/build/wb32-sys"
+    TARBALL="${AMINETXDUO_WB32_TARBALL:-$HOME/amiga-assets/os32/wb32-sys-A1200.tar.gz}"
+    if [ ! -d "$WB" ]; then
+        if [ -f "$TARBALL" ]; then
+            echo "==> unpacking $(basename "$TARBALL")"
+            mkdir -p "$WB"
+            tar xzf "$TARBALL" -C "$WB"
+        else
+            echo "==> assembling Workbench 3.2 from the CD's ADFs"
+            "$ROOT/tools/mkwb32.sh" -o "$WB" || exit 2
+        fi
+        chmod -R a+rx "$WB"
+    else
+        echo "==> Workbench 3.2 tree is current ($WB)"
+    fi
+elif [ "$WBVER" != 3.1 ]; then
+    # 2.04 and 3.0, from their floppies, laid out the way 3.1 is below: the
+    # Workbench disk is the root, Fonts, Locale and Storage are drawers of
+    # the same names, Extras goes in Extras/.  The disks are found by the
+    # TOSEC names' "(Workbench)", "(Fonts)" ... tags; 2.04 has no Locale or
+    # Storage disk.
+    WBADF="${AMINETXDUO_WB_ADF_DIR:-$HOME/amiga-assets/wb/wb$WBVER}"
+    WB="$ROOT/build/wb$WBTAG-sys"
+    WBSTAMP="$ROOT/build/.wb$WBTAG-sys.stamp"
+    wb_disk() { find "$WBADF" -maxdepth 1 -name "*($1)*.adf" | head -1; }
+    [ -n "$(wb_disk Workbench)" ] || {
+        echo "no Workbench $WBVER disk in $WBADF; set AMINETXDUO_WB_ADF_DIR" >&2
+        exit 2
+    }
+    if [ ! -d "$WB" ] || [ ! -f "$WBSTAMP" ]; then
+        [ -n "$XDFTOOL" ] && [ -x "$XDFTOOL" ] || {
+            echo "amitools' xdftool not found, needed to unpack the Workbench ADFs." >&2
+            exit 2
+        }
+        echo "==> assembling Workbench $WBVER into $WB"
+        SCRATCH="$ROOT/build/.wb$WBTAG-unpack"
+        rm -rf "$SCRATCH" "$WB"
+        mkdir -p "$SCRATCH" "$WB"
+        for pair in Workbench:. Fonts:Fonts Locale:Locale Storage:Storage Extras:Extras; do
+            adf=$(wb_disk "${pair%%:*}")
+            [ -n "$adf" ] || continue
+            into="$SCRATCH/${pair%%:*}"
+            mkdir -p "$into"
+            "$XDFTOOL" "$adf" unpack "$into" >/dev/null
+            # amitools puts the volume in a subdirectory beside its
+            # .xdfmeta sidecar; older versions write it straight in.
+            inner="$into"
+            if find "$into" -maxdepth 1 -name '*.xdfmeta' | grep -q .; then
+                inner=$(find "$into" -maxdepth 1 -mindepth 1 -type d | head -1)
+            fi
+            mkdir -p "$WB/${pair##*:}"
+            cp -R "$inner/." "$WB/${pair##*:}/"
+        done
+        rm -rf "$SCRATCH"
+        find "$WB" -maxdepth 1 \( -name '*.blkdev' -o -name '*.bootcode' -o -name '*.xdfmeta' \) -delete
+        # A hard drive install of 2.04 takes the disk's Startup-sequence.HD.
+        if [ -f "$WB/S/Startup-sequence.HD" ]; then
+            mv "$WB/S/Startup-sequence.HD" "$WB/S/Startup-sequence"
+        fi
+        chmod -R a+rx "$WB"
+        : > "$WBSTAMP"
+    else
+        echo "==> Workbench $WBVER tree is current ($WB)"
+    fi
+fi
+# THE NAMES THIS SCRIPT WRITES, in the case it writes them.  2.04 and 3.2 ship
+# s/Startup-sequence (and 3.2 a User-startup); on this host's case-sensitive
+# directory a second S/Startup-Sequence beside it is two files, and which one
+# the guest opens is the emulator's choice.  2.04's lower-case
+# `execute s:user-startup' and `endcli' are spelt the way the edits below
+# match them; AmigaDOS does not care.
+if [ "$WBVER" != 3.1 ]; then
+    for _n in Startup-Sequence User-Startup; do
+        _p=$(find "$WB/S" -maxdepth 1 -iname "$_n" ! -name "$_n" | head -1)
+        [ -z "$_p" ] || mv "$_p" "$WB/S/$_n"
+    done
+    [ -f "$WB/S/Startup-Sequence" ] || { echo "!! $WB has no S/Startup-Sequence" >&2; exit 2; }
+    sed -i.bak -e 's/^\( *\)execute s:user-startup/\1Execute S:User-Startup/' \
+               -e 's/^endcli/EndCLI/' "$WB/S/Startup-Sequence"
+    rm -f "$WB/S/Startup-Sequence.bak"
+    for want in C/Assign C/LoadWB Fonts; do
+        [ -e "$WB/$want" ] || { echo "!! the Workbench $WBVER SYS: has no $want" >&2; exit 2; }
+    done
+fi
+if [ "$WBVER" = 3.1 ]; then
 
 wb_adfs=()
 for disk in workbench fonts locale storage extras; do
@@ -847,6 +1030,7 @@ if [ "$wb_stale" = "1" ]; then
 else
     echo "==> Workbench 3.1 tree is current ($WB)"
 fi
+fi
 
 # --------------------------------------------------------- the release .lha --
 #
@@ -882,8 +1066,28 @@ echo "==> archive $(basename "$ARCHIVE") ($(wc -c < "$ARCHIVE" | tr -d ' ') byte
 # to select before Proceed as "<options>:<gadget id>" (empty: take that page's
 # default).  See installdrive.c on why an option is named by number and not by
 # text: it carries none.
+# THE STACK THE ARCHIVE'S ICON ASKS FOR (DiskObject do_StackSize, offset 74),
+# which is what a double-click gives the Installer.  installdrive's own 40000
+# was 23 KB more than the shipped icon's 16384, and on a 1 MB machine that
+# is not a detail.  $1 is the archive; prints the size, 40000 without an icon.
+icon_stack() {
+    local dir="$ROOT/build/$TAG-icon" n=""
+    rm -rf "$dir"; mkdir -p "$dir"
+    ( cd "$dir" && lha -xqf "$1" AmiNetXDuo/Install-AmiNetXDuo.info ) >/dev/null 2>&1 || true
+    [ -f "$dir/AmiNetXDuo/Install-AmiNetXDuo.info" ] &&
+        n=$(od -An -tu1 -j74 -N4 "$dir/AmiNetXDuo/Install-AmiNetXDuo.info" |
+            awk '{ print (($1 * 256 + $2) * 256 + $3) * 256 + $4 }')
+    rm -rf "$dir"
+    [ -n "$n" ] && [ "$n" -ge 4096 ] || n=40000
+    echo "$n"
+}
+DRIVE_STACK_ARCHIVE=""
+
 build_driver() {
     local out="$1" runs="$2" label="$3" pick="${4:-}"
+    local stack
+    stack=$(icon_stack "${DRIVE_STACK_ARCHIVE:-$ARCHIVE}")
+    echo "installer_stack=$stack"
     local opts=0 gid=0 skip=0
     local page_pause="${AMINETXDUO_INSTALL_PAGE_PAUSE:-0}"
     local pause_options="${AMINETXDUO_INSTALL_PAUSE_OPTIONS:-0}"
@@ -901,6 +1105,7 @@ build_driver() {
            -DDRIVE_PICK_OPTIONS="$opts" -DDRIVE_PICK_ID="$gid" \
            -DDRIVE_PICK_SKIP="$skip" -DDRIVE_PAGE_PAUSE="$page_pause" \
            -DDRIVE_PAUSE_OPTIONS="$pause_options" \
+           -DDRIVE_INSTALL_STACK="${stack}UL" \
            -DDRIVE_ARCHIVE_DRAWER="\"$UNPACK_AMIGA/AmiNetXDuo\"" -I"$NDK" \
            ${UNINSTALL_DEF:+"$UNINSTALL_DEF"} ${NETCHECK_DEF:+"$NETCHECK_DEF"} \
            -o "$out" "$ROOT/install/test/installdrive.c" || exit 2
@@ -1380,6 +1585,10 @@ esac
 mkdir -p "$HD/S"
 printf '%s\n' "${FOREIGN_LINES[@]}" > "$HD/S/User-Startup"
 chmod 644 "$HD/S/User-Startup"
+# The directory the app's Assign names.  3.2's Assign waits on a requester
+# for a missing one and the boot never reaches the Installer; 3.1's only
+# printed an error.
+mkdir -p "$HD/OtherApp"
 
 # -D: the scripted drawer layout.  The marker remains the unattended path;
 # -g leaves it out and has installdrive select the visible radio option.
@@ -1579,7 +1788,7 @@ SUPPLIED_DRIVERS="anxnet.device anxgenet.device anxwifipi.device"
     ls -la "$UNPACK" >&2
     exit 2
 }
-cp "$INSTALLER" "$UNPACK/AmiNetXDuo/Installer"
+stage_installer "$UNPACK/AmiNetXDuo"
 chmod -R a+rx "$UNPACK"
 
 # THE STAGED BYTES ARE THE ARCHIVE'S anxnet.device.  Keyed on what sana2_select
@@ -1838,8 +2047,8 @@ fi
 # carries a build per CPU the same way we do and lha_68020 traps on a 68000,
 # so the model picks -- the rule is tools/demo.sh's, not a second one.
 LHADIR="${AMINETXDUO_DEMO_LHA:-$HOME/amiga-assets/apps/lha-2.15}"
-case "$MODEL" in
-    A4000*) LHABIN=lha_68040 ;;
+case "${EMU_CPU:-}$MODEL" in
+    68040*|68060*|A4000*) LHABIN=lha_68040 ;;
     A500*|A600*|A1000*|A2000*) LHABIN=lha_68k ;;
     *) LHABIN=lha_68020 ;;
 esac
@@ -1999,13 +2208,22 @@ use_gui=no
 headless=$EMU_HEADLESS
 quickstart=$MODEL,0
 kickstart_rom_file=$KICKSTART
-fastmem_size=$(emu_board_fastmem "$BOARD" 8)
+fastmem_size=${FASTMEM_MB:-$(emu_board_fastmem "$BOARD" 8)}
 floppy0type=-1
 nr_floppies=0
 uaehf0=dir,rw,DH0:DH0:$HD,0
 uaehf1=dir,rw,Work:Work:$WORK,0
 serial_port=tcp://127.0.0.1:$port/wait
 EOF
+    # WinUAE's units: chip in 512 KB, slow ("trapdoor") in 256 KB.
+    [ -z "$CHIPMEM_KB" ] || echo "chipmem_size=$((CHIPMEM_KB / 512))" >> "$cfg"
+    [ -z "$SLOWMEM_KB" ] || echo "bogomem_size=$((SLOWMEM_KB / 256))" >> "$cfg"
+    # cpu_model, not cpu_type (tools/amiberry-run.sh says why), and the
+    # 040's and 060's own FPU.
+    if [ -n "$EMU_CPU" ]; then
+        printf 'cpu_model=%s\nfpu_model=%s\ncpu_24bit_addressing=false\n' \
+               "$EMU_CPU" "$EMU_CPU" >> "$cfg"
+    fi
     # GLX over X11 forwarding is commonly unavailable (including XQuartz).
     # The SDL renderer is sufficient for Installer visual review and keeps a
     # visible run from aborting while it tries to create an OpenGL context.
@@ -2267,11 +2485,160 @@ Echo >DH0:.done "$RC"'
           "$HD/install-console.txt" "$HD/installdrive.txt"
 fi
 
+# ------------------------------------------------- run P: an older release --
+#
+# AMINETXDUO_PRIOR_ARCHIVE: the previous release installed the same way, at
+# the same level, then a power cycle into it on the network.  Its interface
+# file then gets a line a user would add, and run 1 installs over all of it.
+# Run 1 boots without S:User-Startup: a running stack holds the library open
+# (the reason -R reboots too).
+RUN1_MODE=""
+PRIOR_VERSION=""
+PRIOR_IF=""
+PRIOR_IF_SUM=""
+PRIOR_NS_SUM=""
+PRIOR_LIB_SUMS=""
+PRIOR_CINFO_SUM=""
+PRIOR_EDIT="; user edit after the install -- an update must keep this"
+if [ -n "$PRIOR_ARCHIVE" ]; then
+    echo
+    echo "============================================================"
+    echo "  P    $(basename "$PRIOR_ARCHIVE") installed ($LEVEL), then booted"
+    echo "============================================================"
+    PRIOR_UNPACK="$HD/Prior"
+    rm -rf "$PRIOR_UNPACK"
+    mkdir -p "$PRIOR_UNPACK"
+    ( cd "$PRIOR_UNPACK" && lha -xfq "$PRIOR_ARCHIVE" ) >/dev/null 2>&1 || \
+    ( cd "$PRIOR_UNPACK" && lha xf "$PRIOR_ARCHIVE" ) >/dev/null 2>&1 || {
+        echo "could not unpack $PRIOR_ARCHIVE" >&2; exit 2; }
+    [ -d "$PRIOR_UNPACK/AmiNetXDuo" ] || {
+        echo "$PRIOR_ARCHIVE did not unpack to an AmiNetXDuo drawer" >&2; exit 2; }
+    stage_installer "$PRIOR_UNPACK/AmiNetXDuo"
+    chmod -R a+rx "$PRIOR_UNPACK"
+    _unpack_amiga=$UNPACK_AMIGA
+    UNPACK_AMIGA="DH0:Prior"
+    DRIVE_STACK_ARCHIVE=$PRIOR_ARCHIVE
+    build_driver "$ROOT/build/installdrive-$TAG-prior" 1 "" ""
+    DRIVE_STACK_ARCHIVE=""
+    UNPACK_AMIGA=$_unpack_amiga
+    cp "$ROOT/build/installdrive-$TAG-prior" "$HD/C/installdrive-prior"
+    chmod 755 "$HD/C/installdrive-prior"
+    # The answers are run 1's, for the candidate.
+    [ ! -f "$HD/install-scenario.txt" ] ||
+        mv "$HD/install-scenario.txt" "$ROOT/build/$TAG-install-scenario.txt"
+
+    startup_with 'FailAt 9999
+C:installdrive-prior >DH0:prior-console.txt
+Echo >DH0:.done "$RC"'
+    boot prior-install "$INSTALL_TIMEOUT"
+    PRIOR_INSTALL_STATUS=$BOOT_STATUS
+    for _f in installdrive.txt install-log.txt installer-out.txt; do
+        [ ! -f "$HD/$_f" ] || mv "$HD/$_f" "$HD/prior-$_f"
+    done
+    echo "---- prior installdrive report ----"
+    cat "$HD/prior-installdrive.txt" 2>/dev/null || echo "(none)"
+    rm -f "$HD/C/installdrive-prior"
+    [ ! -f "$ROOT/build/$TAG-install-scenario.txt" ] ||
+        mv "$ROOT/build/$TAG-install-scenario.txt" "$HD/install-scenario.txt"
+
+    _lib=$(amiga_path Libs/bsdsocket.library 2>/dev/null || true)
+    PRIOR_VERSION=$( { [ -n "$_lib" ] && LC_ALL=C strings "$_lib" |
+                     sed -n 's/^.*\$VER: *//p' | head -1; } || true)
+    echo "prior_install_status=$PRIOR_INSTALL_STATUS"
+    echo "prior_version=${PRIOR_VERSION:-none}"
+    if [ "$PRIOR_INSTALL_STATUS" != 0 ] || [ -z "$PRIOR_VERSION" ]; then
+        echo "!! the prior release did not install; the drive is left at $HD"
+        echo "workbench_e2e=FAIL board=$BOARD model=$MODEL driver=$SANA2_DRIVER" \
+             "stack=prior boot_status=prior-install-$PRIOR_INSTALL_STATUS"
+        exit 1
+    fi
+
+    # The power cycle into the prior release, Commodore's startup with its
+    # User-Startup, and what its own ShowNetStatus says.
+    startup_with 'FailAt 9999
+C:Wait 15
+C:ShowNetStatus >DH0:prior-netstatus.txt
+Echo >DH0:prior-netstatus-rc.txt "$RC"
+Echo >DH0:.done "0"'
+    boot prior-boot "$BOOT_TIMEOUT" net
+    # A PREREQUISITE, asserted: the update is only an update over a working
+    # prior installation.  ShowNetStatus rc 0, and in the block of the
+    # expected interface the state online with link up and an IPv4 address.
+    PRIOR_NS_RC=$(tr -dc '0-9' < "$HD/prior-netstatus-rc.txt" 2>/dev/null || true)
+    _prior_if_block() {
+        awk -v want="Interface $EXPECTED_IF " '{ sub(/\r$/, "") }
+            index($0, want) == 1 { inside = 1; next }
+            /^[^ ]/ { inside = 0 }
+            inside' "$HD/prior-netstatus.txt" 2>/dev/null || true
+    }
+    PRIOR_LINK=$(_prior_if_block | awk '$1=="state" { print $2"_"$3"_"$4; exit }')
+    PRIOR_ADDR=$(_prior_if_block |
+        awk '$1=="address" && $2 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ { print $2; exit }')
+    echo "prior_boot_status=$BOOT_STATUS"
+    echo "prior_shownetstatus_rc=${PRIOR_NS_RC:-none}"
+    echo "prior_interface=$EXPECTED_IF"
+    echo "prior_link=${PRIOR_LINK:-none}"
+    echo "prior_address=${PRIOR_ADDR:-none}"
+    if [ "$BOOT_STATUS" != 0 ] || [ "$PRIOR_NS_RC" != 0 ] ||
+       [ "$PRIOR_LINK" != online_link_up ] || [ -z "$PRIOR_ADDR" ]; then
+        echo "!! the prior release is not online after its power cycle;" \
+             "nothing below would be an update over a working installation"
+        echo "workbench_e2e=FAIL board=$BOARD model=$MODEL driver=$SANA2_DRIVER" \
+             "stack=prior boot_status=prior-boot-$BOOT_STATUS"
+        exit 1
+    fi
+
+    PRIOR_IF=$(amiga_path "Devs/NetInterfaces/$EXPECTED_IF" 2>/dev/null || true)
+    if [ -z "$PRIOR_IF" ]; then
+        echo "!! the prior release left no DEVS:NetInterfaces/$EXPECTED_IF"
+        echo "workbench_e2e=FAIL board=$BOARD model=$MODEL driver=$SANA2_DRIVER" \
+             "stack=prior boot_status=prior-boot-$BOOT_STATUS"
+        exit 1
+    fi
+    printf '%s\n' "$PRIOR_EDIT" >> "$PRIOR_IF"
+    PRIOR_IF_SUM=$(shasum < "$PRIOR_IF" | cut -d' ' -f1)
+    _ns=$(amiga_path S/Network-Startup 2>/dev/null || true)
+    [ -z "$_ns" ] || PRIOR_NS_SUM=$(shasum < "$_ns" | cut -d' ' -f1)
+    # The prior release's own files, each to be kept as .old by run 1.
+    PRIOR_LIB_SUMS=$(
+        for _f in Libs/bsdsocket.library Libs/usergroup.library \
+                  Libs/tls.library Devs/Networks/anxnet.device; do
+            _p=$(amiga_path "$_f" 2>/dev/null) || continue
+            printf '%s %s\n' "$_f" "$(shasum < "$_p" | cut -d' ' -f1)"
+        done)
+    # C:.info as the update finds it: the prior release's copy wrote one.
+    _cdir=$(amiga_path C 2>/dev/null || true)
+    case "${AMINETXDUO_PRIOR_CINFO:-}:$_cdir" in
+        :*|*:) ;;
+        custom:*) printf 'a user drawer icon for C:, not the Installer default\n' > "$_cdir/.info" ;;
+        marked:*) printf 'a user drawer icon for C: that names AmiNetXDuo\n' > "$_cdir/.info" ;;
+    esac
+    [ -z "$_cdir" ] || [ ! -f "$_cdir/.info" ] ||
+        PRIOR_CINFO_SUM=$(shasum < "$_cdir/.info" | cut -d' ' -f1)
+    echo "prior_cinfo=${PRIOR_CINFO_SUM:-none} mode=${AMINETXDUO_PRIOR_CINFO:-release}"
+    if [ -z "$PRIOR_CINFO_SUM" ]; then
+        echo "!! the prior release left no C:.info: nothing below would cover its backup"
+        echo "workbench_e2e=FAIL board=$BOARD model=$MODEL driver=$SANA2_DRIVER" \
+             "stack=prior boot_status=prior-cinfo-none"
+        exit 1
+    fi
+    # Run 1 meets the prior release's anxnet.device as the existing driver,
+    # which the checks below expect kept as .old.
+    if _p=$(amiga_path Devs/Networks/anxnet.device 2>/dev/null); then
+        DEVS_NETWORKS_BEFORE=present
+        STALE_DEVICE="$_p"
+        STALE_SUM=$(shasum "$_p" | cut -d' ' -f1)
+        STALE_IS_STAGED=0
+    fi
+    rm -rf "$PRIOR_UNPACK"
+    RUN1_MODE=nouserstartup
+fi
+
 # ------------------------------------------------------------------ run 1 ---
 
 echo
 echo "============================================================"
-echo "  1/2  Workbench 3.1 boots, then installs the archive ($LEVEL)"
+echo "  1/2  Workbench $WBVER boots, then installs the archive ($LEVEL)"
 echo "============================================================"
 
 # Record the actual guest's installed-memory tier before the Installer runs.
@@ -2287,8 +2654,13 @@ Else
     Echo >DH0:default-stack.txt micro
   EndIf
 EndIf
+Echo >DH0:default-boot.txt manual
+"'"$UNPACK_AMIGA/AmiNetXDuo/InstallNetProbe"'" MEMORY 4194305
+If VAL $RC EQ 0
+  Echo >DH0:default-boot.txt auto
+EndIf
 C:installdrive >DH0:install-console.txt
-Echo >DH0:.done "$RC"'
+Echo >DH0:.done "$RC"' "$RUN1_MODE"
 
 if [ -n "$FOREIGN_MODE" ]; then
     FOREIGN_TREE_BEFORE=$(product_manifest)
@@ -2578,6 +2950,17 @@ echo "  what the installer put on a real Workbench"
 echo "============================================================"
 
 fail=0
+# The Installer's own boot default, accepted at NOVICE where no page asks:
+# manual on micro or with 4 MB of RAM or less (Install-AmiNetXDuo,
+# STARTUP_DEFAULT).  That install is checked as a boot-disabled one, and the
+# check starts the interface by hand.
+BOOT_DEFAULT=$(tr -d '\r\n' < "$HD/default-boot.txt" 2>/dev/null || echo unknown)
+[ "$(tr -d '\r\n' < "$HD/default-stack.txt" 2>/dev/null)" = micro ] && BOOT_DEFAULT=manual
+echo "boot_default=$BOOT_DEFAULT"
+if [ "$LEVEL" = NOVICE ] && [ "$BOOT_DEFAULT" = manual ] && [ "$DRIVE_RUNS" = 1 ] &&
+   [ -z "$FOREIGN_MODE" ] && [ -z "$PRIOR_ARCHIVE" ]; then
+    NO_BOOT=1
+fi
 if [ "$NETCHECK" = 1 ]; then
     _net=$(sed -n 's/^installdrive: netcheck //p' "$HD/installdrive.txt" 2>/dev/null)
     echo "install_netcheck=${_net:-none} want=$NETCHECK_WANT"
@@ -2973,6 +3356,9 @@ echo "startup_sntp_lines=$SNTP_LINES"
 echo "startup_sntp_after_addnetinterface=$SNTP_AFTER"
 NS_OURS=no
 grep -q 'written by the AmiNetXDuo installer' "$NS_FILE" 2>/dev/null && NS_OURS=yes
+# An update keeps the prior release's file (update_network_startup_kept=),
+# written by that release's installer, not this one.
+[ -z "$PRIOR_ARCHIVE" ] || NS_OURS=kept
 if [ "$NS_OURS" = yes ]; then
     if [ "$SNTP_LINES" != "1" ] || [ "$SNTP_AFTER" != "yes" ]; then
         echo "!! want one 'Run >NIL: <NIL: ${SNTP_PREFIX}sntp $EXPECTED_NTP QUIET'" \
@@ -3005,7 +3391,7 @@ if [ -n "$_hand_name" ]; then
         echo "!! the hand-set hostname did not survive: $(grep '^hostname' "$_res" 2>/dev/null)"
         fail=1
     fi
-elif [ "$EXPERT_CUSTOM" = 0 ] &&
+elif [ "$EXPERT_CUSTOM" = 0 ] && [ -z "$PRIOR_ARCHIVE" ] &&
    grep -q 'written by the AmiNetXDuo' "$_res" 2>/dev/null; then
     if grep -q '^hostname' "$_res" || ! grep -q '^;hostname amiga$' "$_res"; then
         echo "!! name_resolution names the machine; the derived name was wanted"
@@ -3016,7 +3402,8 @@ elif [ "$EXPERT_CUSTOM" = 0 ] &&
 fi
 # A transition's run 2 keeps run 1's file, written for run 1's stack.
 _pif=$(amiga_path "${INST}Devs/NetInterfaces/$EXPECTED_IF" 2>/dev/null || true)
-if grep -q 'written by the AmiNetXDuo' "$_pif" 2>/dev/null &&
+# An update keeps the prior release's file (update_interface_kept=).
+if grep -q 'written by the AmiNetXDuo' "$_pif" 2>/dev/null && [ -z "$PRIOR_ARCHIVE" ] &&
    { [ -z "$TRANSITION" ] || [ "$RECONFIGURE" = 1 ]; }; then
     _want_mdns=NO
     case "$STACK_INSTALLED:$MODEL" in
@@ -3947,6 +4334,70 @@ elif [ "$TERM_LINES" != "0" ]; then
     fail=1
 fi
 
+# AN UPDATE OVER THE PRIOR RELEASE: the edited interface file and the boot
+# file kept byte for byte, each replaced file of the prior release kept as
+# .old, and the candidate's library in LIBS:.
+if [ -n "$PRIOR_ARCHIVE" ]; then
+    _if=$(amiga_path "Devs/NetInterfaces/$EXPECTED_IF" 2>/dev/null || true)
+    if [ -n "$_if" ] && [ "$(shasum < "$_if" | cut -d' ' -f1)" = "$PRIOR_IF_SUM" ]; then
+        echo "update_interface_kept=yes"
+    else
+        echo "update_interface_kept=no"
+        echo "!! the update did not keep the edited DEVS:NetInterfaces/eth0"
+        fail=1
+    fi
+    _ns=$(amiga_path S/Network-Startup 2>/dev/null || true)
+    if [ -n "$PRIOR_NS_SUM" ] && [ -n "$_ns" ] &&
+       [ "$(shasum < "$_ns" | cut -d' ' -f1)" = "$PRIOR_NS_SUM" ]; then
+        echo "update_network_startup_kept=yes"
+    else
+        echo "update_network_startup_kept=no"
+        echo "!! the update did not keep S:Network-Startup"
+        fail=1
+    fi
+    while read -r _f _sum; do
+        [ -n "$_f" ] || continue
+        _key=$(basename "$_f" | tr '.' '_')
+        _old=$(amiga_path "$_f.old" 2>/dev/null || true)
+        if [ -n "$_old" ] && [ "$(shasum < "$_old" | cut -d' ' -f1)" = "$_sum" ]; then
+            echo "update_backup_$_key=yes"
+        else
+            echo "update_backup_$_key=no"
+            echo "!! the prior release's $_f is not kept as $_f.old"
+            fail=1
+        fi
+    done <<< "$PRIOR_LIB_SUMS"
+    # C:.info, gone from C: (tool_icons above), kept byte for byte in a
+    # Backup drawer whose Restore puts it back where nothing replaced it.
+    if [ -n "$PRIOR_CINFO_SUM" ]; then
+        _cbk=""
+        _bkt=$(amiga_path AmiNetXDuo/Backup 2>/dev/null || true)
+        for _b in ${_bkt:+"$_bkt"/*}; do
+            [ -f "$_b/C/.info" ] &&
+                [ "$(shasum < "$_b/C/.info" | cut -d' ' -f1)" = "$PRIOR_CINFO_SUM" ] &&
+                grep -qF 'If NOT EXISTS "C:.info"' "$_b/Restore" 2>/dev/null &&
+                { _cbk=$_b; break; }
+        done
+        if [ -n "$_cbk" ]; then
+            echo "update_backup_cinfo=yes"
+        else
+            echo "update_backup_cinfo=no"
+            echo "!! C:.info is not in a Backup drawer, byte for byte, with its Restore line"
+            fail=1
+        fi
+    fi
+    _lib=$(amiga_path Libs/bsdsocket.library 2>/dev/null || true)
+    _ver=$( { [ -n "$_lib" ] && LC_ALL=C strings "$_lib" | sed -n 's/^.*\$VER: *//p' | head -1; } || true)
+    _want=$(LC_ALL=C strings "$UNPACK/AmiNetXDuo/Libs/bsdsocket.library" |
+            sed -n 's/^.*\$VER: *//p' | head -1)
+    echo "update_from=$PRIOR_VERSION"
+    echo "update_to=${_ver:-none}"
+    if [ -z "$_ver" ] || [ "$_ver" != "$_want" ]; then
+        echo "!! LIBS:bsdsocket.library is not the candidate's ($_want)"
+        fail=1
+    fi
+fi
+
 if [ "$INSTALL_STATUS" != "0" ] || [ "$fail" != "0" ]; then
     echo
     echo "!! the install run did not complete cleanly (status $INSTALL_STATUS)"
@@ -4143,11 +4594,19 @@ fi
 # swaps in a measured private stack before main() runs, and the ReadMe says so,
 # it stays here precisely because a cautious user will still type it: a client
 # that mishandled an already-large Shell stack would fail nowhere else.
+# Not on a machine under 2 MB: with the stack loaded, a 512 KB chip plus
+# 512 KB trapdoor A500 has a largest free block of 179,144 bytes, so every
+# command after Stack 200000 fails to start with rc 10 and no output.
+CHECK_STACK="Stack 200000"
+if [ -n "$CHIPMEM_KB" ] &&
+   [ $(( CHIPMEM_KB + ${SLOWMEM_KB:-0} + ${FASTMEM_MB:-0} * 1024 )) -lt 2048 ]; then
+    CHECK_STACK=""
+fi
 cat > "$HD/S/AmiNetXDuo-Check" <<EOF
 ; Written by install/test/run-workbench.sh.  Nothing here is installed
 ; by AmiNetXDuo, it is what a user would type.
 FailAt 9999
-Stack 200000
+$CHECK_STACK
 $MANUAL_START
 
 Echo >DH0:usercheck.txt "=== 1. the installed network"
