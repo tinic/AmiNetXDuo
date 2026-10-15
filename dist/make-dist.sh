@@ -448,6 +448,11 @@ for tool in NetPrefs NetMeter NetSwitch NetWireless NetWirelessPrefs; do
 done
 # NetSwitch's banner, installed beside it (install/tools/png2ilbm.py).
 cp "$INSTALL/banner/NetSwitch.ilbm" "$TREE/Icons/NetSwitch.ilbm"
+# The icons 1.0.0-beta1 to beta8 copied into C:, which the installer
+# compares byte for byte to remove an earlier release's icons from C:.
+mkdir -p "$TREE/Earlier"
+cp "$INSTALL/earlier/NetPrefs.info.beta8" "$INSTALL/earlier/NetMeter.info.beta8" \
+   "$TREE/Earlier/"
 
 # The ssh and scp clients, when they have been built.  Optional, because they
 # come from clients/ rather than the CMake tree and a plain `cmake --build`
