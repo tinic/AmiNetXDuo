@@ -99,6 +99,7 @@ static struct
     int                focus;
     struct Library    *base;             /* resident stack, NULL when down */
     int                stack_down;
+    int                query_failed;     /* last live-table read failed */
     char               last_error[64];
     ULONG              last_click_row;   /* double-click detection */
     ULONG              last_click_us;
@@ -204,13 +205,25 @@ static void refresh_rows(void)
             ns.row[i].ipv6[0] = '\0';
             ns.row[i].naddrs = 0;
         }
+        ns.query_failed = 0;
         return;
     }
 
     n  = tool_netstatus_query(ns.base, NETSTATUS_INTERFACES, &ns_ifaces,
                               sizeof(ns_ifaces), sizeof(NetStatusInterface));
+    if (n < 0)
+    {
+        /* State and indices answer from this table.  A failed read leaves the
+           rows stale, so keep what is on screen and refuse to act on it rather
+           than pretend every interface detached. */
+        ns.query_failed = 1;
+        return;
+    }
+    ns.query_failed = 0;
     n6 = tool_netstatus_query(ns.base, NETSTATUS_ADDRESSES6, &ns_addr6,
                               sizeof(ns_addr6), sizeof(NetStatusAddress6));
+    if (n6 < 0)
+        n6 = 0;                             /* addresses are cosmetic */
 
     for (i = 0; i < ns.count; i++)
     {
@@ -321,12 +334,12 @@ static unsigned online_count(void)
 
 static BOOL action_enabled(void)
 {
-    return ns.base != NULL && ns.count != 0;
+    return ns.base != NULL && ns.count != 0 && !ns.query_failed;
 }
 
 static BOOL take_all_enabled(void)
 {
-    return ns.base != NULL && online_count() != 0;
+    return ns.base != NULL && !ns.query_failed && online_count() != 0;
 }
 
 /* The one action button: takes the selected interface the other way. */
@@ -365,7 +378,9 @@ static void do_action(void)
         {
             refresh_rows();
             r = &ns.row[ns.selected];
-            if (r->state != NS_STATE_DETACHED)
+            if (ns.query_failed)
+                err = ns_query_failed_hint;
+            else if (r->state != NS_STATE_DETACHED)
                 err = control_switch(NETCTRL_INTERFACE_UP, r->index);
         }
     }
@@ -396,9 +411,10 @@ static BOOL confirm(const char *body, const char *yes)
  * definition file so it cannot be in the list, but skip it defensively. */
 static void take_all_offline(void)
 {
-    char     prompt[96];
-    char     body[160];
-    unsigned n, i;
+    char         prompt[96];
+    char         body[160];
+    const char  *first_err = NULL;
+    unsigned     n, i;
 
     if (!take_all_enabled())
         return;
@@ -413,12 +429,29 @@ static void take_all_offline(void)
     if (!confirm(body, ns_offline_button))
         return;
 
-    for (i = 0; i < ns.count; i++)
-        if (ns.row[i].state == NS_STATE_UP &&
-            tool_stricmp(ns.row[i].name, "loopback") != 0)
-            (VOID)control_switch(NETCTRL_INTERFACE_DOWN, ns.row[i].index);
+    /* The requester blocks this window, not the stack: an Online elsewhere
+       could have come up while it was open.  Re-read and act on the fresh
+       rows, not the state and indices captured before the ask. */
+    refresh_rows();
+    if (ns.query_failed)
+    {
+        set_last_error(ns_query_failed_hint);
+        return;
+    }
 
-    set_last_error(NULL);
+    for (i = 0; i < ns.count; i++)
+    {
+        const char *err;
+
+        if (ns.row[i].state != NS_STATE_UP ||
+            tool_stricmp(ns.row[i].name, "loopback") == 0)
+            continue;
+        err = control_switch(NETCTRL_INTERFACE_DOWN, ns.row[i].index);
+        if (err != NULL && first_err == NULL)
+            first_err = err;
+    }
+
+    set_last_error(first_err);
     refresh_rows();
 }
 
@@ -661,11 +694,22 @@ static void draw_scroller(struct RastPort *rp, const NsLayout *l, int strip_x,
     Draw(rp, strip_x + 3, up_y + h + 3);
 }
 
+/* One panel line, elided to the panel's width so a long address or error
+   cannot run past the box into the window chrome. */
+static void panel_line(struct RastPort *rp, const NsLayout *l, int y,
+                       const char *text)
+{
+    char buf[192];
+
+    ns_fit(measure_text, rp, buf, sizeof(buf),
+           (text != NULL) ? text : "", l->box[NS_L_PANEL].w - 4);
+    text_at(rp, l->box[NS_L_PANEL].x, y, buf);
+}
+
 static void draw_panel(struct RastPort *rp, const NsLayout *l, UBYTE textpen)
 {
     const NsBox *p = &l->box[NS_L_PANEL];
     int          lead = ns.font->tf_YSize + l->panel_lead;
-    int          x = p->x;
     int          line = 0;
     int          ty = p->y + ns.font->tf_Baseline;
     const NsRow *r = (ns.selected < ns.count) ? &ns.row[ns.selected] : NULL;
@@ -674,11 +718,11 @@ static void draw_panel(struct RastPort *rp, const NsLayout *l, UBYTE textpen)
     SetAPen(rp, textpen);
 
     ns_selected_line(buf, sizeof(buf), (r != NULL) ? r->name : "");
-    text_at(rp, x, ty, buf);
+    panel_line(rp, l, ty, buf);
 
-    text_at(rp, x, ty + ++line * lead, (r != NULL) ? r->devunit : "");
+    panel_line(rp, l, ty + ++line * lead, (r != NULL) ? r->devunit : "");
 
-    text_at(rp, x, ty + ++line * lead, ns_addresses_head);
+    panel_line(rp, l, ty + ++line * lead, ns_addresses_head);
 
     if (r != NULL)
     {
@@ -693,7 +737,7 @@ static void draw_panel(struct RastPort *rp, const NsLayout *l, UBYTE textpen)
             else if (i == 0)
                 a = (r->state == NS_STATE_UP) ? ns_panel_pending
                                               : ns_panel_none;
-            text_at(rp, x, ty + ++line * lead, a);
+            panel_line(rp, l, ty + ++line * lead, a);
         }
     }
     else
@@ -705,7 +749,7 @@ static void draw_panel(struct RastPort *rp, const NsLayout *l, UBYTE textpen)
         char ebuf[96];
 
         ns_last_error(ebuf, sizeof(ebuf), ns.last_error);
-        text_at(rp, x, ty + ++line * lead, ebuf);
+        panel_line(rp, l, ty + ++line * lead, ebuf);
     }
 }
 
@@ -745,7 +789,10 @@ static void draw_focus(struct RastPort *rp, const NsLayout *l)
     else
         b = &l->box[NS_L_LIST];
 
-    SetAPen(rp, ns.dri->dri_Pens[DETAILPEN]);
+    /* The 4-colour Workbench palette maps DETAILPEN to the window background,
+       where a focus ring is invisible, so draw it in the selection fill pen
+       instead. */
+    SetAPen(rp, ns.dri->dri_Pens[FILLPEN]);
     Move(rp, b->x - 1, b->y - 1);
     Draw(rp, b->x + b->w, b->y - 1);
     Draw(rp, b->x + b->w, b->y + b->h);
@@ -809,7 +856,9 @@ static void draw_all(void)
         ns_take_all_label(buf, sizeof(buf), online_count());
         draw_button(rp, &l->box[NS_L_ALL], buf, take_all_enabled());
 
-        hint = ns.stack_down ? ns_stack_down_hint : ns_hint_text;
+        hint = ns.stack_down      ? ns_stack_down_hint :
+               ns.query_failed    ? ns_query_failed_hint :
+                                    ns_hint_text;
         SetAPen(rp, textpen);
         text_at(rp, l->box[NS_L_HINT].x,
                 l->box[NS_L_HINT].y + ns.font->tf_Baseline, hint);
@@ -869,11 +918,15 @@ static void focus_next(void)
     ns.focus = f;
 }
 
-static void on_click(WORD mx, WORD my, struct IntuiMessage *msg)
+static void on_click(WORD mx, WORD my, ULONG sec, ULONG mic)
 {
     const NsLayout *l = &ns.layout;
-    ULONG           now = (ULONG)msg->Seconds * 1000000UL +
-                          (ULONG)msg->Micros;
+    ULONG           now = sec * 1000000UL + mic;
+
+    /* IDCMP reports the mouse relative to the window's outer corner, but the
+       layout boxes are inner (GIMMEZEROZERO) relative: drop the border. */
+    mx -= ns.window->BorderLeft;
+    my -= ns.window->BorderTop;
 
     if (in_box(mx, my, &l->box[NS_L_ACTION]) && action_enabled())
     {
@@ -986,6 +1039,8 @@ static void event_loop(void)
             UWORD code = msg->Code;
             WORD  mx = msg->MouseX;
             WORD  my = msg->MouseY;
+            ULONG sec = msg->Seconds;
+            ULONG mic = msg->Micros;
 
             GT_ReplyIMsg(msg);
 
@@ -1019,7 +1074,7 @@ static void event_loop(void)
             else if (cls == IDCMP_MOUSEBUTTONS)
             {
                 if (code == SELECTDOWN)
-                    on_click(mx, my, msg);
+                    on_click(mx, my, sec, mic);
                 draw_all();
             }
             else if (cls == IDCMP_RAWKEY)

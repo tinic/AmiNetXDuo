@@ -10,6 +10,7 @@ const char *const ns_panel_pending     = "online but has no address yet";
 const char *const ns_panel_none        = "(none)";
 const char *const ns_take_all_warning  = "This may drop your own connection.";
 const char *const ns_stack_down_hint   = "Network is not running.";
+const char *const ns_query_failed_hint = "Cannot read interface state.";
 const char *const ns_offline_button    = "Offline";
 
 static size_t ns_len(const char *s)
