@@ -722,7 +722,7 @@ add_dependencies(tools
     tool_traceroute tool_nslookup tool_arp
     tool_tftp tool_whois tool_httpd tool_iperf
     tool_sntp tool_shownetservices
-    tool_shownetstatus tool_netstat tool_ping tool_smoke tool_wbgrab)
+    tool_shownetstatus tool_netstat tool_ping tool_smoke tool_wbgrab tool_nsclose)
 if(CMAKE_CROSSCOMPILING)
     add_dependencies(tools tool_lvo_stub_check)
 endif()
