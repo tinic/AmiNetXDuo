@@ -772,6 +772,14 @@ static void draw_all(void)
     fillpen  = ns.dri->dri_Pens[FILLPEN];
     filltext = ns.dri->dri_Pens[FILLTEXTPEN];
 
+    /* draw_all() repaints the whole window every pass, so clear the inner
+       area first.  Text and glyphs are drawn JAM1 over whatever was there, a
+       moved selection leaves its fill behind on the row it left, and the DOWN
+       glyph is a subset of the UP one, so without this each changed cell shows
+       both the old pixels and the new. */
+    SetAPen(rp, ns.dri->dri_Pens[BACKGROUNDPEN]);
+    RectFill(rp, 0, 0, l->inner_w - 1, l->inner_h - 1);
+
     draw_legend(rp, l, textpen);
 
     draw_bevel(rp, &l->box[NS_L_LIST], TRUE);
@@ -988,8 +996,8 @@ static void event_loop(void)
             else if (cls == IDCMP_REFRESHWINDOW)
             {
                 GT_BeginRefresh(ns.window);
-                GT_EndRefresh(ns.window, TRUE);
                 draw_all();
+                GT_EndRefresh(ns.window, TRUE);
             }
             else if (cls == IDCMP_INTUITICKS)
             {
