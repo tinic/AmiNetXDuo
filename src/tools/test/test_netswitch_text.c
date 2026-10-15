@@ -301,7 +301,7 @@ int main(void)
     check(ns_pending_word[0] != '\0' && ns_none_word[0] != '\0' &&
           ns_panel_pending[0] != '\0' && ns_panel_none[0] != '\0' &&
           ns_take_all_warning[0] != '\0' && ns_stack_down_hint[0] != '\0' &&
-          ns_query_failed_hint[0] != '\0' && ns_state_moved_hint[0] != '\0' &&
+          ns_query_failed_hint[0] != '\0' && ns_state_moved_error[0] != '\0' &&
           ns_offline_button[0] != '\0',
           "the no-number phrases are not empty", ns_pending_word, "");
 
@@ -309,6 +309,10 @@ int main(void)
     hint_width("stack-down hint fits the panel column", ns_stack_down_hint, 200);
     hint_width("query-failed hint fits the panel column", ns_query_failed_hint,
                200);
+
+    /* ns_state_moved_error is deliberately not guarded here: it is drawn in
+       the error line, which ns_fit elides to the panel width, not in the
+       never-elided hint box this test holds to 200 px. */
 
     if (failures == 0) printf("netswitch text: all checks passed\n");
     return failures != 0;

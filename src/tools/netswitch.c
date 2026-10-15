@@ -355,6 +355,7 @@ static void do_action(void)
 {
     NsRow       *r;
     NsDispatchOp op;
+    NsCall       call;
     const char  *err = NULL;
 
     if (!action_enabled())
@@ -376,23 +377,23 @@ static void do_action(void)
     }
 
     r = &ns.row[ns.selected];
-    op = ns_dispatch_action(op, r->state);
-    if (op == NS_OP_NONE)
+    call = ns_resolve_call(op, r->state, r->index);
+    if (call.op == NS_OP_NONE)
     {
         /* The state moved under the click: what the button said no longer
            applies, and acting on the fresh state would reverse the request.
            Refuse; the repaint shows the new action to click. */
-        set_last_error(ns_state_moved_hint);
+        set_last_error(ns_state_moved_error);
         return;
     }
 
-    if (op == NS_OP_DOWN)
+    if (call.op == NS_OP_DOWN)
     {
-        err = control_switch(NETCTRL_INTERFACE_DOWN, r->index);
+        err = control_switch(NETCTRL_INTERFACE_DOWN, call.index);
     }
-    else if (op == NS_OP_UP)
+    else if (call.op == NS_OP_UP)
     {
-        err = control_switch(NETCTRL_INTERFACE_UP, r->index);
+        err = control_switch(NETCTRL_INTERFACE_UP, call.index);
     }
     else
     {

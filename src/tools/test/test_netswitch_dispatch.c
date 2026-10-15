@@ -23,6 +23,18 @@ static void eqi(const char *what, long got, long want)
     }
 }
 
+static void eqcall(const char *what, NsCall got, NsDispatchOp op,
+                   unsigned index)
+{
+    if (got.op != op || got.index != index)
+    {
+        fprintf(stderr,
+                "FAIL: %s: got {op=%d, index=%u}, wanted {op=%d, index=%u}\n",
+                what, (int)got.op, got.index, (int)op, index);
+        failures++;
+    }
+}
+
 /* One definition against a small live table.  The shapes that matter are the
    ones the emulator arm never produces: a definition whose interface was
    removed, a slot another interface has reused, and a padding slot. */
@@ -153,6 +165,19 @@ static void dispatch(void)
     /* No intended action is never promoted to one. */
     eqi("no intended action stays none",
         (long)ns_dispatch_action(NS_OP_NONE, NS_STATE_UP), (long)NS_OP_NONE);
+
+    /* The index routes through too, so the test asserts the whole control
+       call -- DOWN at index 0, UP at index 1 -- and not only the op. */
+    eqcall("Go Offline on eth0 sends DOWN at index 0",
+           ns_resolve_call(NS_OP_DOWN, NS_STATE_UP, 0), NS_OP_DOWN, 0);
+    eqcall("Go Online on eth1 sends UP at index 1",
+           ns_resolve_call(NS_OP_UP, NS_STATE_DOWN, 1), NS_OP_UP, 1);
+    eqcall("a reversed click sends no call",
+           ns_resolve_call(NS_OP_DOWN, NS_STATE_DOWN, 0), NS_OP_NONE, 0);
+    eqcall("an already-up click sends no call",
+           ns_resolve_call(NS_OP_UP, NS_STATE_UP, 3), NS_OP_NONE, 0);
+    eqcall("attach acts by name, index unused",
+           ns_resolve_call(NS_OP_ADD, NS_STATE_DETACHED, 5), NS_OP_ADD, 0);
 }
 
 int main(void)

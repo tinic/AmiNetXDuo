@@ -78,4 +78,21 @@ NsDispatchOp ns_op_for_state(NsState state);
  */
 NsDispatchOp ns_dispatch_action(NsDispatchOp intended, NsState fresh_state);
 
+/* One control call the click resolves to: the op and, for DOWN and UP, the
+   live index it switches.  ADD acts by name, so its index is unused; NONE
+   means the click is refused and no call is made. */
+typedef struct NsCall
+{
+    NsDispatchOp op;
+    unsigned     index;
+} NsCall;
+
+/*
+ * The call to make, reconciled the same way as ns_dispatch_action but with
+ * the index routed through too, so a test can assert the whole call -- DOWN
+ * at index 0, UP at index 2, or no call at all -- rather than only the op.
+ */
+NsCall ns_resolve_call(NsDispatchOp intended, NsState fresh_state,
+                       unsigned index);
+
 #endif

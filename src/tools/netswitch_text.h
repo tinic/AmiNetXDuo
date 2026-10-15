@@ -112,7 +112,9 @@ extern const char *const ns_panel_none;         /* "(none)" */
 extern const char *const ns_take_all_warning;   /* "This may drop your own connection." */
 extern const char *const ns_stack_down_hint;    /* "Network is not running." */
 extern const char *const ns_query_failed_hint;  /* "Cannot read interfaces." */
-extern const char *const ns_state_moved_hint;   /* "Interface changed; click again." */
+/* Drawn in the error line, which is elided to the panel width, so this has no
+   length guard; only the *_hint phrases above share the 23-character hint box. */
+extern const char *const ns_state_moved_error;  /* "Interface changed; click again." */
 extern const char *const ns_offline_button;     /* the confirm's yes: "Offline" */
 
 #endif

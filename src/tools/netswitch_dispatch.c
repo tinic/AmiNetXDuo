@@ -87,3 +87,13 @@ NsDispatchOp ns_dispatch_action(NsDispatchOp intended, NsState fresh_state)
         return intended;
     return NS_OP_NONE;
 }
+
+NsCall ns_resolve_call(NsDispatchOp intended, NsState fresh_state,
+                       unsigned index)
+{
+    NsCall call;
+
+    call.op    = ns_dispatch_action(intended, fresh_state);
+    call.index = (call.op == NS_OP_DOWN || call.op == NS_OP_UP) ? index : 0;
+    return call;
+}
