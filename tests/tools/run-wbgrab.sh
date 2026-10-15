@@ -24,6 +24,13 @@
 # netswitch-live.pfs and -1.pfs ... -9.pfs.  The requester's Cancel is gadget
 # ID 0, which WinClick cannot name (its id is args[1] != 0 ? *(LONG *)args[1]
 # : -1, so 0 means "no gadget given"), so that one click is by coordinates.
+# -s netswitch-takeall is the take-all again with a subject it cannot miss:
+# every definition is attached before the window opens, so every row that is
+# up is one the list can show, and after the confirmed take-all each of them
+# has to have changed inside its own glyph cell -- netswitch-takeall.pfs
+# (before the click) and -1.pfs ... -5.pfs (-3 is the open requester, -4 and
+# -5 are 4 s and 12 s after yes), with the stack's own INTERFACES listing
+# before and after in netswitch-takeall.txt.
 # -s netwireless grabs NetWirelessPrefs against
 # tests/tools/wifistub.c's unit with the NetWireless AppIcon beside it, then
 # its join form and the Known networks window, as netwireless.pfs,
@@ -128,9 +135,9 @@ for seq in "${SEQUENCES[@]}"; do
     }
 done
 for seq in "${SEQUENCES[@]}"; do
-    [ "$seq" = netswitch-live ] || continue
+    case "$seq" in netswitch-live | netswitch-takeall) ;; *) continue ;; esac
     [ -n "$NETBOARD" ] || {
-        say error "netswitch-live needs a board: -N a2065"
+        say error "$seq needs a board: -N a2065"
         say hint "the stack has to come up for an interface to attach, and"
         say hint "the same board runs every other emulator arm (tools/cards.sh)"
         exit 2
@@ -310,7 +317,8 @@ EOF
         done
     fi
 
-    if [ "$seq" = netswitch-live ] && [ -n "$NETBOARD" ]; then
+    if { [ "$seq" = netswitch-live ] || [ "$seq" = netswitch-takeall ]; } &&
+       [ -n "$NETBOARD" ]; then
         cp "$NETSWITCH" "$HD/C/NetSwitch"
         cp "$WINCLICK" "$HD/C/WinClick"
         cp "$WINKEY" "$HD/C/WinKey"
@@ -329,7 +337,10 @@ EOF
         # Nine definitions.  The card has one unit, so the first is the
         # interface that comes up and the rest are skipped by the stack
         # (ami_ns_open_devices keeps what opened and drops the rest): the list
-        # then has both shapes at once, an up row and not-attached ones.
+        # then has both shapes at once, an up row and not-attached ones.  The
+        # take-all arm brings every one of them up instead, so that whatever
+        # six rows the list is showing are all up whatever order the directory
+        # hands them over in.
         mkdir -p "$HD/Devs/NetInterfaces"
         for i in 0 1 2 3 4 5 6 7 8; do
             printf '%s\n' "DEVICE=${SANA2_DEVICE:-a2065.device}" "UNIT=0" \
@@ -535,6 +546,71 @@ C:wbgrab TO DH0:netswitch-live-8.pfs >NIL:
 C:Wait 8
 C:wbgrab TO DH0:netswitch-live-9.pfs >NIL:
 C:ShowNetStatus INTERFACES >>DH0:netswitch-live.txt
+Echo >DH0:.done "$RC"
+EOF
+        ;;
+    netswitch-takeall)
+        # The take-all against a subject the list cannot hide.  The live arm
+        # attaches one interface and lets the click land wherever the
+        # directory's order puts it, so if that one row is one of the three
+        # the six-row list is not showing, the confirmed take-all has nothing
+        # to do on screen and the arm passes while testing nothing.  Here
+        # every definition is attached first, so every row that is up is one
+        # of the six the list is showing whichever six they are, whatever
+        # order the directory hands them over in.  The stack has four
+        # interface slots and AddNetInterface says so (ENOSPC, naming the four
+        # that hold them), so nine definitions leave the first four up; the
+        # click then selects one of them and the others stay unselected
+        # subjects.  After the confirmed take-all every visible row that was
+        # an online disc has to have changed inside its own glyph cell.  Two
+        # Tabs from the selected row reach Take all offline, Return opens its
+        # requester (Cancel is gadget 0, which WinClick cannot name), and
+        # gadget 1 is yes.
+        cat <<'EOF'
+FailAt 9999
+C:Wait 6
+Run >NIL: C:nc -4 -l 4321
+C:Wait 2
+C:AddNetInterface DEVS:NetInterfaces/ETH0 >DH0:netswitch-takeall.txt
+C:Wait 2
+C:AddNetInterface DEVS:NetInterfaces/ETH1 >>DH0:netswitch-takeall.txt
+C:Wait 2
+C:AddNetInterface DEVS:NetInterfaces/ETH2 >>DH0:netswitch-takeall.txt
+C:Wait 2
+C:AddNetInterface DEVS:NetInterfaces/ETH3 >>DH0:netswitch-takeall.txt
+C:Wait 2
+C:AddNetInterface DEVS:NetInterfaces/ETH4 >>DH0:netswitch-takeall.txt
+C:Wait 2
+C:AddNetInterface DEVS:NetInterfaces/ETH5 >>DH0:netswitch-takeall.txt
+C:Wait 2
+C:AddNetInterface DEVS:NetInterfaces/ETH6 >>DH0:netswitch-takeall.txt
+C:Wait 2
+C:AddNetInterface DEVS:NetInterfaces/ETH7 >>DH0:netswitch-takeall.txt
+C:Wait 2
+C:AddNetInterface DEVS:NetInterfaces/ETH8 >>DH0:netswitch-takeall.txt
+C:Wait 12
+C:ShowNetStatus INTERFACES >>DH0:netswitch-takeall.txt
+Run >NIL: C:NetSwitch
+C:Wait 4
+C:WinClick "AmiNetXDuo NetSwitch" X 12 Y 40 TIMES 0 >>DH0:netswitch-takeall.txt
+C:wbgrab TO DH0:netswitch-takeall.pfs >>DH0:netswitch-takeall.txt
+C:WinClick "AmiNetXDuo NetSwitch" X 12 Y 40 >>DH0:netswitch-takeall.txt
+C:Wait 1
+C:wbgrab TO DH0:netswitch-takeall-1.pfs >NIL:
+C:WinKey TAB >>DH0:netswitch-takeall.txt
+C:WinKey TAB >>DH0:netswitch-takeall.txt
+C:Wait 1
+C:wbgrab TO DH0:netswitch-takeall-2.pfs >NIL:
+C:WinKey RETURN >>DH0:netswitch-takeall.txt
+C:Wait 2
+C:WinClick "AmiNetXDuo NetSwitch" X 5 Y 5 TIMES 0 >>DH0:netswitch-takeall.txt
+C:wbgrab TO DH0:netswitch-takeall-3.pfs >NIL:
+C:WinClick "AmiNetXDuo NetSwitch" 1 >>DH0:netswitch-takeall.txt
+C:Wait 4
+C:wbgrab TO DH0:netswitch-takeall-4.pfs >NIL:
+C:Wait 8
+C:wbgrab TO DH0:netswitch-takeall-5.pfs >NIL:
+C:ShowNetStatus INTERFACES >>DH0:netswitch-takeall.txt
 Echo >DH0:.done "$RC"
 EOF
         ;;
