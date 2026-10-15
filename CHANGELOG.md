@@ -7,6 +7,9 @@ are history.
 
 ## Unreleased
 
+- New NetSwitch tool lists every configured interface as online, offline, or
+  not attached, with one button to switch the selected interface and a
+  confirmed Take all offline for the rest.
 - ssh converts between UTF-8 and the system character set in console
   windows, through codesets.library when installed and ISO-8859-1
   otherwise. Server window titles set the console title. CHARSET selects

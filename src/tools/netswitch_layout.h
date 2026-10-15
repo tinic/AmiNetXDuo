@@ -54,7 +54,7 @@ typedef struct NsLayout
     int   name_x, name_chars;       /* elide a longer name */
     int   device_x, device_chars;   /* 18: "anxzz9000.device 0" is the real one */
     int   address_x, address_chars; /* 15: a dotted quad, a v6 elides */
-    int   row_lead;
+    int   panel_lead;               /* between the panel's lines */
 
     /* The panel's text column: the panel box is wider, this is what fits. */
     int   panel_w;

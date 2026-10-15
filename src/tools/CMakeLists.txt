@@ -281,6 +281,13 @@ aminetxduo_add_tool(tool_netsetup NetSetup SOURCES netsetup.c ${TOOLS_DEVDIAG})
 # for live changes rather than growing a second stack-control path.
 aminetxduo_add_tool(tool_netprefs NetPrefs SOURCES netprefs.c netprefs_text.c
     netprefs_layout.c)
+
+# The Workbench switch: a hand-drawn list of every configured interface, one
+# button to take the selected one online or offline, and one guarded action to
+# take everything online down.  Config-only like NetPrefs: it talks to the
+# running stack through the netstatus device protocol and never opens a unit.
+aminetxduo_add_tool(tool_netswitch NetSwitch SOURCES netswitch.c netswitch_text.c
+    netswitch_layout.c)
 aminetxduo_add_tool(tool_netmeter NetMeter NX SOURCES netmeter.c netmeter_fmt.c)
 
 # The Wi-Fi window.  Scans, joins through WirelessManager's
@@ -703,7 +710,7 @@ add_dependencies(tools
     tool_addnetroute tool_deletenetroute
     tool_getnetstatus tool_netshutdown tool_removenetinterface
     tool_configurenetinterface
-    tool_netsetup tool_netprefs tool_netmeter tool_netwireless tool_netwirelessprefs
+    tool_netsetup tool_netprefs tool_netswitch tool_netmeter tool_netwireless tool_netwirelessprefs
     tool_online tool_offline tool_host tool_hostname
     tool_fetch tool_nc tool_telnet tool_nettrace tool_netcapture
     tool_traceroute tool_nslookup tool_arp

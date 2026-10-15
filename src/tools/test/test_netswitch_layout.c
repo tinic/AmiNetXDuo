@@ -105,6 +105,8 @@ static void verify(const Fake *f, const NsLayout *l, unsigned count)
           "strip width disagrees with scroll", l->strip_w, l->scroll);
     check(!l->scroll || l->strip_w >= 8, f->name,
           "strip cannot hold the arrows", l->strip_w, 8);
+    check(l->panel_lead >= 1, f->name, "panel lines would overlap",
+          l->panel_lead, 1);
     check((unsigned)l->rows <= count && (count == 0 || l->rows >= 1), f->name,
           "row count", l->rows, (int)count);
     check(l->scroll == ((unsigned)l->rows < count), f->name,
