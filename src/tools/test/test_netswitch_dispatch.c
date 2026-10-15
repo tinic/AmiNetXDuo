@@ -162,6 +162,14 @@ static void dispatch(void)
     eqi("Online refused once attached down",
         (long)ns_dispatch_action(NS_OP_ADD, NS_STATE_DOWN), (long)NS_OP_NONE);
 
+    /* A target that was removed re-reads detached: neither switch op can send
+       to a stale index, so both are refused. */
+    eqi("Go Offline refused on a removed target",
+        (long)ns_dispatch_action(NS_OP_DOWN, NS_STATE_DETACHED),
+        (long)NS_OP_NONE);
+    eqi("Go Online refused on a removed target",
+        (long)ns_dispatch_action(NS_OP_UP, NS_STATE_DETACHED), (long)NS_OP_NONE);
+
     /* No intended action is never promoted to one. */
     eqi("no intended action stays none",
         (long)ns_dispatch_action(NS_OP_NONE, NS_STATE_UP), (long)NS_OP_NONE);
@@ -178,8 +186,15 @@ static void dispatch(void)
            ns_resolve_call(NS_OP_UP, NS_STATE_UP, 3), NS_OP_NONE, 0);
     eqcall("attach acts by name, index unused",
            ns_resolve_call(NS_OP_ADD, NS_STATE_DETACHED, 5), NS_OP_ADD, 0);
+    eqcall("a removed target sends no switch call",
+           ns_resolve_call(NS_OP_DOWN, NS_STATE_DETACHED, 0), NS_OP_NONE, 0);
 }
 
+/* Coverage boundary: this unit asserts the *decision* (join, gates, error
+   format, op mapping) and the *routing* (which op, which index) of a control
+   call, not the call's side effect.  The actual NETCTRL_INTERFACE_UP/DOWN and
+   add_interface invocations happen in netswitch.c against the live table, and
+   are exercised by the emulator arm, not here. */
 int main(void)
 {
     join();
