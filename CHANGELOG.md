@@ -7,6 +7,8 @@ are history.
 
 ## Unreleased
 
+## 1.0.0-rc1
+
 - New NetSwitch takes network interfaces online and offline from
   Workbench.
 - WatchTasks keeps selection on the same task as the live list reorders
