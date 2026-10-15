@@ -351,6 +351,16 @@ static void do_action(void)
     if (!action_enabled())
         return;
 
+    /* The row's index and state answer from the live table, and another tool
+       can have removed the interface or reused its slot since the last read.
+       Re-read and act on the fresh row, not on the cached index. */
+    refresh_rows();
+    if (ns.query_failed)
+    {
+        set_last_error(ns_query_failed_hint);
+        return;
+    }
+
     r = &ns.row[ns.selected];
 
     if (r->state == NS_STATE_UP)
@@ -413,6 +423,7 @@ static void take_all_offline(void)
 {
     char         prompt[96];
     char         body[160];
+    char         first_buf[sizeof(ns.last_error)];
     const char  *first_err = NULL;
     unsigned     n, i;
 
@@ -448,7 +459,16 @@ static void take_all_offline(void)
             continue;
         err = control_switch(NETCTRL_INTERFACE_DOWN, ns.row[i].index);
         if (err != NULL && first_err == NULL)
-            first_err = err;
+        {
+            /* The first failure is the one reported; say which interface it
+               was, not just the errno text. */
+            tool_copy_string(first_buf, sizeof(first_buf), ns.row[i].name);
+            tool_copy_string(first_buf + text_len(first_buf),
+                             sizeof(first_buf) - text_len(first_buf), ": ");
+            tool_copy_string(first_buf + text_len(first_buf),
+                             sizeof(first_buf) - text_len(first_buf), err);
+            first_err = first_buf;
+        }
     }
 
     set_last_error(first_err);
