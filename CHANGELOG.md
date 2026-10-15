@@ -7,6 +7,10 @@ are history.
 
 ## Unreleased
 
+## 1.0.0-rc1
+
+- Updating from 1.0.0-beta8 removes the icons beta8 left in C:, keeping
+  a copy of C:.info that uninstalling restores.
 - New NetSwitch takes network interfaces online and offline from
   Workbench.
 - WatchTasks keeps selection on the same task as the live list reorders
