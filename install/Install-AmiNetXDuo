@@ -2831,8 +2831,13 @@
           (set BK_SUB "Utilities")
           (set SN_WROTE 1) (set SN_T "SYS:Utilities/NetMeter.info") (P_snap)
           (set SN_WROTE 1) (set SN_T "SYS:Utilities/NetSwitch.info") (P_snap)
+          (set SN_WROTE 1) (set SN_T "SYS:Utilities/NetSwitch.ilbm") (P_snap)
           (set BK_SUB "Tools/Commodities")
           (set SN_WROTE 1) (set SN_T "SYS:Tools/Commodities/NetWireless.info") (P_snap)
+        )
+        (
+          (set BK_SUB "AmiNetXDuo")
+          (set SN_WROTE 1) (set SN_T (tackon D_ROOT "NetSwitch.ilbm")) (P_snap)
         ))
       (set BK_SUB "")
       (P_rem_flush)
@@ -3141,6 +3146,8 @@
     (set BK_SRC "SYS:Utilities/NetSwitch") (P_backup)
     (set BK_ARCH (tackon S_ICONS "NetSwitch.info"))
     (set BK_SRC "SYS:Utilities/NetSwitch.info") (P_backup)
+    (set BK_ARCH (tackon S_ICONS "NetSwitch.ilbm"))
+    (set BK_SRC "SYS:Utilities/NetSwitch.ilbm") (P_backup)
     (set BK_SUB "Tools/Commodities")
     (set BK_ARCH "")
     (set BK_SRC "SYS:Tools/Commodities/NetWireless") (P_backup)
@@ -3169,6 +3176,16 @@
         (set BK_SRC (tackon D_C TL_N)) (P_backup)
         (set TL_I (+ TL_I 1))
       ))
+  ))
+
+; The drawer layout puts NetSwitch's banner in the drawer root: a file of
+; that name there that is not ours is kept the same way.
+(if DRAWER_LAYOUT
+  (
+    (set BK_SUB "AmiNetXDuo")
+    (set BK_ARCH (tackon S_ICONS "NetSwitch.ilbm"))
+    (set BK_SRC (tackon D_ROOT "NetSwitch.ilbm")) (P_backup)
+    (set BK_ARCH "")
   ))
 
 ; Where this run kept anything: the lines that put it back.

@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Convert a PNG to a 16-colour IFF ILBM, ByteRun1-compressed.
+"""Make NetSwitch's banner: a PNG to a 256-colour IFF ILBM, ByteRun1.
 
-    install/tools/png2ilbm.py IN.png OUT.ilbm
+    install/tools/png2ilbm.py IN.png OUT.ilbm [WIDTH HEIGHT]
 
-Requires Pillow only when changing artwork, as compile-glowicons.py does:
-packaging uses the checked-in .ilbm.  An image with more than 16 colours is
-quantised to 16.
+The image is scaled to WIDTH x HEIGHT (default 400x64, hires) and reduced to
+256 colours; NetSwitch dithers it to the screen it opens on.  Requires Pillow
+only when changing artwork, as compile-glowicons.py does: packaging uses the
+checked-in install/banner/NetSwitch.ilbm.
 
 SPDX-License-Identifier: MIT
 """
@@ -15,7 +16,7 @@ import sys
 
 from PIL import Image
 
-PLANES = 4
+PLANES = 8
 
 
 def chunk(kind, payload):
@@ -43,15 +44,17 @@ def byterun1(row):
 
 
 def main(argv):
-    if len(argv) != 3:
+    if len(argv) not in (3, 5):
         print(__doc__.strip(), file=sys.stderr)
         return 2
-    img = Image.open(argv[1]).convert("RGB")
-    img = img.quantize(colors=1 << PLANES, dither=Image.Dither.NONE)
+    size = (int(argv[3]), int(argv[4])) if len(argv) == 5 else (400, 64)
+    img = Image.open(argv[1]).convert("RGB").resize(size, Image.Resampling.LANCZOS)
+    img = img.quantize(colors=1 << PLANES, method=Image.Quantize.MEDIANCUT,
+                       dither=Image.Dither.NONE)
     w, h = img.size
     pix = img.tobytes()
-    pal = (img.getpalette() or [])[:3 * (1 << PLANES)]
-    pal += [0] * (3 * (1 << PLANES) - len(pal))
+    pal = (img.getpalette() or [])[:3 << PLANES]
+    pal += [0] * ((3 << PLANES) - len(pal))
     rowbytes = ((w + 15) // 16) * 2
 
     body = bytearray()
@@ -65,7 +68,7 @@ def main(argv):
             body += byterun1(plane)
 
     # BMHD: w, h, x, y, planes, masking, compression, pad, transparent,
-    # aspect x/y, page w/h.  Hires: 10:11 is the 640x256 PAL aspect.
+    # aspect x/y (10:11, PAL hires), page w/h.
     bmhd = struct.pack(">HHhhBBBBHBBhh", w, h, 0, 0, PLANES, 0, 1, 0, 0,
                        10, 11, w, h)
     form = b"ILBM" + chunk(b"BMHD", bmhd) + chunk(b"CMAP", bytes(pal)) \

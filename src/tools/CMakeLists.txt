@@ -284,7 +284,8 @@ aminetxduo_add_tool(tool_netprefs NetPrefs SOURCES netprefs.c netprefs_text.c
 
 # Takes interfaces online and offline from Workbench, through the same
 # netstatus calls as Online and Offline.
-aminetxduo_add_tool(tool_netswitch NetSwitch SOURCES netswitch.c)
+aminetxduo_add_tool(tool_netswitch NetSwitch SOURCES netswitch.c
+    netswitch_banner.c)
 aminetxduo_add_tool(tool_netmeter NetMeter NX SOURCES netmeter.c netmeter_fmt.c netmeter_tui.c)
 
 # The Wi-Fi window.  Scans, joins through WirelessManager's

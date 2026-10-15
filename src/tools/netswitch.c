@@ -8,6 +8,7 @@
  */
 
 #include "tools.h"
+#include "netswitch_banner.h"
 
 #include <exec/memory.h>
 #include <graphics/gfxbase.h>
@@ -21,11 +22,6 @@
 #include <proto/gadtools.h>
 #include <proto/graphics.h>
 #include <proto/intuition.h>
-#include <datatypes/datatypes.h>
-#include <datatypes/datatypesclass.h>
-#include <datatypes/pictureclass.h>
-#include <intuition/gadgetclass.h>
-#include <proto/datatypes.h>
 
 const char *const tool_name = "NetSwitch";
 
@@ -35,7 +31,6 @@ static const char version_tag[] __attribute__((used)) =
 struct IntuitionBase *IntuitionBase;
 struct GfxBase       *GfxBase;
 struct Library       *GadToolsBase;
-struct Library       *DataTypesBase;
 
 #define NS_MAX_ROWS     16      /* as many interface files as Online scans */
 #define NS_NAME_CHARS   15      /* the live status ABI's name length */
@@ -75,9 +70,8 @@ static struct
     struct Window      *window;
     struct Gadget      *gadgets;
     struct Gadget      *g_list, *g_online, *g_offline;
-    Object             *banner;     /* picture.datatype, or NULL */
-    struct BitMap      *banner_bm;
-    WORD                banner_x, banner_y, banner_w, banner_h;
+    NsBanner            banner;     /* netswitch_banner.c; bm NULL: none */
+    WORD                banner_x, banner_y;
     struct TextAttr     list_ta;    /* fixed width, so the columns line up */
     struct List         list;
     struct Node         nodes[NS_MAX_ROWS];
@@ -405,50 +399,14 @@ static VOID pick_list_font(struct TextAttr *ta, const struct TextFont *bf)
         ns.list_ta = topaz8;
 }
 
-/*
- * The banner over the list, beside the program and remapped to the screen's
- * pens.  Optional: without the file or picture.datatype, or when the window
- * would not fit with it, the window opens without it.
- */
-static VOID free_banner(VOID)
-{
-    if (ns.banner != NULL) DisposeDTObject(ns.banner);
-    ns.banner = NULL;
-    ns.banner_bm = NULL;
-    ns.banner_w = ns.banner_h = 0;
-}
-
-static VOID load_banner(VOID)
-{
-    struct TagItem new[] = {
-        { DTA_SourceType, DTST_FILE }, { DTA_GroupID, GID_PICTURE },
-        { PDTA_Remap, TRUE }, { PDTA_Screen, (ULONG)ns.screen },
-        { TAG_DONE, 0 } };
-    struct BitMapHeader *bmh = NULL;
-    struct TagItem get[] = {
-        { PDTA_DestBitMap, (ULONG)&ns.banner_bm },
-        { PDTA_BitMapHeader, (ULONG)&bmh }, { TAG_DONE, 0 } };
-    struct gpLayout layout = { DTM_PROCLAYOUT, NULL, TRUE };
-
-    if (DataTypesBase == NULL) return;
-    ns.banner = NewDTObjectA((APTR)"PROGDIR:NetSwitch.ilbm", new);
-    if (ns.banner == NULL) return;
-    (VOID)DoDTMethodA(ns.banner, NULL, NULL, (Msg)&layout);
-    if (GetDTAttrsA(ns.banner, get) == 2 && ns.banner_bm != NULL &&
-        bmh != NULL)
-    {
-        ns.banner_w = (WORD)bmh->bmh_Width;
-        ns.banner_h = (WORD)bmh->bmh_Height;
-        return;
-    }
-    free_banner();
-}
-
+/* The banner over the list (netswitch_banner.c), beside the program.
+   Optional: without it, or when the window would not fit with it, the
+   window opens without it. */
 static VOID draw_banner(VOID)
 {
-    if (ns.banner_bm != NULL && ns.window != NULL)
-        BltBitMapRastPort(ns.banner_bm, 0, 0, ns.window->RPort, ns.banner_x,
-                          ns.banner_y, ns.banner_w, ns.banner_h, 0xC0);
+    if (ns.banner.bm != NULL && ns.window != NULL)
+        BltBitMapRastPort(ns.banner.bm, 0, 0, ns.window->RPort, ns.banner_x,
+                          ns.banner_y, ns.banner.w, ns.banner.h, 0xC0);
 }
 
 /* The gadgets and the window, with the buttons in `ta`.  FALSE when it does
@@ -461,7 +419,7 @@ static BOOL make_window(struct TextAttr *ta)
     struct Gadget   *g;
     WORD left, top, list_w, list_h, button_w, button_h, inner_w, inner_h;
     WORD width, height, w;
-    WORD above = ns.banner_h != 0 ? (WORD)(ns.banner_h + MARGIN_Y) : 0;
+    WORD above = ns.banner.h != 0 ? (WORD)(ns.banner.h + MARGIN_Y) : 0;
 
     if ((bf = OpenFont(ta)) == NULL) return FALSE;
     pick_list_font(ta, bf);
@@ -480,7 +438,7 @@ static BOOL make_window(struct TextAttr *ta)
     CloseFont(lf);
 
     if (list_w < 2 * button_w + GAP) list_w = (WORD)(2 * button_w + GAP);
-    if (list_w < ns.banner_w) list_w = ns.banner_w;
+    if (list_w < ns.banner.w) list_w = ns.banner.w;
     button_w = (WORD)((list_w - GAP) / 2);
     inner_w  = (WORD)(list_w + 2 * MARGIN_X);
     inner_h  = (WORD)(above + MARGIN_Y + list_h + GAP / 2 + button_h +
@@ -492,7 +450,7 @@ static BOOL make_window(struct TextAttr *ta)
     width  = (WORD)(inner_w + left + s->WBorRight);
     height = (WORD)(inner_h + top + s->WBorBottom);
     if (width > s->Width || height > s->Height) return FALSE;
-    ns.banner_x = (WORD)(left + (inner_w - ns.banner_w) / 2);
+    ns.banner_x = (WORD)(left + (inner_w - ns.banner.w) / 2);
     ns.banner_y = (WORD)(top + MARGIN_Y);
     top = (WORD)(top + above);
 
@@ -555,10 +513,10 @@ static BOOL open_ui(VOID)
 {
     if ((ns.screen = LockPubScreen(NULL)) == NULL) return FALSE;
     if ((ns.visual = GetVisualInfoA(ns.screen, NULL)) == NULL) return FALSE;
-    load_banner();
-    if (ns.banner != NULL && make_window(ns.screen->Font)) return TRUE;
+    if (ns_banner_load(ns.screen, "PROGDIR:NetSwitch.ilbm", &ns.banner) &&
+        make_window(ns.screen->Font)) return TRUE;
     free_window();
-    free_banner();
+    ns_banner_free(ns.screen, &ns.banner);
     if (make_window(ns.screen->Font)) return TRUE;
     free_window();
     return make_window(&topaz8);
@@ -567,7 +525,7 @@ static BOOL open_ui(VOID)
 static VOID close_ui(VOID)
 {
     free_window();
-    free_banner();
+    ns_banner_free(ns.screen, &ns.banner);
     if (ns.visual != NULL) FreeVisualInfo(ns.visual);
     if (ns.screen != NULL) UnlockPubScreen(NULL, ns.screen);
 }
@@ -679,7 +637,6 @@ static int netswitch_run(void)
     IntuitionBase = (struct IntuitionBase *)OpenLibrary("intuition.library", 37);
     GfxBase = (struct GfxBase *)OpenLibrary("graphics.library", 37);
     GadToolsBase = OpenLibrary("gadtools.library", 37);
-    DataTypesBase = OpenLibrary("datatypes.library", 39);
 
     if (IntuitionBase != NULL && GfxBase != NULL && GadToolsBase != NULL)
     {
@@ -696,7 +653,6 @@ static int netswitch_run(void)
         close_ui();
     }
 
-    if (DataTypesBase != NULL) CloseLibrary(DataTypesBase);
     if (GadToolsBase != NULL) CloseLibrary(GadToolsBase);
     if (GfxBase != NULL) CloseLibrary((struct Library *)GfxBase);
     if (IntuitionBase != NULL) CloseLibrary((struct Library *)IntuitionBase);
