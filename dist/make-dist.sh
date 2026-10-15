@@ -294,13 +294,11 @@ fi
 
 # A command that is BUILT and not listed in CMDS ships nowhere and nothing
 # notices, so anything deliberately not shipped goes in NOT_SHIPPED below with
-# its reason.  ToolsSmoke, wbgrab, nsclose and paysum are harness halves and
-# El3Diag is a bench instrument; none has a use on a user's machine.  nsclose
-# closes the NetSwitch window by title for the emulator interaction arm.
-# InstallSameFile and InstallNetProbe do ship, but beside the Installer rather
-# than in C:; they are installer primitives, not user commands.  The other
-# names do not ship.
-NOT_SHIPPED=(InstallSameFile InstallNetProbe InstallWiFi ToolsSmoke CensusProbe UafProbe HangProbe wbgrab El3Diag paysum nsclose)
+# its reason.  ToolsSmoke, wbgrab and paysum are harness halves and El3Diag is
+# a bench instrument; none has a use on a user's machine.  InstallSameFile and
+# InstallNetProbe do ship, but beside the Installer rather than in C:; they are
+# installer primitives, not user commands.  The other names do not ship.
+NOT_SHIPPED=(InstallSameFile InstallNetProbe InstallWiFi ToolsSmoke CensusProbe UafProbe HangProbe wbgrab El3Diag paysum)
 missing_from_cmds=()
 # What the build system says it builds (src/tools/CMakeLists.txt writes the
 # manifest), not what happens to lie in the directory: a reused build tree

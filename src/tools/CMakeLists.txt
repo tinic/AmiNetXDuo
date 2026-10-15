@@ -420,12 +420,6 @@ aminetxduo_add_tool(tool_whois   whois    SOURCES whois.c toolsock.c toolbudget.
 # every command links and nothing else.
 aminetxduo_add_tool(tool_wbgrab wbgrab SOURCES wbgrab.c)
 
-# nsclose is the close half of the NetSwitch hardware leg: it posts an
-# IDCMP_CLOSEWINDOW to the window titled AmiNetXDuo NetSwitch, so a test can
-# stop a running NetSwitch from a Shell without a mouse.  Like wbgrab it links
-# what every command links and nothing else.
-aminetxduo_add_tool(tool_nsclose nsclose SOURCES nsclose.c)
-
 # CensusProbe is the guest half of the allocation census, and exists only when
 # the census does.  It is not a command anybody installs: it walks the sites an
 # ordinary command walks and then provokes the library expunge, which is the
@@ -722,7 +716,7 @@ add_dependencies(tools
     tool_traceroute tool_nslookup tool_arp
     tool_tftp tool_whois tool_httpd tool_iperf
     tool_sntp tool_shownetservices
-    tool_shownetstatus tool_netstat tool_ping tool_smoke tool_wbgrab tool_nsclose)
+    tool_shownetstatus tool_netstat tool_ping tool_smoke tool_wbgrab)
 if(CMAKE_CROSSCOMPILING)
     add_dependencies(tools tool_lvo_stub_check)
 endif()
