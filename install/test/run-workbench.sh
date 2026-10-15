@@ -1055,8 +1055,28 @@ echo "==> archive $(basename "$ARCHIVE") ($(wc -c < "$ARCHIVE" | tr -d ' ') byte
 # to select before Proceed as "<options>:<gadget id>" (empty: take that page's
 # default).  See installdrive.c on why an option is named by number and not by
 # text: it carries none.
+# THE STACK THE ARCHIVE'S ICON ASKS FOR (DiskObject do_StackSize, offset 74),
+# which is what a double-click gives the Installer.  installdrive's own 40000
+# was 23 KB more than the shipped icon's 16384, and on a 1 MB machine that
+# is not a detail.  $1 is the archive; prints the size, 40000 without an icon.
+icon_stack() {
+    local dir="$ROOT/build/$TAG-icon" n=""
+    rm -rf "$dir"; mkdir -p "$dir"
+    ( cd "$dir" && lha -xqf "$1" AmiNetXDuo/Install-AmiNetXDuo.info ) >/dev/null 2>&1 || true
+    [ -f "$dir/AmiNetXDuo/Install-AmiNetXDuo.info" ] &&
+        n=$(od -An -tu1 -j74 -N4 "$dir/AmiNetXDuo/Install-AmiNetXDuo.info" |
+            awk '{ print (($1 * 256 + $2) * 256 + $3) * 256 + $4 }')
+    rm -rf "$dir"
+    [ -n "$n" ] && [ "$n" -ge 4096 ] || n=40000
+    echo "$n"
+}
+DRIVE_STACK_ARCHIVE=""
+
 build_driver() {
     local out="$1" runs="$2" label="$3" pick="${4:-}"
+    local stack
+    stack=$(icon_stack "${DRIVE_STACK_ARCHIVE:-$ARCHIVE}")
+    echo "installer_stack=$stack"
     local opts=0 gid=0 skip=0
     local page_pause="${AMINETXDUO_INSTALL_PAGE_PAUSE:-0}"
     local pause_options="${AMINETXDUO_INSTALL_PAUSE_OPTIONS:-0}"
@@ -1074,6 +1094,7 @@ build_driver() {
            -DDRIVE_PICK_OPTIONS="$opts" -DDRIVE_PICK_ID="$gid" \
            -DDRIVE_PICK_SKIP="$skip" -DDRIVE_PAGE_PAUSE="$page_pause" \
            -DDRIVE_PAUSE_OPTIONS="$pause_options" \
+           -DDRIVE_INSTALL_STACK="${stack}UL" \
            -DDRIVE_ARCHIVE_DRAWER="\"$UNPACK_AMIGA/AmiNetXDuo\"" -I"$NDK" \
            ${UNINSTALL_DEF:+"$UNINSTALL_DEF"} ${NETCHECK_DEF:+"$NETCHECK_DEF"} \
            -o "$out" "$ROOT/install/test/installdrive.c" || exit 2
@@ -1553,6 +1574,10 @@ esac
 mkdir -p "$HD/S"
 printf '%s\n' "${FOREIGN_LINES[@]}" > "$HD/S/User-Startup"
 chmod 644 "$HD/S/User-Startup"
+# The directory the app's Assign names.  3.2's Assign waits on a requester
+# for a missing one and the boot never reaches the Installer; 3.1's only
+# printed an error.
+mkdir -p "$HD/OtherApp"
 
 # -D: the scripted drawer layout.  The marker remains the unattended path;
 # -g leaves it out and has installdrive select the visible radio option.
@@ -2480,7 +2505,9 @@ if [ -n "$PRIOR_ARCHIVE" ]; then
     chmod -R a+rx "$PRIOR_UNPACK"
     _unpack_amiga=$UNPACK_AMIGA
     UNPACK_AMIGA="DH0:Prior"
+    DRIVE_STACK_ARCHIVE=$PRIOR_ARCHIVE
     build_driver "$ROOT/build/installdrive-$TAG-prior" 1 "" ""
+    DRIVE_STACK_ARCHIVE=""
     UNPACK_AMIGA=$_unpack_amiga
     cp "$ROOT/build/installdrive-$TAG-prior" "$HD/C/installdrive-prior"
     chmod 755 "$HD/C/installdrive-prior"
@@ -3279,6 +3306,9 @@ echo "startup_sntp_lines=$SNTP_LINES"
 echo "startup_sntp_after_addnetinterface=$SNTP_AFTER"
 NS_OURS=no
 grep -q 'written by the AmiNetXDuo installer' "$NS_FILE" 2>/dev/null && NS_OURS=yes
+# An update keeps the prior release's file (update_network_startup_kept=),
+# written by that release's installer, not this one.
+[ -z "$PRIOR_ARCHIVE" ] || NS_OURS=kept
 if [ "$NS_OURS" = yes ]; then
     if [ "$SNTP_LINES" != "1" ] || [ "$SNTP_AFTER" != "yes" ]; then
         echo "!! want one 'Run >NIL: <NIL: ${SNTP_PREFIX}sntp $EXPECTED_NTP QUIET'" \
@@ -3311,7 +3341,7 @@ if [ -n "$_hand_name" ]; then
         echo "!! the hand-set hostname did not survive: $(grep '^hostname' "$_res" 2>/dev/null)"
         fail=1
     fi
-elif [ "$EXPERT_CUSTOM" = 0 ] &&
+elif [ "$EXPERT_CUSTOM" = 0 ] && [ -z "$PRIOR_ARCHIVE" ] &&
    grep -q 'written by the AmiNetXDuo' "$_res" 2>/dev/null; then
     if grep -q '^hostname' "$_res" || ! grep -q '^;hostname amiga$' "$_res"; then
         echo "!! name_resolution names the machine; the derived name was wanted"
@@ -3322,7 +3352,8 @@ elif [ "$EXPERT_CUSTOM" = 0 ] &&
 fi
 # A transition's run 2 keeps run 1's file, written for run 1's stack.
 _pif=$(amiga_path "${INST}Devs/NetInterfaces/$EXPECTED_IF" 2>/dev/null || true)
-if grep -q 'written by the AmiNetXDuo' "$_pif" 2>/dev/null &&
+# An update keeps the prior release's file (update_interface_kept=).
+if grep -q 'written by the AmiNetXDuo' "$_pif" 2>/dev/null && [ -z "$PRIOR_ARCHIVE" ] &&
    { [ -z "$TRANSITION" ] || [ "$RECONFIGURE" = 1 ]; }; then
     _want_mdns=NO
     case "$STACK_INSTALLED:$MODEL" in
@@ -4494,11 +4525,19 @@ fi
 # swaps in a measured private stack before main() runs, and the ReadMe says so,
 # it stays here precisely because a cautious user will still type it: a client
 # that mishandled an already-large Shell stack would fail nowhere else.
+# Not on a machine under 2 MB: with the stack loaded, a 512 KB chip plus
+# 512 KB trapdoor A500 has a largest free block of 179,144 bytes, so every
+# command after Stack 200000 fails to start with rc 10 and no output.
+CHECK_STACK="Stack 200000"
+if [ -n "$CHIPMEM_KB" ] &&
+   [ $(( CHIPMEM_KB + ${SLOWMEM_KB:-0} + ${FASTMEM_MB:-0} * 1024 )) -lt 2048 ]; then
+    CHECK_STACK=""
+fi
 cat > "$HD/S/AmiNetXDuo-Check" <<EOF
 ; Written by install/test/run-workbench.sh.  Nothing here is installed
 ; by AmiNetXDuo, it is what a user would type.
 FailAt 9999
-Stack 200000
+$CHECK_STACK
 $MANUAL_START
 
 Echo >DH0:usercheck.txt "=== 1. the installed network"
