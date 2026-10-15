@@ -2,11 +2,11 @@
 #include "netswitch_text.h"
 
 /* The hint line is drawn with text_at() and is never elided, into the panel
-   column: 200 px of box, plus the 8 px margin, is 208 px to the window's
+   column: 200 px of box, and only 208 px from its left edge to the window's
    content edge.  Measured on a 640x256 screen, 23 characters of
-   ns_stack_down_hint take 181 px of ink and 26 of ns_hint_text take 206 --
-   7 px past the box and 2 px short of the edge.  A phrase here has to stay at
-   23 characters or fewer. */
+   ns_stack_down_hint take 181 px of ink and 26 of ns_hint_text take 206,
+   which is 7 px past the box and leaves 1 px inside the content edge.  A
+   phrase here has to stay at 23 characters or fewer. */
 const char *const ns_hint_text         = "Return / dbl-click toggles";
 const char *const ns_addresses_head    = "Addresses:";
 const char *const ns_no_error          = "none";
