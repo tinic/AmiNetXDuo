@@ -353,15 +353,21 @@ static BOOL take_all_enabled(void)
 /* The one action button: takes the selected interface the other way. */
 static void do_action(void)
 {
-    NsRow      *r;
-    const char *err = NULL;
+    NsRow       *r;
+    NsDispatchOp op;
+    const char  *err = NULL;
 
     if (!action_enabled())
         return;
 
-    /* The row's index and state answer from the live table, and another tool
-       can have removed the interface or reused its slot since the last read.
-       Re-read and act on the fresh row, not on the cached index. */
+    /* The button's caption is the action the click asks for, read from the
+       state on screen.  Hold it before the re-read: the fresh state answers
+       for the index, not for changing what the user asked for. */
+    op = ns_op_for_state(ns.row[ns.selected].state);
+
+    /* The index answers from the live table, and another tool can have
+       removed the interface or reused its slot since the last read.  Re-read
+       and act on the fresh row, not on the cached index. */
     refresh_rows();
     if (ns.query_failed)
     {
@@ -370,12 +376,21 @@ static void do_action(void)
     }
 
     r = &ns.row[ns.selected];
+    op = ns_dispatch_action(op, r->state);
+    if (op == NS_OP_NONE)
+    {
+        /* The state moved under the click: what the button said no longer
+           applies, and acting on the fresh state would reverse the request.
+           Refuse; the repaint shows the new action to click. */
+        set_last_error(ns_state_moved_hint);
+        return;
+    }
 
-    if (r->state == NS_STATE_UP)
+    if (op == NS_OP_DOWN)
     {
         err = control_switch(NETCTRL_INTERFACE_DOWN, r->index);
     }
-    else if (r->state == NS_STATE_DOWN)
+    else if (op == NS_OP_UP)
     {
         err = control_switch(NETCTRL_INTERFACE_UP, r->index);
     }

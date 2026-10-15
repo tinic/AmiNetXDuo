@@ -71,3 +71,19 @@ int ns_can_take_all(int has_base, int query_failed, unsigned online)
 {
     return has_base && !query_failed && online != 0;
 }
+
+NsDispatchOp ns_op_for_state(NsState state)
+{
+    if (state == NS_STATE_UP)
+        return NS_OP_DOWN;
+    if (state == NS_STATE_DOWN)
+        return NS_OP_UP;
+    return NS_OP_ADD;                       /* detached */
+}
+
+NsDispatchOp ns_dispatch_action(NsDispatchOp intended, NsState fresh_state)
+{
+    if (ns_op_for_state(fresh_state) == intended)
+        return intended;
+    return NS_OP_NONE;
+}

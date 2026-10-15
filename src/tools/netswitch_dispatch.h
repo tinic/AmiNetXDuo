@@ -11,6 +11,18 @@
 
 #include <stddef.h>
 
+#include "netswitch_text.h"     /* NsState */
+
+/* The action a row asks for.  DOWN and UP are control_switch calls on the
+   live index; ADD attaches a definition the stack has never got. */
+typedef enum
+{
+    NS_OP_NONE = 0,
+    NS_OP_DOWN,
+    NS_OP_UP,
+    NS_OP_ADD
+} NsDispatchOp;
+
 /*
  * One live interface as the dispatcher sees it: the fields the join and the
  * gates read from NETSTATUS_INTERFACES, kept a plain record (not the ABI
@@ -52,5 +64,18 @@ int ns_can_act(int has_base, unsigned count, int query_failed);
  * Take-all additionally needs at least one interface online.
  */
 int ns_can_take_all(int has_base, int query_failed, unsigned online);
+
+/* The action a state asks for: Go Offline on up, Go Online on down, attach
+   on detached.  This is read from the state on screen, before any re-read. */
+NsDispatchOp ns_op_for_state(NsState state);
+
+/*
+ * The action to take after the re-read, given the action the visible button
+ * asked for and the fresh state.  Returns the intended action when the fresh
+ * state still asks for it, or NS_OP_NONE when the state moved under the
+ * click -- acting on the fresh state then would reverse what the user asked
+ * for, so the click is refused and the repaint shows the new action.
+ */
+NsDispatchOp ns_dispatch_action(NsDispatchOp intended, NsState fresh_state);
 
 #endif

@@ -112,6 +112,7 @@ extern const char *const ns_panel_none;         /* "(none)" */
 extern const char *const ns_take_all_warning;   /* "This may drop your own connection." */
 extern const char *const ns_stack_down_hint;    /* "Network is not running." */
 extern const char *const ns_query_failed_hint;  /* "Cannot read interfaces." */
+extern const char *const ns_state_moved_hint;   /* "Interface changed; click again." */
 extern const char *const ns_offline_button;     /* the confirm's yes: "Offline" */
 
 #endif

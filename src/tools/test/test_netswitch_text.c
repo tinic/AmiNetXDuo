@@ -301,7 +301,8 @@ int main(void)
     check(ns_pending_word[0] != '\0' && ns_none_word[0] != '\0' &&
           ns_panel_pending[0] != '\0' && ns_panel_none[0] != '\0' &&
           ns_take_all_warning[0] != '\0' && ns_stack_down_hint[0] != '\0' &&
-          ns_query_failed_hint[0] != '\0' && ns_offline_button[0] != '\0',
+          ns_query_failed_hint[0] != '\0' && ns_state_moved_hint[0] != '\0' &&
+          ns_offline_button[0] != '\0',
           "the no-number phrases are not empty", ns_pending_word, "");
 
     hint_width("hint fits the panel column", ns_hint_text, 200);

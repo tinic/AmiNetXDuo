@@ -118,11 +118,49 @@ static void gates(void)
     eqi("take-all refuses no stack", ns_can_take_all(0, 0, 1), 0);
 }
 
+/* The click maps a state to the action it asks for, and the re-read only
+   answers for the index: when the fresh state no longer asks for the intended
+   action, the click is refused rather than reversed. */
+static void dispatch(void)
+{
+    eqi("up asks Go Offline", (long)ns_op_for_state(NS_STATE_UP),
+        (long)NS_OP_DOWN);
+    eqi("down asks Go Online", (long)ns_op_for_state(NS_STATE_DOWN),
+        (long)NS_OP_UP);
+    eqi("detached asks Online", (long)ns_op_for_state(NS_STATE_DETACHED),
+        (long)NS_OP_ADD);
+
+    /* The fresh state still asks for the same action: act. */
+    eqi("Go Offline on a still-up row", (long)ns_dispatch_action(NS_OP_DOWN,
+        NS_STATE_UP), (long)NS_OP_DOWN);
+    eqi("Go Online on a still-down row", (long)ns_dispatch_action(NS_OP_UP,
+        NS_STATE_DOWN), (long)NS_OP_UP);
+    eqi("Online on a still-detached row", (long)ns_dispatch_action(NS_OP_ADD,
+        NS_STATE_DETACHED), (long)NS_OP_ADD);
+
+    /* The state moved under the click: the button said one thing, the fresh
+       state says the opposite, and acting on the fresh state would send the
+       reverse of what the user clicked.  Refuse. */
+    eqi("Go Offline refused when already down",
+        (long)ns_dispatch_action(NS_OP_DOWN, NS_STATE_DOWN), (long)NS_OP_NONE);
+    eqi("Go Online refused when already up",
+        (long)ns_dispatch_action(NS_OP_UP, NS_STATE_UP), (long)NS_OP_NONE);
+    eqi("Online refused once attached up",
+        (long)ns_dispatch_action(NS_OP_ADD, NS_STATE_UP), (long)NS_OP_NONE);
+    eqi("Online refused once attached down",
+        (long)ns_dispatch_action(NS_OP_ADD, NS_STATE_DOWN), (long)NS_OP_NONE);
+
+    /* No intended action is never promoted to one. */
+    eqi("no intended action stays none",
+        (long)ns_dispatch_action(NS_OP_NONE, NS_STATE_UP), (long)NS_OP_NONE);
+}
+
 int main(void)
 {
     join();
     named_error();
     gates();
+    dispatch();
 
     if (failures == 0) printf("netswitch dispatch: all checks passed\n");
     return failures != 0;
