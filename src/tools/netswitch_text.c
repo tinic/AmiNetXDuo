@@ -178,28 +178,40 @@ int ns_elide(char *out, size_t cap, const char *text, unsigned chars)
     size_t i;
 
     if (out == NULL || cap == 0) return 0;
-    out[0] = '\0';
 
     if (len <= chars)
     {
         size_t used = 0;
-        return append(out, cap, &used, text);
-    }
 
-    /* "..." costs three of the column: the point of eliding is to say more
-       with less, and a limit too small for that keeps the text instead. */
-    keep = chars > 3 ? chars - 3 : chars;
-    if (cap <= keep + 3) return 0;
-
-    for (i = 0; i < keep; i++) out[i] = text[i];
-    if (chars > 3)
-    {
-        out[keep] = '.';
-        out[keep + 1] = '.';
-        out[keep + 2] = '.';
-        out[keep + 3] = '\0';
+        if (append(out, cap, &used, text)) return 1;
     }
     else
-        out[keep] = '\0';
-    return 1;
+    {
+        /* "..." costs three of the column: the point of eliding is to say
+           more with less, and a limit too small for that keeps the text
+           instead. */
+        keep = chars > 3 ? chars - 3 : chars;
+        if (cap > keep + 3)
+        {
+            for (i = 0; i < keep; i++) out[i] = text[i];
+            if (chars > 3)
+            {
+                out[keep] = '.';
+                out[keep + 1] = '.';
+                out[keep + 2] = '.';
+                out[keep + 3] = '\0';
+            }
+            else
+                out[keep] = '\0';
+            return 1;
+        }
+    }
+
+    /* Both branches write out from the front, so nothing here clears out
+       before reading text: the address column elides in place, and wiping the
+       buffer first would leave it empty and still report success.  A refusal
+       leaves an empty column, which says less than the text and never more
+       than the column. */
+    out[0] = '\0';
+    return 0;
 }

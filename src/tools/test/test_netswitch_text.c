@@ -144,6 +144,26 @@ int main(void)
     check(!ns_elide(small, sizeof(small), "abcdef", 6), "elide refuses", small,
           "");
 
+    /* In place, which is how the list's address column gets its cell: the
+       formatter writes the address into the buffer and the elider cuts it
+       there.  An elider that cleared the buffer before reading it would hand
+       back an empty column and still say it had succeeded. */
+    check(ns_list_address(buf, sizeof(buf), NULL, NULL, NS_STATE_DETACHED),
+          "address in place", buf, "");
+    check(ns_elide(buf, sizeof(buf), buf, 15), "elide in place", buf, "");
+    eq("elide in place short", buf, "-");
+    check(ns_list_address(buf, sizeof(buf), "fe80::211:22ff:fe33:4455", NULL,
+                          NS_STATE_UP), "address in place long", buf, "");
+    check(ns_elide(buf, sizeof(buf), buf, 15), "elide in place long", buf, "");
+    eq("elide in place long", buf, "fe80::211:22...");
+    check(strlen(buf) == 15, "elide in place keeps the column", buf,
+          "15 chars");
+    check(ns_list_address(buf, sizeof(buf), "", "", NS_STATE_UP),
+          "address in place pending", buf, "");
+    check(ns_elide(buf, sizeof(buf), buf, 18), "elide in place pending", buf,
+          "");
+    eq("elide in place pending", buf, "no address yet");
+
     refuses("selected", wrap_selected, "eth0");
     refuses("error", wrap_error, "boom");
 

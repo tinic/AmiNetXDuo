@@ -67,8 +67,10 @@ int ns_take_all_label(char *out, size_t cap, unsigned count);
 int ns_take_all_prompt(char *out, size_t cap, unsigned count);
 
 /* Cuts text to at most chars characters, ending it with "...".  A limit
-   under four characters truncates without the ellipsis.  Returns 1, or 0
-   when cap cannot hold what the limit allows. */
+   under four characters truncates without the ellipsis.  Safe in place --
+   out may be text, which is how netswitch.c formats a list column.  Returns
+   1, or 0 when cap cannot hold what the limit allows; a refusal leaves out
+   empty. */
 int ns_elide(char *out, size_t cap, const char *text, unsigned chars);
 
 /*
