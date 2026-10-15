@@ -4380,6 +4380,7 @@ if [ -n "$PRIOR_ARCHIVE" ]; then
         done
         if [ -n "$_cbk" ]; then
             echo "update_backup_cinfo=yes"
+            UPDATE_CINFO_BACKUP=$_cbk
         else
             echo "update_backup_cinfo=no"
             echo "!! C:.info is not in a Backup drawer, byte for byte, with its Restore line"
@@ -4444,6 +4445,104 @@ if [ "$CONFIG_ONLY" = "1" ]; then
          "driver=$_result_driver card_config=$CARD_CONFIG" \
          "stack=$STACK_INSTALLED boot_status=not-run"
     exit 0
+fi
+
+# ------------------------------------------ the uninstall legs, after an update --
+#
+# AMINETXDUO_UNINSTALL_LEGS=1 with AMINETXDUO_PRIOR_ARCHIVE: the updated drive,
+# before anything boots the candidate's stack, is uninstalled twice, each from
+# its own copy and in its own boot (the -u installdrive, no install runs).
+#   restore  C:.info comes back as the prior release had it, byte for byte;
+#            C:NetPrefs.info and C:NetMeter.info stay absent; NotRestored
+#            does not name C:.info.
+#   replace  a different C:.info written after the update stays; NotRestored
+#            names it; Backup/<N>/C/.info still holds the prior bytes.
+# Then the update's drive is put back and the power cycle below runs on it.
+UPDATE_CINFO_BACKUP=${UPDATE_CINFO_BACKUP:-}
+if [ "${AMINETXDUO_UNINSTALL_LEGS:-0}" = 1 ]; then
+    if [ -z "$PRIOR_ARCHIVE" ] || [ -z "$PRIOR_CINFO_SUM" ] || [ -z "$UPDATE_CINFO_BACKUP" ]; then
+        echo "!! AMINETXDUO_UNINSTALL_LEGS needs an update whose C:.info went to Backup"
+        echo "workbench_e2e=FAIL board=$BOARD model=$MODEL driver=$SANA2_DRIVER" \
+             "stack=$STACK_INSTALLED boot_status=uninstall-legs-unprepared"
+        exit 1
+    fi
+    UNINSTALL_DEF='-DDRIVE_UNINSTALL="SYS:AmiNetXDuo/Uninstall-AmiNetXDuo"'
+    build_driver "$ROOT/build/installdrive-$TAG-uninstall" 0 "" ""
+    UNINSTALL_DEF=""
+    _legn=$(basename "$UPDATE_CINFO_BACKUP")
+    echo "uninst_backup_drawer=$_legn"
+    LEG_SNAP="$ROOT/build/testhd-$TAG.updated"
+    _startup_sum=$STARTUP_SUM
+    rm -rf "$LEG_SNAP"
+    cp -a "$HD" "$LEG_SNAP"
+    legs_ok=1
+    _yn() { if "$@"; then echo yes; else echo no; fi; }
+    _sum() { [ -f "$1" ] && shasum < "$1" | cut -d' ' -f1; }
+    for _leg in restore replace; do
+        echo
+        echo "============================================================"
+        echo "  U-$_leg  uninstalling the updated drive"
+        echo "============================================================"
+        rm -rf "$HD"
+        cp -a "$LEG_SNAP" "$HD"
+        cp "$ROOT/build/installdrive-$TAG-uninstall" "$HD/C/installdrive"
+        chmod 755 "$HD/C/installdrive"
+        rm -f "$HD/install-scenario.txt" "$HD/installdrive.txt" \
+              "$HD/uninstall-notrestored.txt" "$HD/uninstall-log.txt"
+        _cdir=$(amiga_path C)
+        _new=""
+        if [ "$_leg" = replace ]; then
+            printf 'replacement C:.info written after the update\n' > "$_cdir/.info"
+            _new=$(_sum "$_cdir/.info")
+            echo "uninst_replace_new=$_new"
+            [ "$_new" != "$PRIOR_CINFO_SUM" ] || { echo "!! the replacement equals the prior bytes"; legs_ok=0; }
+        fi
+        startup_with 'FailAt 9999
+C:installdrive >DH0:uninstall-console.txt
+Echo >DH0:.done "$RC"' nouserstartup
+        boot "uninstall-$_leg" "$INSTALL_TIMEOUT"
+        _st=$BOOT_STATUS
+        _cdir=$(amiga_path C)
+        _ci=$(_sum "$_cdir/.info" || true)
+        _nr="$HD/uninstall-notrestored.txt"
+        _bk="$HD/AmiNetXDuo/Backup/$_legn/C/.info"
+        echo "---- U-$_leg installdrive ----"
+        cat "$HD/installdrive.txt" 2>/dev/null || echo "(none)"
+        echo "---- U-$_leg NotRestored ----"
+        cat "$_nr" 2>/dev/null || echo "(none)"
+        _p="uninst_${_leg}"
+        _r1=$(_yn [ "$_st" = 0 ]);                     echo "${_p}_status=$_st ok=$_r1"
+        _r2=$(_yn [ ! -e "$_cdir/NetPrefs.info" ]);    echo "${_p}_c_netprefs=$_r2"
+        _r3=$(_yn [ ! -e "$_cdir/NetMeter.info" ]);    echo "${_p}_c_netmeter=$_r3"
+        if [ "$_leg" = restore ]; then
+            _r4=$(_yn [ -n "$_ci" ]);                  echo "${_p}_cinfo_present=$_r4"
+            _r5=$(_yn [ "$_ci" = "$PRIOR_CINFO_SUM" ]); echo "${_p}_cinfo_sum=$_r5"
+            _r6=$(_yn eval '[ ! -f "$_nr" ] || ! grep -qF "C:.info" "$_nr"')
+            echo "${_p}_notrestored=$_r6"
+        else
+            _r4=$(_yn eval '[ -n "$_ci" ] && [ "$_ci" = "$_new" ]'); echo "${_p}_cinfo_sum=$_r4"
+            _r5=$(_yn grep -qxF "C:.info is not the one in SYS:AmiNetXDuo/Backup/$_legn/C/.info" "$_nr")
+            echo "${_p}_notrestored=$_r5"
+            _r6=$(_yn [ "$(_sum "$_bk" || true)" = "$PRIOR_CINFO_SUM" ])
+            echo "${_p}_backup_kept=$_r6"
+        fi
+        case " $_r1 $_r2 $_r3 $_r4 $_r5 $_r6 " in
+            *" no "*) legs_ok=0; echo "uninst_${_leg}=FAIL" ;;
+            *)        echo "uninst_${_leg}=PASS" ;;
+        esac
+        _keep="$ROOT/build/$TAG-uninstall-$_leg"
+        rm -rf "$_keep"; mkdir -p "$_keep"
+        cp "$HD"/*.txt "$_keep/" 2>/dev/null || true
+    done
+    rm -rf "$HD"
+    mv "$LEG_SNAP" "$HD"
+    if [ "$legs_ok" != 1 ]; then
+        echo "workbench_e2e=FAIL board=$BOARD model=$MODEL driver=$SANA2_DRIVER" \
+             "stack=$STACK_INSTALLED boot_status=uninstall-legs"
+        exit 1
+    fi
+    # The drive is the update's again; so is the startup it was checked with.
+    STARTUP_SUM=$_startup_sum
 fi
 
 # ------------------------------------------------------------------ run 2 ---
