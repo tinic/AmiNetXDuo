@@ -287,7 +287,7 @@ aminetxduo_add_tool(tool_netprefs NetPrefs SOURCES netprefs.c netprefs_text.c
 # take everything online down.  Config-only like NetPrefs: it talks to the
 # running stack through the netstatus device protocol and never opens a unit.
 aminetxduo_add_tool(tool_netswitch NetSwitch SOURCES netswitch.c netswitch_text.c
-    netswitch_layout.c)
+    netswitch_layout.c netswitch_dispatch.c)
 aminetxduo_add_tool(tool_netmeter NetMeter NX SOURCES netmeter.c netmeter_fmt.c netmeter_tui.c)
 
 # The Wi-Fi window.  Scans, joins through WirelessManager's
@@ -1040,6 +1040,19 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(test_netswitch_layout PRIVATE -Wall -Wextra)
     set_target_properties(test_netswitch_layout PROPERTIES C_STANDARD 11)
 
+    # NetSwitch's control dispatch: which interface an action touches, and
+    # what it says when it cannot.  The emulator arm never fails a live-table
+    # read or removes an interface mid-action, so those fault paths are driven
+    # here -- a failed read refuses, a removed interface or a reused slot
+    # joins by name, and a partial bulk failure names the interface.
+    add_executable(test_netswitch_dispatch
+        test/test_netswitch_dispatch.c
+        netswitch_dispatch.c)
+    target_include_directories(test_netswitch_dispatch PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    target_compile_options(test_netswitch_dispatch PRIVATE -Wall -Wextra)
+    set_target_properties(test_netswitch_dispatch PROPERTIES C_STANDARD 11)
+
     # NetWireless edits WirelessManager's Wireless.prefs, which users also
     # edit by hand: an unchanged save is byte for byte, an edit touches only
     # its lines.  The interface file's DEVICE and UNIT come from the same
@@ -1319,6 +1332,7 @@ if(NOT CMAKE_CROSSCOMPILING)
     add_test(NAME netprefs_font_layout COMMAND test_netprefs_layout)
     add_test(NAME netswitch_state_text COMMAND test_netswitch_text)
     add_test(NAME netswitch_font_layout COMMAND test_netswitch_layout)
+    add_test(NAME netswitch_dispatch COMMAND test_netswitch_dispatch)
     add_test(NAME netmeter_arithmetic COMMAND test_netmeter_fmt)
     add_test(NAME netprobe_pcmcia_kind COMMAND test_netprobe_card)
     add_test(NAME netwireless_prefs_text COMMAND test_netwireless_prefs)

@@ -516,7 +516,10 @@ host_test_targets() { # builddir
 #      574 with netswitch_font_layout: NetSwitch's window from the gadget
 #      font's metrics at PAL and NTSC, and the fallback for a font too wide for
 #      640 (all hosts).
-HOST_TESTS_EXPECTED=574
+#      575 with netswitch_dispatch: NetSwitch's control dispatch -- a failed
+#      read, a removed interface and a reused slot join by name, and a bulk
+#      failure names the interface (all hosts).
+HOST_TESTS_EXPECTED=575
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,

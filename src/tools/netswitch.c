@@ -22,6 +22,7 @@
 #include "tools.h"
 #include "netswitch_text.h"
 #include "netswitch_layout.h"
+#include "netswitch_dispatch.h"
 #include "aminetxduo/version.h"
 
 #include <exec/libraries.h>
@@ -192,8 +193,10 @@ static void enumerate_interfaces(void)
  * definition reads as detached: it is configured, and nothing is running. */
 static void refresh_rows(void)
 {
-    LONG     n, n6;
-    unsigned i;
+    LONG        n, n6;
+    unsigned    i, live_count;
+    LONG        j;
+    NsLive      live_view[NX_MAX_PHYSICAL_INTERFACES];
 
     if (ns.base == NULL)
     {
@@ -225,11 +228,26 @@ static void refresh_rows(void)
     if (n6 < 0)
         n6 = 0;                             /* addresses are cosmetic */
 
+    /* One view of the live table, parallel to ns_ifaces.e, for the name-based
+       join in netswitch_dispatch.c.  It keeps the padding slots too, so its
+       positions still line up with the entries that hold the addresses. */
+    live_count = 0;
+    for (j = 0; n > 0 && j < n && j < (LONG)NX_MAX_PHYSICAL_INTERFACES; j++)
+    {
+        const NetStatusInterface *e = &ns_ifaces.e[j];
+
+        live_view[live_count].name  = e->nsi_Name;
+        live_view[live_count].named = (e->nsi_Flags & NETSTATUS_IF_NAMED) != 0;
+        live_view[live_count].index = e->nsi_Index;
+        live_view[live_count].up    = (e->nsi_Flags & NETSTATUS_IF_LINKUP) != 0;
+        live_count++;
+    }
+
     for (i = 0; i < ns.count; i++)
     {
-        NsRow                  *r = &ns.row[i];
-        const NetStatusInterface *nsi = NULL;
-        LONG                    j;
+        NsRow                   *r = &ns.row[i];
+        const NetStatusInterface *nsi;
+        LONG                     match;
 
         r->state = NS_STATE_DETACHED;
         r->index = 0xFFFF;
@@ -237,29 +255,18 @@ static void refresh_rows(void)
         r->ipv6[0] = '\0';
         r->naddrs = 0;
 
-        for (j = 0; n > 0 && j < n &&
-                    j < (LONG)NX_MAX_PHYSICAL_INTERFACES; j++)
-        {
-            const NetStatusInterface *e = &ns_ifaces.e[j];
-
-            if (!(e->nsi_Flags & NETSTATUS_IF_NAMED))
-                continue;
-            if (tool_stricmp(e->nsi_Name, r->name) != 0)
-                continue;
-            nsi = e;
-            break;
-        }
-        if (nsi == NULL)
+        match = ns_join_live(r->name, live_view, live_count);
+        if (match < 0)
             continue;
+        nsi = &ns_ifaces.e[match];
 
-        r->index = nsi->nsi_Index;
+        r->index = (UWORD)live_view[match].index;
         /*
          * NETSTATUS_IF_LINKUP, not NETSTATUS_IF_ONLINE: LINKUP is the flag
          * UP and DOWN set (onoff.c:300).  The SANA-II shim's own online flag
          * is a layer below and does not follow in step.
          */
-        r->state = (nsi->nsi_Flags & NETSTATUS_IF_LINKUP) ? NS_STATE_UP
-                                                           : NS_STATE_DOWN;
+        r->state = live_view[match].up ? NS_STATE_UP : NS_STATE_DOWN;
 
         if (nsi->nsi_Address != 0)
         {
@@ -334,12 +341,13 @@ static unsigned online_count(void)
 
 static BOOL action_enabled(void)
 {
-    return ns.base != NULL && ns.count != 0 && !ns.query_failed;
+    return (BOOL)ns_can_act(ns.base != NULL, ns.count, ns.query_failed);
 }
 
 static BOOL take_all_enabled(void)
 {
-    return ns.base != NULL && !ns.query_failed && online_count() != 0;
+    return (BOOL)ns_can_take_all(ns.base != NULL, ns.query_failed,
+                                 online_count());
 }
 
 /* The one action button: takes the selected interface the other way. */
@@ -462,11 +470,7 @@ static void take_all_offline(void)
         {
             /* The first failure is the one reported; say which interface it
                was, not just the errno text. */
-            tool_copy_string(first_buf, sizeof(first_buf), ns.row[i].name);
-            tool_copy_string(first_buf + text_len(first_buf),
-                             sizeof(first_buf) - text_len(first_buf), ": ");
-            tool_copy_string(first_buf + text_len(first_buf),
-                             sizeof(first_buf) - text_len(first_buf), err);
+            ns_named_error(first_buf, sizeof(first_buf), ns.row[i].name, err);
             first_err = first_buf;
         }
     }
