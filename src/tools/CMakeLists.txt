@@ -993,6 +993,29 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(test_netprefs_layout PRIVATE -Wall -Wextra)
     set_target_properties(test_netprefs_layout PROPERTIES C_STANDARD 11)
 
+    # NetSwitch says which of the three states each interface is in, and what
+    # each button will do about it.  Words and numbers only, so every one of
+    # them is checked here rather than read off a screen.
+    add_executable(test_netswitch_text
+        test/test_netswitch_text.c
+        netswitch_text.c)
+    target_include_directories(test_netswitch_text PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    target_compile_options(test_netswitch_text PRIVATE -Wall -Wextra)
+    set_target_properties(test_netswitch_text PROPERTIES C_STANDARD 11)
+
+    # NetSwitch's window is laid out from the gadget font's metrics, and the
+    # list scrolls to keep the selection on the screen.  topaz 8, 11 and a
+    # proportional 13 at 640 wide and at NTSC's 200 high; a font too wide for
+    # the screen reports that it does not fit.
+    add_executable(test_netswitch_layout
+        test/test_netswitch_layout.c
+        netswitch_layout.c)
+    target_include_directories(test_netswitch_layout PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    target_compile_options(test_netswitch_layout PRIVATE -Wall -Wextra)
+    set_target_properties(test_netswitch_layout PROPERTIES C_STANDARD 11)
+
     # NetWireless edits WirelessManager's Wireless.prefs, which users also
     # edit by hand: an unchanged save is byte for byte, an edit touches only
     # its lines.  The interface file's DEVICE and UNIT come from the same
@@ -1270,6 +1293,8 @@ if(NOT CMAKE_CROSSCOMPILING)
     add_test(NAME netprefs_preserves_text COMMAND test_netprefs_text)
     add_test(NAME devicehome_rewrites_only_ours COMMAND test_devicehome)
     add_test(NAME netprefs_font_layout COMMAND test_netprefs_layout)
+    add_test(NAME netswitch_state_text COMMAND test_netswitch_text)
+    add_test(NAME netswitch_font_layout COMMAND test_netswitch_layout)
     add_test(NAME netmeter_arithmetic COMMAND test_netmeter_fmt)
     add_test(NAME netprobe_pcmcia_kind COMMAND test_netprobe_card)
     add_test(NAME netwireless_prefs_text COMMAND test_netwireless_prefs)

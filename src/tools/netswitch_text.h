@@ -1,0 +1,81 @@
+/*
+ * NetSwitch: the words its window shows, and the rules that pick them.  No
+ * AmigaOS calls, so test/test_netswitch_text.c runs it on the build host.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#ifndef AMINETXDUO_NETSWITCH_TEXT_H
+#define AMINETXDUO_NETSWITCH_TEXT_H
+
+#include <stddef.h>
+
+/*
+ * The three states, read from NETSTATUS_INTERFACES' nsi_Flags: a definition
+ * with no live interface, a live one that is down, and one that is up.  A
+ * misspelt interface file and an offline one are not the same thing, and
+ * ShowNetStatus answers the first as "offline" (shownetstatus.c:1330) --
+ * which is the answer this app exists not to give.
+ */
+typedef enum NsState
+{
+    NS_STATE_DETACHED = 0,      /* configured; the stack has no such interface */
+    NS_STATE_DOWN,              /* attached, not online */
+    NS_STATE_UP                 /* attached and online */
+} NsState;
+
+/* The word for a state: "Online", "Offline", "Not attached". */
+const char *ns_state_word(NsState state);
+
+/* The action button's caption for the selected row.  Going online attaches
+   when nothing is attached: Online only up/downs an interface the stack
+   already has (onoff.c:368), and answers ENXIO otherwise. */
+const char *ns_action_word(NsState state);
+
+/*
+ * The line under the list: "3 interfaces | 1 online 1 offline 1 not
+ * attached".  All three counts are always there, so the line's shape does not
+ * change as interfaces come and go; only "interface" is singular in one.
+ * Returns 1, or 0 when cap is too small.
+ */
+int ns_status_line(char *out, size_t cap, unsigned total, unsigned online,
+                   unsigned down, unsigned detached);
+
+/*
+ * The address cell of one list row.  IPv4 wins when the interface has it;
+ * the first IPv6 stands in otherwise (the caller elides it to the column).
+ * Up with neither is not the same as down: DHCP can still be running, so it
+ * says so rather than showing the dash a down interface shows.
+ */
+int ns_list_address(char *out, size_t cap, const char *ipv4, const char *ipv6,
+                    NsState state);
+
+/* The panel's first line: "Selected: eth0". */
+int ns_selected_line(char *out, size_t cap, const char *name);
+
+/* "Last error: none" or the error the last action got.  A GUI that hides
+   why a button did nothing is worse than the CLI it replaces. */
+int ns_last_error(char *out, size_t cap, const char *error);
+
+/*
+ * The take-all button and the confirmation behind it.  This can cut the
+ * operator's own link -- the ssh or wifi door into the machine -- so it
+ * carries the count and asks.  Returns 1, or 0 when cap is too small.
+ */
+int ns_take_all_label(char *out, size_t cap, unsigned count);
+int ns_take_all_prompt(char *out, size_t cap, unsigned count);
+
+/* Cuts text to at most chars characters, ending it with "...".  A limit
+   under four characters truncates without the ellipsis.  Returns 1, or 0
+   when cap cannot hold what the limit allows. */
+int ns_elide(char *out, size_t cap, const char *text, unsigned chars);
+
+/* The phrases with no numbers in them. */
+extern const char *const ns_legend_text;        /* "online offline not attached" */
+extern const char *const ns_hint_text;          /* "Return / dbl-click toggles" */
+extern const char *const ns_addresses_head;     /* "Addresses:" */
+extern const char *const ns_no_error;           /* "none" */
+extern const char *const ns_pending_word;       /* "no address yet" */
+extern const char *const ns_none_word;          /* "-" */
+
+#endif
