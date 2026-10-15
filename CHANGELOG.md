@@ -12,6 +12,25 @@ are history.
   confirmed Take all offline for the rest. Its columns are fitted to the
   measured width of the gadget font, so a wide glyph or a proportional font
   cannot run one column's text into the next.
+- WatchTasks keeps selection on the same task as the live list reorders
+  and asks for confirmation before sending Ctrl-C.
+- New ShowTasks and WatchTasks commands list Exec tasks and DOS
+  processes, and show live CPU and memory use per task in a Shell.
+- With QUIET, AddNetInterface, AddNetRoute, DeleteNetRoute,
+  ConfigureNetInterface and RemoveNetInterface print nothing and return
+  5 on any failure, as in Roadshow.
+- arp uses the AmigaDOS Command Reference template: SET host mac with
+  TEMP, DELETE, ALL or -a, and FILE; host names are resolved. The
+  arp <address> SET <mac> form is removed.
+- ping accepts -v, which shows ICMP errors, and DONTROUTE; traceroute
+  takes the packet size without its keyword.
+- AddNetInterface waits 60 seconds by default and starts from an
+  interface's Workbench icon, honouring its QUIET, TIMEOUT and PRI
+  tool types.
+- ConfigureNetInterface accepts every AmigaDOS Command Reference keyword.
+  ALIASADDR and DELETEADDR add and remove additional IPv4 addresses;
+  ADDRESS=DHCP and CONFIGURE=AUTO are accepted; a failed ONLINE
+  returns 5.
 - ssh converts between UTF-8 and the system character set in console
   windows, through codesets.library when installed and ISO-8859-1
   otherwise. Server window titles set the console title. CHARSET selects
@@ -23,6 +42,9 @@ are history.
   Non-ASCII file names list and open correctly in WebDAV clients.
 - CheckNetDevice reports the card in the A600/A1200 PCMCIA slot, its
   identification and matching driver, or "No card".
+- The archive's Installer is a modified Installer 2.17 that needs less
+  memory than Installer 43.3, and rejects over-long SCRIPT, APPNAME and
+  LOGFILE arguments with an error.
 - Installer detects ROM and registered network drivers, including
   uaenet.device and Amithlon drivers, without requiring a DEVS: file.
 - Installation supports a 68000 A500 with Kickstart/Workbench 2.04 and
@@ -71,6 +93,9 @@ are history.
 - X-Surf 100 with anxnet.device supports LINKSPEED=10; AUTO remains the
   default. The guide covers switch PAUSE settings and TCP receive windows.
 - httpd's file browser accepts Return in the New drawer and Rename dialogs.
+- NetMeter started from a Shell shows a full-window display with rates,
+  peaks, averages, totals, errors and a history graph per interface;
+  started from Workbench or with redirected output it opens its window.
 - NetMeter starts from SYS:WBStartup without a "not responding" requester.
   Existing WBStartup icons need DONOTWAIT added in their Information window.
 

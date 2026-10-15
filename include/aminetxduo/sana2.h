@@ -43,6 +43,19 @@ typedef struct AmiSana2If AmiSana2If;
    through nx_interface_additional_link_info, which ami_sana2_attach() sets. */
 VOID ami_sana2_driver_entry(NX_IP_DRIVER *driver_req);
 
+/*
+ * An alias address: a second NX_INTERFACE on `iface`'s device, attached with
+ * ami_sana2_alias_driver_entry after ami_sana2_alias_bind(iface) and
+ * published with ami_sana2_alias_publish(), which also withdraws it.  The
+ * alias makes no device call: it sends through `iface` and its link follows
+ * the attach.  Both calls run under nx_ip_protection.
+ */
+#define AMI_SANA2_ALIASES       3
+VOID ami_sana2_alias_driver_entry(NX_IP_DRIVER *driver_req);
+VOID ami_sana2_alias_bind(AmiSana2If *iface);
+VOID ami_sana2_alias_sync(AmiSana2If *iface);
+BOOL ami_sana2_alias_publish(AmiSana2If *iface, NX_INTERFACE *alias, BOOL on);
+
 /* NX_LINK_DISABLE without the S2_OFFLINE, so other stacks on the same device
    keep the wire.  Values past NX_LINK_USER_COMMAND are application-reserved. */
 #define AMI_LINK_STACK_DISABLE  (NX_LINK_USER_COMMAND + 1)

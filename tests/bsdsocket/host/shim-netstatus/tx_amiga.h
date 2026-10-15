@@ -41,9 +41,6 @@ typedef struct TX_AMIGA_TICK_STATS_STRUCT
     ULONG   tx_amiga_tick_uptime_rem;
     ULONG   tx_amiga_tick_worst_stall_ms;
     ULONG   tx_amiga_tick_worst_service_us;
-    ULONG   tx_amiga_tick_over_budget;
-    ULONG   tx_amiga_tick_deferred;
-    ULONG   tx_amiga_tick_skew;
     ULONG   tx_amiga_tick_skew_peak;
 } TX_AMIGA_TICK_STATS;
 

@@ -1025,6 +1025,15 @@ static VOID ns_fill_interfaces(NX_IP *ip, NsWriter *w)
                           out->nsi_HwAddress);
 
         sana = (AmiSana2If *)nxif->nx_interface_additional_link_info;
+
+        /* The device is the interface's, and so are its counters. */
+        if (netstack_interface_alias_name((UWORD)i, out->nsi_Name,
+                                          sizeof(out->nsi_Name)))
+        {
+            out->nsi_Flags |= NETSTATUS_IF_ALIAS;
+            sana = NULL;
+        }
+
         if (sana != NULL)
         {
             out->nsi_Flags |= NETSTATUS_IF_SANA2;
@@ -1073,7 +1082,7 @@ static VOID ns_fill_interfaces(NX_IP *ip, NsWriter *w)
             ns_copy_name(out->nsi_Device, sizeof(out->nsi_Device), cfg->device);
             out->nsi_Unit = cfg->unit;
         }
-        else
+        else if (!(out->nsi_Flags & NETSTATUS_IF_ALIAS))
         {
             ns_copy_name(out->nsi_Name, sizeof(out->nsi_Name),
                          (const char *)nxif->nx_interface_name);
@@ -1149,9 +1158,6 @@ static VOID ns_fill_health(NetStatusHealth *out)
     out->nsl_TickUptimeMs       = tx_amiga_uptime_ms(&tick);
     out->nsl_TickWorstStallMs   = tick.tx_amiga_tick_worst_stall_ms;
     out->nsl_TickWorstServiceUs = tick.tx_amiga_tick_worst_service_us;
-    out->nsl_TickOverBudget     = tick.tx_amiga_tick_over_budget;
-    out->nsl_TickDeferred       = tick.tx_amiga_tick_deferred;
-    out->nsl_TickSkew           = tick.tx_amiga_tick_skew;
     out->nsl_TickSkewPeak       = tick.tx_amiga_tick_skew_peak;
 
     out->nsl_BatonLive        = ami_baton_stats.bs_Live;
@@ -2244,6 +2250,22 @@ LONG bsd_NetStackControl(register ULONG magic __asm("d0"),
             return (bsd_stack_unhold(SocketBase) == 0)
                        ? 0 : bsd_fail(SocketBase, AMI_EBUSY);
 
+        case NETCTRL_INTERFACE_AUTOIP:
+        {
+            LONG st;
+
+            if (ctl->nsc_Index >= (UWORD)NX_MAX_PHYSICAL_INTERFACES)
+                return bsd_fail(SocketBase, AMI_ENXIO);
+
+            st = netstack_interface_autoip_start(ctl->nsc_Index);
+            if (st == AMI_NET_OK)
+                return 0;
+            return bsd_fail(SocketBase,
+                            (st == AMI_NET_ERR_NOMEM)  ? AMI_ENOBUFS :
+                            (st == AMI_NET_ERR_KERNEL) ? AMI_EIO     :
+                                                         AMI_EBUSY);
+        }
+
         case NETCTRL_INTERFACE_PRIORITY:
         {
             LONG st;
@@ -2391,13 +2413,23 @@ LONG bsd_NetStackControl(register ULONG magic __asm("d0"),
                 rc = bsd_fail(SocketBase, AMI_EINVAL);
                 break;
             }
-            status = nx_arp_static_entry_create(ip, ctl->nsc_Destination,
-                        ((ULONG)ctl->nsc_HwAddress[0] << 8) |
-                         (ULONG)ctl->nsc_HwAddress[1],
-                        ((ULONG)ctl->nsc_HwAddress[2] << 24) |
-                        ((ULONG)ctl->nsc_HwAddress[3] << 16) |
-                        ((ULONG)ctl->nsc_HwAddress[4] << 8) |
-                         (ULONG)ctl->nsc_HwAddress[5]);
+            {
+                ULONG msw = ((ULONG)ctl->nsc_HwAddress[0] << 8) |
+                             (ULONG)ctl->nsc_HwAddress[1];
+                ULONG lsw = ((ULONG)ctl->nsc_HwAddress[2] << 24) |
+                            ((ULONG)ctl->nsc_HwAddress[3] << 16) |
+                            ((ULONG)ctl->nsc_HwAddress[4] << 8) |
+                             (ULONG)ctl->nsc_HwAddress[5];
+
+                /* arp SET TEMP. */
+                if (ctl->nsc_Flags & NETCTRL_F_TEMPORARY)
+                    status = nx_arp_dynamic_entry_set(ip, ctl->nsc_Destination,
+                                                      msw, lsw);
+                else
+                    status = nx_arp_static_entry_create(ip,
+                                                        ctl->nsc_Destination,
+                                                        msw, lsw);
+            }
             rc = ns_map_status(SocketBase, status);
             break;
 

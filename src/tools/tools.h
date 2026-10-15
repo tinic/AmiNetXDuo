@@ -64,6 +64,16 @@ VOID tool_hint(const char *fmt, ...);      /* ONE line under a refusal       */
 VOID tool_fault(LONG code);                /* PrintFault(code, tool_name)    */
 
 /*
+ * QUIET for the commands whose reference QUIET is Roadshow's (toolquiet.h):
+ * from tool_quiet_begin() on, Output() and the error stream are NIL:, so no
+ * message of any kind is printed; tool_quiet_end() restores them and turns the
+ * return code into RETURN_WARN when it is worse.  Every exit goes through
+ * tool_quiet_end(), which is a no-op when QUIET was not given.
+ */
+VOID tool_quiet_begin(VOID);
+LONG tool_quiet_end(LONG rc);
+
+/*
  * THE IDENTIFIER, not a translation of it.
  *
  * A refusal prints the operation and then one of these, so the first line
@@ -434,6 +444,14 @@ BOOL diag_is_resident(const char *device);
  * old for these vectors. The two need different advice.
  */
 VOID tool_explain_no_netstatus(struct Library *base);
+
+/*
+ * DONTROUTE for ping and traceroute.  bsdsocket.library has no SO_DONTROUTE,
+ * so a command refuses what no interface reaches directly instead: TRUE when
+ * the IPv4 `addr` is inside the subnet of an interface holding an address,
+ * or on the loopback network, 127/8.
+ */
+BOOL tool_on_link(ULONG addr);
 
 /* "Usage: <tool> <template>" plus a one-line summary. */
 VOID tool_usage(const char *tmpl, const char *summary);

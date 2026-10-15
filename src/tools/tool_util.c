@@ -5,6 +5,7 @@
  */
 
 #include "tools.h"
+#include "toolquiet.h"
 
 /* ----------------------------------------------------------------- output */
 
@@ -124,6 +125,58 @@ VOID tool_hint(const char *fmt, ...)
 VOID tool_fault(LONG code)
 {
     PrintFault(code, (CONST_STRPTR)tool_name);
+}
+
+/* ------------------------------------------------------------------ QUIET */
+
+/*
+ * NIL: rather than a flag in tool_error(): the explainers, PrintFault() and
+ * every report print through Output() or pr_CES, and one redirection silences
+ * all of them without each caller having to know.  The return code mapping
+ * holds even if NIL: did not open.
+ */
+static BOOL quiet_on;
+static BPTR quiet_nil;
+static BPTR quiet_out;
+static BPTR quiet_ces;
+
+VOID tool_quiet_begin(VOID)
+{
+    struct Process *pr = (struct Process *)FindTask(NULL);
+
+    if (quiet_on)
+        return;
+    quiet_on = TRUE;
+
+    if (pr == NULL || pr->pr_Task.tc_Node.ln_Type != NT_PROCESS)
+        return;
+
+    quiet_nil = Open((CONST_STRPTR)"NIL:", MODE_NEWFILE);
+    if (quiet_nil == (BPTR)0)
+        return;
+
+    quiet_out  = SelectOutput(quiet_nil);
+    quiet_ces  = pr->pr_CES;
+    pr->pr_CES = quiet_nil;
+}
+
+LONG tool_quiet_end(LONG rc)
+{
+    if (!quiet_on)
+        return rc;
+    quiet_on = FALSE;
+
+    if (quiet_nil != (BPTR)0)
+    {
+        struct Process *pr = (struct Process *)FindTask(NULL);
+
+        (VOID)SelectOutput(quiet_out);
+        pr->pr_CES = quiet_ces;
+        Close(quiet_nil);
+        quiet_nil = (BPTR)0;
+    }
+
+    return (LONG)tool_quiet_rc(1, (long)rc);
 }
 
 /* ------------------------------------------------------------------ break */

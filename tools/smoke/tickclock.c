@@ -94,11 +94,10 @@ static void report_ticks(const char *when)
     Printf((CONST_STRPTR)"  %s: delivered %lu, wakeups %lu, uptime %lu ms\n",
            (LONG)when, s.tx_amiga_tick_delivered, s.tx_amiga_tick_wakeups,
            tx_amiga_uptime_ms(&s));
-    Printf((CONST_STRPTR)"  %s: clipped %lu, lost %lu, over budget %lu, deferred %lu\n",
-           (LONG)when, s.tx_amiga_tick_clipped, s.tx_amiga_tick_lost,
-           s.tx_amiga_tick_over_budget, s.tx_amiga_tick_deferred);
-    Printf((CONST_STRPTR)"  %s: wheel %lu ticks late, worst %lu; worst stall %lu ms\n",
-           (LONG)when, s.tx_amiga_tick_skew, s.tx_amiga_tick_skew_peak,
+    Printf((CONST_STRPTR)"  %s: clipped %lu, lost %lu\n",
+           (LONG)when, s.tx_amiga_tick_clipped, s.tx_amiga_tick_lost);
+    Printf((CONST_STRPTR)"  %s: wheel worst %lu ticks late; worst stall %lu ms\n",
+           (LONG)when, s.tx_amiga_tick_skew_peak,
            s.tx_amiga_tick_worst_stall_ms);
 }
 

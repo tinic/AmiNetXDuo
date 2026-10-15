@@ -22,21 +22,39 @@ const char *const tool_name = "ping";
 static const char version_tag[] __attribute__((used)) =
     TOOL_VERSTAG("ping");
 
-#define TEMPLATE    "-c=COUNT/K/N,-i=INTERVAL/K/N,-l=LOAD/K/N," \
+/*
+ * The AmigaDOS Command Reference's template, with -n written as it means:
+ * the reference's -n=NUMERICONLY/S=NUMERIC/S puts NUMERIC among the modifiers.
+ * test_refcompat holds TEMPLATE to it.  -d DEBUG does nothing (SO_DEBUG shows
+ * nothing here), -R RECORDROUTE is ignored with a warning (no IP options on a
+ * raw socket), and DONTROUTE refuses a host no interface reaches directly,
+ * since bsdsocket.library has no SO_DONTROUTE.
+ */
+#define REFERENCE_TEMPLATE "-c=COUNT/K/N,-d=DEBUG/S,-i=INTERVAL/K/N,"      \
+                           "-l=LOAD/K/N,-n=NUMERICONLY=NUMERIC/S,"         \
+                           "-q=QUIET/S,-R=RECORDROUTE/S,DONTROUTE/S,"      \
+                           "-s=SIZE/K/N,-v=VERBOSE/S,BELL/S,HOST/A"
+
+#define TEMPLATE    "-c=COUNT/K/N,-d=DEBUG/S,-i=INTERVAL/K/N,-l=LOAD/K/N," \
                     "-n=NUMERICONLY=NUMERIC/S,-o=ONEREPLY/S,-q=QUIET/S," \
-                    "-s=SIZE/K/N,-t=TIMEOUT/K/N,BELL/S,HOST/A," \
+                    "-R=RECORDROUTE/S,DONTROUTE/S,-s=SIZE/K/N,"          \
+                    "-t=TIMEOUT/K/N,-v=VERBOSE/S,BELL/S,HOST/A,"         \
                     "IPV4=-4/S,IPV6=-6/S"
 
 enum
 {
     ARG_COUNT = 0,
+    ARG_DEBUG,
     ARG_INTERVAL,
     ARG_LOAD,
     ARG_NUMERIC,
     ARG_ONEREPLY,
     ARG_QUIET,
+    ARG_RECORDROUTE,
+    ARG_DONTROUTE,
     ARG_SIZE,
     ARG_TIMEOUT,
+    ARG_VERBOSE,
     ARG_BELL,
     ARG_HOST,
     ARG_IPV4,
@@ -211,6 +229,81 @@ static BOOL ping_is_reply(BOOL v6, const UBYTE *buf, ULONG len, UWORD ident,
     return TRUE;
 }
 
+/* What -v names.  The rest print as their number. */
+static const char *ping_icmp_name(BOOL v6, UBYTE type)
+{
+    if (v6)
+    {
+        switch (type)
+        {
+            case 1:   return "destination unreachable";
+            case 2:   return "packet too big";
+            case 3:   return "time exceeded";
+            case 4:   return "parameter problem";
+            case 133: return "router solicitation";
+            case 134: return "router advertisement";
+            case 135: return "neighbour solicitation";
+            case 136: return "neighbour advertisement";
+            case 137: return "redirect";
+            default:  return NULL;
+        }
+    }
+
+    switch (type)
+    {
+        case 3:  return "destination unreachable";
+        case 4:  return "source quench";
+        case 5:  return "redirect";
+        case 11: return "time exceeded";
+        case 12: return "parameter problem";
+        default: return NULL;
+    }
+}
+
+/*
+ * -v: an ICMP message that is neither an echo request nor a reply, from
+ * anybody.  The raw socket is handed every inbound ICMP datagram (raw.c), so
+ * this is what BSD ping -v lists.
+ */
+static VOID ping_verbose(struct Library *sb, BOOL v6, const UBYTE *buf,
+                         ULONG len, const ToolAddr *from)
+{
+    const UBYTE *icmp = buf;
+    const char  *name;
+    char         text[TOOL_ADDR_STRLEN];
+
+    if (!v6)
+    {
+        ULONG hlen;
+
+        if (len < 20 || (buf[0] >> 4) != 4)
+            return;
+        hlen = (ULONG)(buf[0] & 0x0f) * 4UL;
+        if (hlen < 20 || len < hlen + 4)
+            return;
+        icmp = buf + hlen;
+        len -= hlen;
+    }
+    else if (len < 4)
+    {
+        return;
+    }
+
+    if (icmp[0] == (v6 ? ICMP6_ECHO : ICMP_ECHO) ||
+        icmp[0] == (v6 ? ICMP6_ECHOREPLY : ICMP_ECHOREPLY))
+        return;
+
+    tool_addr_text(sb, from, text, sizeof(text));
+    name = ping_icmp_name(v6, icmp[0]);
+
+    if (name != NULL)
+        tool_printf("%lu bytes from %s: %s, code %lu\n", len, (LONG)text,
+                    (LONG)name, (ULONG)icmp[1]);
+    else
+        tool_printf("%lu bytes from %s: ICMP type %lu, code %lu\n", len,
+                    (LONG)text, (ULONG)icmp[0], (ULONG)icmp[1]);
+}
+
 /* ----------------------------------------------------------- the clock --- */
 
 /*
@@ -289,6 +382,7 @@ static int ping_main(int argc, char **argv)
     BOOL            onereply;
     BOOL            quiet;
     BOOL            bell;
+    BOOL            verbose;
     ULONG           sent = 0;
     ULONG           received = 0;
     ULONG           rtt_min = 0xffffffffUL;
@@ -341,6 +435,10 @@ static int ping_main(int argc, char **argv)
     onereply = (args[ARG_ONEREPLY] != 0) ? TRUE : FALSE;
     quiet    = (args[ARG_QUIET]    != 0) ? TRUE : FALSE;
     bell     = (args[ARG_BELL]     != 0) ? TRUE : FALSE;
+    verbose  = (args[ARG_VERBOSE]  != 0) ? TRUE : FALSE;
+
+    if (args[ARG_RECORDROUTE] != 0)
+        tool_error("RECORDROUTE ignored: no IP options on a raw socket");
 
     if (size > PING_MAX_SIZE)
     {
@@ -412,6 +510,20 @@ static int ping_main(int argc, char **argv)
     tool_addr_text(sb, &target, addrtext, sizeof(addrtext));
 
     v6 = TOOL_ADDR_IS6(&target);
+
+    if (args[ARG_DONTROUTE] != 0)
+    {
+        if (v6)
+            tool_error("DONTROUTE ignored for IPv6");
+        else if (!tool_on_link(target.ta_V4))
+        {
+            tool_error("DONTROUTE: %s is not on a local network",
+                       (LONG)addrtext);
+            CloseLibrary(sb);
+            FreeArgs(rda);
+            return RETURN_ERROR;
+        }
+    }
 
     sock = tool_sock_socket(sb,
                             v6 ? TOOL_AF_INET6 : TOOL_AF_INET, TOOL_SOCK_RAW,
@@ -588,6 +700,10 @@ static int ping_main(int argc, char **argv)
             {
                 rtt      = ami_millis() - t0;
                 answered = TRUE;
+            }
+            else if (verbose)
+            {
+                ping_verbose(sb, v6, ping_reply, (ULONG)n, &from_addr);
             }
         }
 

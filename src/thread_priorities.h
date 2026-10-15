@@ -59,6 +59,31 @@
 #define AMI_CALLER_PRIORITY        16      /* adopted application tasks      */
 
 /*
+ * Exec priorities, the other ladder. Our protocol tasks never outrank
+ * input.device or the filesystem handlers and disk drivers; normal programs
+ * run at 0.
+ *
+ *   20  input.device
+ *   10+ filesystem handlers, scsi.device and other disk drivers
+ *    9  AmiNetXDuo tick (TX_AMIGA_TIMER_PRIORITY, tx_port.h)
+ *    6  ehide.device (seen on the A3000)
+ *    5  console.device, trackdisk.device, TCP: handler and its sessions
+ *  1-2  ThreadX band (TX_AMIGA_TASK_PRIORITY, TX_AMIGA_HANDOFF_PRIORITY)
+ *    0  normal programs
+ *
+ * The tick may sit above console.device, trackdisk.device and IDE drivers
+ * because one service delivers at most TX_AMIGA_TIMER_MAX_CATCHUP ticks; their
+ * cost is whatever the timer callbacks cost. The TCP: processes share 5 with
+ * console.device and round-robin with it. SANA-II driver tasks (anxwifipi
+ * unit 10, receiver 5) are hardware drivers and are not on this ladder.
+ */
+#define AMI_EXEC_INPUT_PRIORITY    20      /* input.device                   */
+#define AMI_EXEC_HANDLER_PRIORITY  10      /* filesystem handlers, disks     */
+#define AMI_EXEC_CONSOLE_PRIORITY   5      /* console.device, trackdisk      */
+#define AMI_EXEC_PROGRAM_PRIORITY   0      /* normal programs                */
+#define AMI_EXEC_TCP_PRIORITY       5      /* TCP: handler and sessions      */
+
+/*
  * The invariants, so that the next edit to the numbers above fails to compile
  * instead of costing another 6.6%.
  */
@@ -88,6 +113,30 @@
 #endif
 #if AMI_DHCPV6_WORK_PRIORITY >= AMI_CALLER_PRIORITY
 #error "the DHCPv6 deferred-work thread must outrank adopted callers"
+#endif
+
+#if AMI_EXEC_TCP_PRIORITY >= AMI_EXEC_HANDLER_PRIORITY
+#error "the TCP: processes must stay below the filesystem handlers"
+#endif
+#if AMI_EXEC_TCP_PRIORITY > AMI_EXEC_CONSOLE_PRIORITY
+#error "the TCP: processes must not outrank console.device"
+#endif
+#if AMI_EXEC_TCP_PRIORITY <= AMI_EXEC_PROGRAM_PRIORITY
+#error "the TCP: processes must outrank normal programs"
+#endif
+#if defined(TX_AMIGA_TIMER_PRIORITY)
+#if TX_AMIGA_TIMER_PRIORITY >= AMI_EXEC_HANDLER_PRIORITY
+#error "the tick must stay below the filesystem handlers and input.device"
+#endif
+#if TX_AMIGA_TIMER_PRIORITY <= AMI_EXEC_TCP_PRIORITY
+#error "the tick must outrank the TCP: processes"
+#endif
+#if TX_AMIGA_HANDOFF_PRIORITY >= AMI_EXEC_TCP_PRIORITY
+#error "the ThreadX band must stay below the TCP: processes"
+#endif
+#if TX_AMIGA_TASK_PRIORITY <= AMI_EXEC_PROGRAM_PRIORITY
+#error "the ThreadX band must outrank normal programs"
+#endif
 #endif
 
 #endif /* AMINETXDUO_THREAD_PRIORITIES_H */

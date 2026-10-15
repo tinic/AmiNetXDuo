@@ -218,10 +218,8 @@ static VOID show_health(const ToolStats *st)
     tool_printf("\t%lu ticks in %lu ms, %lu clipped, %lu lost\n",
                 st->tick_ticks, st->tick_uptime_ms,
                 st->tick_clipped, st->tick_lost);
-    tool_printf("\t%lu catch-ups, %lu over budget, %lu ticks deferred\n",
-                st->tick_catchups, st->tick_over_budget, st->tick_deferred);
-    tool_printf("\ttimer wheel %lu ticks late, worst %lu\n",
-                st->tick_skew, st->tick_skew_peak);
+    tool_printf("\t%lu catch-ups\n", st->tick_catchups);
+    tool_printf("\ttimer wheel worst %lu ticks late\n", st->tick_skew_peak);
     tool_printf("\tworst stall %lu ms, service %lu us at the time\n",
                 st->tick_worst_stall_ms, st->tick_worst_service_us);
     tool_printf("\tbaton: %lu transitions, %lu at once at the peak\n",

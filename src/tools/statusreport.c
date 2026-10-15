@@ -297,7 +297,6 @@ static const SrField sr_health_fields[] =
     SR_F("tick_lost",        NetStatusHealth, nsl_TickLost),
     SR_F("tick_clipped",     NetStatusHealth, nsl_TickClipped),
     SR_F("tick_worst_stall_ms", NetStatusHealth, nsl_TickWorstStallMs),
-    SR_F("tick_over_budget", NetStatusHealth, nsl_TickOverBudget),
     SR_F("alloc_live",       NetStatusHealth, nsl_AllocLive),
     SR_F("alloc_peak",       NetStatusHealth, nsl_AllocPeak),
     SR_F("alloc_refused",    NetStatusHealth, nsl_AllocRefused),

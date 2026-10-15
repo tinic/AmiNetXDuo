@@ -284,6 +284,24 @@ static ULONG ami_sana2_copy_sum(UCHAR *to, const UCHAR *from, ULONG len)
  * *ihl_out its header length, *total_out the datagram's total length, at
  * most `len` (the rest is padding).  What both checksum paths ask first.
  */
+/* 68020+ permits odd-address word loads. GCC otherwise expands even the
+   aligned C form into byte reads here; name the one load explicitly. A packed
+   alias-safe operand describes arbitrary packet alignment to the compiler.
+   68000 builds and other hosts retain portable byte reads. */
+static inline ULONG __attribute__((always_inline)) ami_sana2_tx_be16(
+    const UCHAR *p)
+{
+#if defined(__mc68020__)
+    struct __attribute__((packed, may_alias)) NetWord { unsigned short value; };
+    ULONG word = 0;
+    __asm__("move.w %1,%0" : "+d"(word)
+            : "m"(((const struct NetWord *)p)->value) : "cc");
+    return word;
+#else
+    return ((ULONG)p[0] << 8) | p[1];
+#endif
+}
+
 static inline BOOL __attribute__((always_inline)) ami_sana2_tx_tcp_segment(
     const UCHAR *ip, ULONG len, ULONG *ihl_out, ULONG *total_out)
 {
@@ -299,10 +317,10 @@ static inline BOOL __attribute__((always_inline)) ami_sana2_tx_tcp_segment(
     if (ip[9] != 6)                     /* not TCP                           */
         return FALSE;
 
-    if ((((ULONG)ip[6] << 8) | ip[7]) & 0x3FFF)
+    if (ami_sana2_tx_be16(ip + 6) & 0x3FFF)
         return FALSE;                   /* a fragment has no whole segment   */
 
-    total = ((ULONG)ip[2] << 8) | ip[3];
+    total = ami_sana2_tx_be16(ip + 2);
     if (total > len || total < ihl + 20)
         return FALSE;                   /* padded or malformed               */
 
@@ -323,14 +341,14 @@ static inline ULONG __attribute__((always_inline)) ami_sana2_tx_pseudo_header(
 {
     ULONG sum;
 
-    sum  = ((ULONG)ip[12] << 8) | ip[13];
-    sum += ((ULONG)ip[14] << 8) | ip[15];
-    sum += ((ULONG)ip[16] << 8) | ip[17];
-    sum += ((ULONG)ip[18] << 8) | ip[19];
-    sum += 6UL;
-    sum += tcp_len;
-    while (sum >> 16)
-        sum = (sum & 0xFFFFUL) + (sum >> 16);
+    sum  = ami_sana2_tx_be16(ip + 12);
+    sum += ami_sana2_tx_be16(ip + 14);
+    sum += ami_sana2_tx_be16(ip + 16);
+    sum += ami_sana2_tx_be16(ip + 18);
+    sum += 6UL + tcp_len;
+    /* Four address words plus an IPv4 segment length fit in 19 bits. */
+    sum = (sum & 0xFFFFUL) + (sum >> 16);
+    sum = (sum & 0xFFFFUL) + (sum >> 16);
     return sum;
 }
 

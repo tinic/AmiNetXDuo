@@ -505,12 +505,18 @@ host_test_targets() { # builddir
 #      566 with ssh_console_text: the ssh client's UTF-8 conversion and OSC
 #      filter (all hosts).
 #      567 with text_codeset: the shared codeset <-> UTF-8 module (all hosts).
-#      568 with netswitch_state_text: NetSwitch's status line, list address
+#      569 with tools_refcompat_quiet and tools_refcompat_reference: the
+#      AmigaDOS Command Reference QUIET return code and templates.
+#      570 with tools_refcompat_arpfile: arp FILE's record rules.
+#      571 with tools_refcompat_onlink: DONTROUTE's on-link rule, 127/8.
+#      572 with tools_refcompat_addif: AddNetInterface's TIMEOUT tool type
+#      and its per-launch Workbench log name.
+#      573 with netswitch_state_text: NetSwitch's status line, list address
 #      column and button labels, which refuse rather than truncate (all hosts).
-#      569 with netswitch_font_layout: NetSwitch's window from the gadget
+#      574 with netswitch_font_layout: NetSwitch's window from the gadget
 #      font's metrics at PAL and NTSC, and the fallback for a font too wide for
 #      640 (all hosts).
-HOST_TESTS_EXPECTED=569
+HOST_TESTS_EXPECTED=574
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,

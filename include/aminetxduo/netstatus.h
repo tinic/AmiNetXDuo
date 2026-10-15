@@ -157,6 +157,9 @@ typedef struct NetStatusSystem
 #define NETSTATUS_IF_ONLINE     0x0008  /* and that device reports online    */
 #define NETSTATUS_IF_NAMED      0x0010  /* nsi_Name came from the config     */
 #define NETSTATUS_IF_MDNS       0x0020  /* answering .local here             */
+/* An alias address (ConfigureNetInterface ALIASADDR): nsi_Name is
+   "<interface>:<slot>", the counters are the interface's row's. */
+#define NETSTATUS_IF_ALIAS      0x0040
 
 typedef struct NetStatusInterface
 {
@@ -461,9 +464,10 @@ typedef struct NetStatusHealth
     ULONG   nsl_TickUptimeMs;
     ULONG   nsl_TickWorstStallMs;
     ULONG   nsl_TickWorstServiceUs;
-    ULONG   nsl_TickOverBudget;
-    ULONG   nsl_TickDeferred;
-    ULONG   nsl_TickSkew;
+    /* Were the tick budget counters and the wheel lateness after a wakeup,
+       which always equalled nsl_TickLost; always 0.  Kept so the record keeps
+       its version 16 shape. */
+    ULONG   nsl_TickPad[3];
     ULONG   nsl_TickSkewPeak;
 
     ULONG   nsl_BatonLive;
@@ -950,7 +954,8 @@ typedef struct NetStatusRxBudget
    table size. */
 #define NETCTRL_ROUTE_ADD       5   /* nsc_Destination/NetMask/Gateway       */
 #define NETCTRL_ROUTE_DELETE    6   /* nsc_Destination/NetMask               */
-#define NETCTRL_ARP_ADD         7   /* nsc_Destination, nsc_HwAddress        */
+/* NETCTRL_F_TEMPORARY makes the entry dynamic, not static. */
+#define NETCTRL_ARP_ADD         7   /* nsc_Destination, nsc_HwAddress, nsc_Flags */
 #define NETCTRL_ARP_DELETE      8   /* nsc_Destination                       */
 #define NETCTRL_ARP_FLUSH       9   /*,                                    */
 
@@ -1026,6 +1031,10 @@ typedef struct NetStatusRxBudget
    file is not rewritten.  EINVAL out of range, ENXIO for no such interface. */
 #define NETCTRL_INTERFACE_PRIORITY 27 /* nsc_Index, nsc_Priority               */
 
+/* RFC 3927 link-local addressing, ConfigureNetInterface CONFIGURE=AUTO.  Not
+   waited for.  EBUSY when it already serves another interface. */
+#define NETCTRL_INTERFACE_AUTOIP 28 /* nsc_Index                              */
+
 /* Flags for nsc_Flags. Zero unless an operation above says otherwise. */
 #define NETCTRL_F_FORCE         0x00000001
 /* Which of NETCTRL_INTERFACE_CONFIGURE's three fields were given at all. */
@@ -1037,6 +1046,9 @@ typedef struct NetStatusRxBudget
 /* NETCTRL_INTERFACE_ADD: Online requested the interface, so STATE=DOWN in
  * the stored definition does not leave it down. */
 #define NETCTRL_F_UP            0x00000020
+/* NETCTRL_ARP_ADD: a dynamic entry, which traffic replaces and
+   NETCTRL_ARP_FLUSH removes; a library that predates it makes it static. */
+#define NETCTRL_F_TEMPORARY     0x00000040
 
 typedef struct NetStatusControl
 {

@@ -1,0 +1,45 @@
+
+68k 10059578: movel a5@(72),d1  [1 ARM instructions]
+  0000: ldur	w20, [x27, #72]
+
+68k 1005957c: moveq #5,d0  [1 ARM instructions]
+  0004: mov	w19, #0x5                   	// #5
+
+68k 1005957e: cmpl d1,d0  [5 ARM instructions]
+  0008: cmp	w19, w20
+  000c: umov	w6, v19.h[5]
+  0010: mrs	x7, nzcv
+  0014: eor	w7, w7, #0x20000000
+  0018: bfxil	w6, w7, #28, #4
+
+68k 10059580: bnew 59374 <__nx_tcp_socket_packet_process+0x1c8>  [2 ARM instructions]
+  001c: tbz	w6, #2, 0x54
+  0020: add	w18, w18, #0xc
+
+68k 10059584: moveal a2,a1  [1 ARM instructions]
+  0024: mov	w14, w15
+
+68k 10059586: moveal a5,a0  [1 ARM instructions]
+  0028: mov	w13, w27
+
+68k 10059588: jsr %pc@(55d06 <__nx_tcp_mss_option_get+0x67e>)  [5 ARM instructions]
+  002c: mov	w9, #0xffffc782            	// #-14462
+  0030: add	w8, w18, w9
+  0034: add	w18, w18, #0x8
+  0038: str	w18, [x29, #-4]!
+  003c: mov	w18, w8
+
+68k 00000000: UNIT EXIT  [5 ARM instructions]
+  0040: mov	x0, v20.d[0]
+  0044: mov	v19.h[5], w6
+  0048: add	x0, x0, #0x7
+  004c: mov	v20.d[0], x0
+  0050: ret
+
+68k 00000000: UNIT EXIT  [6 ARM instructions]
+  0054: sub	w18, w18, #0x204
+  0058: mov	x0, v20.d[0]
+  005c: mov	v19.h[5], w6
+  0060: add	x0, x0, #0x4
+  0064: mov	v20.d[0], x0
+  0068: ret

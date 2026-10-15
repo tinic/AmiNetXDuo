@@ -554,12 +554,32 @@ static ArgUse classify_use(const char *src, const char *at, size_t len)
 
 /* ------------------------------------------------------------- contract --- */
 
-/* An option that parses and is then never read. One exception, named in the
-   file's own header. */
+/*
+ * An option that parses and is then never read.  Named, one by one, with the
+ * reason: a template keyword nothing reads is otherwise a defect.
+ */
+static const struct
+{
+    const char *cmd;
+    const char *arg;
+} ignored[] = {
+    /* the timeout is the resolver's, set in DEVS:Internet/resolv.conf */
+    { "host",       "TIMEOUT" },
+    /* AmigaDOS Command Reference compatibility, inert here: the listing is
+       numeric already, and SO_DEBUG shows nothing on this stack */
+    { "arp",        "NONAMES" },
+    { "ping",       "DEBUG" },
+    { "traceroute", "DEBUG" },
+};
+
 static int deliberately_ignored(const char *cmd, const char *arg)
 {
-    /* host: the timeout is the resolver's, set in DEVS:Internet/resolv.conf. */
-    return strcmp(cmd, "host") == 0 && strcmp(arg, "TIMEOUT") == 0;
+    size_t i;
+
+    for (i = 0; i < sizeof(ignored) / sizeof(ignored[0]); i++)
+        if (strcmp(ignored[i].cmd, cmd) == 0 && strcmp(ignored[i].arg, arg) == 0)
+            return 1;
+    return 0;
 }
 
 static void contract_pair(const char *name, int pair, const char *src,

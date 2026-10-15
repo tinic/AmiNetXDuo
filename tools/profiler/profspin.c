@@ -145,8 +145,18 @@ char           line[128];
 
     if (opt[OPT_SCALE] != 0L)
     {
-        scale = (ULONG)*(LONG *)opt[OPT_SCALE];
-        if (scale == 0UL) { scale = 1UL; }
+    LONG given = *(LONG *)opt[OPT_SCALE];
+
+        /* reps[0] * scale must fit a ULONG: a negative SCALE wrapped to
+           four billion turns of a loop nothing can break. */
+        if (given < 0L || (ULONG)given > 0xFFFFFFFFUL / reps[0])
+        {
+            Printf((STRPTR)"profspin: SCALE must be 0 to %ld\n",
+                   (long)(0xFFFFFFFFUL / reps[0]));
+            FreeArgs(rd);
+            return(RETURN_ERROR);
+        }
+        scale = (given == 0L) ? 1UL : (ULONG)given;
     }
 
     if (opt[OPT_AUDIO] != 0L)

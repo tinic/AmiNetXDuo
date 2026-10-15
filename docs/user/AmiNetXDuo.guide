@@ -998,10 +998,11 @@
 
   replacing eth0 with the name of the interface file. The command reads
   the configuration, starts the physical network, brings the interface
-  online, and keeps it up until the next reboot. QUIET suppresses the report of
-  what came up, so a boot that works prints nothing and a boot that
-  fails still prints why. To see the report of a start that works,
-  omit QUIET while the configuration is still being written.
+  online, and keeps it up until the next reboot. QUIET suppresses every
+  message, the reasons for a failure included, and turns a failure into
+  WARN (5), as on Roadshow: the boot script goes on, and IF WARN after
+  the line detects the failure. To see the report and the reasons, omit
+  QUIET while the configuration is still being written.
 
   Add a line to start a second card. To start every definition in
   DEVS:NetInterfaces, which is what Roadshow's own S:Network-Startup does,
@@ -1200,14 +1201,15 @@
     @{"Offline         " link OFFLINE}  take an interface off the network
     NetSetup          write the configuration files from a Shell
     NetPrefs          edit interfaces and boot policy from Workbench
-    NetMeter          addresses and live rates in a small Workbench window
+    NetMeter          addresses and live rates, in a window or in a Shell
     NetWirelessPrefs  Wi-Fi networks in range, joining one, link state
     NetWireless       Wi-Fi state and signal as an AppIcon and in ENV:WiFi
     CheckNetConfig    read the configuration files back and report faults
     NetShutdown       stop the network and the programs using it
     RemoveNetInterface  remove one interface from the stack
-    ConfigureNetInterface  change a running interface's address, or
-                      renew and release its DHCP lease
+    ConfigureNetInterface  change a running interface's address, add
+                      or remove an alias address (ALIASADDR,
+                      DELETEADDR), or renew and release its DHCP lease
     hostname          what this machine is called, and where the name
                       came from; with a name, set it
     AddNetRoute       add a route by hand
@@ -1227,6 +1229,11 @@
     NetCapture        capture packets to a file Wireshark reads
     NetTrace          the same, for a transfer it runs itself
     arp               the machines on this network
+
+  @{b}Looking at this Amiga@{ub}
+
+    @{"ShowTasks       " link SHOWTASKS}  the Exec tasks and AmigaDOS processes
+    @{"WatchTasks      " link WATCHTASKS}  the same, live, with processor use
 
   @{b}Asking other machines things@{ub}
 
@@ -1266,6 +1273,11 @@
      10   ERROR -- the stack is not running, or a lookup failed
      20   FAIL -- the configuration or the driver is wrong
 
+  With QUIET, AddNetInterface, RemoveNetInterface, ConfigureNetInterface,
+  AddNetRoute and DeleteNetRoute print no message at all and return WARN
+  (5) in place of ERROR or FAIL, as the AmigaDOS Command Reference
+  specifies.
+
   @{b}Asking for a template with "?"@{ub}
 
   A command followed by ? prints its template and waits for the
@@ -1275,7 +1287,8 @@
       INTERFACES=-i/S,ROUTES=-r/S,ALL=-a/S,STATS=-s/S,HEALTH=-h/S:
 
   These are Shell commands. Started from Workbench, each one reports
-  that and does nothing else.
+  that and does nothing else. AddNetInterface is the exception: see
+  @{"AddNetInterface" link ADDNETINTERFACE}.
 
 @endnode
 
@@ -1309,9 +1322,10 @@
              file: if it is not there, the answer is "not there",
              never the drawer's file of the same name.
 
-             More than one can be given. They are sorted by name
-             before any of them is used, and the files are all read
-             and checked before anything is started. AmigaDOS patterns
+             More than one can be given. They are sorted before any
+             of them is used: by the PRI (or PRIORITY) tool type of
+             each file's icon, highest first, then by name. The files
+             are all read and checked before anything is started. AmigaDOS patterns
              are expanded explicitly, so the Roadshow and AmiTCP_NG
              Network-Startup form starts every non-icon definition:
 
@@ -1320,13 +1334,13 @@
              This enumeration happens only because that command asks
              for it; opening bsdsocket.library never scans the drawer.
 
-  @{b}QUIET@{ub}      Suppress the report of what worked. For S:Network-Startup.
-             Errors are still printed, and the return code is
-             unchanged, so a boot that fails still reports why.
+  @{b}QUIET@{ub}      Print nothing, errors included, and return WARN (5)
+             for any failure. For S:Network-Startup: a failure does
+             not stop the script, and IF WARN detects it.
   @{b}TIMEOUT@{ub}    Seconds to wait for an interface that asks for its
-             address to be given one. Default 10, which is also the
-             smallest value accepted -- a DHCP exchange given less time
-             than that reports a failure that is not one. For DHCP, the
+             address to be given one. Default 60. The smallest value
+             accepted is 10 -- a DHCP exchange given less time than
+             that reports a failure that is not one. For DHCP, the
              wait ends when that interface's lease is BOUND and its route
              and name-server options have been installed, not merely when
              some address appears. An interface with its address in its
@@ -1341,7 +1355,7 @@
 
   The first line names the driver the file specifies. The second line
   appears only when the stack was not running already, because the wait
-  for an address lasts up to half a minute. The third line reports the
+  for an address lasts up to a minute. The third line reports the
   address the interface @{b}holds@{ub}, not the one written in the file.
 
   An interface that came up without an address says so:
@@ -1409,6 +1423,22 @@
   AddNetInterface does not shut the stack down when it exits. The
   reference it takes is what keeps the stack alive after the boot
   script has finished.
+
+  @{b}From Workbench@{ub}
+
+  An interface file with a project icon whose default tool is
+  AddNetInterface starts that interface when the icon is opened, or at
+  boot from WBStartup. The icon needs a stack of at least 4000 bytes.
+  Tool types:
+
+      QUIET          no requester, whatever happens
+      TIMEOUT=<n>    as the TIMEOUT argument; a value that is not a
+                     number, or is negative, is refused
+      PRI=<n>        the order among several selected icons
+
+  A start that does not succeed shows the messages the Shell form
+  prints in a requester. They are collected in a T: file named for the
+  launch and deleted afterwards.
 
 @endnode
 
@@ -1750,10 +1780,10 @@
 
                                 @{b}ping@{ub}
 
-      ping -c=COUNT/K/N,-i=INTERVAL/K/N,-l=LOAD/K/N,
+      ping -c=COUNT/K/N,-d=DEBUG/S,-i=INTERVAL/K/N,-l=LOAD/K/N,
            -n=NUMERICONLY=NUMERIC/S,-o=ONEREPLY/S,-q=QUIET/S,
-           -s=SIZE/K/N,-t=TIMEOUT/K/N,BELL/S,HOST/A,
-           IPV4=-4/S,IPV6=-6/S
+           -R=RECORDROUTE/S,DONTROUTE/S,-s=SIZE/K/N,-t=TIMEOUT/K/N,
+           -v=VERBOSE/S,BELL/S,HOST/A,IPV4=-4/S,IPV6=-6/S
 
   Sends ICMP echo requests and reports what comes back. Tests whether
   two machines can reach each other.
@@ -1772,10 +1802,17 @@
   @{b}-n@{ub} or @{b}NUMERIC@{ub}         Do not put a name to the address given.
   @{b}-o@{ub} or @{b}ONEREPLY@{ub}        Stop as soon as one reply comes back.
   @{b}-q@{ub} or @{b}QUIET@{ub}           Print only the summary.
-  @{b}-s@{ub} or @{b}SIZE@{ub}            Payload bytes, up to 1400. Default 56.
+  @{b}-s@{ub} or @{b}SIZE@{ub}            Payload bytes, up to 65467. Default 56.
   @{b}-t@{ub} or @{b}TIMEOUT@{ub}         Give up after this many seconds whatever
                           state the run is in. 0, the default, imposes
                           no such limit.
+  @{b}-v@{ub} or @{b}VERBOSE@{ub}         Also list every other ICMP message that
+                          arrives: unreachable, time exceeded, redirect.
+  @{b}DONTROUTE@{ub}               Refuse a host that is not on the network
+                          of an interface. IPv4 only.
+  @{b}-d@{ub} or @{b}DEBUG@{ub}           Accepted. Has no effect.
+  @{b}-R@{ub} or @{b}RECORDROUTE@{ub}     Accepted with a warning. The route is
+                          not recorded.
   @{b}BELL@{ub}                    Ring the console bell for each reply.
   @{b}-4@{ub}, @{b}-6@{ub}                  Resolve the name to an IPv4 or an IPv6
                           address only. Without either, the first
@@ -1788,14 +1825,6 @@
   between requests and while waiting between them, so in the worst case
   -- a request that gets no reply at all -- it takes five seconds to
   take effect.
-
-  @{b}Options this ping does not have@{ub}
-
-  DEBUG, RECORDROUTE, DONTROUTE and VERBOSE are absent rather than
-  accepted and ignored. The first three need a socket, an IP option and
-  a routing bypass that the echo call underneath does not offer.
-  VERBOSE lists inbound ICMP that is not an echo reply, which that call
-  never returns.
 
   @{b}Examples@{ub}
 
@@ -1910,7 +1939,7 @@
 @node SSH "ssh"
 @toc COMMANDS
 @prev HOST
-@next CHECKNETDEVICE
+@next SHOWTASKS
 
                                 @{b}ssh@{ub}
 
@@ -1946,9 +1975,95 @@
 @endnode
 
 
-@node CHECKNETDEVICE "CheckNetDevice"
+@node SHOWTASKS "ShowTasks"
 @toc COMMANDS
 @prev SSH
+@next WATCHTASKS
+
+                             @{b}ShowTasks@{ub}
+
+      ShowTasks MACHINE/S,DETAIL/S,TASK/K,CLI/N/K,HELP/S
+
+  Lists the Exec tasks and AmigaDOS processes, one row each: P for a
+  process or T for a task, the task address in hex, the CLI number, the
+  priority, the state, the stack size and the name. A process that runs
+  a command with a different name has the command on an indented line
+  below it.
+
+  @{b}TASK@{ub}     One task, by the address the table shows. A $ or 0x
+           prefix is accepted.
+  @{b}CLI@{ub}      One process, by its CLI number, which must be positive.
+           TASK and CLI cannot be used together.
+  @{b}DETAIL@{ub}   Adds the signal masks, the stack addresses, the process
+           fields and the arguments.
+  @{b}MACHINE@{ub}  One JSON object per task, with every field.
+  @{b}HELP@{ub}     The version and a summary of the options.
+
+  The list is a snapshot of at most 96 tasks. The saved stack pointer of
+  a running task can be out of date. An address can be used again by a
+  new task after the task ends.
+
+  Return codes: 0 OK; 5 no matching task, more than 96 tasks, or Ctrl-C;
+  10 an incorrect TASK or CLI.
+
+      1> ShowTasks CLI=1 DETAIL
+
+@endnode
+
+
+@node WATCHTASKS "WatchTasks"
+@toc COMMANDS
+@prev SHOWTASKS
+@next CHECKNETDEVICE
+
+                             @{b}WatchTasks@{ub}
+
+      WatchTasks TICKS/N/K,COUNT/N/K,ROWS/N/K,COLS/N/K,MACHINE/S,HELP/S
+
+  Shows the tasks and processes in the Shell window and updates the list
+  until q is pressed. Each row has T or P, the task address, the CLI
+  number, the priority, the processor use, the state and the name.
+
+  The processor use is a sample: at each vertical blank, 50 or 60 times a
+  second, WatchTasks records which task runs. A task with fewer than ten
+  samples shows no value. The sampling stops when WatchTasks ends.
+
+  @{b}TICKS@{ub}    Vertical blanks between updates. The default is 50.
+  @{b}COUNT@{ub}    Updates before WatchTasks ends. The default is no limit.
+  @{b}ROWS@{ub}     The height of the window, when the console does not
+           report it.
+  @{b}COLS@{ub}     The width of the window, when the console does not
+           report it.
+  @{b}MACHINE@{ub}  JSON lines. cpu_tenths is the processor use in tenths of a
+           percent, or null when there is no value.
+  @{b}HELP@{ub}     The version and a summary of the options.
+
+  When the output is not a console window, WatchTasks prints the list
+  again at each update.
+
+  @{b}Keys@{ub}
+
+      j, k, cursor keys     select a task
+      n, u                  page down, page up
+      t, p, s, c, a         sort by processor use, priority, state, CLI
+                            number, name
+      /                     filter the list
+      Space                 stop and start the updates
+      Return                details of the selected task; Return or Esc
+                            closes them
+      b                     send Ctrl-C to the selected task
+      h                     help
+      q                     quit
+
+  Before b sends Ctrl-C, WatchTasks checks the address and the name of
+  the task again. The task decides what Ctrl-C does.
+
+@endnode
+
+
+@node CHECKNETDEVICE "CheckNetDevice"
+@toc COMMANDS
+@prev WATCHTASKS
 @next STATUSREPORT
 
                           @{b}CheckNetDevice@{ub}
@@ -3350,8 +3465,8 @@
   labels. Save & Start and Online/Offline run the command to completion
   with the busy pointer up, up to a minute with DHCP.
 
-  NetMeter is installed in SYS:Utilities by a system installation. Its
-  window lists each running interface: a dot that is green while the link
+  NetMeter is installed in SYS:Utilities by a system installation. Started
+  from Workbench, it opens a window that lists each running interface: a dot that is green while the link
   is up, the name, the IPv4 address and one IPv6 address (the global one
   when there is one), and a receive and a send bar with the rate in bytes a
   second. The bars scale to the recent peak. Rest the pointer on a name for
@@ -3364,10 +3479,30 @@
   Project > Snapshot (Right-Amiga S) keeps the window where it is: the
   position and size go into NetMeter's own icon as the ToolTypes LEFT, TOP,
   WIDTH and HEIGHT, which are read the next time it starts, and every other
-  ToolType is left alone. From a Shell the same four are arguments, and
-  they win over the icon:
+  ToolType is left alone. The same four are arguments when the window is
+  opened from a Shell, and they win over the icon:
 
-      NetMeter LEFT=400 TOP=30 WIDTH=380 HEIGHT=100
+      Run >NIL: NetMeter LEFT=400 TOP=30 WIDTH=380 HEIGHT=100
+
+  Started from a Shell, NetMeter draws in the Shell's own window instead,
+  in place once a second. The title line gives the host name and the time
+  since NetMeter started. For each interface it shows the name, the link
+  state and speed, the IPv4 address, the device and unit and one IPv6
+  address; the receive (RX) and send (TX) rates, each with a bar, its peak
+  and its average since NetMeter started; the bytes and packets received
+  and sent since the interface was added, the errors and the dropped
+  frames; and a graph with one column a second, receive above the middle
+  line and send below it, each half to its own scale. The layout follows
+  the window size: a narrow window omits the peaks, the averages and any
+  field that does not fit whole, and a short one omits the graph. A
+  resized window is redrawn at once. The colours are the first four screen
+  pens, which every Workbench screen has.
+
+  Q, Esc or Ctrl-C ends NetMeter and clears the window. R resets the
+  peaks, the averages and the graph. Space stops the display and starts it
+  again; the measurement continues while it is stopped. With output that
+  is not a console window, as with Run >NIL: NetMeter, NetMeter opens the
+  Workbench window instead.
 
   To start it with Workbench, put a copy of its icon in SYS:WBStartup. The
   icon carries the ToolType DONOTWAIT, which tells Workbench not to wait
@@ -3611,12 +3746,14 @@
   (c) 2011-2025 Neil Cafferkey. The licence text is installed with it as
   WirelessManager-LICENSE in the AmiNetXDuo drawer.
 
+  ShowTasks and WatchTasks are built from github.com/tinic/shelltools.
+
   codesets.library is the work of the codesets.library Open Source Team,
   built unmodified from github.com/jens-maus/libcodesets and distributed
   under the GNU Lesser General Public Licence 2.1. The installer puts it
   in LIBS: on AmigaOS 3.0 and later when no copy there is as new. The
-  licence text and the location of the source are installed in the
-  Codesets drawer of the AmiNetXDuo drawer.
+  location of the source is installed in the Codesets drawer of the
+  AmiNetXDuo drawer.
 
   Thanks to Rondoval on the English Amiga Board for a detailed external
   review of the SANA-II extension design. His criticism prompted the move

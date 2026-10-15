@@ -159,6 +159,25 @@ LONG netstack_iface_mdns_set(UWORD nx_index, BOOL enable);
    the default gateway follow it at once.  AMI_NET_ERR_CONFIG out of range. */
 LONG netstack_interface_priority_set(UWORD index, LONG priority);
 
+/*
+ * Alias addresses, ConfigureNetInterface ALIASADDR and DELETEADDR.  Each takes
+ * a free interface slot of its own, named "<interface>:<slot>", and is
+ * removed with its interface.  AMI_NET_ERR_STATE for no such interface,
+ * AMI_NET_ERR_NOSLOT when no slot is free, AMI_NET_ERR_BUSY for an address
+ * the stack already holds, AMI_NET_ERR_NONAME for an alias that is not there.
+ */
+LONG netstack_interface_alias_add(UWORD index, ULONG address, ULONG netmask);
+LONG netstack_interface_alias_delete(UWORD index, ULONG address);
+/* TRUE when the slot is an alias; *parent gets its interface's slot. */
+BOOL netstack_interface_alias_of(UWORD slot, UWORD *parent);
+/* "eth0:1": the name listings give an alias slot.  FALSE for any other. */
+BOOL netstack_interface_alias_name(UWORD slot, char *out, ULONG len);
+
+/* RFC 3927 link-local addressing on a running interface, as CONFIGURE=AUTO
+   in its file starts it.  AMI_NET_ERR_STATE when the one AutoIP object
+   already serves another interface. */
+LONG netstack_interface_autoip_start(UWORD index);
+
 /* The configuration of the interface at that NX index.  NOT
    cfg->interfaces[nx_index]: that subscript is the configuration order. */
 const AmiIfConfig *netstack_iface_config(UWORD nx_index);

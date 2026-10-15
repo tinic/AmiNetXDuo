@@ -7,12 +7,22 @@
 
 #include "tools.h"
 #include "libfit.h"
+#include "addif_wb.h"
+
+#include <intuition/intuition.h>
+#include <workbench/startup.h>
+#include <workbench/workbench.h>
+#include <proto/icon.h>
+#include <proto/intuition.h>
 
 const char *const tool_name = "AddNetInterface";
 
 static const char version_tag[] __attribute__((used)) =
     TOOL_VERSTAG("AddNetInterface");
 
+/* The AmigaDOS Command Reference's template; test_refcompat holds TEMPLATE
+   to it. */
+#define REFERENCE_TEMPLATE "INTERFACE/M,QUIET/S,TIMEOUT/K/N"
 #define TEMPLATE    "INTERFACE/M,QUIET/S,TIMEOUT/K/N"
 
 enum
@@ -23,8 +33,10 @@ enum
     ARG_COUNT
 };
 
-/* Seconds. Both the default and the floor, see the note at the top. */
-#define ADDIF_TIMEOUT       10UL
+/* Seconds: the reference's default, and its floor, below which a DHCP
+   exchange reports a failure that is not one. */
+#define ADDIF_TIMEOUT       60UL
+#define ADDIF_TIMEOUT_MIN   10UL
 
 /* What the stack needs beyond its own load file. */
 #define ADDNETIF_MIN_FREE   (200UL * 1024UL)
@@ -160,29 +172,256 @@ static BOOL load_interface(const char *name, AmiIfConfig *ifc, BOOL again)
     return FALSE;
 }
 
+/* --------------------------------------------------------- Workbench, icons */
+
+/*
+ * The AmigaDOS Command Reference: an interface file with a project icon whose
+ * default tool is AddNetInterface starts that interface when it is opened.
+ * The icon's QUIET and TIMEOUT tool types are the two arguments; PRI or
+ * PRIORITY orders several interfaces, from the Shell as well.  What the
+ * command would print goes to a T: file and, unless QUIET, into a requester
+ * when it did not succeed.
+ */
+struct Library       *IconBase;
+struct IntuitionBase *IntuitionBase;
+
+static LONG addif_pri[AMI_CFG_MAX_ATTACHED];
+static BOOL addif_quiet;
+
+static BPTR addif_wb_out;
+static BPTR addif_wb_old_out;
+static BPTR addif_wb_old_ces;
+static BOOL addif_wb_temp;          /* addif_wb_out is the T: file          */
+
+static char addif_wb_log[32];       /* addif_log_name()                     */
+
+/* A tool type of the icon beside `path`, or NULL.  The caller frees *dob. */
+static const char *icon_tool_type(const char *path, const char *key,
+                                  struct DiskObject **dob)
+{
+    if (IconBase == NULL)
+        return NULL;
+
+    if (*dob == NULL)
+        *dob = GetDiskObject((STRPTR)path);
+    if (*dob == NULL || (*dob)->do_ToolTypes == NULL)
+        return NULL;
+
+    return (const char *)FindToolType((CONST_STRPTR *)(*dob)->do_ToolTypes,
+                                      (CONST_STRPTR)key);
+}
+
+/* PRI= or PRIORITY= in the icon beside `path`; 0 without one. */
+static __attribute__((noinline)) LONG icon_priority(const char *path)
+{
+    struct DiskObject *dob = NULL;
+    const char        *v   = icon_tool_type(path, "PRI", &dob);
+    LONG               pri = 0;
+
+    if (v == NULL)
+        v = icon_tool_type(path, "PRIORITY", &dob);
+    if (v != NULL)
+        (VOID)StrToLong((STRPTR)v, &pri);
+    if (dob != NULL)
+        FreeDiskObject(dob);
+
+    return pri;
+}
+
+/*
+ * The project icons Workbench passed, as paths, with their QUIET and TIMEOUT.
+ * QUIET in any of them makes the run quiet; the longest TIMEOUT wins.  A
+ * TIMEOUT that is not a number, or is negative, is refused as the Shell
+ * refuses it; the floor of 10 is applied by the caller for both.
+ */
+static __attribute__((noinline)) LONG wb_arguments(const struct WBStartup *wbs, ULONG *count,
+                         BOOL *quiet, LONG *timeout)
+{
+    LONG i;
+
+    for (i = 1; i < wbs->sm_NumArgs; i++)
+    {
+        const struct WBArg *wa   = &wbs->sm_ArgList[i];
+        struct DiskObject  *dob  = NULL;
+        char               *path = addif_expanded[*count];
+        const char         *v;
+
+        if (*count >= (ULONG)AMI_CFG_MAX_ATTACHED)
+        {
+            tool_error("more than %ld interfaces", (LONG)AMI_CFG_MAX_ATTACHED);
+            return RETURN_FAIL;
+        }
+
+        if (wa->wa_Lock == (BPTR)0 ||
+            !NameFromLock(wa->wa_Lock, (STRPTR)path, ADDIF_MATCH_PATH) ||
+            !AddPart((STRPTR)path, wa->wa_Name, ADDIF_MATCH_PATH))
+        {
+            tool_error("%s: path too long", (LONG)wa->wa_Name);
+            return RETURN_FAIL;
+        }
+
+        addif_names[*count] = (STRPTR)path;
+        (*count)++;
+        addif_names[*count] = NULL;
+
+        /* Before anything is refused: QUIET is what decides whether the
+           refusal comes up as a requester. */
+        if (icon_tool_type(path, "QUIET", &dob) != NULL)
+        {
+            *quiet      = TRUE;
+            addif_quiet = TRUE;
+            /* The refusals below then return WARN, as the Shell's do. */
+            tool_quiet_begin();
+        }
+        v = icon_tool_type(path, "TIMEOUT", &dob);
+        if (v != NULL)
+        {
+            long given = 0;
+
+            if (!addif_seconds(v, &given))
+            {
+                tool_error("TIMEOUT \"%s\" is not a number", (LONG)v);
+                FreeDiskObject(dob);
+                return RETURN_ERROR;
+            }
+            if (given < 0)
+            {
+                tool_error("TIMEOUT cannot be negative");
+                FreeDiskObject(dob);
+                return RETURN_ERROR;
+            }
+            if ((LONG)given > *timeout)
+                *timeout = (LONG)given;
+        }
+        if (dob != NULL)
+            FreeDiskObject(dob);
+    }
+
+    return RETURN_OK;
+}
+
+/* Output() and the error stream into a T: file for the requester, NIL: when
+   T: is not there. */
+static __attribute__((noinline)) VOID wb_capture_begin(VOID)
+{
+    struct Process *pr = (struct Process *)FindTask(NULL);
+
+    IconBase      = OpenLibrary((CONST_STRPTR)"icon.library", 37);
+    IntuitionBase = (struct IntuitionBase *)
+        OpenLibrary((CONST_STRPTR)"intuition.library", 37);
+
+    addif_log_name(addif_wb_log, sizeof(addif_wb_log), (ULONG)pr);
+    addif_wb_out  = Open((CONST_STRPTR)addif_wb_log, MODE_NEWFILE);
+    addif_wb_temp = (BOOL)(addif_wb_out != (BPTR)0);
+    if (!addif_wb_temp)
+        addif_wb_out = Open((CONST_STRPTR)"NIL:", MODE_NEWFILE);
+    if (addif_wb_out == (BPTR)0)
+        return;
+
+    addif_wb_old_out = SelectOutput(addif_wb_out);
+    addif_wb_old_ces = pr->pr_CES;
+    pr->pr_CES       = addif_wb_out;
+}
+
+static __attribute__((noinline)) VOID wb_capture_end(LONG rc)
+{
+    struct Process *pr = (struct Process *)FindTask(NULL);
+    static char     text[512];
+    LONG            got = 0;
+
+    if (addif_wb_out != (BPTR)0)
+    {
+        if (addif_wb_temp && rc != RETURN_OK && !addif_quiet)
+        {
+            Flush(addif_wb_out);
+            (VOID)Seek(addif_wb_out, 0, OFFSET_BEGINNING);
+            got = Read(addif_wb_out, text, (LONG)sizeof(text) - 1);
+        }
+
+        (VOID)SelectOutput(addif_wb_old_out);
+        pr->pr_CES = addif_wb_old_ces;
+        Close(addif_wb_out);
+        if (addif_wb_temp)
+            (VOID)DeleteFile((CONST_STRPTR)addif_wb_log);
+    }
+
+    if (rc != RETURN_OK && !addif_quiet && IntuitionBase != NULL)
+    {
+        struct EasyStruct es;
+
+        if (got <= 0)
+        {
+            tool_copy_string(text, sizeof(text), "The interface did not start.");
+            got = 1;
+        }
+        else
+        {
+            text[got] = '\0';
+            while (got > 0 && text[got - 1] == '\n')
+                text[--got] = '\0';
+        }
+
+        es.es_StructSize   = sizeof(es);
+        es.es_Flags        = 0;
+        es.es_Title        = (UBYTE *)"AddNetInterface";
+        es.es_TextFormat   = (UBYTE *)"%s";
+        es.es_GadgetFormat = (UBYTE *)"OK";
+        (VOID)EasyRequest(NULL, &es, NULL, (LONG)text);
+    }
+
+    if (IntuitionBase != NULL)
+        CloseLibrary((struct Library *)IntuitionBase);
+    if (IconBase != NULL)
+        CloseLibrary(IconBase);
+}
+
 /*
  * Sort the names, so a list of interfaces is brought up in an order that does
- * not depend on how it was typed. Insertion sort: the list is at most
- * AMI_CFG_MAX_ATTACHED long.
+ * not depend on how it was typed: the icon's PRI first, highest first, then
+ * the name.  A bare name's icon is looked for where its file is.  Insertion
+ * sort: the list is at most AMI_CFG_MAX_ATTACHED long.
  */
-static VOID sort_names(STRPTR *names, ULONG count)
+static __attribute__((noinline)) VOID sort_names(STRPTR *names, ULONG count)
 {
-    ULONG i;
+    static char path[ADDIF_MATCH_PATH];
+    ULONG       i;
+
+    for (i = 0; i < count; i++)
+    {
+        const char *name = (const char *)names[i];
+
+        if (tool_basename(name) != name)
+        {
+            addif_pri[i] = icon_priority(name);
+            continue;
+        }
+
+        tool_join_path(path, sizeof(path), "DEVS:NetInterfaces", name);
+        if (!tool_exists(path))
+            tool_join_path(path, sizeof(path), "SYS:Storage/NetInterfaces",
+                           name);
+        addif_pri[i] = icon_priority(path);
+    }
 
     for (i = 1; i < count; i++)
     {
         STRPTR hold = names[i];
+        LONG   pri  = addif_pri[i];
         ULONG  j    = i;
 
         while (j > 0 &&
-               tool_stricmp(tool_basename((const char *)names[j - 1]),
-                            tool_basename((const char *)hold)) > 0)
+               (addif_pri[j - 1] < pri ||
+                (addif_pri[j - 1] == pri &&
+                 tool_stricmp(tool_basename((const char *)names[j - 1]),
+                              tool_basename((const char *)hold)) > 0)))
         {
-            names[j] = names[j - 1];
+            names[j]     = names[j - 1];
+            addif_pri[j] = addif_pri[j - 1];
             j--;
         }
 
-        names[j] = hold;
+        names[j]     = hold;
+        addif_pri[j] = pri;
     }
 }
 
@@ -649,19 +888,45 @@ static BOOL wait_for_interface_ready(LONG index, const AmiIfConfig *ifc,
     }
 }
 
+static int addif_main(int argc, char **argv);
+
 int main(int argc, char **argv)
 {
-    LONG            args[ARG_COUNT];
+    LONG rc;
+
+    /* Workbench hands the WBStartup over as argv (tool_startup.S). */
+    if (argc == 0)
+        wb_capture_begin();
+    else
+        IconBase = OpenLibrary((CONST_STRPTR)"icon.library", 37);
+
+    rc = tool_quiet_end(addif_main(argc, argv));
+
+    if (argc == 0)
+        wb_capture_end(rc);
+    else if (IconBase != NULL)
+        CloseLibrary(IconBase);
+
+    return (int)rc;
+}
+
+/* Static: this command is one process, and 4 KB of Shell stack. */
+static LONG args[ARG_COUNT];
+
+static int addif_main(int argc, char **argv)
+{
     struct RDArgs  *rda;
     AmiIfConfig     ifc;
     STRPTR         *arguments;
-    STRPTR         *names;
+    STRPTR         *names = addif_names;
     const char     *name;
     const char     *primary;
     ULONG           count = 0;
     ULONG           timeout;
     ULONG           allowance;
-    BOOL            quiet;
+    BOOL            quiet = FALSE;
+    LONG            given = -1;
+    BOOL            have_timeout = FALSE;
     BOOL            dynamic = FALSE;
     BOOL            broken = FALSE;
     ULONG           n;
@@ -669,64 +934,81 @@ int main(int argc, char **argv)
     LONG            err;
     LONG            rc = RETURN_OK;
 
-    (VOID)argv;
-
-    if (tool_from_workbench(argc))
-        return RETURN_FAIL;
-
     tool_break_arm();
 
-    args[ARG_INTERFACE] = 0;
-    args[ARG_QUIET]     = 0;
-    args[ARG_TIMEOUT]   = 0;
-
-    rda = ReadArgs((CONST_STRPTR)TEMPLATE, args, NULL);
-    if (rda == NULL)
+    if (argc == 0)
     {
-        tool_fault(IoErr());
-        tool_usage("<interface name> [<interface name>...]",
-                   "The name of a file in DEVS:NetInterfaces, for example "
-                   "eth0.");
-        return RETURN_ERROR;
+        LONG wrc = wb_arguments((const struct WBStartup *)argv, &count,
+                                &quiet, &given);
+
+        if (wrc != RETURN_OK)
+            return (int)wrc;
+        have_timeout = (BOOL)(given >= 0);
     }
-
-    arguments = (STRPTR *)args[ARG_INTERFACE];
-    names     = addif_names;
-    quiet   = (args[ARG_QUIET] != 0) ? TRUE : FALSE;
-    timeout = ADDIF_TIMEOUT;
-
-    if (args[ARG_TIMEOUT] != 0)
+    else
     {
-        LONG given = *(const LONG *)args[ARG_TIMEOUT];
+        args[ARG_INTERFACE] = 0;
+        args[ARG_QUIET]     = 0;
+        args[ARG_TIMEOUT]   = 0;
 
-        if (given < 0)
+        rda = ReadArgs((CONST_STRPTR)TEMPLATE, args, NULL);
+        if (rda == NULL)
         {
-            tool_error("TIMEOUT cannot be negative");
-            FreeArgs(rda);
+            tool_fault(IoErr());
+            tool_usage("<interface name> [<interface name>...]",
+                       "The name of a file in DEVS:NetInterfaces, for "
+                       "example eth0.");
             return RETURN_ERROR;
         }
 
-        timeout = (given > (LONG)ADDIF_TIMEOUT) ? (ULONG)given : ADDIF_TIMEOUT;
+        arguments = (STRPTR *)args[ARG_INTERFACE];
+        quiet     = (args[ARG_QUIET] != 0) ? TRUE : FALSE;
+        if (quiet)
+            tool_quiet_begin();
+        if (args[ARG_TIMEOUT] != 0)
+        {
+            have_timeout = TRUE;
+            given        = *(const LONG *)args[ARG_TIMEOUT];
+        }
+
+        /* Copied into addif_expanded, so nothing below needs rda. */
+        for (n = 0; arguments != NULL && arguments[n] != NULL; n++)
+        {
+            if (!expand_interface_argument((const char *)arguments[n],
+                                           &count))
+            {
+                FreeArgs(rda);
+                return RETURN_FAIL;
+            }
+        }
+
+        FreeArgs(rda);
     }
 
-    if (arguments == NULL || arguments[0] == NULL)
+    addif_quiet = quiet;
+    if (quiet)
+        tool_quiet_begin();
+
+    timeout = ADDIF_TIMEOUT;
+    if (have_timeout)
+    {
+        if (given < 0)
+        {
+            tool_error("TIMEOUT cannot be negative");
+            return RETURN_ERROR;
+        }
+
+        timeout = ((ULONG)given > ADDIF_TIMEOUT_MIN) ? (ULONG)given
+                                                     : ADDIF_TIMEOUT_MIN;
+    }
+
+    if (count == 0)
     {
         tool_error("no interface was named");
         tool_usage("<interface name> [<interface name>...]",
                    "The name of a file in DEVS:NetInterfaces, for example "
                    "eth0.");
-
-        FreeArgs(rda);
         return RETURN_ERROR;
-    }
-
-    for (n = 0; arguments[n] != NULL; n++)
-    {
-        if (!expand_interface_argument((const char *)arguments[n], &count))
-        {
-            FreeArgs(rda);
-            return RETURN_FAIL;
-        }
     }
 
     sort_names(names, count);
@@ -743,7 +1025,6 @@ int main(int argc, char **argv)
 
         if (!load_interface(name, &ifc, FALSE))
         {
-            FreeArgs(rda);
             return RETURN_FAIL;
         }
 
@@ -798,7 +1079,6 @@ int main(int argc, char **argv)
         {
             tool_error("bsdsocket.library did not open");
             explain_library_failure(&ifc, freemem, largest, resident);
-            FreeArgs(rda);
             return RETURN_FAIL;
         }
 
@@ -808,7 +1088,6 @@ int main(int argc, char **argv)
             tool_explain_foreign_stack(base);
 
             tool_stack_release(base);
-            FreeArgs(rda);
             return RETURN_WARN;
         }
 
@@ -830,7 +1109,6 @@ int main(int argc, char **argv)
                 tool_error("cannot read the interface list");
                 tool_explain_no_netstatus(base);
                 tool_stack_release(base);
-                FreeArgs(rda);
                 return RETURN_FAIL;
             }
 
@@ -909,7 +1187,6 @@ int main(int argc, char **argv)
                     tool_error("cannot read the interface list");
                     tool_explain_no_netstatus(base);
                     tool_stack_release(base);
-                    FreeArgs(rda);
                     return RETURN_FAIL;
                 }
             }
@@ -977,12 +1254,10 @@ int main(int argc, char **argv)
         {
             tool_fault(ERROR_BREAK);
             tool_stack_release(base);
-            FreeArgs(rda);
             return RETURN_WARN;
         }
 
         tool_stack_release(base);
-        FreeArgs(rda);
         return (int)rc;
     }
 
@@ -991,7 +1266,6 @@ int main(int argc, char **argv)
         tool_error("netstack_startup: %s (%s, %ld)",
                    (LONG)tool_net_error(err), (LONG)tool_code_net(err), err);
         explain_startup_failure(err, &ifc);
-        FreeArgs(rda);
         return RETURN_FAIL;
     }
 
@@ -1011,7 +1285,6 @@ int main(int argc, char **argv)
                 tool_error("%s was not added to the running network: %s",
                            (LONG)name, (LONG)tool_net_error(err));
                 explain_startup_failure(err, &ifc);
-                FreeArgs(rda);
                 return RETURN_FAIL;
             }
 
@@ -1037,7 +1310,6 @@ int main(int argc, char **argv)
                            (LONG)tool_net_error(err),
                            (LONG)tool_code_net(err), err);
                 tool_explain_device(ifc.device, ifc.unit, ifc.card);
-                FreeArgs(rda);
                 return RETURN_FAIL;
             }
         }
@@ -1131,6 +1403,5 @@ int main(int argc, char **argv)
         rc = RETURN_WARN;
     }
 
-    FreeArgs(rda);
     return (int)rc;
 }

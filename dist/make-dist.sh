@@ -85,7 +85,8 @@ CMDS=(AddNetInterface NetSetup NetPrefs NetMeter NetWireless NetWirelessPrefs On
       GetNetStatus NetShutdown RemoveNetInterface
       ConfigureNetInterface
       AddNetRoute DeleteNetRoute
-      NetDevStats)
+      NetDevStats
+      ShowTasks WatchTasks)   # these two from third_party/shelltools
 
 # ------------------------------------------------------------- the builds --
 #
@@ -559,7 +560,7 @@ cp "$INSTALL/AmiNetXDuo.info"          "$OUTDIR/"
 # default tool is "Installer", so Workbench finds it here and a double-click just
 # works, nothing to fetch or install first.
 installer_sha=$( (sha256sum "$INSTALL/Installer" 2>/dev/null || shasum -a 256 "$INSTALL/Installer") | cut -d" " -f1)
-if [ "$installer_sha" != "c99b79f4506e547545dde81df435ac1782e8a49674bf4a6814aacdc720bd3111" ]; then
+if [ "$installer_sha" != "c6dc78f6e95c8b47204150fa3ff8d0e235866851301a5f1f8ddd05d97ba53137" ]; then
     echo "the supplied Installer does not match the validated low-memory build" >&2
     exit 1
 fi

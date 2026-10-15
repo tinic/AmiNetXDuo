@@ -12,8 +12,13 @@
 #include <proto/exec.h>
 #include <proto/dos.h>
 #include <proto/intuition.h>
+#include <devices/timer.h>
+#include <proto/timer.h>
 
 struct IntuitionBase *IntuitionBase;
+struct Device *TimerBase;
+static struct timerequest timer_io;
+static ULONG eclock_hz;
 static struct Task *parent;
 static volatile LONG child_rc;
 static volatile ULONG child_stack;
@@ -23,6 +28,7 @@ static char line[8192], arguments[8192];
 static struct IntuiMessage close_message;
 static struct MsgPort *close_port;
 static ULONG raw_key_address;
+static BYTE child_pri;
 static BOOL child_installer;
 static LONG gui_ids[40];
 static ULONG gui_count;
@@ -53,6 +59,21 @@ static char *field(char *s)
 }
 
 static BOOL finished(VOID) { return (SetSignal(0UL, 0UL) & gone) != 0; }
+
+/* Budgets are elapsed E-clock time, not Delay() turns: a busy child stretches
+ * turns. E-clock is monotonic (sntp may step the clock); the low word wraps
+ * after over an hour, well past any budget. */
+static ULONG mark(VOID)
+{
+    struct EClockVal now;
+    ReadEClock(&now);
+    return now.ev_lo;
+}
+
+static BOOL expired(ULONG t0, ULONG ticks)
+{
+    return mark() - t0 >= ticks * (eclock_hz / TICKS_PER_SECOND);
+}
 
 /* Deliver the same close event as the window's close gadget. Only a window
  * whose port belongs to this child qualifies. The message remains owned by
@@ -175,7 +196,8 @@ static LONG run_case(char *id, ULONG stack, char mode, ULONG seconds, const char
 {
     BPTR seg, input, output;
     struct Process *child;
-    ULONG i, waited, broke = 0;
+    ULONG i, turn, broke = 0;
+    ULONG t0;
     BOOL sent_close = FALSE, close_pending = FALSE;
     LONG rc;
     for (i = 0; i < sizeof(arguments) - 2 && args[i] != '\0'; i++) arguments[i] = args[i];
@@ -202,7 +224,7 @@ static LONG run_case(char *id, ULONG stack, char mode, ULONG seconds, const char
     record(id, "START", 0, stack, 0);
     child = CreateNewProcTags(NP_Seglist, (Tag)seg, NP_FreeSeglist, (Tag)FALSE,
         NP_Cli, (Tag)TRUE, NP_Name, (Tag)path, NP_Arguments, (Tag)arguments,
-        NP_StackSize, (Tag)stack, NP_Input, (Tag)input, NP_Output, (Tag)output,
+        NP_StackSize, (Tag)stack, NP_Priority, (Tag)child_pri, NP_Input, (Tag)input, NP_Output, (Tag)output,
         NP_Error, (Tag)output, NP_CloseInput, (Tag)FALSE, NP_CloseOutput, (Tag)FALSE,
         NP_CloseError, (Tag)FALSE, NP_ExitCode, (Tag)child_exit, TAG_DONE);
     if (child == NULL)
@@ -213,7 +235,8 @@ static LONG run_case(char *id, ULONG stack, char mode, ULONG seconds, const char
     }
     /* Interrupt/GUI cases are expected to stay resident until stopped. Plain
      * exit cases must finish unaided; Ctrl-C never converts their hang to PASS. */
-    for (waited = 0; waited < seconds * 50UL && !finished(); waited += 2)
+    t0 = mark();
+    while (!expired(t0, seconds * TICKS_PER_SECOND) && !finished())
         Delay(2);
     if (!finished())
     {
@@ -226,13 +249,14 @@ static LONG run_case(char *id, ULONG stack, char mode, ULONG seconds, const char
         }
         if (sent_close) broke = 1;
         Permit();
-        for (waited = 0; waited < (mode == 'I' ? 500UL : 150UL) && !finished(); waited += 2)
+        t0 = mark();
+        for (turn = 0; !expired(t0, mode == 'I' ? 500UL : 150UL) && !finished(); turn++)
         {
             Delay(2);
             if (close_pending && GetMsg(close_port) != NULL) close_pending = FALSE;
             /* Cancel can open a second confirmation requester. Reuse our
              * message only after its reply, never while queued in a child. */
-            if (mode == 'I' && !close_pending && waited % 10UL == 0 && !finished()) {
+            if (mode == 'I' && !close_pending && turn % 5UL == 0 && !finished()) {
                 close_pending = close_window(child);
                 if (close_pending) sent_close = TRUE;
             }
@@ -274,7 +298,18 @@ int main(int argc, char **argv)
     bit = AllocSignal(-1);
     if (bit < 0) return 20;
     gone = 1UL << bit;
+    /* Children keep our original priority; we run one above so a child that
+     * never waits cannot hold the deadline check off for a whole time slice. */
+    if (OpenDevice((CONST_STRPTR)TIMERNAME, UNIT_ECLOCK, (struct IORequest *)&timer_io, 0) != 0)
+    { FreeSignal(bit); return 20; }
+    child_pri = parent->tc_Node.ln_Pri;
+    SetTaskPri(parent, child_pri + 1);
     close_port = CreateMsgPort();
+    TimerBase = timer_io.tr_node.io_Device;
+    {
+        struct EClockVal ev;
+        eclock_hz = ReadEClock(&ev);
+    }
     IntuitionBase = (struct IntuitionBase *)OpenLibrary((CONST_STRPTR)"intuition.library", 37);
     journal = Open((CONST_STRPTR)"DH0:cli-results.tsv", MODE_NEWFILE);
     cases = Open((CONST_STRPTR)"DH0:cli-cases.tsv", MODE_OLDFILE);
@@ -305,6 +340,8 @@ int main(int argc, char **argv)
     if (journal) Close(journal);
     if (IntuitionBase) CloseLibrary((struct Library *)IntuitionBase);
     if (close_port) DeleteMsgPort(close_port);
+    CloseDevice((struct IORequest *)&timer_io);
+    SetTaskPri(parent, child_pri);
     FreeSignal(bit);
     return (int)rc;
 }

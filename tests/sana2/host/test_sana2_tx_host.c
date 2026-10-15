@@ -31,7 +31,16 @@ static void h_check(int ok, const char *what)
 static struct IORequest *h_sent;
 static unsigned long     h_sends;
 
-VOID Disable(VOID) { }
+/* A competing reaper can run after the lock-free queue test, immediately
+   before the caller disables interrupts to detach the reply list. */
+static VOID (*h_before_disable)(VOID);
+VOID Disable(VOID)
+{
+    VOID (*fn)(VOID) = h_before_disable;
+    h_before_disable = NULL;
+    if (fn != NULL)
+        fn();
+}
 VOID Enable(VOID)  { }
 VOID Forbid(VOID)  { }
 /* ACKPACE stays off here (ack_tpkb 0); the hold is test_sana2_ackpace's. */
@@ -346,6 +355,7 @@ static void fixture_init(BOOL raw, ULONG hw_type)
     h_flush_held   = NULL;
     h_flush_reply_on_sleep = 0;
     h_current      = &h_thread_a;
+    h_before_disable = NULL;
 }
 
 static void packet_init(const UCHAR *body, ULONG len)
@@ -648,6 +658,26 @@ static void test_chip_checksum_declines(void)
     h_check((pkt.nx_packet_interface_capability_flag &
              NX_INTERFACE_CAPABILITY_TCP_TX_CHECKSUM) == 0,
             "and the flag is taken");
+}
+
+static void test_pseudo_header_carries(void)
+{
+    UCHAR *ip;
+    packet_init(ack_frame, ACK_LEN);
+    memmove(pkt.nx_packet_prepend_ptr + 1, pkt.nx_packet_prepend_ptr, ACK_LEN);
+    pkt.nx_packet_prepend_ptr++;
+    pkt.nx_packet_append_ptr++;
+    ip = pkt.nx_packet_prepend_ptr;
+    memset(ip + 12, 0xff, 8);
+    h_check(ami_sana2_tx_pseudo_sum(&pkt) == TRUE &&
+            ip[36] == 0 && ip[37] == 26,
+            "odd-address pseudo-header loads retain address carries");
+    ip[14] = 0xff;
+    ip[15] = 0xe6;
+    memset(ip + 16, 0, 4);
+    h_check(ami_sana2_tx_pseudo_sum(&pkt) == TRUE &&
+            ip[36] == 0 && ip[37] == 1,
+            "a carry produced by the first fold is folded again");
 }
 
 static void test_pad_raw(void)
@@ -968,6 +998,28 @@ static void test_lazy_parks_and_unparks(void)
 }
 #endif /* AMINETXDUO_TX_LAZY_COLLECT */
 
+static VOID competing_reaper(VOID)
+{
+    ami_sana2_tx_reap(&iface);
+}
+
+static void test_reap_loses_queue_to_another_reaper(void)
+{
+    printf("sana2: a second reaper drains the port before the splice lock\n");
+    fixture_init(FALSE, S2WireType_Ethernet);
+    packet_init(arp_frame, ARP_LEN);
+    h_check(ami_sana2_tx_send(&iface, &pkt, AMI_ETHERTYPE_ARP, 0xFFFF,
+                              0xFFFFFFFF) == NX_SUCCESS, "the write is posted");
+    h_reply();
+    h_before_disable = competing_reaper;
+    ami_sana2_tx_reap(&iface);
+    h_check(h_before_disable == NULL, "the competing reaper ran");
+    h_check(h_releases == 1 && iface.tx[0].busy == FALSE,
+            "the two reapers complete the packet exactly once");
+    h_check(iface.tx_port.mp_MsgList.lh_Head->ln_Succ == NULL,
+            "the outer reaper leaves an empty port intact");
+}
+
 /* IOF_QUICK on the write: only to a device that answered our tags, and then
    a kept flag is a finished write -- slot back, packet back, nothing to reap;
    a cleared flag is a queued one and the reap still owns it. */
@@ -1242,6 +1294,7 @@ int main(void)
 {
     frames_init();
     test_quick_write_completes_inline();
+    test_reap_loses_queue_to_another_reaper();
 #ifdef AMINETXDUO_TX_RUN
     test_run_flags_and_flushes();
 #endif
@@ -1253,6 +1306,7 @@ int main(void)
     test_chip_checksum_needs_the_tag();
     test_chip_checksum_raw_takes_the_stack();
     test_chip_checksum_declines();
+    test_pseudo_header_carries();
     test_pad_raw();
     test_high_ethertype_goes_raw();
     test_high_ethertype_checksum_first();

@@ -112,11 +112,11 @@ UBYTE netdev_tx_csum4(const UBYTE *frame, UWORD len, UBYTE supported,
                       UWORD *checksum_offset)
 {
     const UBYTE *ip;
-    UWORD plen;
-    UWORD ihl;
-    UWORD total;
-    UWORD tlen;
-    UWORD offset;
+    ULONG plen;
+    ULONG ihl;
+    ULONG total;
+    ULONG tlen;
+    ULONG offset;
     UBYTE flag;
 
     if (frame == NULL || checksum_offset == NULL || len < 14 + 20 ||
@@ -124,10 +124,22 @@ UBYTE netdev_tx_csum4(const UBYTE *frame, UWORD len, UBYTE supported,
         return 0;
 
     ip   = frame + 14;
-    plen = (UWORD)(len - 14);
+    plen = (ULONG)len - 14UL;
+    /* Normal TCP has fixed header offsets. Validate the same wire fields
+       without variable word arithmetic and indexed partial-register loads. */
+    if (ip[0] == 0x45 && ip[9] == 6)
+    {
+        total = nd_be16(ip + 2);
+        if (total < 40 || total > plen ||
+            (nd_be16(ip + 6) & 0x3fffUL) != 0 ||
+            (supported & ANXD_S2_TXF_TCP) == 0 || ip[32] < 0x50)
+            return 0;
+        *checksum_offset = 50;
+        return ANXD_S2_TXF_TCP;
+    }
     if ((ip[0] & 0xf0u) != 0x40u)
         return 0;
-    ihl = (UWORD)((ip[0] & 0x0fu) << 2);
+    ihl = (ULONG)(ip[0] & 0x0fu) << 2;
     if (ihl < 20 || ihl > plen)
         return 0;
     total = nd_be16(ip + 2);
@@ -136,13 +148,13 @@ UBYTE netdev_tx_csum4(const UBYTE *frame, UWORD len, UBYTE supported,
     if ((ip[6] & 0x3fu) != 0 || ip[7] != 0)
         return 0;
 
-    tlen = (UWORD)(total - ihl);
+    tlen = total - ihl;
     if (ip[9] == 6)
     {
         if ((supported & ANXD_S2_TXF_TCP) == 0 || tlen < 20 ||
             (ip[ihl + 12] >> 4) < 5)
             return 0;
-        offset = (UWORD)(14 + ihl + 16);
+        offset = 14UL + ihl + 16UL;
         flag = ANXD_S2_TXF_TCP;
     }
     else if (ip[9] == 17)
@@ -150,15 +162,15 @@ UBYTE netdev_tx_csum4(const UBYTE *frame, UWORD len, UBYTE supported,
         if ((supported & ANXD_S2_TXF_UDP) == 0 || tlen < 8 ||
             nd_be16(ip + ihl + 4) != tlen)
             return 0;
-        offset = (UWORD)(14 + ihl + 6);
+        offset = 14UL + ihl + 6UL;
         flag = ANXD_S2_TXF_UDP;
     }
     else
         return 0;
 
-    if ((UWORD)(offset + 2) > (UWORD)(14 + total))
+    if (offset + 2 > 14UL + total)
         return 0;
-    *checksum_offset = offset;
+    *checksum_offset = (UWORD)offset;
     return flag;
 }
 

@@ -1,0 +1,156 @@
+Library after: cap snapshot, open-window and threshold calculations reuse the value.
+
+68k 1005615e: moveal a2@(52),a3  [1 ARM instructions]
+  0094: ldur	w16, [x15, #52]
+
+68k 10056162: movel a2@(152),d0  [1 ARM instructions]
+  0098: ldur	w19, [x15, #152]
+
+68k 10056166: moveal a2@(148),a1  [1 ARM instructions]
+  009c: ldur	w14, [x15, #148]
+
+68k 1005616a: movel a2@(140),d1  [1 ARM instructions]
+  00a0: ldur	w20, [x15, #140]
+
+68k 1005616e: moveal a2@(144),a0  [1 ARM instructions]
+  00a4: ldur	w13, [x15, #144]
+
+68k 10056172: tstl d0  [3 ARM instructions]
+  00a8: cmn	wzr, w19
+  00ac: cset	w7, eq	// eq = none
+  00b0: bfi	w8, w7, #2, #1
+
+68k 10056174: bnew 56286 <__nx_tcp_mss_option_get+0xbfe>  [2 ARM instructions]
+  00b4: tbz	w8, #2, 0x1e4
+  00b8: add	w18, w18, #0x26
+
+68k 10056178: cmpl a3,d0  [3 ARM instructions]
+  00bc: cmp	w19, w16
+  00c0: cset	w10, eq	// eq = none
+  00c4: bfi	w8, w10, #2, #1
+
+68k 1005617a: beqs 5618c <__nx_tcp_mss_option_get+0xb04>  [2 ARM instructions]
+  00c8: tbnz	w8, #2, 0x1fc
+  00cc: add	w18, w18, #0x4
+
+68k 1005617c: movel a3@(72),d0  [1 ARM instructions]
+  00d0: ldur	w19, [x16, #72]
+
+68k 10056180: moveq #-1,d2  [1 ARM instructions]
+  00d4: mov	w21, #0xffffffff            	// #-1
+
+68k 10056182: cmpl d0,d2  [3 ARM instructions]
+  00d8: cmp	w21, w19
+  00dc: cset	w5, eq	// eq = none
+  00e0: bfi	w8, w5, #2, #1
+
+68k 10056184: beqs 5618c <__nx_tcp_mss_option_get+0xb04>  [2 ARM instructions]
+  00e4: tbnz	w8, #2, 0x214
+  00e8: add	w18, w18, #0xa
+
+68k 10056186: tstl d0  [3 ARM instructions]
+  00ec: cmn	wzr, w19
+  00f0: cset	w7, eq	// eq = none
+  00f4: bfi	w8, w7, #2, #1
+
+68k 10056188: bnew 5628e <__nx_tcp_mss_option_get+0xc06>  [2 ARM instructions]
+  00f8: tbz	w8, #2, 0x22c
+  00fc: add	w18, w18, #0x6
+
+68k 1005618c: subal a1,a0  [1 ARM instructions]
+  0100: sub	w13, w13, w14
+
+68k 1005618e: lsrl #1,d1  [5 ARM instructions]
+  0104: and	w8, w8, #0xffffffe0
+  0108: tst	w20, #0x1
+  010c: lsr	w20, w20, #1
+  0110: orr	w9, w8, #0x10
+  0114: csel	w8, w9, w8, ne	// ne = any
+
+68k 10056190: cmpal d1,a0  [3 ARM instructions]
+  0118: cmp	w13, w20
+  011c: cset	w10, cc	// cc = lo, ul, last
+  0120: bfi	w8, w10, #1, #1
+
+68k 10056192: bcsw 562b4 <__nx_tcp_mss_option_get+0xc2c>  [2 ARM instructions]
+  0124: tbnz	w8, #1, 0x244
+  0128: add	w18, w18, #0xa
+
+Positive-cap branch, from its separate emitted unit:
+
+68k 1005628e: cmpal d0,a0  [5 ARM instructions]
+  0000: cmp	w13, w19
+  0004: umov	w4, v19.h[5]
+  0008: mrs	x5, nzcv
+  000c: eor	w5, w5, #0x20000000
+  0010: bfxil	w4, w5, #28, #4
+
+68k 10056290: blss 562a2 <__nx_tcp_mss_option_get+0xc1a>  [3 ARM instructions]
+  0014: tst	w4, #0x6
+  0018: b.ne	0x104  // b.any
+  001c: add	w18, w18, #0x4
+
+68k 10056292: movel d0,d2  [1 ARM instructions]
+  0020: mov	w21, w19
+
+68k 10056294: cmpal d0,a1  [4 ARM instructions]
+  0024: cmp	w14, w19
+  0028: mrs	x6, nzcv
+  002c: eor	w6, w6, #0x20000000
+  0030: bfxil	w4, w6, #28, #4
+
+68k 10056296: blss 5629a <__nx_tcp_mss_option_get+0xc12>  [3 ARM instructions]
+  0034: tst	w4, #0x6
+  0038: b.ne	0x11c  // b.any
+  003c: add	w18, w18, #0x6
+
+68k 10056298: movel a1,d2  [1 ARM instructions]
+  0040: mov	w21, w14
+
+68k 1005629a: cmpal d2,a0  [3 ARM instructions]
+  0044: cmp	w13, w21
+  0048: cset	w7, cc	// cc = lo, ul, last
+  004c: bfi	w4, w7, #1, #1
+
+68k 1005629c: bccs 562a0 <__nx_tcp_mss_option_get+0xc18>  [2 ARM instructions]
+  0050: tbz	w4, #1, 0x134
+  0054: add	w18, w18, #0x6
+
+68k 1005629e: movel a0,d2  [1 ARM instructions]
+  0058: mov	w21, w13
+
+68k 100562a0: moveal d2,a0  [1 ARM instructions]
+  005c: mov	w13, w21
+
+68k 100562a2: subal a1,a0  [1 ARM instructions]
+  0060: sub	w13, w13, w14
+
+68k 100562a4: cmpl d0,d1  [4 ARM instructions]
+  0064: cmp	w20, w19
+  0068: mrs	x9, nzcv
+  006c: eor	w9, w9, #0x20000000
+  0070: bfxil	w4, w9, #28, #4
+
+68k 100562a6: blsw 5618e <__nx_tcp_mss_option_get+0xb06>  [3 ARM instructions]
+  0074: tst	w4, #0x6
+  0078: b.ne	0x14c  // b.any
+  007c: add	w18, w18, #0xc
+
+68k 100562aa: lsrl #1,d0  [5 ARM instructions]
+  0080: and	w4, w4, #0xffffffe0
+  0084: tst	w19, #0x1
+  0088: lsr	w19, w19, #1
+  008c: orr	w10, w4, #0x10
+  0090: csel	w4, w10, w4, ne	// ne = any
+
+68k 100562ac: movel d0,d1  [1 ARM instructions]
+  0094: mov	w20, w19
+
+68k 100562ae: cmpal d1,a0  [3 ARM instructions]
+  0098: cmp	w13, w20
+  009c: cset	w11, cc	// cc = lo, ul, last
+  00a0: bfi	w4, w11, #1, #1
+
+68k 100562b0: bccw 56196 <__nx_tcp_mss_option_get+0xb0e>  [2 ARM instructions]
+  00a4: tbz	w4, #1, 0x164
+  00a8: add	w18, w18, #0xa

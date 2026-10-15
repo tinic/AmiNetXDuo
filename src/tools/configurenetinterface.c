@@ -17,10 +17,27 @@ const char *const tool_name = "ConfigureNetInterface";
 static const char version_tag[] __attribute__((used)) =
     TOOL_VERSTAG("ConfigureNetInterface");
 
-#define TEMPLATE    "INTERFACE/A,QUIET/S,ADDRESS/K,NETMASK/K,GATEWAY/K,"     \
-                    "ADDRESS6/K,GATEWAY6/K,MDNS/K,CONFIGURE/K,CONFIGURE6/K," \
-                    "RELEASE=RELEASEADDRESS/S,TIMEOUT/K/N,MTU/K/N,"          \
-                    "ONLINE/S,OFFLINE/S,UP/S,DOWN/S,PRIORITY/K/N"
+/*
+ * The AmigaDOS Command Reference's template, then ours.  test_refcompat holds
+ * TEMPLATE to it.  Each reference keyword does what the interface file's
+ * keyword of the same name does: DEBUG, LEASE, DHCPUNICAST, METRIC and
+ * DESTINATION are accepted and change nothing, as they do there
+ * (config_parse.c IF_INERT).
+ */
+#define REFERENCE_TEMPLATE "INTERFACE/A,QUIET/S,ADDRESS/K,NETMASK/K,"         \
+                    "BROADCASTADDR/K,DESTINATION=DESTINATIONADDR/K,"          \
+                    "METRIC/K/N,MTU/K/N,ALIASADDR/K,DELETEADDR/K,ONLINE/S,"   \
+                    "OFFLINE/S,UP/S,DOWN/S,DEBUG/K,COMPLETE/K,CONFIGURE/K,"   \
+                    "LEASE/K,RELEASE=RELEASEADDRESS/S,ID/K,TIMEOUT/K/N,"      \
+                    "DHCPUNICAST/K"
+
+#define TEMPLATE    "INTERFACE/A,QUIET/S,ADDRESS/K,NETMASK/K,"                \
+                    "BROADCASTADDR/K,DESTINATION=DESTINATIONADDR/K,"          \
+                    "METRIC/K/N,MTU/K/N,ALIASADDR/K,DELETEADDR/K,ONLINE/S,"   \
+                    "OFFLINE/S,UP/S,DOWN/S,DEBUG/K,COMPLETE/K,CONFIGURE/K,"   \
+                    "LEASE/K,RELEASE=RELEASEADDRESS/S,ID/K,TIMEOUT/K/N,"      \
+                    "DHCPUNICAST/K,GATEWAY/K,ADDRESS6/K,GATEWAY6/K,MDNS/K,"   \
+                    "CONFIGURE6/K,PRIORITY/K/N"
 
 enum
 {
@@ -28,19 +45,29 @@ enum
     ARG_QUIET,
     ARG_ADDRESS,
     ARG_NETMASK,
-    ARG_GATEWAY,
-    ARG_ADDRESS6,
-    ARG_GATEWAY6,
-    ARG_MDNS,
-    ARG_CONFIGURE,
-    ARG_CONFIGURE6,
-    ARG_RELEASE,
-    ARG_TIMEOUT,
+    ARG_BROADCASTADDR,
+    ARG_DESTINATION,
+    ARG_METRIC,
     ARG_MTU,
+    ARG_ALIASADDR,
+    ARG_DELETEADDR,
     ARG_ONLINE,
     ARG_OFFLINE,
     ARG_UP,
     ARG_DOWN,
+    ARG_DEBUG,
+    ARG_COMPLETE,
+    ARG_CONFIGURE,
+    ARG_LEASE,
+    ARG_RELEASE,
+    ARG_ID,
+    ARG_TIMEOUT,
+    ARG_DHCPUNICAST,
+    ARG_GATEWAY,
+    ARG_ADDRESS6,
+    ARG_GATEWAY6,
+    ARG_MDNS,
+    ARG_CONFIGURE6,
     ARG_PRIORITY,
     ARG_COUNT
 };
@@ -63,6 +90,10 @@ enum
 #define CNI_ENOTCONN        57
 #define CNI_ENOSYS          78
 #define CNI_ENETDOWN        50
+#define CNI_EEXIST          17
+#define CNI_ENOSPC          28
+#define CNI_EPERM           1
+#define CNI_EOPNOTSUPP      45
 
 /* RFC 791 2: 68 bytes is the smallest datagram every host must carry. */
 #define CNI_MTU_MIN         68
@@ -542,7 +573,157 @@ static VOID say_addresses6(struct Library *base, LONG index, const char *name)
         say("%s: no IPv6 address\n", (LONG)name);
 }
 
+/* YES, NO, or absent; FALSE after a message for anything else.  The
+   reference's DEBUG, COMPLETE and DHCPUNICAST. */
+static BOOL yes_no(const char *keyword, LONG index, BOOL *yes)
+{
+    const char *v = (const char *)args[index];
+
+    *yes = FALSE;
+    if (v == NULL)
+        return TRUE;
+    if (tool_stricmp(v, "YES") == 0)
+    {
+        *yes = TRUE;
+        return TRUE;
+    }
+    if (tool_stricmp(v, "NO") == 0)
+        return TRUE;
+
+    tool_error("%s is YES or NO, not \"%s\"", (LONG)keyword, (LONG)v);
+    return FALSE;
+}
+
+/*
+ * ALIASADDR and DELETEADDR through ConfigureInterfaceTagList(), as Roadshow's
+ * IFC_AddAliasAddress and IFC_DeleteAliasAddress: an address the interface
+ * answers to besides its own.  The delete goes first, so one call can replace
+ * an alias.
+ */
+static BOOL apply_aliases(struct Library *base, const char *name)
+{
+    struct TagItem tags[3];
+    ULONG          n = 0;
+    LONG           err = 0;
+
+    if (args[ARG_DELETEADDR] != 0)
+    {
+        tags[n].ti_Tag  = IFC_DeleteAliasAddress;
+        tags[n].ti_Data = (ULONG)args[ARG_DELETEADDR];
+        n++;
+    }
+    if (args[ARG_ALIASADDR] != 0)
+    {
+        tags[n].ti_Tag  = IFC_AddAliasAddress;
+        tags[n].ti_Data = (ULONG)args[ARG_ALIASADDR];
+        n++;
+    }
+    tags[n].ti_Tag  = TAG_DONE;
+    tags[n].ti_Data = 0;
+
+    if (tool_configure_interface(base, name, tags, &err) == 0)
+    {
+        if (args[ARG_DELETEADDR] != 0)
+            say("%s: alias %s removed\n", (LONG)name, args[ARG_DELETEADDR]);
+        if (args[ARG_ALIASADDR] != 0)
+            say("%s: alias %s\n", (LONG)name, args[ARG_ALIASADDR]);
+        return TRUE;
+    }
+
+    if (err == CNI_EADDRNOTAVAIL)
+        tool_error("%s has no alias %s", (LONG)name, args[ARG_DELETEADDR]);
+    else if (err == CNI_EEXIST)
+        tool_error("%s is already in use", args[ARG_ALIASADDR]);
+    else if (err == CNI_ENOSPC)
+        tool_error("no free interface slot for alias %s", args[ARG_ALIASADDR]);
+    else if (err == CNI_EOPNOTSUPP || err == CNI_ENOSYS)
+        tool_error("bsdsocket.library has no alias addresses");
+    else
+        tool_error("%s: alias not changed (%s, %ld)", (LONG)name,
+                   (LONG)tool_code_errno(err), err);
+
+    return FALSE;
+}
+
+/* COMPLETE=YES, IFC_Complete: the configuration is whole.  Static routes
+   follow the interfaces here already, so the library has nothing to reread. */
+static VOID apply_complete(struct Library *base, const char *name)
+{
+    struct TagItem tags[2];
+    LONG           err = 0;
+
+    tags[0].ti_Tag  = IFC_Complete;
+    tags[0].ti_Data = TRUE;
+    tags[1].ti_Tag  = TAG_DONE;
+    tags[1].ti_Data = 0;
+
+    (VOID)tool_configure_interface(base, name, tags, &err);
+}
+
+/* ID: the host name DHCP offers, as ID= in the interface file offers it.  A
+   stronger source keeping the name is not an error, as it is not there. */
+static BOOL apply_id(struct Library *base, const char *id)
+{
+    LONG  err = 0;
+    ULONG w;
+    ULONG n = 0;
+
+    while (id[n] != '\0')
+        n++;
+    if (n < 2 || n >= (ULONG)NETSTATUS_HOSTNAME_LEN)
+    {
+        tool_error("ID is 2 to %ld characters",
+                   (LONG)(NETSTATUS_HOSTNAME_LEN - 1));
+        return FALSE;
+    }
+
+    for (w = 0; w < (ULONG)(sizeof(cni_control) / sizeof(ULONG)); w++)
+        ((ULONG *)&cni_control)[w] = 0;
+    cni_control.nsc_Magic   = AMI_NETSTATUS_MAGIC;
+    cni_control.nsc_Version = (UWORD)AMI_NETSTATUS_VERSION;
+    tool_copy_string(cni_control.nsc_HostName,
+                     sizeof(cni_control.nsc_HostName), id);
+
+    if (tool_netstatus_control(base, NETCTRL_HOSTNAME_SET, &cni_control,
+                               &err) != 0 && err != CNI_EPERM)
+    {
+        tool_error("ID %s was refused", (LONG)id);
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
+/* BROADCASTADDR has no setting of its own: it is derived from the address and
+   the netmask, so one that disagrees with them is the mistake. */
+static BOOL broadcast_agrees(ULONG address, ULONG netmask)
+{
+    ULONG given;
+
+    if (!ami_config_parse_ip((const char *)args[ARG_BROADCASTADDR], &given))
+    {
+        tool_error("\"%s\" is not an address", args[ARG_BROADCASTADDR]);
+        return FALSE;
+    }
+
+    if (given != tool_broadcast(address, netmask))
+    {
+        tool_error("BROADCASTADDR %s does not match ADDRESS and NETMASK",
+                   args[ARG_BROADCASTADDR]);
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
+static int cni_main(int argc, char **argv);
+
 int main(int argc, char **argv)
+{
+    return (int)tool_quiet_end(cni_main(argc, argv));
+}
+
+static int cni_main(int argc, char **argv)
 {
     struct RDArgs   *rda;
     struct Library  *base;
@@ -566,8 +747,12 @@ int main(int argc, char **argv)
     ULONG            mtu          = 0;
     BOOL             have_state   = FALSE;
     LONG             state        = 0;
+    BOOL             want_autoip  = FALSE;
+    BOOL             complete     = FALSE;
+    BOOL             inert;
     LONG             index;
     LONG             err = 0;
+    ULONG            i;
     const NetStatusInterface *row;
 
     (VOID)argv;
@@ -577,24 +762,8 @@ int main(int argc, char **argv)
 
     tool_break_arm();
 
-    args[ARG_INTERFACE] = 0;
-    args[ARG_QUIET]     = 0;
-    args[ARG_ADDRESS]   = 0;
-    args[ARG_NETMASK]   = 0;
-    args[ARG_GATEWAY]   = 0;
-    args[ARG_ADDRESS6]  = 0;
-    args[ARG_GATEWAY6]  = 0;
-    args[ARG_MDNS]      = 0;
-    args[ARG_CONFIGURE] = 0;
-    args[ARG_CONFIGURE6] = 0;
-    args[ARG_RELEASE]   = 0;
-    args[ARG_TIMEOUT]   = 0;
-    args[ARG_MTU]       = 0;
-    args[ARG_ONLINE]    = 0;
-    args[ARG_OFFLINE]   = 0;
-    args[ARG_UP]        = 0;
-    args[ARG_DOWN]      = 0;
-    args[ARG_PRIORITY]  = 0;
+    for (i = 0; i < (ULONG)ARG_COUNT; i++)
+        args[i] = 0;
     cni_gateway6[0] = 0;
     cni_gateway6[1] = 0;
     cni_gateway6[2] = 0;
@@ -604,20 +773,38 @@ int main(int argc, char **argv)
     if (rda == NULL)
     {
         tool_fault(IoErr());
-        tool_usage("<interface> [QUIET] [ADDRESS <a>[/<bits>]] [NETMASK <m>] "
-                   "[GATEWAY <g>|NONE] [ADDRESS6 <a>] [GATEWAY6 <g>|NONE] "
-                   "[MDNS YES|NO] [CONFIGURE DHCP] [CONFIGURE6 <mode>] "
-                   "[RELEASE] [TIMEOUT <secs>] [MTU <bytes>] "
-                   "[ONLINE|OFFLINE|UP|DOWN] [PRIORITY <n>]",
+        tool_usage("<interface> [QUIET] [ADDRESS <a>[/<bits>]|DHCP] "
+                   "[NETMASK <m>] [ALIASADDR <a>] [DELETEADDR <a>] "
+                   "[GATEWAY <g>|NONE] [GATEWAY6 <g>|NONE] [MDNS YES|NO] "
+                   "[CONFIGURE DHCP|AUTO|FASTAUTO] [RELEASE] [TIMEOUT <secs>] "
+                   "[MTU <bytes>] [ONLINE|OFFLINE|UP|DOWN] [PRIORITY <n>] "
+                   "[ID <name>] [COMPLETE YES|NO]",
                    "Change what a running interface is addressed with.");
         return RETURN_ERROR;
     }
 
     cni_quiet = (args[ARG_QUIET] != 0) ? TRUE : FALSE;
+    if (cni_quiet)
+        tool_quiet_begin();
 
     /* The same spelling AddNetInterface and RemoveNetInterface accept: a name,
        or the path of the file it was configured from. */
     name = tool_basename((const char *)args[ARG_INTERFACE]);
+
+    /* ADDRESS=DHCP and NETMASK=DHCP are the reference's spellings of
+       CONFIGURE=DHCP. */
+    if (args[ARG_ADDRESS] != 0 &&
+        tool_stricmp((const char *)args[ARG_ADDRESS], "DHCP") == 0)
+    {
+        want_dhcp         = TRUE;
+        args[ARG_ADDRESS] = 0;
+    }
+    if (args[ARG_NETMASK] != 0 &&
+        tool_stricmp((const char *)args[ARG_NETMASK], "DHCP") == 0)
+    {
+        want_dhcp         = TRUE;
+        args[ARG_NETMASK] = 0;
+    }
 
     if (args[ARG_ADDRESS] != 0 &&
         !parse_address((const char *)args[ARG_ADDRESS], &address, &netmask,
@@ -748,15 +935,31 @@ int main(int argc, char **argv)
     {
         const char *c = (const char *)args[ARG_CONFIGURE];
 
-        if (tool_stricmp(c, "DHCP") != 0)
+        /* AUTO and FASTAUTO are RFC 3927 link-local addressing, as the
+           interface file's CONFIGURE=AUTO; the stack has one way to do it. */
+        if (tool_stricmp(c, "DHCP") == 0)
+            want_dhcp = TRUE;
+        else if (tool_stricmp(c, "AUTO") == 0 ||
+                 tool_stricmp(c, "FASTAUTO") == 0)
+            want_autoip = TRUE;
+        else
         {
-            tool_error("CONFIGURE accepts only DHCP");
+            tool_error("CONFIGURE is DHCP, AUTO or FASTAUTO");
             FreeArgs(rda);
             return RETURN_ERROR;
         }
+    }
 
-        want_dhcp = TRUE;
+    if (want_dhcp && want_autoip)
+    {
+        tool_error("DHCP and CONFIGURE=%s cannot be combined",
+                   args[ARG_CONFIGURE]);
+        FreeArgs(rda);
+        return RETURN_ERROR;
+    }
 
+    if (want_dhcp)
+    {
         if (have_netmask || have_gateway)
         {
             tool_error("NETMASK and GATEWAY cannot be used with CONFIGURE=DHCP");
@@ -769,21 +972,10 @@ int main(int argc, char **argv)
     {
         LONG seconds = *(LONG *)args[ARG_TIMEOUT];
 
-        if (!want_dhcp)
-        {
-            tool_error("TIMEOUT requires CONFIGURE=DHCP");
-            FreeArgs(rda);
-            return RETURN_ERROR;
-        }
-        if (seconds < CNI_DHCP_TIMEOUT_MIN)
-        {
-            tool_error("TIMEOUT must be at least %ld seconds",
-                       (LONG)CNI_DHCP_TIMEOUT_MIN);
-            FreeArgs(rda);
-            return RETURN_ERROR;
-        }
-
-        timeout = (ULONG)seconds;
+        /* Without DHCP there is nothing to wait for, and the reference's
+           floor is a floor, not a refusal. */
+        timeout = (seconds > CNI_DHCP_TIMEOUT_MIN) ? (ULONG)seconds
+                                                   : CNI_DHCP_TIMEOUT_MIN;
     }
 
     /* One state, or none.  Two of them name two different interfaces to end
@@ -852,9 +1044,50 @@ int main(int argc, char **argv)
         have_priority = TRUE;
     }
 
+    /* The reference's YES/NO keywords, checked before anything is applied. */
+    {
+        BOOL debug;
+        BOOL unicast;
+
+        if (!yes_no("DEBUG", ARG_DEBUG, &debug) ||
+            !yes_no("COMPLETE", ARG_COMPLETE, &complete) ||
+            !yes_no("DHCPUNICAST", ARG_DHCPUNICAST, &unicast))
+        {
+            FreeArgs(rda);
+            return RETURN_ERROR;
+        }
+    }
+
+    {
+        ULONG check;
+        BOOL  bits;
+
+        if ((args[ARG_ALIASADDR] != 0 &&
+             !parse_address((const char *)args[ARG_ALIASADDR], &check, &check,
+                            &bits)) ||
+            (args[ARG_DELETEADDR] != 0 &&
+             !parse_address((const char *)args[ARG_DELETEADDR], &check, &check,
+                            &bits)))
+        {
+            tool_error("\"%s\" is not an address",
+                       (args[ARG_ALIASADDR] != 0) ? args[ARG_ALIASADDR]
+                                                  : args[ARG_DELETEADDR]);
+            FreeArgs(rda);
+            return RETURN_ERROR;
+        }
+    }
+
+    /* Accepted and inert, as in the interface file: still a request. */
+    inert = (BOOL)(args[ARG_DEBUG] != 0 || args[ARG_LEASE] != 0 ||
+                   args[ARG_DHCPUNICAST] != 0 || args[ARG_METRIC] != 0 ||
+                   args[ARG_DESTINATION] != 0 || args[ARG_TIMEOUT] != 0 ||
+                   args[ARG_BROADCASTADDR] != 0);
+
     if (!have_address && !have_netmask && !have_gateway && !have_gateway6 &&
         !have_mdns && !want_dhcp && !want_release && !have_mtu && !have_state &&
-        !have_priority)
+        !have_priority && !want_autoip && !inert && args[ARG_ID] == 0 &&
+        args[ARG_COMPLETE] == 0 && args[ARG_ALIASADDR] == 0 &&
+        args[ARG_DELETEADDR] == 0)
     {
         tool_error("nothing to change");
         FreeArgs(rda);
@@ -870,8 +1103,6 @@ int main(int argc, char **argv)
         return RETURN_WARN;
     }
 
-    /* FALSE: QUIET drops the report of what changed, never the reason it
-       could not. */
     base = tool_netstatus_open(FALSE);
     if (base == NULL)
     {
@@ -894,6 +1125,21 @@ int main(int argc, char **argv)
         tool_netstatus_close(base);
         FreeArgs(rda);
         return RETURN_FAIL;
+    }
+
+    if (args[ARG_BROADCASTADDR] != 0 && !want_dhcp)
+    {
+        row = iface_row(index);
+
+        if (!broadcast_agrees(have_address ? address
+                                           : (row ? row->nsi_Address : 0UL),
+                              have_netmask ? netmask
+                                           : (row ? row->nsi_NetMask : 0UL)))
+        {
+            tool_netstatus_close(base);
+            FreeArgs(rda);
+            return RETURN_ERROR;
+        }
     }
 
     /*
@@ -932,9 +1178,11 @@ int main(int argc, char **argv)
             else
                 tool_error("%s did not go online", (LONG)name);
 
+            /* The reference: "a value of 5 indicates that it didn't quite
+               work", so IF WARN after ONLINE sees it. */
             tool_netstatus_close(base);
             FreeArgs(rda);
-            return RETURN_FAIL;
+            return RETURN_WARN;
         }
 
         say("%s: online\n", (LONG)name);
@@ -1071,6 +1319,41 @@ int main(int argc, char **argv)
                 say("%s: default gateway %s\n", (LONG)name, (LONG)cni_text);
             }
         }
+    }
+
+    if (want_autoip)
+    {
+        if (control(base, NETCTRL_INTERFACE_AUTOIP, index, 0, 0, 0, 0, &err)
+            != 0)
+        {
+            if (err == CNI_EBUSY)
+                tool_error("link-local addressing already serves another "
+                           "interface");
+            else
+                tool_error("%s: link-local addressing not started (%s, %ld)",
+                           (LONG)name, (LONG)tool_code_errno(err), err);
+
+            tool_netstatus_close(base);
+            FreeArgs(rda);
+            return RETURN_FAIL;
+        }
+
+        say("%s: link-local addressing started\n", (LONG)name);
+    }
+
+    if ((args[ARG_ALIASADDR] != 0 || args[ARG_DELETEADDR] != 0) &&
+        !apply_aliases(base, name))
+    {
+        tool_netstatus_close(base);
+        FreeArgs(rda);
+        return RETURN_FAIL;
+    }
+
+    if (args[ARG_ID] != 0 && !apply_id(base, (const char *)args[ARG_ID]))
+    {
+        tool_netstatus_close(base);
+        FreeArgs(rda);
+        return RETURN_FAIL;
     }
 
     /*
@@ -1259,6 +1542,9 @@ int main(int argc, char **argv)
 
         say("%s: priority %ld until reboot\n", (LONG)name, priority);
     }
+
+    if (complete)
+        apply_complete(base, name);
 
     /* Said last, so it is the line left on the screen. */
     if (!want_dhcp && (have_address || have_netmask || have_gateway) &&

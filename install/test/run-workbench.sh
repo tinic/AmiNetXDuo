@@ -4166,6 +4166,10 @@ $HTTPS_STEPS
 Echo >>DH0:usercheck.txt "*N=== 4. arp, what answered on this network"
 C:arp >>DH0:usercheck.txt
 Echo >>DH0:usercheck.txt "RESULT arp rc=\$RC"
+
+Echo >>DH0:usercheck.txt "*N=== 4a. ShowTasks, the tasks on this Amiga"
+C:ShowTasks >>DH0:usercheck.txt
+Echo >>DH0:usercheck.txt "RESULT showtasks rc=\$RC"
 $CHECK_TAIL
 $WIFI_TAIL
 Echo >>DH0:usercheck.txt "*N=== done"
@@ -4415,6 +4419,7 @@ else
 fi
 
 report "arp"                           arp
+report "ShowTasks"                     showtasks
 
 # The supplicant, once.  The boot's S:Network-Startup started it -- with the
 # interface it names, unit 0 and the 32 KB stack -- and the second run found

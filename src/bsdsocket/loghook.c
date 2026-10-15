@@ -16,7 +16,7 @@
  * THE HOOK RUNS ON THE CALLER'S CONTEXT.  For syslog() that is the
  * application's task.  For the stack's own lines it is whichever task
  * logged: a NetX thread, or the port's timer task, which runs the tick under
- * Forbid() at priority 20.  A hook that Wait()s or takes a semaphore there
+ * Forbid() at TX_AMIGA_TIMER_PRIORITY.  A hook that Wait()s or takes a semaphore there
  * stalls every thread of the stack, so nothing is delivered under Forbid()
  * or Disable(), or from the timer task at all, and a hook that logs while it
  * runs is not re-entered.

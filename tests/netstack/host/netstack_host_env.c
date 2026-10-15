@@ -1156,6 +1156,24 @@ VOID ami_sana2_driver_entry(NX_IP_DRIVER *driver_req)
     (VOID)driver_req;
 }
 
+VOID ami_sana2_alias_driver_entry(NX_IP_DRIVER *driver_req)
+{
+    (VOID)driver_req;
+}
+
+VOID ami_sana2_alias_bind(AmiSana2If *iface)
+{
+    (VOID)iface;
+}
+
+BOOL ami_sana2_alias_publish(AmiSana2If *iface, NX_INTERFACE *alias, BOOL on)
+{
+    (VOID)iface;
+    (VOID)alias;
+    (VOID)on;
+    return TRUE;
+}
+
 VOID ami_sana2_set_block_hooks(AmiSana2BlockHook before_wait, AmiSana2BlockHook after_wait)
 {
     (VOID)before_wait;
