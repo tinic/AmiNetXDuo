@@ -446,6 +446,8 @@ mkdir -p "$TREE/Icons"
 for tool in NetPrefs NetMeter NetSwitch NetWireless NetWirelessPrefs; do
     cp "$INSTALL/$tool.info" "$TREE/Icons/$tool.info"
 done
+# NetSwitch's banner, installed beside it (install/tools/png2ilbm.py).
+cp "$INSTALL/banner/NetSwitch.ilbm" "$TREE/Icons/NetSwitch.ilbm"
 
 # The ssh and scp clients, when they have been built.  Optional, because they
 # come from clients/ rather than the CMake tree and a plain `cmake --build`

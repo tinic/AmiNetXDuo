@@ -219,6 +219,7 @@ EOF
 
     if [ "$seq" = netswitch ]; then
         cp "$NETSWITCH" "$HD/C/NetSwitch"
+        cp "$ROOT/install/banner/NetSwitch.ilbm" "$HD/C/NetSwitch.ilbm"
         cp "$WINCLICK" "$HD/C/WinClick"
         cp "$ADDIF" "$HD/C/AddNetInterface"
         cp "$SHOWNET" "$HD/C/ShowNetStatus"

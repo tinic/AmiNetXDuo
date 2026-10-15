@@ -2875,6 +2875,9 @@
   (P_rec_ours)
   (set REC_F (if DRAWER_LAYOUT (tackon D_ROOT "NetSwitch") "SYS:Utilities/NetSwitch"))
   (P_rec_ours)
+  (set REC_F (if DRAWER_LAYOUT (tackon D_ROOT "NetSwitch.ilbm")
+                 "SYS:Utilities/NetSwitch.ilbm"))
+  (P_rec_ours)
   (set REC_F (if DRAWER_LAYOUT (tackon D_ROOT "NetWirelessPrefs")
                  "SYS:Prefs/NetWirelessPrefs"))
   (P_rec_ours)
@@ -3778,6 +3781,12 @@
 (set TL_H (cat "NetSwitch takes each interface online and offline from a "
                "Workbench window."))
 (P_tool)
+(copyfiles
+  (prompt ("Installing the NetSwitch banner into %s" TL_D))
+  (help   TL_H)
+  (source (tackon S_ICONS "NetSwitch.ilbm"))
+  (dest   TL_D)
+  (optional "force"))
 (set TL_N "NetWirelessPrefs")
 (set TL_D (if DRAWER_LAYOUT D_ROOT "SYS:Prefs"))
 (set TL_H (cat "NetWirelessPrefs lists the Wi-Fi networks in range and joins "
