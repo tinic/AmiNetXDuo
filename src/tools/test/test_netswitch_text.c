@@ -252,6 +252,29 @@ int main(void)
     check(strcmp(buf + strlen(buf) - 3, "...") == 0, "fit in place marks the cut",
           buf, "");
 
+    /* Long to short in one buffer, which is what a repaint is: the renderer
+       keeps one cell buffer per column and formats it again for every row and
+       every pass, so a short value written after a long one must not leave the
+       long one behind it.  This is the same shape as the in-place defect above
+       -- a longer string has to disappear from a cell that no longer has room
+       for it -- and it is checked on the formatter the panel and the list
+       share, for the address that the click in the emulator arm changed from
+       an address to "none". */
+    check(ns_list_address(buf, sizeof(buf), "fe80::211:22ff:fe33:4455", NULL,
+                          NS_STATE_UP), "long then short: format the long value",
+          buf, "");
+    check(ns_fit(px_measure, NULL, buf, sizeof(buf), buf, 40),
+          "long then short: fit the long value", buf, "");
+    check(strcmp(buf + strlen(buf) - 3, "...") == 0,
+          "long then short: the long value was cut to the cell", buf, "");
+    check(ns_list_address(buf, sizeof(buf), NULL, NULL, NS_STATE_DOWN),
+          "long then short: format the short value", buf, "");
+    check(ns_fit(px_measure, NULL, buf, sizeof(buf), buf, 40),
+          "long then short: fit the short value", buf, "");
+    eq("long then short: none of the long value survives", buf, ns_none_word);
+    check(strlen(buf) == strlen(ns_none_word),
+          "long then short: the cell is exactly the short value", buf, "1 char");
+
     /* The legend names the three shapes in the same order the states are
        numbered, so the glyph a reader looks up is the one the row shows. */
     eq("legend up", ns_legend_word(NS_STATE_UP), "online");
