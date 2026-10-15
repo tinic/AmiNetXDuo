@@ -100,6 +100,9 @@
 #   AMINETXDUO_PRIOR_ARCHIVE=<lha>  installs that release first, boots it,
 #       then installs -a over it: an update.  Its kept interface file carries
 #       a user edit that must survive; the replaced library is kept as .old.
+#       A C:.info there goes to Backup, with its Restore line, and out of C:.
+#   AMINETXDUO_PRIOR_CINFO=custom  with it, C:.info is given bytes of its own
+#       before the update, as a user's drawer icon would be.
 # At NOVICE the Installer's own boot default is accepted: micro, or 4 MB of
 # RAM or less, means no S:Network-Startup, and the check starts the
 # interface by hand, as a user would (boot_default=manual).
@@ -2489,6 +2492,7 @@ PRIOR_IF=""
 PRIOR_IF_SUM=""
 PRIOR_NS_SUM=""
 PRIOR_LIB_SUMS=""
+PRIOR_CINFO_SUM=""
 PRIOR_EDIT="; user edit after the install -- an update must keep this"
 if [ -n "$PRIOR_ARCHIVE" ]; then
     echo
@@ -2596,6 +2600,14 @@ Echo >DH0:.done "0"'
             _p=$(amiga_path "$_f" 2>/dev/null) || continue
             printf '%s %s\n' "$_f" "$(shasum < "$_p" | cut -d' ' -f1)"
         done)
+    # C:.info as the update finds it: the prior release's copy wrote one.
+    _cdir=$(amiga_path C 2>/dev/null || true)
+    if [ "${AMINETXDUO_PRIOR_CINFO:-}" = custom ] && [ -n "$_cdir" ]; then
+        printf 'a user drawer icon for C:, not the Installer default\n' > "$_cdir/.info"
+    fi
+    [ -z "$_cdir" ] || [ ! -f "$_cdir/.info" ] ||
+        PRIOR_CINFO_SUM=$(shasum < "$_cdir/.info" | cut -d' ' -f1)
+    echo "prior_cinfo=${PRIOR_CINFO_SUM:-none} mode=${AMINETXDUO_PRIOR_CINFO:-release}"
     # Run 1 meets the prior release's anxnet.device as the existing driver,
     # which the checks below expect kept as .old.
     if _p=$(amiga_path Devs/Networks/anxnet.device 2>/dev/null); then
@@ -4341,6 +4353,29 @@ if [ -n "$PRIOR_ARCHIVE" ]; then
             fail=1
         fi
     done <<< "$PRIOR_LIB_SUMS"
+    # C:.info, gone from C: (tool_icons above), kept byte for byte in a
+    # Backup drawer whose Restore puts it back where nothing replaced it.
+    if [ -n "$PRIOR_CINFO_SUM" ]; then
+        _cbk=""
+        _bkt=$(amiga_path AmiNetXDuo/Backup 2>/dev/null || true)
+        for _b in ${_bkt:+"$_bkt"/*}; do
+            [ -f "$_b/C/.info" ] &&
+                [ "$(shasum < "$_b/C/.info" | cut -d' ' -f1)" = "$PRIOR_CINFO_SUM" ] &&
+                grep -qF 'If NOT EXISTS "C:.info"' "$_b/Restore" 2>/dev/null &&
+                { _cbk=$_b; break; }
+        done
+        if [ -n "$_cbk" ]; then
+            echo "update_backup_cinfo=yes"
+        else
+            echo "update_backup_cinfo=no"
+            echo "!! C:.info is not in a Backup drawer, byte for byte, with its Restore line"
+            fail=1
+        fi
+    elif [ "${AMINETXDUO_PRIOR_CINFO:-}" = custom ]; then
+        echo "update_backup_cinfo=no"
+        echo "!! AMINETXDUO_PRIOR_CINFO=custom and no C:.info before the update"
+        fail=1
+    fi
     _lib=$(amiga_path Libs/bsdsocket.library 2>/dev/null || true)
     _ver=$( { [ -n "$_lib" ] && LC_ALL=C strings "$_lib" | sed -n 's/^.*\$VER: *//p' | head -1; } || true)
     _want=$(LC_ALL=C strings "$UNPACK/AmiNetXDuo/Libs/bsdsocket.library" |
