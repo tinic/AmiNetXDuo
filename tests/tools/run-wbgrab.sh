@@ -31,6 +31,16 @@
 # (before the click) and -1.pfs ... -5.pfs (-3 is the open requester, -4 and
 # -5 are 4 s and 12 s after yes), with the stack's own INTERFACES listing
 # before and after in netswitch-takeall.txt.
+# -s netswitch-rows is the click-to-row mapping at its boundaries, with the
+# stack down so nothing can be switched by a wrong row: the list's row bands
+# are 13 px apart, and a click on the last pixel of one band, the first pixel
+# of the next, the pixel above the first band and a point outside the list
+# each grab a frame, so the FILLPEN band's own row can be read per click --
+# netswitch-rows.pfs (the window's box) and -1.pfs ... -22.pfs.  The clicks are
+# ordered so every probe is preceded by a click on the far row, which is what
+# makes "the band did not move" distinguishable from "this frame is a stale
+# repaint".  A click that lands on row N and selects row N+1 is how a user
+# takes the wrong interface down, which is why this is worth a frame each.
 # -s netwireless grabs NetWirelessPrefs against
 # tests/tools/wifistub.c's unit with the NetWireless AppIcon beside it, then
 # its join form and the Known networks window, as netwireless.pfs,
@@ -119,7 +129,7 @@ for seq in "${SEQUENCES[@]}"; do
     }
 done
 for seq in "${SEQUENCES[@]}"; do
-    [ "$seq" = netswitch ] || continue
+    [ "$seq" = netswitch ] || [ "$seq" = netswitch-rows ] || continue
     [ -x "$NETSWITCH" ] && [ -x "$WINCLICK" ] || {
         say error "no NetSwitch or WinClick under $BUILD"
         say hint "cmake --build $BUILD --parallel --target tool_netswitch test_winclick"
@@ -283,7 +293,8 @@ EOF
             > "$HD/Prefs/Env-Archive/Sys/Wireless.prefs"
     fi
 
-    if [ "$seq" = netswitch ] && [ -x "$NETSWITCH" ] && [ -x "$WINCLICK" ]; then
+    if { [ "$seq" = netswitch ] || [ "$seq" = netswitch-rows ]; } &&
+       [ -x "$NETSWITCH" ] && [ -x "$WINCLICK" ]; then
         cp "$NETSWITCH" "$HD/C/NetSwitch"
         cp "$WINCLICK" "$HD/C/WinClick"
         chmod 755 "$HD/C/NetSwitch" "$HD/C/WinClick"
@@ -459,6 +470,98 @@ Run >NIL: C:NetSwitch
 C:Wait 4
 C:WinClick "AmiNetXDuo NetSwitch" X 5 Y 5 TIMES 0 >DH0:netswitch.txt
 C:wbgrab TO DH0:netswitch.pfs >>DH0:netswitch.txt
+Echo >DH0:.done "$RC"
+EOF
+        ;;
+    netswitch-rows)
+        # Where the three row bands begin and end, and what a click inside the
+        # list but off the rows does.  WinClick's X and Y are the window's
+        # content, the way netswitch_layout.c lays it out: three 13 px bands at
+        # y 22, 35 and 48 (netswitch_layout.c: row_h = fh + ROW_LEAD = 13,
+        # first row at list_y + CELL_PAD = 22 in the window's content).  The
+        # probes are the last pixel of a band against the first pixel of the
+        # next (34/35 and 47/48), the first pixel of each band (22/35/48), one
+        # pixel above the first band (21), 5 (the legend, above the list) and
+        # 61 (the list's own bottom padding, past the last row), then 19 and 17
+        # (the list's top padding, down to one pixel above the list) and 5
+        # again (the legend).  The stack is down, so nothing can be switched by a click
+        # that lands wrong, and every probe is preceded by a click on a band
+        # the probe could not land on, so that a probe that selects something
+        # is visible as a band that moved instead of a frame that did not
+        # change.
+        cat <<'EOF'
+FailAt 9999
+C:Wait 6
+Run >NIL: C:NetSwitch
+C:Wait 4
+C:WinClick "AmiNetXDuo NetSwitch" X 12 Y 60 TIMES 0 >DH0:netswitch-rows.txt
+C:wbgrab TO DH0:netswitch-rows.pfs >>DH0:netswitch-rows.txt
+C:WinClick "AmiNetXDuo NetSwitch" X 12 Y 60 >>DH0:netswitch-rows.txt
+C:Wait 1
+C:wbgrab TO DH0:netswitch-rows-1.pfs >NIL:
+C:WinClick "AmiNetXDuo NetSwitch" X 12 Y 34 >>DH0:netswitch-rows.txt
+C:Wait 1
+C:wbgrab TO DH0:netswitch-rows-2.pfs >NIL:
+C:WinClick "AmiNetXDuo NetSwitch" X 12 Y 35 >>DH0:netswitch-rows.txt
+C:Wait 1
+C:wbgrab TO DH0:netswitch-rows-3.pfs >NIL:
+C:WinClick "AmiNetXDuo NetSwitch" X 12 Y 60 >>DH0:netswitch-rows.txt
+C:Wait 1
+C:wbgrab TO DH0:netswitch-rows-4.pfs >NIL:
+C:WinClick "AmiNetXDuo NetSwitch" X 12 Y 47 >>DH0:netswitch-rows.txt
+C:Wait 1
+C:wbgrab TO DH0:netswitch-rows-5.pfs >NIL:
+C:WinClick "AmiNetXDuo NetSwitch" X 12 Y 60 >>DH0:netswitch-rows.txt
+C:Wait 1
+C:wbgrab TO DH0:netswitch-rows-6.pfs >NIL:
+C:WinClick "AmiNetXDuo NetSwitch" X 12 Y 48 >>DH0:netswitch-rows.txt
+C:Wait 1
+C:wbgrab TO DH0:netswitch-rows-7.pfs >NIL:
+C:WinClick "AmiNetXDuo NetSwitch" X 12 Y 22 >>DH0:netswitch-rows.txt
+C:Wait 1
+C:wbgrab TO DH0:netswitch-rows-8.pfs >NIL:
+C:WinClick "AmiNetXDuo NetSwitch" X 12 Y 60 >>DH0:netswitch-rows.txt
+C:Wait 1
+C:wbgrab TO DH0:netswitch-rows-9.pfs >NIL:
+C:WinClick "AmiNetXDuo NetSwitch" X 12 Y 21 >>DH0:netswitch-rows.txt
+C:Wait 1
+C:wbgrab TO DH0:netswitch-rows-10.pfs >NIL:
+C:WinClick "AmiNetXDuo NetSwitch" X 12 Y 60 >>DH0:netswitch-rows.txt
+C:Wait 1
+C:wbgrab TO DH0:netswitch-rows-11.pfs >NIL:
+C:WinClick "AmiNetXDuo NetSwitch" X 12 Y 5 >>DH0:netswitch-rows.txt
+C:Wait 1
+C:wbgrab TO DH0:netswitch-rows-12.pfs >NIL:
+C:WinClick "AmiNetXDuo NetSwitch" X 12 Y 60 >>DH0:netswitch-rows.txt
+C:Wait 1
+C:wbgrab TO DH0:netswitch-rows-13.pfs >NIL:
+C:WinClick "AmiNetXDuo NetSwitch" X 12 Y 61 >>DH0:netswitch-rows.txt
+C:Wait 1
+C:wbgrab TO DH0:netswitch-rows-14.pfs >NIL:
+C:WinClick "AmiNetXDuo NetSwitch" X 12 Y 22 >>DH0:netswitch-rows.txt
+C:Wait 1
+C:wbgrab TO DH0:netswitch-rows-15.pfs >NIL:
+C:WinClick "AmiNetXDuo NetSwitch" X 12 Y 61 >>DH0:netswitch-rows.txt
+C:Wait 1
+C:wbgrab TO DH0:netswitch-rows-16.pfs >NIL:
+C:WinClick "AmiNetXDuo NetSwitch" X 12 Y 60 >>DH0:netswitch-rows.txt
+C:Wait 1
+C:wbgrab TO DH0:netswitch-rows-17.pfs >NIL:
+C:WinClick "AmiNetXDuo NetSwitch" X 12 Y 19 >>DH0:netswitch-rows.txt
+C:Wait 1
+C:wbgrab TO DH0:netswitch-rows-18.pfs >NIL:
+C:WinClick "AmiNetXDuo NetSwitch" X 12 Y 60 >>DH0:netswitch-rows.txt
+C:Wait 1
+C:wbgrab TO DH0:netswitch-rows-19.pfs >NIL:
+C:WinClick "AmiNetXDuo NetSwitch" X 12 Y 17 >>DH0:netswitch-rows.txt
+C:Wait 1
+C:wbgrab TO DH0:netswitch-rows-20.pfs >NIL:
+C:WinClick "AmiNetXDuo NetSwitch" X 12 Y 60 >>DH0:netswitch-rows.txt
+C:Wait 1
+C:wbgrab TO DH0:netswitch-rows-21.pfs >NIL:
+C:WinClick "AmiNetXDuo NetSwitch" X 12 Y 5 >>DH0:netswitch-rows.txt
+C:Wait 1
+C:wbgrab TO DH0:netswitch-rows-22.pfs >NIL:
 Echo >DH0:.done "$RC"
 EOF
         ;;
