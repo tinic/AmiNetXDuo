@@ -313,7 +313,7 @@ static BOOL render_dither(struct Screen *s, const NsImage *img,
 
                 e0[(x + 1) * 3 + c] += d;
                 e0[(x + 2) * 3 + c] += d;
-                e1[(x - 1) * 3 + c] += d;
+                e1[(LONG)x * 3 - 3 + (LONG)c] += d;    /* left pad */
                 e1[x * 3 + c] += d;
                 e1[(x + 1) * 3 + c] += d;
                 e2[x * 3 + c] += d;
@@ -337,7 +337,7 @@ static BOOL render_dither(struct Screen *s, const NsImage *img,
 BOOL ns_banner_load(struct Screen *s, const char *file, NsBanner *b)
 {
     struct BitMap *sbm = s->RastPort.BitMap;
-    ULONG          depth = GetBitMapAttr(sbm, BMA_DEPTH);
+    ULONG          depth;
     struct RastPort rp;
     NsImage        img;
     UBYTE         *f;
@@ -348,6 +348,7 @@ BOOL ns_banner_load(struct Screen *s, const char *file, NsBanner *b)
     b->bm = NULL;
     b->npens = 0;
     if (GfxBase->LibNode.lib_Version < 40) return FALSE;
+    depth = GetBitMapAttr(sbm, BMA_DEPTH);
     if (depth > 8)
     {
         ns_cgx_base = OpenLibrary((CONST_STRPTR)"cybergraphics.library", 40);
