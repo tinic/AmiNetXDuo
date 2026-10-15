@@ -45,6 +45,7 @@ def layout(outdir):
     # Icons/ holds the tool icons a private install puts in the drawer root.
     for name, xy in (("NetPrefs.info", (62, 10)),
                      ("NetMeter.info", (210, 10)),
+                     ("NetSwitch.info", (506, 146)),
                      ("NetWireless.info", (62, 146)),
                      ("NetWirelessPrefs.info", (358, 146))):
         path = tree / "Icons" / name

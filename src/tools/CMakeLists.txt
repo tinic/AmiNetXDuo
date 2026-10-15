@@ -281,6 +281,11 @@ aminetxduo_add_tool(tool_netsetup NetSetup SOURCES netsetup.c ${TOOLS_DEVDIAG})
 # for live changes rather than growing a second stack-control path.
 aminetxduo_add_tool(tool_netprefs NetPrefs SOURCES netprefs.c netprefs_text.c
     netprefs_layout.c)
+
+# Takes interfaces online and offline from Workbench, through the same
+# netstatus calls as Online and Offline.
+aminetxduo_add_tool(tool_netswitch NetSwitch SOURCES netswitch.c
+    netswitch_banner.c)
 aminetxduo_add_tool(tool_netmeter NetMeter NX SOURCES netmeter.c netmeter_fmt.c netmeter_tui.c)
 
 # The Wi-Fi window.  Scans, joins through WirelessManager's
@@ -703,7 +708,7 @@ add_dependencies(tools
     tool_addnetroute tool_deletenetroute
     tool_getnetstatus tool_netshutdown tool_removenetinterface
     tool_configurenetinterface
-    tool_netsetup tool_netprefs tool_netmeter tool_netwireless tool_netwirelessprefs
+    tool_netsetup tool_netprefs tool_netswitch tool_netmeter tool_netwireless tool_netwirelessprefs
     tool_online tool_offline tool_host tool_hostname
     tool_fetch tool_nc tool_telnet tool_nettrace tool_netcapture
     tool_traceroute tool_nslookup tool_arp
