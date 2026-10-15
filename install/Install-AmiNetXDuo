@@ -105,6 +105,8 @@
                     (tackon SRCDIR "Terminal.info") "Terminal.info"))
 ; The Workbench tools' icons: C/ carries none, so C: gets none.
 (set S_ICONS (if (> (strlen SRCDIR) 0) (tackon SRCDIR "Icons") "Icons"))
+; The icons 1.0.0-beta1 to beta8 copied into C:, byte for byte.
+(set S_EARLIER (if (> (strlen SRCDIR) 0) (tackon SRCDIR "Earlier") "Earlier"))
 (set S_UNINSTALL (if (> (strlen SRCDIR) 0)
                      (tackon SRCDIR "Uninstall-AmiNetXDuo") "Uninstall-AmiNetXDuo"))
 (set S_UNINSTALLICON (cat S_UNINSTALL ".info"))
@@ -3121,6 +3123,24 @@
     (set BK_SRC "S:Network-Startup.old")
     (P_backup)
   ))
+; 1.0.0-beta1 to beta8 copied C/ with (infos): their tool icons went into C:,
+; and C:.info with them.  Those icons there, byte for byte, make C:.info
+; that copy's too, and it goes with them below.
+(set CINFO_OLD 0)
+(if (= DRAWER_LAYOUT 0)
+  (
+    (set TL_I 0)
+    (while (set TL_N (select TL_I "NetPrefs.info" "NetMeter.info" ""))
+      (
+        (if (exists (tackon D_C TL_N) (noreq))
+            (if (= 0 (run ("\"%s\" \"%s\" \"%s\" BYTES" S_SAMEFILE (tackon D_C TL_N)
+                           (tackon S_EARLIER (cat TL_N ".beta8")))
+                          (quiet) (safe)))
+                (set CINFO_OLD 1)))
+        (set TL_I (+ TL_I 1))
+      ))
+  ))
+
 ; With the libraries, before anything is replaced, in every run: a command
 ; of the same name in C:, the four Workbench tools and their icons, and the
 ; certificate store, when they are another stack's or the user's.  Every
@@ -3166,16 +3186,18 @@
           (P_backup)
         )))
     ; The tool icons C/ no longer carries, which the reinstall removes
-    ; from C: below: a user's own goes to Backup first.
-    (set BK_ARCH "")
+    ; from C: below when they are an earlier release's: a user's own goes
+    ; to Backup first.
     (set TL_I 0)
     (while (set TL_N (select TL_I "NetPrefs.info" "NetMeter.info"
                                   "NetSwitch.info"
                                   "NetWireless.info" "NetWirelessPrefs.info" ""))
       (
+        (set BK_ARCH (if (< TL_I 2) (tackon S_EARLIER (cat TL_N ".beta8")) ""))
         (set BK_SRC (tackon D_C TL_N)) (P_backup)
         (set TL_I (+ TL_I 1))
       ))
+    (set BK_ARCH "")
   ))
 
 ; The drawer layout puts NetSwitch's banner in the drawer root: a file of
@@ -3821,18 +3843,37 @@
 (P_tool)
 
 ; Icons an earlier installation put in C: or beside the commands drawer.
+; In SYS:C only an earlier release's, by the test the backup above used: a
+; user's own icon stays.
 (set TL_I 0)
 (while (set TL_N (select TL_I "NetPrefs.info" "NetMeter.info" "NetSwitch.info"
                               "NetWireless.info"
                               "NetWirelessPrefs.info" ""))
   (
-    (if (exists (tackon D_C TL_N) (noreq))
-        (delete (tackon D_C TL_N)
-          (prompt ("Removing %s" (tackon D_C TL_N)))
-          (help   "C: carries no icon; the tool's icon is beside the tool.")
-          (optional "force" "nofail")))
+    (set BK_SRC (tackon D_C TL_N))
+    (if (exists BK_SRC (noreq))
+      (
+        (set IS_OURS 1)
+        (if (= DRAWER_LAYOUT 0)
+          (
+            (set BK_SUB "C")
+            (set BK_ARCH (if (< TL_I 2) (tackon S_EARLIER (cat TL_N ".beta8")) ""))
+            (P_is_ours)
+            (set BK_ARCH "")
+          ))
+        (if IS_OURS
+            (delete BK_SRC
+              (prompt ("Removing %s" BK_SRC))
+              (help   "C: carries no icon; the tool's icon is beside the tool.")
+              (optional "force" "nofail")))
+      ))
     (set TL_I (+ TL_I 1))
   ))
+(if (AND CINFO_OLD (exists (tackon D_C ".info") (noreq)))
+    (delete (tackon D_C ".info")
+      (prompt "Removing the icon an earlier installation gave C:")
+      (help   "C: carries no icon; the tool's icon is beside the tool.")
+      (optional "force" "nofail")))
 (if (AND DRAWER_LAYOUT (exists (tackon D_ROOT "C.info") (noreq)))
     (delete (tackon D_ROOT "C.info")
       (prompt "Removing the commands drawer's icon")
