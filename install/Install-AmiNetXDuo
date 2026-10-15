@@ -3124,8 +3124,8 @@
     (P_backup)
   ))
 ; 1.0.0-beta1 to beta8 copied C/ with (infos): their tool icons went into C:,
-; and C:.info with them.  Those icons there, byte for byte, make C:.info
-; that copy's too, and it goes with them below.
+; and C:.info with them.  Those icons there, byte for byte, say such a copy
+; ran; C:.info may still be the user's, so it goes to Backup, then out of C:.
 (set CINFO_OLD 0)
 (if (= DRAWER_LAYOUT 0)
   (
@@ -3198,6 +3198,10 @@
         (set TL_I (+ TL_I 1))
       ))
     (set BK_ARCH "")
+    (if CINFO_OLD
+      (
+        (set BK_SRC (tackon D_C ".info")) (P_backup)
+      ))
   ))
 
 ; The drawer layout puts NetSwitch's banner in the drawer root: a file of
