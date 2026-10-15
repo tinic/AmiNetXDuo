@@ -565,7 +565,8 @@ fi
 # fallback; prints installer_source= for the log.
 stage_installer() {
     if [ -f "$1/Installer" ]; then
-        echo "installer_source=archive bytes=$(wc -c < "$1/Installer" | tr -d ' ')"
+        echo "installer_source=archive bytes=$(wc -c < "$1/Installer" | tr -d ' ')" \
+             "sha256=$(shasum -a 256 "$1/Installer" | cut -d' ' -f1)"
         return 0
     fi
     [ -n "$INSTALLER" ] && [ -f "$INSTALLER" ] || {
@@ -574,7 +575,8 @@ stage_installer() {
         exit 2
     }
     cp "$INSTALLER" "$1/Installer"
-    echo "installer_source=supplied bytes=$(wc -c < "$1/Installer" | tr -d ' ')"
+    echo "installer_source=supplied bytes=$(wc -c < "$1/Installer" | tr -d ' ')" \
+         "sha256=$(shasum -a 256 "$1/Installer" | cut -d' ' -f1)"
 }
 
 # THE VENDOR DRIVER, not anxnet.device, and that is a statement about what this
