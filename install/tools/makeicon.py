@@ -361,6 +361,23 @@ def meter_icon():
     return c
 
 
+def switch_icon():
+    """NetSwitch: the three interface states its window's legend shows -- a
+    filled disc for online, a ring for offline, a square for not attached."""
+    c = Canvas(48, 26, GREY)
+    c.fill(2, 2, 45, 23, WHITE)
+    c.bevel(1, 1, 46, 24)
+    # Online: the filled disc.
+    for r in (5, 4, 3, 2, 1, 0):
+        _arc(c, 10, 13, r, 0, 360, BLUE)
+    _arc(c, 10, 13, 5, 0, 360, BLACK)
+    # Offline: the same disc, hollow.
+    _arc(c, 24, 13, 5, 0, 360, BLACK)
+    # Not attached: a hollow square.
+    c.box(33, 8, 43, 18, BLACK)
+    return c
+
+
 def _arc(c, cx, cy, r, a0, a1, colour):
     """Points of a circle of radius r from angle a0 to a1 (degrees, 0 is
     right, 90 up), one pixel thick."""
@@ -491,6 +508,12 @@ def main(argv):
         "NetMeter.info": diskobject(
             meter_icon(), WBTOOL,
             tooltypes=["DONOTWAIT"],
+            stack=8192),
+        # An action tool, not a status window: NetSwitch returns when its
+        # window closes, so Workbench may wait for it.
+        "NetSwitch.info": diskobject(
+            switch_icon(), WBTOOL,
+            tooltypes=[],
             stack=8192),
         # The Wi-Fi commodity: DONOTWAIT for WBStartup, as NetMeter.
         "NetWireless.info": diskobject(

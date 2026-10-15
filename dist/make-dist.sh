@@ -76,7 +76,7 @@ DEVICES=(netdev/anxnet netdev/anxgenet wifipi/anxwifipi)
 if grep -q '^AMINETXDUO_ZZ9000:BOOL=ON$' "$BUILD/CMakeCache.txt" 2>/dev/null; then
     DEVICES+=(netdev/anxzz9000)
 fi
-CMDS=(AddNetInterface NetSetup NetPrefs NetMeter NetWireless NetWirelessPrefs Online Offline ShowNetStatus ShowNetServices
+CMDS=(AddNetInterface NetSetup NetPrefs NetMeter NetSwitch NetWireless NetWirelessPrefs Online Offline ShowNetStatus ShowNetServices
       ping netstat host hostname
       nslookup arp fetch nc telnet NetTrace NetCapture sntp traceroute tftp
       whois httpd
@@ -294,12 +294,13 @@ fi
 
 # A command that is BUILT and not listed in CMDS ships nowhere and nothing
 # notices, so anything deliberately not shipped goes in NOT_SHIPPED below with
-# its reason.  ToolsSmoke, wbgrab and paysum are harness halves and El3Diag is
-# a bench instrument; none has a use on a user's machine.
+# its reason.  ToolsSmoke, wbgrab, nsclose and paysum are harness halves and
+# El3Diag is a bench instrument; none has a use on a user's machine.  nsclose
+# closes the NetSwitch window by title for the emulator interaction arm.
 # InstallSameFile and InstallNetProbe do ship, but beside the Installer rather
 # than in C:; they are installer primitives, not user commands.  The other
 # names do not ship.
-NOT_SHIPPED=(InstallSameFile InstallNetProbe InstallWiFi ToolsSmoke CensusProbe UafProbe HangProbe wbgrab El3Diag paysum)
+NOT_SHIPPED=(InstallSameFile InstallNetProbe InstallWiFi ToolsSmoke CensusProbe UafProbe HangProbe wbgrab El3Diag paysum nsclose)
 missing_from_cmds=()
 # What the build system says it builds (src/tools/CMakeLists.txt writes the
 # manifest), not what happens to lie in the directory: a reused build tree
@@ -443,7 +444,7 @@ chmod 755 "$TREE"/C/*
 # copies them beside the tools in SYS:Prefs, SYS:Utilities,
 # SYS:Tools/Commodities or the drawer.  Icons/ has no drawer icon of its own.
 mkdir -p "$TREE/Icons"
-for tool in NetPrefs NetMeter NetWireless NetWirelessPrefs; do
+for tool in NetPrefs NetMeter NetSwitch NetWireless NetWirelessPrefs; do
     cp "$INSTALL/$tool.info" "$TREE/Icons/$tool.info"
 done
 

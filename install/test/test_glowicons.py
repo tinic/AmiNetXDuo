@@ -34,6 +34,7 @@ class GlowIcons(unittest.TestCase):
                     "Examples.info": "Drawer", "Terminal.info": "Drawer",
                     "Developer.info": "Drawer", "AmiNetXDuo.info": "AmiNetXDuo",
                     "Icons/NetMeter.info": "NetMeter", "Icons/NetPrefs.info": "NetPrefs",
+                    "Icons/NetSwitch.info": "NetSwitch",
                     "Icons/NetWireless.info": "NetWireless",
                     "Icons/NetWirelessPrefs.info": "NetWirelessPrefs"}.items():
                 shutil.copyfile(ROOT / "install" / (source + ".info"), tree / target)
