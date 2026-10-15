@@ -2549,14 +2549,36 @@ C:ShowNetStatus >DH0:prior-netstatus.txt
 Echo >DH0:prior-netstatus-rc.txt "$RC"
 Echo >DH0:.done "0"'
     boot prior-boot "$BOOT_TIMEOUT" net
+    # A PREREQUISITE, asserted: the update is only an update over a working
+    # prior installation.  ShowNetStatus rc 0, and in the block of the
+    # expected interface the state online with link up and an IPv4 address.
+    PRIOR_NS_RC=$(tr -dc '0-9' < "$HD/prior-netstatus-rc.txt" 2>/dev/null || true)
+    _prior_if_block() {
+        awk -v want="Interface $EXPECTED_IF " '{ sub(/\r$/, "") }
+            index($0, want) == 1 { inside = 1; next }
+            /^[^ ]/ { inside = 0 }
+            inside' "$HD/prior-netstatus.txt" 2>/dev/null || true
+    }
+    PRIOR_LINK=$(_prior_if_block | awk '$1=="state" { print $2"_"$3"_"$4; exit }')
+    PRIOR_ADDR=$(_prior_if_block |
+        awk '$1=="address" && $2 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ { print $2; exit }')
     echo "prior_boot_status=$BOOT_STATUS"
-    echo "prior_shownetstatus_rc=$(tr -dc '0-9' < "$HD/prior-netstatus-rc.txt" 2>/dev/null)"
-    echo "prior_link=$(awk '$1=="state"{print $2"_"$3"_"$4; exit}' "$HD/prior-netstatus.txt" 2>/dev/null)"
-    echo "prior_address=$(awk '$1=="address"{print $2; exit}' "$HD/prior-netstatus.txt" 2>/dev/null)"
+    echo "prior_shownetstatus_rc=${PRIOR_NS_RC:-none}"
+    echo "prior_interface=$EXPECTED_IF"
+    echo "prior_link=${PRIOR_LINK:-none}"
+    echo "prior_address=${PRIOR_ADDR:-none}"
+    if [ "$BOOT_STATUS" != 0 ] || [ "$PRIOR_NS_RC" != 0 ] ||
+       [ "$PRIOR_LINK" != online_link_up ] || [ -z "$PRIOR_ADDR" ]; then
+        echo "!! the prior release is not online after its power cycle;" \
+             "nothing below would be an update over a working installation"
+        echo "workbench_e2e=FAIL board=$BOARD model=$MODEL driver=$SANA2_DRIVER" \
+             "stack=prior boot_status=prior-boot-$BOOT_STATUS"
+        exit 1
+    fi
 
-    PRIOR_IF=$(amiga_path Devs/NetInterfaces/eth0 2>/dev/null || true)
-    if [ -z "$PRIOR_IF" ] || [ "$BOOT_STATUS" != 0 ]; then
-        echo "!! the prior release left no DEVS:NetInterfaces/eth0, or did not boot"
+    PRIOR_IF=$(amiga_path "Devs/NetInterfaces/$EXPECTED_IF" 2>/dev/null || true)
+    if [ -z "$PRIOR_IF" ]; then
+        echo "!! the prior release left no DEVS:NetInterfaces/$EXPECTED_IF"
         echo "workbench_e2e=FAIL board=$BOARD model=$MODEL driver=$SANA2_DRIVER" \
              "stack=prior boot_status=prior-boot-$BOOT_STATUS"
         exit 1
@@ -4288,7 +4310,7 @@ fi
 # file kept byte for byte, each replaced file of the prior release kept as
 # .old, and the candidate's library in LIBS:.
 if [ -n "$PRIOR_ARCHIVE" ]; then
-    _if=$(amiga_path Devs/NetInterfaces/eth0 2>/dev/null || true)
+    _if=$(amiga_path "Devs/NetInterfaces/$EXPECTED_IF" 2>/dev/null || true)
     if [ -n "$_if" ] && [ "$(shasum < "$_if" | cut -d' ' -f1)" = "$PRIOR_IF_SUM" ]; then
         echo "update_interface_kept=yes"
     else
