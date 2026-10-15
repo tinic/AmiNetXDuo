@@ -9,8 +9,12 @@
 # -f sets the Workbench screen font through ENVARC:Sys/font.prefs, e.g.
 # helvetica.font/13.  -V 32 boots Workbench 3.2 on its own Kickstart.  -s netprefs grabs NetPrefs on each of its pages as
 # netprefs.pfs, netprefs-1.pfs ... netprefs-4.pfs; netprefs_window is the
-# window's box for cropping.  -s netswitch grabs NetSwitch with three
-# definitions and no stack, the second row selected, as netswitch.pfs.  -s netwireless grabs NetWirelessPrefs against
+# window's box for cropping.  -s netswitch boots the stack on an A2065
+# (slirp) and drives NetSwitch: ETH0 selected (netswitch.pfs), Offline
+# (-2), Online (-3), Offline and Online three times each (-4, -5), then
+# Online on BOGUS, whose device is missing (-6, the requester), and ETH0
+# selected again after it is dismissed (-7).  ShowNetStatus after each step
+# is in ns-*.txt on the drive.  -s netwireless grabs NetWirelessPrefs against
 # tests/tools/wifistub.c's unit with the NetWireless AppIcon beside it, then
 # its join form and the Known networks window, as netwireless.pfs,
 # netwireless-1.pfs and netwireless-2.pfs; then, with ENVARC: alone, moves
@@ -68,6 +72,9 @@ WBGRAB="$BUILD/src/tools/wbgrab"
 
 NETPREFS="$BUILD/src/tools/NetPrefs"
 NETSWITCH="$BUILD/src/tools/NetSwitch"
+BSDLIB="$BUILD/src/bsdsocket/bsdsocket.library"
+ADDIF="$BUILD/src/tools/AddNetInterface"
+SHOWNET="$BUILD/src/tools/ShowNetStatus"
 NETWIRELESS="$BUILD/src/tools/NetWirelessPrefs"
 NETWIRELESSCX="$BUILD/src/tools/NetWireless"
 WIFISTUB="$BUILD/tests/tools/WifiStub"
@@ -93,9 +100,14 @@ done
 
 for seq in "${SEQUENCES[@]}"; do
     [ "$seq" = netswitch ] || continue
-    [ -x "$NETSWITCH" ] && [ -x "$WINCLICK" ] || {
-        say error "no NetSwitch or WinClick under $BUILD"
-        say hint "cmake --build $BUILD --parallel --target tool_netswitch test_winclick"
+    [ -x "$NETSWITCH" ] && [ -x "$WINCLICK" ] && [ -f "$BSDLIB" ] &&
+        [ -x "$ADDIF" ] && [ -x "$SHOWNET" ] || {
+        say error "no NetSwitch, WinClick, bsdsocket.library, AddNetInterface or ShowNetStatus under $BUILD"
+        say hint "cmake --build $BUILD --parallel --target tool_netswitch test_winclick bsdsocket_library tool_addnetinterface tool_shownetstatus"
+        exit 2
+    }
+    [ -f "${AMINETXDUO_A2065:-}" ] || {
+        say error "no a2065.device; set AMINETXDUO_A2065"
         exit 2
     }
 done
@@ -205,15 +217,20 @@ EOF
             "CONFIGURE=DHCP" "MTU=1500" > "$HD/Devs/NetInterfaces/ETH0"
     fi
 
-    if [ -x "$NETSWITCH" ] && [ -x "$WINCLICK" ]; then
+    if [ "$seq" = netswitch ]; then
         cp "$NETSWITCH" "$HD/C/NetSwitch"
         cp "$WINCLICK" "$HD/C/WinClick"
-        chmod 755 "$HD/C/NetSwitch" "$HD/C/WinClick"
-        mkdir -p "$HD/Devs/NetInterfaces"
-        for i in ETH0 ETH1 WIFI0; do
-            printf '%s\n' "DEVICE=DEVS:Networks/a2065.device" "UNIT=0" \
-                "CONFIGURE=DHCP" > "$HD/Devs/NetInterfaces/$i"
-        done
+        cp "$ADDIF" "$HD/C/AddNetInterface"
+        cp "$SHOWNET" "$HD/C/ShowNetStatus"
+        chmod 755 "$HD/C/NetSwitch" "$HD/C/WinClick" "$HD/C/AddNetInterface" \
+            "$HD/C/ShowNetStatus"
+        cp "$BSDLIB" "$HD/Libs/bsdsocket.library"
+        mkdir -p "$HD/Devs/NetInterfaces" "$HD/Devs/Networks"
+        cp "$AMINETXDUO_A2065" "$HD/Devs/Networks/a2065.device"
+        printf '%s\n' "DEVICE=DEVS:Networks/a2065.device" "UNIT=0" \
+            "CONFIGURE=DHCP" > "$HD/Devs/NetInterfaces/ETH0"
+        printf '%s\n' "DEVICE=DEVS:Networks/missing.device" "UNIT=0" \
+            "CONFIGURE=DHCP" > "$HD/Devs/NetInterfaces/BOGUS"
     fi
 
     if [ -x "$NETWIRELESS" ] && [ -x "$NETWIRELESSCX" ] && [ -x "$WIFISTUB" ] &&
@@ -333,15 +350,46 @@ Echo >DH0:.done "$RC"
 EOF
         ;;
     netswitch)
-        # Gadget 1 is the list; AT 14 is its second row in topaz 8.
+        # Gadget 1 is the list (AT 6 is BOGUS, AT 14 is ETH0 in topaz 8),
+        # 2 Online, 3 Offline.  While the requester is open it is the first
+        # window titled NetSwitch, and its one gadget is 0.
         cat <<'EOF'
 FailAt 9999
 C:Wait 6
+C:AddNetInterface ETH0 >DH0:ns-addif.txt
+C:ShowNetStatus INTERFACES >DH0:ns-1.txt
 Run >NIL: C:NetSwitch
 C:Wait 4
 C:WinClick "NetSwitch" 1 AT 14 >DH0:netswitch.txt
 C:Wait 2
 C:wbgrab TO DH0:netswitch.pfs >>DH0:netswitch.txt
+C:WinClick "NetSwitch" 3 >DH0:ns-2-click.txt
+C:Wait 3
+C:wbgrab TO DH0:netswitch-2.pfs >NIL:
+C:ShowNetStatus INTERFACES >DH0:ns-2.txt
+C:WinClick "NetSwitch" 2 >DH0:ns-3-click.txt
+C:Wait 3
+C:wbgrab TO DH0:netswitch-3.pfs >NIL:
+C:ShowNetStatus INTERFACES >DH0:ns-3.txt
+C:WinClick "NetSwitch" 3 TIMES 3 >DH0:ns-4a-click.txt
+C:Wait 3
+C:wbgrab TO DH0:netswitch-4.pfs >NIL:
+C:ShowNetStatus INTERFACES >DH0:ns-4a.txt
+C:WinClick "NetSwitch" 2 TIMES 3 >DH0:ns-4b-click.txt
+C:Wait 3
+C:wbgrab TO DH0:netswitch-5.pfs >NIL:
+C:ShowNetStatus INTERFACES >DH0:ns-4b.txt
+C:WinClick "NetSwitch" 1 AT 6 >DH0:ns-5-click.txt
+C:Wait 1
+C:WinClick "NetSwitch" 2 >>DH0:ns-5-click.txt
+C:Wait 4
+C:wbgrab TO DH0:netswitch-6.pfs >NIL:
+C:WinClick "NetSwitch" 0 >DH0:ns-5-dismiss.txt
+C:Wait 2
+C:WinClick "NetSwitch" 1 AT 14 >>DH0:ns-5-dismiss.txt
+C:Wait 2
+C:wbgrab TO DH0:netswitch-7.pfs >NIL:
+C:ShowNetStatus INTERFACES >DH0:ns-5.txt
 Echo >DH0:.done "$RC"
 EOF
         ;;
@@ -516,6 +564,12 @@ nr_floppies=0
 uaehf0=dir,rw,DH0:DH0:$HD,0
 serial_port=tcp://127.0.0.1:$port/wait
 EOF
+    # netswitch needs a stack with a card: an A2065 on slirp, a fresh MAC.
+    if [ "$name" = netswitch ]; then
+        printf 'a2065_rom_file=:ENABLED\na2065_rom_options=mac=02:%02x:%02x:%02x:%02x:%02x,slirp\n' \
+            $((RANDOM % 256)) $((RANDOM % 256)) $((RANDOM % 256)) \
+            $((RANDOM % 256)) $((RANDOM % 256)) >> "$cfg"
+    fi
 
     ( trap '' PIPE; exec "$AMIBERRY" --log -f "$cfg" ) \
         >"$ROOT/build/amiberry-wbgrab-$name.log" 2>&1 &
