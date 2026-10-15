@@ -2830,6 +2830,7 @@
           (set SN_WROTE 1) (set SN_T "SYS:Prefs/NetWirelessPrefs.info") (P_snap)
           (set BK_SUB "Utilities")
           (set SN_WROTE 1) (set SN_T "SYS:Utilities/NetMeter.info") (P_snap)
+          (set SN_WROTE 1) (set SN_T "SYS:Utilities/NetSwitch.info") (P_snap)
           (set BK_SUB "Tools/Commodities")
           (set SN_WROTE 1) (set SN_T "SYS:Tools/Commodities/NetWireless.info") (P_snap)
         ))
@@ -2871,6 +2872,8 @@
   (set REC_F (if DRAWER_LAYOUT (tackon D_ROOT "NetPrefs") "SYS:Prefs/NetPrefs"))
   (P_rec_ours)
   (set REC_F (if DRAWER_LAYOUT (tackon D_ROOT "NetMeter") "SYS:Utilities/NetMeter"))
+  (P_rec_ours)
+  (set REC_F (if DRAWER_LAYOUT (tackon D_ROOT "NetSwitch") "SYS:Utilities/NetSwitch"))
   (P_rec_ours)
   (set REC_F (if DRAWER_LAYOUT (tackon D_ROOT "NetWirelessPrefs")
                  "SYS:Prefs/NetWirelessPrefs"))
@@ -2990,6 +2993,7 @@
     (
       (set REC_N 0)
       (while (set REC_SUB (select REC_N "NetPrefs.info" "NetMeter.info"
+                                        "NetSwitch.info"
                                         "NetWireless.info" "NetWirelessPrefs.info"
                                         "C.info" ""))
         (
@@ -3130,6 +3134,10 @@
     (set BK_SRC "SYS:Utilities/NetMeter") (P_backup)
     (set BK_ARCH (tackon S_ICONS "NetMeter.info"))
     (set BK_SRC "SYS:Utilities/NetMeter.info") (P_backup)
+    (set BK_ARCH "")
+    (set BK_SRC "SYS:Utilities/NetSwitch") (P_backup)
+    (set BK_ARCH (tackon S_ICONS "NetSwitch.info"))
+    (set BK_SRC "SYS:Utilities/NetSwitch.info") (P_backup)
     (set BK_SUB "Tools/Commodities")
     (set BK_ARCH "")
     (set BK_SRC "SYS:Tools/Commodities/NetWireless") (P_backup)
@@ -3152,6 +3160,7 @@
     (set BK_ARCH "")
     (set TL_I 0)
     (while (set TL_N (select TL_I "NetPrefs.info" "NetMeter.info"
+                                  "NetSwitch.info"
                                   "NetWireless.info" "NetWirelessPrefs.info" ""))
       (
         (set BK_SRC (tackon D_C TL_N)) (P_backup)
@@ -3673,8 +3682,9 @@
           "NetPrefs is its Workbench editor for interface, address, device and "
           "tuning settings, and preserves unknown fields.  NetMeter is a "
           "small Workbench window with each interface's addresses and how "
-          "fast it is receiving and sending.  ConfigureNetInterface "
-          "changes the address, netmask and "
+          "fast it is receiving and sending.  NetSwitch brings each "
+          "interface online and offline from a Workbench window.  "
+          "ConfigureNetInterface changes the address, netmask and "
           "gateway of an interface that is already running, and releases or "
           "renews its DHCP lease.  hostname reports the name of this "
           "machine, reports which of the four places that can name it did "
@@ -3763,6 +3773,11 @@
 (set TL_H (cat "NetMeter shows each interface's addresses and how fast it is "
                "receiving and sending.  Click an address to copy it."))
 (P_tool)
+(set TL_N "NetSwitch")
+(set TL_D (if DRAWER_LAYOUT D_ROOT "SYS:Utilities"))
+(set TL_H (cat "NetSwitch takes each interface online and offline from a "
+               "Workbench window."))
+(P_tool)
 (set TL_N "NetWirelessPrefs")
 (set TL_D (if DRAWER_LAYOUT D_ROOT "SYS:Prefs"))
 (set TL_H (cat "NetWirelessPrefs lists the Wi-Fi networks in range and joins "
@@ -3781,7 +3796,8 @@
 
 ; Icons an earlier installation put in C: or beside the commands drawer.
 (set TL_I 0)
-(while (set TL_N (select TL_I "NetPrefs.info" "NetMeter.info" "NetWireless.info"
+(while (set TL_N (select TL_I "NetPrefs.info" "NetMeter.info" "NetSwitch.info"
+                              "NetWireless.info"
                               "NetWirelessPrefs.info" ""))
   (
     (if (exists (tackon D_C TL_N) (noreq))

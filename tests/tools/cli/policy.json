@@ -245,6 +245,13 @@
       "TIMEOUT": "1"
     }
   },
+  "NetSwitch": {
+    "binary": "src/tools/NetSwitch",
+    "parser": "none",
+    "source": "src/tools/netswitch.c",
+    "values": {},
+    "mode": "interrupt"
+  },
   "NetTrace": {
     "base": {
       "HOST": "127.0.0.1",
