@@ -31,9 +31,9 @@ static const char version_tag[] __attribute__((used)) =
 #define DEFAULT_TITLE   "AmiNetXDuo NetSwitch"
 
 /* FindWindow is not in the NDK's headers, so walk the locked screen's window
-   list the same way it would.  The screen lock holds the screen itself; a
-   window leaving mid-walk cannot happen here because the target window is
-   exactly what is waiting to be closed. */
+   list the same way it would.  LockPubScreen pins the screen, not its
+   windows, so the walk returns a window that is live only at this instant;
+   the caller checks the result and posts to it immediately. */
 static struct Window *find_window(struct Screen *sc, const char *title)
 {
     struct Window *w;
@@ -92,12 +92,6 @@ int main(int argc, char **argv)
         goto out;
     }
 
-    if (find_window(sc, title) == NULL)
-    {
-        tool_error("no window titled \"%s\"", (LONG)title);
-        goto out;
-    }
-
     reply = CreateMsgPort();
     if (reply == NULL)
     {
@@ -113,11 +107,17 @@ int main(int argc, char **argv)
         goto out;
     }
 
-    /* The window reads it, answers it, then closes.  The reply port is ours,
-       so the answer is how this tool knows the close is done. */
     {
         struct Window *w = find_window(sc, title);
 
+        if (w == NULL)
+        {
+            tool_error("no window titled \"%s\"", (LONG)title);
+            goto out;
+        }
+
+        /* The window reads it, answers it, then closes.  The reply port is
+           ours, so the answer is how this tool knows the close is done. */
         im->ExecMessage.mn_Node.ln_Type = NT_MESSAGE;
         im->ExecMessage.mn_ReplyPort    = reply;
         im->ExecMessage.mn_Length       = sizeof(struct IntuiMessage);
@@ -128,13 +128,22 @@ int main(int argc, char **argv)
         PutMsg(w->UserPort, &im->ExecMessage);
     }
 
+    /* The close can only be known by the window's reply.  It is not pinned by
+       anything nsclose holds, so the wait is bounded rather than forever. */
     {
-        struct Message *back;
+        struct Message *back = NULL;
+        ToolWait        wait;
 
-        Wait(1UL << reply->mp_SigBit);
-        back = GetMsg(reply);
+        tool_wait_init(&wait, 5);
+        while ((back = GetMsg(reply)) == NULL)
+        {
+            if (!tool_wait_second(&wait))
+                break;
+        }
         if (back == &im->ExecMessage)
             rc = RETURN_OK;
+        else if (back == NULL)
+            tool_error("window did not answer the close");
         else
             tool_error("unexpected reply");
     }
