@@ -187,6 +187,7 @@ the NDK does not declare and the CPU profiler.
 | `NetSetup` | ask the questions for one interface, and write the configuration files |
 | `NetPrefs` | Workbench editor for interface, address, device and tuning settings; preserves comments and unknown keywords |
 | `NetMeter` | small Workbench window: each interface's addresses (click one to copy it) and its receive and send rates |
+| `NetSwitch` | Workbench window listing each interface's state and address; takes the selected interface online or offline |
 | `NetWireless` | Wi-Fi commodity: the link's state and signal as an AppIcon, a Tools menu item and `ENV:WiFi`; reads the signal only while connected |
 | `NetWirelessPrefs` | Wi-Fi networks in range and joining one; writes WirelessManager's `Wireless.prefs` with the derived key, not the passphrase |
 | `AddNetInterface`, `RemoveNetInterface` | start an interface from its file, and take one out of the running network |
@@ -215,9 +216,9 @@ the NDK does not declare and the CPU profiler.
 | `hostname` | the name of this machine, and where the name came from |
 
 The installer copies all of them into `C:`; a system installation also places
-the `NetPrefs` and `NetWirelessPrefs` programs and icons in `SYS:Prefs`, `NetMeter` in
-`SYS:Utilities` and `NetWireless` in `SYS:Tools/Commodities`; a drawer installation places all
-four in its drawer. `C:` carries no icons. Every command that resolves a name
+the `NetPrefs` and `NetWirelessPrefs` programs and icons in `SYS:Prefs`, `NetMeter` and
+`NetSwitch` in `SYS:Utilities` and `NetWireless` in `SYS:Tools/Commodities`; a drawer
+installation places all five in its drawer. `C:` carries no icons. Every command that resolves a name
 takes `-4` and `-6`.
 
 ## Files, a Shell and the display in a web browser
