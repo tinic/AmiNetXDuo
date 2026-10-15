@@ -542,3 +542,14 @@ if(AMIGA_NDK_INCLUDE)
 endif()
 target_compile_options(test_winclick PRIVATE -Wall -Wextra)
 set_target_properties(test_winclick PROPERTIES OUTPUT_NAME "WinClick")
+
+# WinKey presses a key in the active window, the other half of WinClick: Tab
+# and the cursor keys reach a window's gadgets where a click cannot
+# (tests/tools/run-wbgrab.sh -s netswitch-keys).
+add_executable(test_winkey winkey.c)
+target_include_directories(test_winkey PRIVATE ${AMINETXDUO_CORE_INCLUDES})
+if(AMIGA_NDK_INCLUDE)
+    target_include_directories(test_winkey PRIVATE "${AMIGA_NDK_INCLUDE}")
+endif()
+target_compile_options(test_winkey PRIVATE -Wall -Wextra)
+set_target_properties(test_winkey PROPERTIES OUTPUT_NAME "WinKey")

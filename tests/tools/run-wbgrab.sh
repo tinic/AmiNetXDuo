@@ -4,14 +4,27 @@
 #
 #   tests/tools/run-wbgrab.sh [-b BUILDDIR] [-m MODEL] [-t SECONDS]
 #                             [-o OUTDIR] [-s SEQUENCE]... [-d DEPTH]
-#                             [-f FONT/SIZE] [-V 32]
+#                             [-f FONT/SIZE] [-V 32] [-N BOARD]
 #
 # -f sets the Workbench screen font through ENVARC:Sys/font.prefs, e.g.
 # helvetica.font/13.  -V 32 boots Workbench 3.2 on its own Kickstart.  -s netprefs grabs NetPrefs on each of its pages as
 # netprefs.pfs, netprefs-1.pfs ... netprefs-4.pfs; netprefs_window is the
 # window's box for cropping.  -s netswitch runs NetSwitch with the stack down
 # and grabs netswitch.pfs: the legend, three not-attached rows, the "Network
-# is not running." hint and the two buttons, all disabled.  -s netwireless grabs NetWirelessPrefs against
+# is not running." hint and the two buttons, all disabled.  -s netswitch-keys
+# drives that window from the keyboard and the mouse -- a click that selects a
+# row, then cursor keys past the last visible row so the list scrolls, Tab and
+# Return against gadgets that are all disabled -- as netswitch-keys.pfs and
+# netswitch-keys-1.pfs ... -4.pfs, with what WinKey sent and where it landed in
+# netswitch-keys.txt.  -s netswitch-live is the same window against a running
+# stack (needs -N BOARD, and a2065 is the board every other arm uses): one
+# interface attached and up, the rest not attached, and the sequence toggles
+# the selected interface off and on, opens the take-all requester, cancels it,
+# opens it again and confirms, then waits past one 5-second poll, as
+# netswitch-live.pfs and -1.pfs ... -9.pfs.  The requester's Cancel is gadget
+# ID 0, which WinClick cannot name (its id is args[1] != 0 ? *(LONG *)args[1]
+# : -1, so 0 means "no gadget given"), so that one click is by coordinates.
+# -s netwireless grabs NetWirelessPrefs against
 # tests/tools/wifistub.c's unit with the NetWireless AppIcon beside it, then
 # its join form and the Known networks window, as netwireless.pfs,
 # netwireless-1.pfs and netwireless-2.pfs; then, with ENVARC: alone, moves
@@ -40,9 +53,10 @@ OUTDIR="$ROOT/build/wbgrab-out"
 DEPTH=""
 FONT=""
 OSVER=31
+NETBOARD=""
 SEQUENCES=()
 
-while getopts "b:m:t:o:s:d:f:V:" opt; do
+while getopts "b:m:t:o:s:d:f:V:N:" opt; do
     case "$opt" in
         b) BUILD="$OPTARG" ;;
         m) MODEL="$OPTARG" ;;
@@ -52,6 +66,7 @@ while getopts "b:m:t:o:s:d:f:V:" opt; do
         s) SEQUENCES+=("$OPTARG") ;;
         f) FONT="$OPTARG" ;;
         V) OSVER="$OPTARG" ;;
+        N) NETBOARD="$OPTARG" ;;
         *) sed -n '3,12p' "$0" >&2; exit 2 ;;
     esac
 done
@@ -73,7 +88,12 @@ NETWIRELESS="$BUILD/src/tools/NetWirelessPrefs"
 NETWIRELESSCX="$BUILD/src/tools/NetWireless"
 WIFISTUB="$BUILD/tests/tools/WifiStub"
 WINCLICK="$BUILD/tests/tools/WinClick"
+WINKEY="$BUILD/tests/tools/WinKey"
 WMSTUB="$BUILD/tests/tools/WmStub"
+NC="$BUILD/src/tools/nc"
+SHOWNETSTATUS="$BUILD/src/tools/ShowNetStatus"
+ADDIF="$BUILD/src/tools/AddNetInterface"
+LIBSBSD="$BUILD/src/bsdsocket/bsdsocket.library"
 for seq in "${SEQUENCES[@]}"; do
     [ "$seq" = netwireless ] || [ "$seq" = screens ] || continue
     [ -x "$NETWIRELESS" ] && [ -x "$NETWIRELESSCX" ] && [ -x "$WIFISTUB" ] &&
@@ -99,6 +119,30 @@ for seq in "${SEQUENCES[@]}"; do
         exit 2
     }
 done
+for seq in "${SEQUENCES[@]}"; do
+    [ "$seq" = netswitch-keys ] || continue
+    [ -x "$NETSWITCH" ] && [ -x "$WINCLICK" ] && [ -x "$WINKEY" ] || {
+        say error "no NetSwitch, WinClick or WinKey under $BUILD"
+        say hint "cmake --build $BUILD --parallel --target tool_netswitch test_winclick test_winkey"
+        exit 2
+    }
+done
+for seq in "${SEQUENCES[@]}"; do
+    [ "$seq" = netswitch-live ] || continue
+    [ -n "$NETBOARD" ] || {
+        say error "netswitch-live needs a board: -N a2065"
+        say hint "the stack has to come up for an interface to attach, and"
+        say hint "the same board runs every other emulator arm (tools/cards.sh)"
+        exit 2
+    }
+    [ -x "$NETSWITCH" ] && [ -x "$WINCLICK" ] && [ -x "$WINKEY" ] &&
+        [ -x "$NC" ] && [ -x "$SHOWNETSTATUS" ] && [ -x "$ADDIF" ] &&
+        [ -f "$LIBSBSD" ] || {
+        say error "no NetSwitch, WinClick, WinKey, nc, ShowNetStatus, AddNetInterface or bsdsocket.library under $BUILD"
+        say hint "cmake --build $BUILD --parallel --target tool_netswitch test_winclick test_winkey tool_nc tool_shownetstatus tool_addnetinterface bsdsocket_library"
+        exit 2
+    }
+done
 
 case "$FONT" in
     "") ;;
@@ -107,6 +151,13 @@ case "$FONT" in
 esac
 
 # ------------------------------------------------------------- the machine --
+
+# shellcheck source=tools/emu-board.sh
+. "$ROOT/tools/emu-board.sh"
+# shellcheck source=tools/emu-mac.sh
+. "$ROOT/tools/emu-mac.sh"
+# shellcheck source=tools/sana2-stage.sh
+. "$ROOT/tools/sana2-stage.sh"
 
 model_var=$(printf '%s' "$MODEL" | tr '[:lower:]' '[:upper:]' | tr -c 'A-Z0-9' '_')
 model_var=${model_var%_}
@@ -242,6 +293,53 @@ EOF
             > "$HD/Devs/NetInterfaces/ETH2"
     fi
 
+    if [ "$seq" = netswitch-keys ] && [ -x "$NETSWITCH" ] &&
+       [ -x "$WINCLICK" ] && [ -x "$WINKEY" ]; then
+        cp "$NETSWITCH" "$HD/C/NetSwitch"
+        cp "$WINCLICK" "$HD/C/WinClick"
+        cp "$WINKEY" "$HD/C/WinKey"
+        chmod 755 "$HD/C/NetSwitch" "$HD/C/WinClick" "$HD/C/WinKey"
+        # Ten definitions, more than the list can show at once, so the list
+        # scrolls and its corner arrows appear.  The stack is not running, so
+        # every row reads as "not attached".
+        mkdir -p "$HD/Devs/NetInterfaces"
+        for i in 0 1 2 3 4 5 6 7 8 9; do
+            printf '%s\n' "DEVICE=DEVS:Networks/a2065.device" "UNIT=$i" \
+                "CONFIGURE=DHCP" "MTU=1500" \
+                > "$HD/Devs/NetInterfaces/ETH$i"
+        done
+    fi
+
+    if [ "$seq" = netswitch-live ] && [ -n "$NETBOARD" ]; then
+        cp "$NETSWITCH" "$HD/C/NetSwitch"
+        cp "$WINCLICK" "$HD/C/WinClick"
+        cp "$WINKEY" "$HD/C/WinKey"
+        cp "$NC" "$HD/C/nc"
+        cp "$SHOWNETSTATUS" "$HD/C/ShowNetStatus"
+        cp "$ADDIF" "$HD/C/AddNetInterface"
+        chmod 755 "$HD/C/NetSwitch" "$HD/C/WinClick" "$HD/C/WinKey" \
+            "$HD/C/nc" "$HD/C/ShowNetStatus" "$HD/C/AddNetInterface"
+        # The stack itself, and the driver for the card in the machine.  It
+        # starts when a socket program opens bsdsocket.library and goes away
+        # with the last one, so the sequence keeps one listening.
+        mkdir -p "$HD/Libs"
+        cp "$LIBSBSD" "$HD/Libs/bsdsocket.library"
+        AMINETXDUO_SANA2_DRIVER="${AMINETXDUO_SANA2_DRIVER:-${AMINETXDUO_A2065:-}}" \
+            sana2_stage_driver "$NETBOARD" "$HD/Devs"
+        # Nine definitions.  The card has one unit, so the first is the
+        # interface that comes up and the rest are skipped by the stack
+        # (ami_ns_open_devices keeps what opened and drops the rest): the list
+        # then has both shapes at once, an up row and not-attached ones.
+        mkdir -p "$HD/Devs/NetInterfaces"
+        for i in 0 1 2 3 4 5 6 7 8; do
+            printf '%s\n' "DEVICE=${SANA2_DEVICE:-a2065.device}" "UNIT=0" \
+                "CONFIGURE=STATIC" "ADDRESS=192.168.1.$((50 + i))" \
+                "NETMASK=255.255.255.0" "MTU=1500" \
+                > "$HD/Devs/NetInterfaces/ETH$i"
+        done
+    fi
+
+
     [ -n "$DEPTH" ] && wb31_screenmode_prefs "$HD" "$DEPTH"
     [ -n "$FONT" ] && font_prefs "$HD" "${FONT%/*}" "${FONT##*/}"
     return 0
@@ -350,6 +448,93 @@ Run >NIL: C:NetSwitch
 C:Wait 4
 C:WinClick "AmiNetXDuo NetSwitch" X 5 Y 5 TIMES 0 >DH0:netswitch.txt
 C:wbgrab TO DH0:netswitch.pfs >>DH0:netswitch.txt
+Echo >DH0:.done "$RC"
+EOF
+        ;;
+    netswitch-keys)
+        # The same window driven from the keyboard and the mouse.  The click
+        # activates the window and selects row 0; the cursor keys move the
+        # selection, past the last row the list can show, which scrolls it.
+        # Nothing is attached, so both buttons are disabled: Tab has nowhere
+        # to go and Return is the disabled gadget's no-op, and the two grabs
+        # are what that looks like.  WinKey is the keyboard half of WinClick.
+        cat <<'EOF'
+FailAt 9999
+C:Wait 6
+Run >NIL: C:NetSwitch
+C:Wait 4
+C:WinClick "AmiNetXDuo NetSwitch" X 12 Y 40 TIMES 0 >DH0:netswitch-keys.txt
+C:wbgrab TO DH0:netswitch-keys.pfs >>DH0:netswitch-keys.txt
+C:WinClick "AmiNetXDuo NetSwitch" X 12 Y 40 >>DH0:netswitch-keys.txt
+C:Wait 1
+C:wbgrab TO DH0:netswitch-keys-1.pfs >NIL:
+C:WinKey DOWN TIMES 8 >>DH0:netswitch-keys.txt
+C:Wait 1
+C:wbgrab TO DH0:netswitch-keys-2.pfs >NIL:
+C:WinKey TAB >>DH0:netswitch-keys.txt
+C:Wait 1
+C:wbgrab TO DH0:netswitch-keys-3.pfs >NIL:
+C:WinKey RETURN >>DH0:netswitch-keys.txt
+C:Wait 2
+C:wbgrab TO DH0:netswitch-keys-4.pfs >NIL:
+Echo >DH0:.done "$RC"
+EOF
+        ;;
+    netswitch-live)
+        # The stack is up: nc listens on a port and holds bsdsocket.library
+        # open for the length of the arm.  Opening the library starts the
+        # stack loopback-only -- no definition is attached by starting it, so
+        # AddNetInterface attaches ETH0 and brings it up, and the other eight
+        # stay definitions.  One Tab puts the focus on the action button,
+        # which is enabled because the selected row is up; Return takes it
+        # down and Return again brings it back.  Two more Tabs reach Take all
+        # offline, enabled because one interface is online, and Return opens
+        # the requester: Cancel first, then yes.  ShowNetStatus writes the
+        # stack's own answer down as text at the start and at the end, so the
+        # pictures can be read against it.
+        cat <<'EOF'
+FailAt 9999
+C:Wait 6
+Run >NIL: C:nc -4 -l 4321
+C:Wait 2
+C:AddNetInterface DEVS:NetInterfaces/ETH0 >DH0:netswitch-live.txt
+C:Wait 3
+C:ShowNetStatus INTERFACES >>DH0:netswitch-live.txt
+Run >NIL: C:NetSwitch
+C:Wait 4
+C:WinClick "AmiNetXDuo NetSwitch" X 12 Y 40 TIMES 0 >>DH0:netswitch-live.txt
+C:wbgrab TO DH0:netswitch-live.pfs >>DH0:netswitch-live.txt
+C:WinClick "AmiNetXDuo NetSwitch" X 12 Y 40 >>DH0:netswitch-live.txt
+C:Wait 1
+C:wbgrab TO DH0:netswitch-live-1.pfs >NIL:
+C:WinKey TAB >>DH0:netswitch-live.txt
+C:Wait 1
+C:wbgrab TO DH0:netswitch-live-2.pfs >NIL:
+C:WinKey RETURN >>DH0:netswitch-live.txt
+C:Wait 3
+C:wbgrab TO DH0:netswitch-live-3.pfs >NIL:
+C:WinKey RETURN >>DH0:netswitch-live.txt
+C:Wait 3
+C:wbgrab TO DH0:netswitch-live-4.pfs >NIL:
+C:WinKey TAB >>DH0:netswitch-live.txt
+C:Wait 1
+C:wbgrab TO DH0:netswitch-live-5.pfs >NIL:
+C:WinKey RETURN >>DH0:netswitch-live.txt
+C:Wait 2
+C:WinClick "AmiNetXDuo NetSwitch" X 5 Y 5 TIMES 0 >>DH0:netswitch-live.txt
+C:wbgrab TO DH0:netswitch-live-6.pfs >NIL:
+C:WinClick "AmiNetXDuo NetSwitch" X 294 Y 44 >>DH0:netswitch-live.txt
+C:Wait 2
+C:wbgrab TO DH0:netswitch-live-7.pfs >NIL:
+C:WinKey RETURN >>DH0:netswitch-live.txt
+C:Wait 2
+C:WinClick "AmiNetXDuo NetSwitch" X 5 Y 5 TIMES 0 >>DH0:netswitch-live.txt
+C:WinClick "AmiNetXDuo NetSwitch" 1 >>DH0:netswitch-live.txt
+C:Wait 3
+C:wbgrab TO DH0:netswitch-live-8.pfs >NIL:
+C:Wait 8
+C:wbgrab TO DH0:netswitch-live-9.pfs >NIL:
+C:ShowNetStatus INTERFACES >>DH0:netswitch-live.txt
 Echo >DH0:.done "$RC"
 EOF
         ;;
@@ -524,6 +709,16 @@ nr_floppies=0
 uaehf0=dir,rw,DH0:DH0:$HD,0
 serial_port=tcp://127.0.0.1:$port/wait
 EOF
+
+    # The one sequence that needs the stack has a card in the machine.  slirp
+    # is user mode: it takes no host interface, so the drive claim above stays
+    # "none" and nothing here touches the bench's LAN.  The MAC is the run's
+    # own, derived from the sequence name, the way tools/amiberry-run.sh does
+    # it -- one default on two guests is one address in two ARP caches.
+    if [ -n "$NETBOARD" ]; then
+        emu_board_lines "$NETBOARD" "$(emu_mac_default "wbgrab-$name")" \
+            slirp >> "$cfg" || exit 2
+    fi
 
     ( trap '' PIPE; exec "$AMIBERRY" --log -f "$cfg" ) \
         >"$ROOT/build/amiberry-wbgrab-$name.log" 2>&1 &
