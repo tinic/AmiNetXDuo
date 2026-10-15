@@ -45,9 +45,11 @@ typedef struct NsLayout
     int   row_h;                    /* one list row */
     int   rows;                     /* rows shown at once; 0 = empty list */
     int   scroll;                   /* 1 when more interfaces are waiting */
+    int   cell_pad;                 /* frame to the first row and column */
+    int   strip_w;                  /* scroller strip, 0 when not scrolling */
 
-    /* The row's columns, as offsets from the list box's left edge.  A row is
-       drawn at box[NS_L_LIST].y + row_h * i, the glyph first. */
+    /* The row's columns, as offsets from the list box's left edge.  Row i is
+       drawn at box[NS_L_LIST].y + cell_pad + row_h * i, the glyph first. */
     int   glyph_x, glyph_w;
     int   name_x, name_chars;       /* elide a longer name */
     int   device_x, device_chars;   /* 18: "anxzz9000.device 0" is the real one */

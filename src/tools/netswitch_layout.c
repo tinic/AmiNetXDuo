@@ -121,6 +121,8 @@ int ns_layout(const NsFont *font, int max_w, int max_h, unsigned count,
     out->row_h = row_h;
     out->rows = rows;
     out->scroll = scroll;
+    out->cell_pad = CELL_PAD;
+    out->strip_w = strip;
     out->row_lead = ROW_LEAD;
     out->glyph_x = CELL_PAD;
     out->glyph_w = glyph_w;

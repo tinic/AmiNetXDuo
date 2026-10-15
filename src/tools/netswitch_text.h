@@ -59,8 +59,9 @@ int ns_last_error(char *out, size_t cap, const char *error);
 
 /*
  * The take-all button and the confirmation behind it.  This can cut the
- * operator's own link -- the ssh or wifi door into the machine -- so it
- * carries the count and asks.  Returns 1, or 0 when cap is too small.
+ * operator's own link -- the ssh or wifi door into the machine -- so the
+ * button carries the count and the requester states what will happen before
+ * asking.  Returns 1, or 0 when cap is too small.
  */
 int ns_take_all_label(char *out, size_t cap, unsigned count);
 int ns_take_all_prompt(char *out, size_t cap, unsigned count);
@@ -70,12 +71,23 @@ int ns_take_all_prompt(char *out, size_t cap, unsigned count);
    when cap cannot hold what the limit allows. */
 int ns_elide(char *out, size_t cap, const char *text, unsigned chars);
 
+/*
+ * The legend's word for a state, lowercase so it sits beside its shape:
+ * "online", "offline", "not attached".  The panel uses ns_state_word()'s
+ * capitals; the two differ on purpose.
+ */
+const char *ns_legend_word(NsState state);
+
 /* The phrases with no numbers in them. */
-extern const char *const ns_legend_text;        /* "online offline not attached" */
 extern const char *const ns_hint_text;          /* "Return / dbl-click toggles" */
 extern const char *const ns_addresses_head;     /* "Addresses:" */
 extern const char *const ns_no_error;           /* "none" */
 extern const char *const ns_pending_word;       /* "no address yet" */
 extern const char *const ns_none_word;          /* "-" */
+extern const char *const ns_panel_pending;      /* "online but has no address yet" */
+extern const char *const ns_panel_none;         /* "(none)" */
+extern const char *const ns_take_all_warning;   /* "This may drop your own connection." */
+extern const char *const ns_stack_down_hint;    /* "Network is not running." */
+extern const char *const ns_offline_button;     /* the confirm's yes: "Offline" */
 
 #endif

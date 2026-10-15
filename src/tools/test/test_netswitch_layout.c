@@ -97,6 +97,14 @@ static void verify(const Fake *f, const NsLayout *l, unsigned count)
           l->row_h, f->height);
     check(l->glyph_w >= f->height, f->name, "glyph smaller than the font",
           l->glyph_w, f->height);
+    /* The two constants the renderer needs, not derived from the font, travel
+       with the layout so netswitch.c cannot drift from this file. */
+    check(l->cell_pad == l->glyph_x, f->name, "cell pad is not the glyph inset",
+          l->cell_pad, l->glyph_x);
+    check((l->scroll == 0) == (l->strip_w == 0), f->name,
+          "strip width disagrees with scroll", l->strip_w, l->scroll);
+    check(!l->scroll || l->strip_w >= 8, f->name,
+          "strip cannot hold the arrows", l->strip_w, 8);
     check((unsigned)l->rows <= count && (count == 0 || l->rows >= 1), f->name,
           "row count", l->rows, (int)count);
     check(l->scroll == ((unsigned)l->rows < count), f->name,

@@ -117,9 +117,9 @@ int main(void)
     check(ns_take_all_label(buf, sizeof(buf), 0), "take-all 0", buf, "");
     eq("take-all 0", buf, "Take all offline (0)");
     check(ns_take_all_prompt(buf, sizeof(buf), 1), "prompt 1", buf, "");
-    eq("prompt 1", buf, "Take 1 interface offline?");
+    eq("prompt 1", buf, "1 interface will go offline.");
     check(ns_take_all_prompt(buf, sizeof(buf), 4), "prompt 4", buf, "");
-    eq("prompt 4", buf, "Take 4 interfaces offline?");
+    eq("prompt 4", buf, "4 interfaces will go offline.");
 
     /* Elision is by characters, not pixels: the app draws in a cell font, so
        a column is a character count and this is the rule the host can check.
@@ -149,10 +149,14 @@ int main(void)
 
     /* The legend names the three shapes in the same order the states are
        numbered, so the glyph a reader looks up is the one the row shows. */
-    check(strcmp(ns_legend_text, "online offline not attached") == 0,
-          "legend order", ns_legend_text, "online offline not attached");
-    check(ns_pending_word[0] != '\0' && ns_none_word[0] != '\0',
-          "dash and pending word are not empty", ns_pending_word, "");
+    eq("legend up", ns_legend_word(NS_STATE_UP), "online");
+    eq("legend down", ns_legend_word(NS_STATE_DOWN), "offline");
+    eq("legend detached", ns_legend_word(NS_STATE_DETACHED), "not attached");
+    check(ns_pending_word[0] != '\0' && ns_none_word[0] != '\0' &&
+          ns_panel_pending[0] != '\0' && ns_panel_none[0] != '\0' &&
+          ns_take_all_warning[0] != '\0' && ns_stack_down_hint[0] != '\0' &&
+          ns_offline_button[0] != '\0',
+          "the no-number phrases are not empty", ns_pending_word, "");
 
     if (failures == 0) printf("netswitch text: all checks passed\n");
     return failures != 0;

@@ -1,12 +1,16 @@
 /* SPDX-License-Identifier: MIT */
 #include "netswitch_text.h"
 
-const char *const ns_legend_text    = "online offline not attached";
-const char *const ns_hint_text      = "Return / dbl-click toggles";
-const char *const ns_addresses_head = "Addresses:";
-const char *const ns_no_error       = "none";
-const char *const ns_pending_word   = "no address yet";
-const char *const ns_none_word      = "-";
+const char *const ns_hint_text         = "Return / dbl-click toggles";
+const char *const ns_addresses_head    = "Addresses:";
+const char *const ns_no_error          = "none";
+const char *const ns_pending_word      = "no address yet";
+const char *const ns_none_word         = "-";
+const char *const ns_panel_pending     = "online but has no address yet";
+const char *const ns_panel_none        = "(none)";
+const char *const ns_take_all_warning  = "This may drop your own connection.";
+const char *const ns_stack_down_hint   = "Network is not running.";
+const char *const ns_offline_button    = "Offline";
 
 static size_t ns_len(const char *s)
 {
@@ -58,6 +62,17 @@ const char *ns_state_word(NsState state)
     case NS_STATE_DETACHED: return "Not attached";
     }
     return "Not attached";
+}
+
+const char *ns_legend_word(NsState state)
+{
+    switch (state)
+    {
+    case NS_STATE_UP:       return "online";
+    case NS_STATE_DOWN:     return "offline";
+    case NS_STATE_DETACHED: return "not attached";
+    }
+    return "not attached";
 }
 
 const char *ns_action_word(NsState state)
@@ -148,11 +163,12 @@ int ns_take_all_prompt(char *out, size_t cap, unsigned count)
     if (out == NULL || cap == 0) return 0;
     out[0] = '\0';
 
-    if (!append(out, cap, &used, "Take ")) return 0;
     if (!append_num(out, cap, &used, count)) return 0;
-    if (!append(out, cap, &used, count == 1 ? " interface" : " interfaces"))
+    if (!append(out, cap, &used,
+                count == 1 ? " interface will go offline."
+                           : " interfaces will go offline."))
         return 0;
-    return append(out, cap, &used, " offline?");
+    return 1;
 }
 
 int ns_elide(char *out, size_t cap, const char *text, unsigned chars)
