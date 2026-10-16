@@ -153,6 +153,9 @@ BOOL        ami_sana2_is_online(const AmiSana2If *iface);
  * cable clears nx_interface_link_up instead and never touches this.
  */
 BOOL        ami_sana2_admin_up(const AmiSana2If *iface);
+/* The cable: 0 the driver does not say (or the interface is offline), 1 no
+   link, 2 link (sana2_carrier.c). */
+UBYTE       ami_sana2_get_carrier(const AmiSana2If *iface);
 
 /*
  * Put one frame on the wire that the IP stack did not build.  `dst` is six

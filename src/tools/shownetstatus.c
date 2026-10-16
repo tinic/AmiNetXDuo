@@ -389,6 +389,21 @@ static const ToolDhcpInfo *lease_for(const ToolDhcp *dhcp,
     return NULL;
 }
 
+/*
+ * The link word.  An interface taken down is "down" whatever the wire.  Up,
+ * it is the cable when the driver reports one (S2EVENT_CONNECT and
+ * S2EVENT_DISCONNECT), and "unknown" when it does not: S2_ONLINE alone says
+ * the driver is ready, not that a cable is in.
+ */
+static const char *link_word(const ToolIfInfo *live)
+{
+    if (!live->link_up)
+        return "down";
+    if (!live->carrier_known)
+        return "unknown";
+    return live->carrier ? "up" : "down";
+}
+
 static VOID show_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
                            const ToolSnapshot *snap,
                            const ToolDhcpInfo *lease,
@@ -440,7 +455,7 @@ static VOID show_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
     {
         tool_printf("  state       %-10s      link %s\n",
                     (LONG)(up ? "online" : "offline"),
-                    (LONG)(live->link_up ? "up" : "down"));
+                    (LONG)link_word(live));
     }
     else if (stack_running)
     {
@@ -713,7 +728,7 @@ static VOID show_interface_list(const AmiConfig *cfg, const ToolSnapshot *snap,
                            (live == NULL || !live->attached) ? "defined" :
                            iface_online(live) ? "online" : "offline"),
                     (LONG)(live != NULL && live->attached
-                               ? (live->link_up ? "up" : "down") : "?"),
+                               ? link_word(live) : "?"),
                     (LONG)addr);
 
         /* Indented under the line they belong to. A machine with no IPv6
@@ -738,7 +753,7 @@ static VOID show_interface_list(const AmiConfig *cfg, const ToolSnapshot *snap,
                         (LONG)live->nx_name,
                         (LONG)(!readable ? "?" :
                                iface_online(live) ? "online" : "offline"),
-                        (LONG)(live->link_up ? "up" : "down"),
+                        (LONG)link_word(live),
                         (LONG)addr);
             list_addresses6(snap, live);
         }
@@ -1338,6 +1353,12 @@ static VOID diagnose_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
     {
         problem_head();
         advice("  * %s: no link\n", (LONG)cfg->name);
+    }
+    else if (live->carrier_known && !live->carrier)
+    {
+        problem_head();
+        advice("  * %s: the card sees no network (check the cable)\n",
+               (LONG)cfg->name);
     }
 
     /*

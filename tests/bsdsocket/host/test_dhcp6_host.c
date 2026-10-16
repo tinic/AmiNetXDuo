@@ -290,6 +290,8 @@ VOID ami_sana2_get_stats(const AmiSana2If *i, AmiSana2Stats *o)
 { (VOID)i; (VOID)o; h_unreachable("ami_sana2_get_stats"); }
 BOOL ami_sana2_is_online(const AmiSana2If *i)
 { (VOID)i; h_unreachable("ami_sana2_is_online"); return FALSE; }
+UBYTE ami_sana2_get_carrier(const AmiSana2If *i)
+{ (VOID)i; h_unreachable("ami_sana2_get_carrier"); return 0; }
 
 LONG bsd_if_set_address(struct AmiSocketBase *b, LONG i, BOOL ha, ULONG a,
                         BOOL hm, ULONG m)

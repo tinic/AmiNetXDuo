@@ -717,7 +717,23 @@ typedef struct AmiSana2Reader
     BOOL                ack_tr_open;
     BOOL                ack_tr_busy;
     ULONG               ack_mask;
+
+    /* The cable watch (sana2_carrier.c): one S2_ONEVENT for
+       S2EVENT_CONNECT | S2EVENT_DISCONNECT, out while carrier_busy. */
+    struct AmiSana2CarrierIO *carrier_io;
+    BYTE                carrier_sigbit;
+    BOOL                carrier_busy;
+    ULONG               carrier_mask;
 } AmiSana2Reader;
+
+/* The cable watch's request and its reply port (sana2_carrier.c): their
+   own allocation, because a driver may keep the request after the reader
+   that sent it has gone. */
+typedef struct AmiSana2CarrierIO
+{
+    struct MsgPort      port;
+    struct IOSana2Req   req;
+} AmiSana2CarrierIO;
 
 /* One ring of reads for one Ethernet type. */
 /*
@@ -1006,6 +1022,15 @@ struct AmiSana2If
     /* Administrative state: the stack's intent, not the wire's condition.
        Only the driver entry's enable/disable cases write it. */
     BOOL                admin_up;
+    /* The cable, as the driver reports it (sana2_carrier.c): 0 the driver
+       does not say, 1 no link, 2 link.  The wire's condition, where
+       nx_interface_link_up is the stack's intent. */
+    UBYTE               carrier;
+    /* A link-event request the driver would not give back when the reader
+       stopped, parked with its port set to PA_IGNORE.  Freed at the next
+       start once it has come back; while it has not, the cable is not asked
+       about again, so a driver that holds them never collects more. */
+    struct AmiSana2CarrierIO *carrier_parked;
     /* AMI_LINK_DETACH_BEGIN has run: the removal owns the teardown, and the
        driver entry leaves the device alone.  Never cleared. */
     BOOL                detaching;
@@ -1212,6 +1237,10 @@ VOID  ami_sana2_ack_flush(AmiSana2If *iface);
 VOID  ami_sana2_ack_reader_start(AmiSana2Reader *rd);
 VOID  ami_sana2_ack_reader_pass(AmiSana2Reader *rd);
 VOID  ami_sana2_ack_reader_stop(AmiSana2Reader *rd);
+VOID  ami_sana2_carrier_start(AmiSana2Reader *rd);
+VOID  ami_sana2_carrier_pass(AmiSana2Reader *rd);
+VOID  ami_sana2_carrier_stop(AmiSana2Reader *rd);
+VOID  ami_sana2_carrier_release(AmiSana2If *iface);
 
 /* <proto/exec.h> is forced FIRST: the NDK's inline wait macros must expand
    (once, behind their guard) BEFORE ours are defined, or a TU that includes it

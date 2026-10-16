@@ -37,6 +37,9 @@ typedef struct ToolIfInfo
     UWORD           nx_index;
     BOOL            attached;        /* NX_INTERFACE is valid                */
     BOOL            link_up;
+    /* The cable, when the driver reports it: carrier_known, then carrier. */
+    BOOL            carrier_known;
+    BOOL            carrier;
     BOOL            mdns;            /* answering .local on this wire        */
     ULONG           address;         /* host byte order                      */
     ULONG           netmask;

@@ -134,6 +134,7 @@ static const char netdev_stat_poll[]  = "Opener polls";
 static const char netdev_stat_pollh[] = "Opener polls that found frames held";
 static const char netdev_stat_ver[]   = "Direct receive frames verified";
 static const char netdev_stat_batch[] = "Receive batches answered";
+static const char netdev_stat_link[]  = "Link state";
 
 static VOID cmd_special_stats(NetdevUnit *unit, struct IOSana2Req *io)
 {
@@ -230,6 +231,12 @@ static VOID cmd_special_stats(NetdevUnit *unit, struct IOSana2Req *io)
        had frames waiting for it (aminetxduo/anxs2ext.h). */
     STAT(netdev_stat_poll,  unit->nu_RxPolls);
     STAT(netdev_stat_pollh, unit->nu_RxPollsHeld);
+
+    /* The cable: 1 the PHY sees a link, 0 it does not.  Only from a core
+       that reads its PHY; the stack takes a missing record as "not known"
+       and keeps the link it had (sana2_device.c). */
+    if (unit->nu_Nic.phy_link != 0)
+        STAT(netdev_stat_link, unit->nu_Nic.phy_link - 1);
 
     /* Whatever the core itself counts, after everything above. */
     if (unit->nu_Nic.core_stat_names != NULL)
@@ -1090,10 +1097,17 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
          */
         /* Zero names no condition and would otherwise queue forever: no
            future post can share a bit with it. */
-        if (mask == 0 ||
-            (mask & ~(ULONG)(S2EVENT_ERROR | S2EVENT_TX | S2EVENT_RX |
-                             S2EVENT_ONLINE | S2EVENT_OFFLINE |
-                             S2EVENT_BUFF | S2EVENT_HARDWARE)) != 0)
+        /* S2EVENT_CONNECT and S2EVENT_DISCONNECT only from a core that
+           reads its PHY.  Accepted from any other, they would wait forever
+           and the stack could not tell "no cable" from "cannot say". */
+        ULONG known = S2EVENT_ERROR | S2EVENT_TX | S2EVENT_RX |
+                      S2EVENT_ONLINE | S2EVENT_OFFLINE |
+                      S2EVENT_BUFF | S2EVENT_HARDWARE;
+
+        if (NETDEV_SEES_LINK(&unit->nu_Nic))
+            known |= S2EVENT_CONNECT | S2EVENT_DISCONNECT;
+
+        if (mask == 0 || (mask & ~known) != 0)
         {
             netdev_reply(io, S2ERR_NOT_SUPPORTED, S2WERR_BAD_EVENT);
             return;

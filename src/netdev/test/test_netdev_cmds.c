@@ -1381,6 +1381,54 @@ static void l_onevent_masks(void)
     }
 }
 
+/*
+ * S2EVENT_CONNECT and S2EVENT_DISCONNECT, the cable: refused by a core that
+ * cannot read its PHY, where an accepted request would wait forever and the
+ * caller could not tell "no cable" from "cannot say"; accepted from each
+ * kind of core that can.
+ */
+static void l_onevent_link(void)
+{
+    static const ULONG masks[] = {
+        S2EVENT_CONNECT, S2EVENT_DISCONNECT,
+        S2EVENT_CONNECT | S2EVENT_DISCONNECT,
+        S2EVENT_CONNECT | S2EVENT_DISCONNECT | S2EVENT_OFFLINE
+    };
+    struct IOSana2Req io;
+    UWORD             i;
+    UWORD             core;
+
+    for (i = 0; i < (UWORD)(sizeof(masks) / sizeof(masks[0])); i++)
+    {
+        reset();
+        req(&io, S2_ONEVENT);
+        io.ios2_WireError = masks[i];
+        netdev_perform(&opener, &io);
+        expect_u32("link events from a core without a PHY",
+                   (unsigned long)(UBYTE)last_err,
+                   (unsigned long)(UBYTE)S2ERR_NOT_SUPPORTED);
+        expect_u32("name the bad event", last_wire,
+                   (unsigned long)S2WERR_BAD_EVENT);
+        expect(event_wait_calls == 0, "and never reach the event queue");
+
+        for (core = 0; core < 3; core++)
+        {
+            reset();
+            if (core == 0)
+                unit.nu_Nic.ax_phy = 1;
+            else if (core == 1)
+                unit.nu_Nic.dl_kind = 19;
+            else
+                unit.nu_Nic.link_watch = 1;
+            req(&io, S2_ONEVENT);
+            io.ios2_WireError = masks[i];
+            netdev_perform(&opener, &io);
+            expect(event_wait_calls == 1 && event_wait_last == &io,
+                   "link events from a core that reads its PHY are queued");
+        }
+    }
+}
+
 /* ============================================================== tracking = */
 
 static void m_track_types(void)
@@ -2419,6 +2467,7 @@ int main(void)
     j_the_advertised_list_is_the_real_one();
     k_unknown_commands();
     l_onevent_masks();
+    l_onevent_link();
     m_track_types();
     m2_track_race();
     n_special_stats_respect_the_caller();

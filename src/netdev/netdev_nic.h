@@ -286,7 +286,13 @@ struct NetdevNic
     UBYTE               ax_phy;
     UBYTE               ax_phy_tick;
     UBYTE               ax_phy_tries;
-    UBYTE               ax_phy_pad;
+    /* The PHY's link bit as the core last read it: 0 not known (a core
+       that cannot see its PHY), 1 down, 2 up.  Reported as the special
+       statistic "Link state" (netdev_cmds.c). */
+    UBYTE               phy_link;
+    /* The core reads its PHY's link bit on its own (GENET's link task);
+       ax_phy and dl_kind say the same for the ne2000.c cores. */
+    UBYTE               link_watch;
 
     /*
      * D-Link DL10019/DL10022 (ne2000.c): dl_kind 19 or 22, 0 for anything

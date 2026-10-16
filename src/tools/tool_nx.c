@@ -129,6 +129,8 @@ LONG tool_snapshot(ToolSnapshot *out, BOOL want_sockets)
         info->nx_index     = (UWORD)i;
         info->attached     = FALSE;
         info->link_up      = FALSE;
+        info->carrier_known = FALSE;
+        info->carrier      = FALSE;
         info->address      = 0;
         info->netmask      = 0;
         info->mtu          = 0;
@@ -181,6 +183,9 @@ LONG tool_snapshot(ToolSnapshot *out, BOOL want_sockets)
         info->nx_index = src->nsi_Index;
         info->attached = (src->nsi_Flags & NETSTATUS_IF_ATTACHED) ? TRUE : FALSE;
         info->link_up  = (src->nsi_Flags & NETSTATUS_IF_LINKUP) ? TRUE : FALSE;
+        info->carrier_known =
+            (src->nsi_Flags & NETSTATUS_IF_CARRIERKNOWN) ? TRUE : FALSE;
+        info->carrier  = (src->nsi_Flags & NETSTATUS_IF_CARRIER) ? TRUE : FALSE;
         info->mdns     = (src->nsi_Flags & NETSTATUS_IF_MDNS) ? TRUE : FALSE;
         info->address  = src->nsi_Address;
         info->netmask  = src->nsi_NetMask;

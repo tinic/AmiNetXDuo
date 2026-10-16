@@ -1605,6 +1605,15 @@ ULONG netdev_tick_c(register NetdevUnit *unit __asm("a1"))
         unit->nu_Nic.ops->tick(&unit->nu_Nic))
         netdev_tx_pump(unit);
 
+    /* The cable, as the core last read it, to whoever waits on it. */
+    if (unit->nu_Nic.phy_link != unit->nu_LinkPosted)
+    {
+        unit->nu_LinkPosted = unit->nu_Nic.phy_link;
+        if (unit->nu_Nic.phy_link != 0)
+            netdev_event(unit, (unit->nu_Nic.phy_link == 2)
+                                   ? S2EVENT_CONNECT : S2EVENT_DISCONNECT);
+    }
+
     if (unit->nu_Online && unit->nu_IntSilent >= 10u && unit->nu_InIsr == 0 &&
         (!netdev_pcmcia_is_unit(unit) || unit->nu_Nic.running))
     {

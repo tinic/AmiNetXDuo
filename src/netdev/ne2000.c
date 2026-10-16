@@ -1134,6 +1134,7 @@ static VOID dl_link(NetdevNic *nic)
 
     (VOID)dl_mii_read(nic, nic->dl_phy, 1);     /* the link bit latches low */
     bmsr = dl_mii_read(nic, nic->dl_phy, 1);
+    nic->phy_link = (UBYTE)((bmsr & 0x0004u) ? 2 : 1);
     if ((bmsr & 0x0004u) == 0)
         return;
 
@@ -1175,6 +1176,8 @@ static BOOL ne2000_tick(NetdevNic *nic)
     nic->ax_phy_tick = 0;
 
     bmsr   = ax_mii_read(nic, MII_BMSR);
+    if (bmsr >= 0)
+        nic->phy_link = (UBYTE)((bmsr & MII_BMSR_LINK) ? 2 : 1);
     anar   = ax_mii_read(nic, MII_ANAR);
     anlpar = ax_mii_read(nic, MII_ANLPAR);
 

@@ -186,6 +186,10 @@ struct Sana2DeviceStats
 #define S2EVENT_BUFF            (1L << 5)
 #define S2EVENT_HARDWARE        (1L << 6)
 #define S2EVENT_SOFTWARE        (1L << 7)
+/* Not in the Commodore set: the pair wireless SANA-II drivers post when the
+   card gains and loses its network, used here for a wired card's cable. */
+#define S2EVENT_CONNECT         (1L << 9)
+#define S2EVENT_DISCONNECT      (1L << 10)
 
 #endif /* SANA2_SANA2DEVICE_H */
 

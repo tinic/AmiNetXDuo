@@ -1735,6 +1735,7 @@ BOOL ami_sana2_close(AmiSana2If *iface)
         return FALSE;
     }
 
+    ami_sana2_carrier_release(iface);
     ami_sana2_release(iface);
 
     return TRUE;
@@ -1955,6 +1956,11 @@ ULONG ami_sana2_known_rx_bytes(const char *device)
 BOOL ami_sana2_is_online(const AmiSana2If *iface)
 {
     return (iface != NULL) ? iface->online : FALSE;
+}
+
+UBYTE ami_sana2_get_carrier(const AmiSana2If *iface)
+{
+    return (iface != NULL && iface->online) ? iface->carrier : (UBYTE)0;
 }
 
 BOOL ami_sana2_admin_up(const AmiSana2If *iface)

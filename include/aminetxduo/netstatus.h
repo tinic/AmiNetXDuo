@@ -160,6 +160,12 @@ typedef struct NetStatusSystem
 /* An alias address (ConfigureNetInterface ALIASADDR): nsi_Name is
    "<interface>:<slot>", the counters are the interface's row's. */
 #define NETSTATUS_IF_ALIAS      0x0040
+/* The cable, from a SANA-II driver that reports it (S2EVENT_CONNECT and
+   S2EVENT_DISCONNECT).  NETSTATUS_IF_LINKUP is the stack's own state, which
+   Online and Offline set; CARRIER is whether the card sees a network, and
+   means something only with CARRIERKNOWN. */
+#define NETSTATUS_IF_CARRIERKNOWN 0x0080
+#define NETSTATUS_IF_CARRIER      0x0100
 
 typedef struct NetStatusInterface
 {

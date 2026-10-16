@@ -630,6 +630,8 @@ static VOID ge_link_poll(NetdevNic *nic)
     if (bmsr >= 0 && (bmsr & BMSR_LINK) == 0)
         bmsr = ge_mii_read(nic, MII_BMSR);
     up = (UBYTE)genet_phy_link_up(bmsr);
+    if (bmsr >= 0)
+        nic->phy_link = (UBYTE)(up ? 2 : 1);
 
     if (up)
     {
@@ -1991,6 +1993,7 @@ static LONG genet_attach(NetdevNic *nic)
 
     c = (GenetCore *)(APTR)mem;
     nic->core = c;
+    nic->link_watch = 1;
     c->rx_buf = (UBYTE *)(((ULONG)(mem + sizeof(GenetCore)) + GE_ALIGN - 1) &
                           ~(ULONG)(GE_ALIGN - 1));
     c->tx_buf = c->rx_buf + (ULONG)GE_RX_RING * GE_BUFSZ;

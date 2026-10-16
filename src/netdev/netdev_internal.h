@@ -62,6 +62,11 @@ static inline VOID nd_remove(struct Node *n)
 #include "netdev_mcast.h"
 #include "sana2_device.h"
 
+/* The core can tell a cable from none: it answers S2EVENT_CONNECT and
+   S2EVENT_DISCONNECT (netdev_cmds.c), and any other core refuses them. */
+#define NETDEV_SEES_LINK(nic) \
+    ((nic)->ax_phy != 0 || (nic)->dl_kind != 0 || (nic)->link_watch != 0)
+
 /* Independent of the stack's interface slots: full/minimal/fat retain four
    hardware units, while micro's device images reserve just one. */
 #ifndef NETDEV_MAX_UNITS
@@ -252,6 +257,9 @@ typedef struct NetdevUnit
      * read from interrupt context.  netdev_event.c owns it.
      */
     UWORD                       nu_EventMask;
+    /* nu_Nic.phy_link as last posted: S2EVENT_CONNECT/DISCONNECT go out
+       when the two differ (the vertical-blank pass, netdev_device.c). */
+    UBYTE                       nu_LinkPosted;
     UWORD                       nu_BatchPending; /* ANXD_CMD_RX_BATCH requests
                                                    holding frames for the
                                                    pass-end reply           */

@@ -67,6 +67,9 @@ VOID netdev_event_wait(NetdevUnit *unit, struct IOSana2Req *io)
 
     Disable();
     now = unit->nu_Online ? S2EVENT_ONLINE : S2EVENT_OFFLINE;
+    if (unit->nu_Nic.phy_link != 0)
+        now |= (unit->nu_Nic.phy_link == 2) ? S2EVENT_CONNECT
+                                            : S2EVENT_DISCONNECT;
     if ((io->ios2_WireError & now) != 0)
     {
         Enable();

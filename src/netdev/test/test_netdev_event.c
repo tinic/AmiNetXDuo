@@ -527,6 +527,55 @@ static void test_filter(void)
     expect_int("a rejection replies to nothing", replies, 0);
 }
 
+/*
+ * S2EVENT_CONNECT and S2EVENT_DISCONNECT are states, like ONLINE and
+ * OFFLINE: a wait for the one that holds is answered at once, and a wait
+ * while the core has not read its PHY yet is queued for the first post.
+ */
+static void test_link_state(void)
+{
+    struct IOSana2Req io;
+
+    printf("\n-- current CONNECT/DISCONNECT state\n");
+
+    reset_fixture();
+    unit.nu_Online       = 1;
+    unit.nu_Nic.phy_link = 2;
+    wait_for(&opener_a, &io, S2EVENT_CONNECT | S2EVENT_DISCONNECT);
+    expect_u32("a cable in: answered with CONNECT", io.ios2_WireError,
+               S2EVENT_CONNECT);
+    expect_int("not queued", queued(&opener_a.op_Events), 0);
+
+    reset_fixture();
+    unit.nu_Online       = 1;
+    unit.nu_Nic.phy_link = 1;
+    wait_for(&opener_a, &io, S2EVENT_CONNECT | S2EVENT_DISCONNECT);
+    expect_u32("no cable: answered with DISCONNECT", io.ios2_WireError,
+               S2EVENT_DISCONNECT);
+    expect_int("not queued", queued(&opener_a.op_Events), 0);
+
+    reset_fixture();
+    unit.nu_Online       = 1;
+    unit.nu_Nic.phy_link = 1;
+    wait_for(&opener_a, &io, S2EVENT_CONNECT);
+    expect_int("waiting for a cable while there is none: queued",
+               queued(&opener_a.op_Events), 1);
+    netdev_event(&unit, S2EVENT_CONNECT);
+    expect_int("the cable going in replies", replies, 1);
+    expect_u32("with CONNECT", io.ios2_WireError, S2EVENT_CONNECT);
+    expect_int("and leaves nothing queued", queued(&opener_a.op_Events), 0);
+
+    reset_fixture();
+    unit.nu_Online = 1;
+    wait_for(&opener_a, &io, S2EVENT_CONNECT | S2EVENT_DISCONNECT);
+    expect_int("PHY not read yet: queued", queued(&opener_a.op_Events), 1);
+    expect_int("nothing replied", replies, 0);
+    netdev_event(&unit, S2EVENT_DISCONNECT);
+    expect_u32("the first read posts DISCONNECT", io.ios2_WireError,
+               S2EVENT_DISCONNECT);
+    expect_int("Disable() balanced", disable_depth, 0);
+}
+
 int main(void)
 {
     test_queue();
@@ -538,6 +587,7 @@ int main(void)
     test_gate();
     test_payload();
     test_filter();
+    test_link_state();
 
     printf("\n%s: %d failure(s)\n", failures ? "FAILED" : "PASSED", failures);
     return failures != 0;

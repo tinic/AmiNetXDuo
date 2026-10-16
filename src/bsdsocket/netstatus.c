@@ -1039,6 +1039,18 @@ static VOID ns_fill_interfaces(NX_IP *ip, NsWriter *w)
             out->nsi_Flags |= NETSTATUS_IF_SANA2;
             if (ami_sana2_is_online(sana))
                 out->nsi_Flags |= NETSTATUS_IF_ONLINE;
+            switch (ami_sana2_get_carrier(sana))
+            {
+            case 2:
+                out->nsi_Flags |= NETSTATUS_IF_CARRIERKNOWN |
+                                  NETSTATUS_IF_CARRIER;
+                break;
+            case 1:
+                out->nsi_Flags |= NETSTATUS_IF_CARRIERKNOWN;
+                break;
+            default:
+                break;
+            }
 
             out->nsi_Speed = ami_sana2_get_bps(sana);
 

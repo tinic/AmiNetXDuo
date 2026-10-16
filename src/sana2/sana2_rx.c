@@ -2319,6 +2319,7 @@ static VOID ami_sana2_rx_thread(ULONG argument)
     /* ACKPACE: this reader releases the interface's held acknowledgments
        (sana2_ackpace.c); nothing is held without it. */
     ami_sana2_ack_reader_start(rd);
+    ami_sana2_carrier_start(rd);
 
     /*
      * Every request is a copy of the opened one, which carries io_Device,
@@ -2449,6 +2450,11 @@ static VOID ami_sana2_rx_thread(ULONG argument)
         /* ACKPACE: what is due goes, and the timer is armed for the next. */
         ami_sana2_ack_reader_pass(rd);
 
+        /* The cable changed, or the driver answered the first ask. */
+        if (rd->carrier_io != NULL &&
+            rd->carrier_io->port.mp_MsgList.lh_Head->ln_Succ != NULL)
+            ami_sana2_carrier_pass(rd);
+
         /*
          * A status query asked for the device's counters of now
          * (ami_sana2_stats_request()).  The two device commands run here, on
@@ -2528,7 +2534,8 @@ static VOID ami_sana2_rx_thread(ULONG argument)
         if (ami_sana2_rx_should_block(rd, AMI_SANA2_RX_RUN_MAX))
         {
             ami_sana2_block_enter();
-            Wait(rd->wake_mask | rd->reap_mask | rd->ack_mask);
+            Wait(rd->wake_mask | rd->reap_mask | rd->ack_mask |
+                 rd->carrier_mask);
 #ifdef AMINETXDUO_RXPROBE
             {
                 AmiRxProbe *pr = &iface->rx[0].probe;
@@ -2606,6 +2613,7 @@ static VOID ami_sana2_rx_thread(ULONG argument)
     }
 
     ami_sana2_rx_teardown(rd);
+    ami_sana2_carrier_stop(rd);
 
     rd->running = FALSE;
     tx_semaphore_put(&rd->exited);
