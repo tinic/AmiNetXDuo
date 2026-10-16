@@ -379,6 +379,10 @@ VOID ami_sana2_refresh_stats(AmiSana2If *iface) { (VOID)iface; }
 VOID ami_sana2_ack_reader_start(AmiSana2Reader *rd) { rd->ack_mask = 0; }
 VOID ami_sana2_ack_reader_pass(AmiSana2Reader *rd)  { (VOID)rd; }
 VOID ami_sana2_ack_reader_stop(AmiSana2Reader *rd)  { (VOID)rd; }
+/* The cable watch is sana2_carrier.c's; the reader task is not run here. */
+VOID ami_sana2_carrier_start(AmiSana2Reader *rd) { rd->carrier_io = NULL; rd->carrier_mask = 0; }
+VOID ami_sana2_carrier_pass(AmiSana2Reader *rd)  { (VOID)rd; }
+VOID ami_sana2_carrier_stop(AmiSana2Reader *rd)  { (VOID)rd; }
 /* The capacity the reader asks again for once a second (sana2_device.c),
    and the ThreadX clock that paces it: the reader's loop is not driven
    here. */

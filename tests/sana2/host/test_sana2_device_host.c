@@ -729,6 +729,9 @@ LONG AbortIO(struct IORequest *req)
 
 /* No reader ever started here, so there are no slot arrays to give back;
    when they would go is still counted, for the watched interface. */
+/* No reader runs here, so nothing is ever parked (sana2_carrier.c). */
+VOID ami_sana2_carrier_release(AmiSana2If *iface) { (VOID)iface; }
+
 VOID ami_sana2_rx_free_slots(AmiSana2If *iface)
 {
     if (iface != NULL && (APTR)iface == h_free_watch)
