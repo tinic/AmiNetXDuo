@@ -559,7 +559,7 @@ WORK="$ROOT/build/testwork-$TAG"
 # ------------------------------------------------------------ ingredients --
 
 # THE INSTALLER THE ARCHIVE SHIPS is the one under test: the release carries
-# its own (install/Installer, the low-memory build), and a user double-clicks
+# its own (install/Installer, Commodore's 43.3), and a user double-clicks
 # that one.  This one only fills in for an archive that has none; overwriting
 # the shipped one meant a 1 MB A500 ran a different, larger Installer and
 # failed with "Out of Memory" where the product's own was never tried.
@@ -1068,7 +1068,7 @@ echo "==> archive $(basename "$ARCHIVE") ($(wc -c < "$ARCHIVE" | tr -d ' ') byte
 # text: it carries none.
 # THE STACK THE ARCHIVE'S ICON ASKS FOR (DiskObject do_StackSize, offset 74),
 # which is what a double-click gives the Installer.  installdrive's own 40000
-# was 23 KB more than the shipped icon's 16384, and on a 1 MB machine that
+# was 30 KB more than the shipped icon's 10000, and on a 1 MB machine that
 # is not a detail.  $1 is the archive; prints the size, 40000 without an icon.
 icon_stack() {
     local dir="$ROOT/build/$TAG-icon" n=""

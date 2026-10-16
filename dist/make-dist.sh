@@ -563,12 +563,13 @@ cp "$INSTALL/Uninstall-AmiNetXDuo.info" "$TREE/"
 cp "$INSTALL/AmiNetXDuo.info"          "$TREE/"
 cp "$INSTALL/AmiNetXDuo.info"          "$OUTDIR/"
 
-# The modified Installer, bundled in the same drawer. Install-AmiNetXDuo.info's
+# The Commodore Installer, bundled in the same drawer.  Install-AmiNetXDuo.info's
 # default tool is "Installer", so Workbench finds it here and a double-click just
 # works, nothing to fetch or install first.
+# Pin the exact beta8 Installer 43.3 restored for the normal Workbench UI.
 installer_sha=$( (sha256sum "$INSTALL/Installer" 2>/dev/null || shasum -a 256 "$INSTALL/Installer") | cut -d" " -f1)
-if [ "$installer_sha" != "c6dc78f6e95c8b47204150fa3ff8d0e235866851301a5f1f8ddd05d97ba53137" ]; then
-    echo "the supplied Installer does not match the validated low-memory build" >&2
+if [ "$installer_sha" != "70237f51e1e7cf3025123a983df7e65e18eb6206e97c7b8d3662ca3373047f1e" ]; then
+    echo "the supplied Installer does not match Commodore Installer 43.3 from beta8" >&2
     exit 1
 fi
 cp "$INSTALL/Installer" "$TREE/Installer"
