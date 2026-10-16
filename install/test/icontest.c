@@ -41,7 +41,7 @@ struct Expect
 
 static const struct Expect expected[] =
 {
-    { "Install-AmiNetXDuo", WBPROJECT, "Installer",           16384,  5 },
+    { "Install-AmiNetXDuo", WBPROJECT, "Installer",           10000,  5 },
     { "AmiNetXDuo",         WBDRAWER,  NULL,                      0, -1 },
     { "Drawer",             WBDRAWER,  NULL,                      0, -1 },
     { "Document",           WBPROJECT, "SYS:Utilities/More",   4096,  0 },

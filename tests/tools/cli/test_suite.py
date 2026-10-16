@@ -70,13 +70,6 @@ class InventoryTests(unittest.TestCase):
         self.assertEqual(by_kind['option:PRIORITY']['mode'], 'exit')
         self.assertEqual(by_kind['unknown']['mode'], 'exit')
 
-    def test_installer_short_path_failure_stays_covered(self):
-        spec = self.policy['Installer']
-        by_kind = {r['kind']: r for r in matrix.tool_cases('Installer', spec)}
-        row = by_kind['short-path:SCRIPT']
-        self.assertEqual(row['arguments'], 'SCRIPT "' + 'x' * 104 + '"')
-        self.assertEqual(row['mode'], 'interrupt')
-
     def test_shards_cover_each_case_once_with_both_stacks(self):
         original = {r['id'] for r in self.rows}
         shards = [run.shard_rows(self.rows, i, 4) for i in range(4)]

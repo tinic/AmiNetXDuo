@@ -87,13 +87,12 @@ anxwifipi.device for that machine's Wi-Fi.  See SUPPLIED DRIVERS below.
 INSTALLING
 ----------
 
-Double-click "Install-AmiNetXDuo". The modified Installer 2.17 is in the same
-drawer, so nothing has to be fetched first. Its lower-memory parser supports
-the complete script on a 1 MB Kickstart/Workbench 2.04 desktop.
+Double-click "Install-AmiNetXDuo".  Commodore's Installer is in the same
+drawer, so nothing has to be fetched first.
 
 From a Shell, the equivalent is:
 
-     Stack 16384
+     Stack 10000
      CD <the drawer this file is in>
      Installer SCRIPT Install-AmiNetXDuo APPNAME AmiNetXDuo
 
@@ -445,9 +444,6 @@ LICENCE
 
 MIT, with these exceptions, each confined to the files it names:
 
-  *  The bundled modified Installer 2.17 retains the original Commodore-Amiga
-     and Sylvan Technical Arts copyrights and is separate from the stack's
-     MIT licence. See Installer-NOTICE.txt for provenance and build details.
   *  ThreadX and NetX Duo are MIT as well (Microsoft / Eclipse ThreadX
      contributors).  Both are maintained forks, at github.com/tinic/threadx
      and github.com/tinic/netxduo.

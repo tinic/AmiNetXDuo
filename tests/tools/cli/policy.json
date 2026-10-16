@@ -149,17 +149,19 @@
     "binary": "@Installer",
     "mode": "interrupt",
     "parser": "installer",
-    "template": "SCRIPT/A,APPNAME/K,MINUSER/K,DEFUSER/K,LOGFILE/K,NOPRETEND/S,NOLOG/S",
+    "template": "SCRIPT/A,APPNAME/K,MINUSER/K,DEFUSER/K,LOGFILE/K,LANGUAGE/K,NOPRETEND/S,NOLOG/S,NOPRINT/S",
     "values": {
       "APPNAME": "CLI test",
       "DEFUSER": "novice",
       "LOGFILE": "RAM:cli-install.log",
+      "LANGUAGE": "english",
       "MINUSER": "novice",
       "NOLOG": true,
       "NOPRETEND": true,
+      "NOPRINT": true,
       "SCRIPT": "RAM:cli-script"
     },
-    "binary_sha256": "c6dc78f6e95c8b47204150fa3ff8d0e235866851301a5f1f8ddd05d97ba53137"
+    "binary_sha256": "70237f51e1e7cf3025123a983df7e65e18eb6206e97c7b8d3662ca3373047f1e"
   },
   "NetCapture": {
     "binary": "src/tools/NetCapture",

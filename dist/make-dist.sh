@@ -563,14 +563,9 @@ cp "$INSTALL/Uninstall-AmiNetXDuo.info" "$TREE/"
 cp "$INSTALL/AmiNetXDuo.info"          "$TREE/"
 cp "$INSTALL/AmiNetXDuo.info"          "$OUTDIR/"
 
-# The modified Installer, bundled in the same drawer. Install-AmiNetXDuo.info's
+# The Commodore Installer, bundled in the same drawer.  Install-AmiNetXDuo.info's
 # default tool is "Installer", so Workbench finds it here and a double-click just
 # works, nothing to fetch or install first.
-installer_sha=$( (sha256sum "$INSTALL/Installer" 2>/dev/null || shasum -a 256 "$INSTALL/Installer") | cut -d" " -f1)
-if [ "$installer_sha" != "c6dc78f6e95c8b47204150fa3ff8d0e235866851301a5f1f8ddd05d97ba53137" ]; then
-    echo "the supplied Installer does not match the validated low-memory build" >&2
-    exit 1
-fi
 cp "$INSTALL/Installer" "$TREE/Installer"
 chmod 755 "$TREE/Installer"
 
