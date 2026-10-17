@@ -547,10 +547,28 @@ static VOID _tx_amiga_timer_discard(struct timerequest *tr, struct MsgPort *port
  *
  * Everything one wakeup does, with two callers: the tick task (every build) and,
  * in a green build, the realm's scheduler loop.  The E-Clock is the time base for
- * both, and the whole service runs under one Forbid().
+ * both.  The bookkeeping is one short Forbid() and every tick of a backlog is
+ * its own, so a task above the tick (USB and audio drivers sit at 10-19) that
+ * became ready mid-backlog runs between two ticks, not after the last.  Only
+ * the tick task writes this state, so nothing changes under it in between.
  */
 
 struct _tx_amiga_tick_run   _tx_amiga_tick_run;   /* struct: tx_amiga_internal.h */
+
+
+/* Note one Forbid() section of the service: its cost and the longest so far.  */
+static VOID _tx_amiga_tick_held(ULONG *held, ULONG *hold, ULONG t0, ULONG t1)
+{
+
+ULONG   section =  (ULONG) (t1 - t0);
+
+
+    *held +=  section;
+    if (section > *hold)
+    {
+        *hold =  section;
+    }
+}
 
 
 VOID _tx_amiga_tick_deliver(UINT from_realm)
@@ -558,11 +576,18 @@ VOID _tx_amiga_tick_deliver(UINT from_realm)
 
 struct _tx_amiga_tick_run  *r =  &_tx_amiga_tick_run;
 struct EClockVal            svc_now;
+struct EClockVal            svc_t0;
+struct EClockVal            svc_t1;
 ULONG                       svc_delta;
 ULONG                       svc_measured;
 ULONG                       svc_advance;
 ULONG                       svc_carry;
-ULONG                       svc_cost;
+ULONG                       svc_owed;
+ULONG                       svc_skipped;
+ULONG                       svc_clips;
+ULONG                       svc_budget;
+ULONG                       svc_held;
+ULONG                       svc_hold;
 ULONG                       svc_i;
 
 
@@ -646,25 +671,18 @@ ULONG                       svc_i;
             tx_amiga_eclock_us(r -> tr_last_service, r -> tr_eclock_per_ms);
     }
 
+    svc_skipped =  0UL;
+    svc_clips   =  0UL;
+
     if (r -> tr_backlog > (ULONG) TX_AMIGA_TIMER_MAX_CATCHUP)
     {
 
         /* The ceiling on the backlog, and the only place a tick is thrown
            away; also the only path that skips a wheel slot.  */
-        _tx_amiga_tick.tx_amiga_tick_lost +=
-            r -> tr_backlog - (ULONG) TX_AMIGA_TIMER_MAX_CATCHUP;
+        svc_skipped =  r -> tr_backlog - (ULONG) TX_AMIGA_TIMER_MAX_CATCHUP;
+        _tx_amiga_tick.tx_amiga_tick_lost +=  svc_skipped;
         _tx_amiga_tick.tx_amiga_tick_clipped++;
-
-        if (_tx_amiga_tick.tx_amiga_tick_clipped <= 3UL)
-        {
-            AMI_WARN("tick: %ld ms since the last wakeup, wheel skips %ld "
-                    "of %ld owed (cap %ld, previous service %ld us)",
-                    (LONG) tx_amiga_eclock_ms(svc_delta, r -> tr_eclock_per_ms),
-                    (LONG) (r -> tr_backlog - (ULONG) TX_AMIGA_TIMER_MAX_CATCHUP),
-                    (LONG) r -> tr_backlog, (LONG) TX_AMIGA_TIMER_MAX_CATCHUP,
-                    (LONG) tx_amiga_eclock_us(r -> tr_last_service,
-                                              r -> tr_eclock_per_ms));
-        }
+        svc_clips =  _tx_amiga_tick.tx_amiga_tick_clipped;
 
         r -> tr_backlog =  (ULONG) TX_AMIGA_TIMER_MAX_CATCHUP;
     }
@@ -673,17 +691,65 @@ ULONG                       svc_i;
         _tx_amiga_tick.tx_amiga_tick_catchups++;
     }
 
-    for (svc_i = 0UL; svc_i < r -> tr_backlog; svc_i++)
+    svc_owed =  r -> tr_backlog;
+
+    (VOID) ReadEClock(&svc_t1);
+    svc_held =  0UL;
+    svc_hold =  0UL;
+    _tx_amiga_tick_held(&svc_held, &svc_hold, svc_now.ev_lo, svc_t1.ev_lo);
+
+    Permit();
+
+    /* Outside the Forbid(): the log hook is not ours to time.  */
+    if ((svc_skipped != 0UL) && (svc_clips <= 3UL))
+    {
+        AMI_WARN("tick: %ld ms since the last wakeup, wheel skips %ld "
+                "of %ld owed (cap %ld, previous service %ld us)",
+                (LONG) tx_amiga_eclock_ms(svc_delta, r -> tr_eclock_per_ms),
+                (LONG) svc_skipped,
+                (LONG) (svc_owed + svc_skipped), (LONG) TX_AMIGA_TIMER_MAX_CATCHUP,
+                (LONG) tx_amiga_eclock_us(r -> tr_last_service,
+                                          r -> tr_eclock_per_ms));
+    }
+
+    svc_budget =  r -> tr_eclock_per_ms * (ULONG) TX_AMIGA_TIMER_BUDGET_MS;
+
+    for (svc_i = 0UL; svc_i < svc_owed; svc_i++)
     {
 
-        /* Enter "interrupt" context, run the tick, leave it.  */
+        /* The budget counts time this service held the machine, not time a
+           task above it ran in between: that one is not stolen from anybody
+           below.  Checked between ticks, so the first tick always runs and a
+           service can overrun by one tick; the rest waits for the next.  */
+        if ((svc_i > 0UL) && (svc_held > svc_budget))
+        {
+            break;
+        }
+
+        /* One tick, one Forbid().  The nesting keeps the restore's Permit()
+           from switching before the section is timed; ours is the one that
+           lets a task above the tick in.  */
+        Forbid();
+        (VOID) ReadEClock(&svc_t0);
         _tx_thread_context_save();
         _tx_timer_interrupt();
         _tx_thread_context_restore();
+        (VOID) ReadEClock(&svc_t1);
+        Permit();
+
+        _tx_amiga_tick_held(&svc_held, &svc_hold, svc_t0.ev_lo, svc_t1.ev_lo);
     }
+
+    Forbid();
 
     r -> tr_backlog -=  svc_i;
     _tx_amiga_tick.tx_amiga_tick_delivered +=  svc_i;
+
+    if (svc_i < svc_owed)
+    {
+        _tx_amiga_tick.tx_amiga_tick_over_budget++;
+        _tx_amiga_tick.tx_amiga_tick_deferred +=  svc_owed - svc_i;
+    }
 
     /* Poke the scheduler when it could actually dispatch.  Pointless from
        the realm: it IS the scheduler, mid-pass.  */
@@ -696,24 +762,19 @@ ULONG                       svc_i;
         }
     }
 
-    /* Service cost of this delivery, summed over tx_amiga_tick_wakeups.  */
+    /* Service cost of this delivery, summed over tx_amiga_tick_wakeups: the
+       sections it held, not the time tasks above it ran in between.  */
+    r -> tr_last_service =  svc_held;
+    if (svc_held < 4000000UL)
     {
-        struct EClockVal end;
-
-        (VOID) ReadEClock(&end);
-        svc_cost             =  (ULONG) (end.ev_lo - svc_now.ev_lo);
-        r -> tr_last_service =  svc_cost;
-        if (svc_cost < 4000000UL)
-        {
-            _tx_amiga_tick.tx_amiga_tick_service_us +=
-                (svc_cost * 1000UL) / r -> tr_eclock_per_ms;
-        }
-        if (svc_cost > r -> tr_worst_hold)
-        {
-            r -> tr_worst_hold =  svc_cost;
-            _tx_amiga_tick.tx_amiga_tick_worst_hold_us =
-                tx_amiga_eclock_us(svc_cost, r -> tr_eclock_per_ms);
-        }
+        _tx_amiga_tick.tx_amiga_tick_service_us +=
+            (svc_held * 1000UL) / r -> tr_eclock_per_ms;
+    }
+    if (svc_hold > r -> tr_worst_hold)
+    {
+        r -> tr_worst_hold =  svc_hold;
+        _tx_amiga_tick.tx_amiga_tick_worst_hold_us =
+            tx_amiga_eclock_us(svc_hold, r -> tr_eclock_per_ms);
     }
 
     Permit();

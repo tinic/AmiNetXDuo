@@ -264,7 +264,8 @@ VOID _tx_amiga_timer_clock_advance(ULONG ticks);
 
 /* The shared tick service (tx_initialize_low_level.c): everything one tick wakeup
    does, E-Clock-based and idempotent, called by the tick task (every build) and by
-   the realm's scheduler loop (green builds).  Runs under its own Forbid().  */
+   the realm's scheduler loop (green builds).  Takes its own Forbid() sections,
+   one per tick, so the caller must not hold one.  */
 VOID _tx_amiga_tick_deliver(UINT from_realm);
 
 /* Its state, one instance in tx_initialize_low_level.c.  The scheduler loop reads
