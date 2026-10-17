@@ -535,6 +535,9 @@ static VOID t_health_reports_the_tick_catchups(VOID)
 
     h_tick.tx_amiga_tick_catchups = 4321UL;
     h_tick.tx_amiga_tick_delivered = 99UL;
+    h_tick.tx_amiga_tick_over_budget = 17UL;
+    h_tick.tx_amiga_tick_deferred = 23UL;
+    h_tick.tx_amiga_tick_worst_hold_us = 345UL;
 
     memset(h_buffer, 0, sizeof(h_buffer));
     hdr->nsh_Magic   = AMI_NETSTATUS_MAGIC;
@@ -549,6 +552,9 @@ static VOID t_health_reports_the_tick_catchups(VOID)
     CHECK(out->nsl_TickCatchups == 4321UL,
           "and it carries the tick task's catch-up count");
     CHECK(out->nsl_TickTicks == 99UL, "beside the ticks delivered");
+    CHECK(out->nsl_TickOverBudget == 17UL, "the services over budget");
+    CHECK(out->nsl_TickDeferred == 23UL, "the ticks they deferred");
+    CHECK(out->nsl_TickWorstHoldUs == 345UL, "and the longest Forbid()");
 }
 
 int main(void)

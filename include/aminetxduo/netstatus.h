@@ -464,10 +464,12 @@ typedef struct NetStatusHealth
     ULONG   nsl_TickUptimeMs;
     ULONG   nsl_TickWorstStallMs;
     ULONG   nsl_TickWorstServiceUs;
-    /* Were the tick budget counters and the wheel lateness after a wakeup,
-       which always equalled nsl_TickLost; always 0.  Kept so the record keeps
-       its version 16 shape. */
-    ULONG   nsl_TickPad[3];
+    /* Services cut short by the tick budget and the ticks they carried over,
+       then the longest single Forbid() of a service.  The third slot was the
+       wheel lateness after a wakeup; the record keeps its version 16 shape. */
+    ULONG   nsl_TickOverBudget;
+    ULONG   nsl_TickDeferred;
+    ULONG   nsl_TickWorstHoldUs;
     ULONG   nsl_TickSkewPeak;
 
     ULONG   nsl_BatonLive;

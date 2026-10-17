@@ -5,7 +5,6 @@
 1	port/threadx-amiga/src/tx_initialize_low_level.c	_tx_amiga_tick_deliver
 1	port/threadx-amiga/src/tx_initialize_low_level.c	_tx_amiga_timer_clock_advance
 1	port/threadx-amiga/src/tx_initialize_low_level.c	tx_amiga_eclock_ms
-1	port/threadx-amiga/src/tx_initialize_low_level.c	tx_amiga_eclock_us
 1	port/threadx-amiga/src/tx_thread_interrupt_control.c	_tx_amiga_int_restore
 1	port/threadx-amiga/src/tx_thread_schedule.c	_tx_amiga_signal
 1	port/threadx-amiga/src/tx_thread_schedule.c	tx_amiga_kernel_stop
@@ -65,7 +64,9 @@
 10	src/bsdsocket/transfer.c	nx_packet_release
 16	src/bsdsocket/raw.c	nx_packet_release
 2	port/threadx-amiga/src/tx_initialize_low_level.c	_tx_amiga_stop_notify
+2	port/threadx-amiga/src/tx_initialize_low_level.c	_tx_amiga_tick_held
 2	port/threadx-amiga/src/tx_initialize_low_level.c	_tx_amiga_timer_discard
+2	port/threadx-amiga/src/tx_initialize_low_level.c	tx_amiga_eclock_us
 2	port/threadx-amiga/src/tx_thread_interrupt_control.c	tx_amiga_task_on_list
 2	port/threadx-amiga/src/tx_thread_schedule.c	_tx_amiga_reap
 2	port/threadx-amiga/src/tx_thread_schedule.c	_tx_amiga_reap_cleanup

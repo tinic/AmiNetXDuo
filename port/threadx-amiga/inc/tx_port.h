@@ -422,9 +422,10 @@ void    _tx_amiga_start_interrupts(void);
    it preempts the baton holder; below the filesystem handlers and disk
    drivers (10) and input.device (20), so a tick burst never delays a pointer
    move or a disk request.  It may outrank console.device, trackdisk.device and
-   IDE drivers (5-6): one service delivers at most TX_AMIGA_TIMER_MAX_CATCHUP
-   ticks; measured ticks cost 20-170 us, but timer callbacks set the real
-   cost.  Ladder asserted in
+   IDE drivers (5-6): one service holds the machine for about
+   TX_AMIGA_TIMER_BUDGET_MS.  Each tick is its own Forbid(), so a task above
+   the tick waits at most one tick; measured ticks cost 20-170 us, but timer
+   callbacks set the real cost.  Ladder asserted in
    src/thread_priorities.h.  */
 
 #ifndef TX_AMIGA_TIMER_PRIORITY
@@ -455,6 +456,17 @@ void    _tx_amiga_start_interrupts(void);
 
 #ifndef TX_AMIGA_TIMER_MAX_CATCHUP
 #define TX_AMIGA_TIMER_MAX_CATCHUP              8UL
+#endif
+
+/* Milliseconds one service may hold the machine, summed over its Forbid()
+   sections; the time a task above the tick runs in between does not count.
+   Checked between ticks, so it is a target, not a cap: the first tick always
+   runs and a service can overrun by one tick.  The rest of the backlog
+   carries over to the next service, and only TX_AMIGA_TIMER_MAX_CATCHUP
+   throws ticks away.  */
+
+#ifndef TX_AMIGA_TIMER_BUDGET_MS
+#define TX_AMIGA_TIMER_BUDGET_MS                2UL
 #endif
 
 /* Startup validation window for the wakeup source, in milliseconds, and the rate
