@@ -708,6 +708,12 @@ ULONG                       svc_i;
             _tx_amiga_tick.tx_amiga_tick_service_us +=
                 (svc_cost * 1000UL) / r -> tr_eclock_per_ms;
         }
+        if (svc_cost > r -> tr_worst_hold)
+        {
+            r -> tr_worst_hold =  svc_cost;
+            _tx_amiga_tick.tx_amiga_tick_worst_hold_us =
+                tx_amiga_eclock_us(svc_cost, r -> tr_eclock_per_ms);
+        }
     }
 
     Permit();
@@ -970,6 +976,7 @@ UINT                 armed;
     _tx_amiga_tick_run.tr_up_rem          =  0UL;
     _tx_amiga_tick_run.tr_last_service    =  0UL;
     _tx_amiga_tick_run.tr_worst_delta     =  0UL;
+    _tx_amiga_tick_run.tr_worst_hold      =  0UL;
     _tx_amiga_tick_run.tr_realm           =  (UINT) TX_FALSE;
     _tx_amiga_tick_run.tr_live            =  (UINT) TX_TRUE;
     Permit();

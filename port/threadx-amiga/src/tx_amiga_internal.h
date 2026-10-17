@@ -282,6 +282,7 @@ struct _tx_amiga_tick_run
     ULONG   tr_up_rem;
     ULONG   tr_last_service;
     ULONG   tr_worst_delta;
+    ULONG   tr_worst_hold;      /* E-Clock, longest Forbid() of a service    */
     UINT    tr_live;            /* parameters valid; service may run        */
     UINT    tr_realm;           /* green: the realm is the wakeup target    */
 };
