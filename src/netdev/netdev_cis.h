@@ -129,6 +129,8 @@ UWORD netdev_cis_io_off(const NetdevCisEntry *e, UWORD assumed);
 
 /* CISTPL_FUNCE subtuple: the LAN function's station address. */
 #define CIS_FUNCE_LAN_NODE_ID   0x04
+#define CIS_FUNCE_LAN_TECH      0x01    /* then the technology:        */
+#define CIS_LAN_TECH_WIRELESS   0x07    /* 802.11                      */
 
 /* CISTPL_LONGLINK_MFC target address space, TPLMFC_TAS. */
 #define CIS_MFC_COMMON      0

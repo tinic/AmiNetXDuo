@@ -7,6 +7,7 @@
 #include "netdev_internal.h"
 #include "netdev_cards.h"
 #include "netdev_cis.h"
+#include "netdev_wireless.h"
 #include "netdev_clock.h"
 #include "netdev_macgen.h"
 #include "netdev_float.h"
@@ -791,6 +792,7 @@ static BOOL pc_read_identity(struct CardHandle *handle, UWORD *manf_out,
     UWORD manf = 0;
     UWORD prod = 0;
     UBYTE funcid = (UBYTE)CIS_FUNC_LAN;
+    BOOL  wifi = FALSE;
 
     /* A replacement must not inherit the first card's saved CIS or address. */
     pc_cis_len      = 0;
@@ -849,6 +851,9 @@ static BOOL pc_read_identity(struct CardHandle *handle, UWORD *manf_out,
                  (ULONG)(tuple_len >= 1u ? buf[2] : ANXDIAG_ABSENT));
         netdev_diag_note(ANXDIAG_PC_FUNCE, ci,
                          (ULONG)(tuple_len >= 1u ? buf[2] : ANXDIAG_ABSENT));
+        if (tuple_len >= 2u && buf[2] == CIS_FUNCE_LAN_TECH &&
+            buf[3] == CIS_LAN_TECH_WIRELESS)
+            wifi = TRUE;
         if (tuple_len >= 8u && buf[2] == CIS_FUNCE_LAN_NODE_ID &&
             buf[3] == (UBYTE)NETDEV_ADDR_LEN)
         {
@@ -867,6 +872,17 @@ static BOOL pc_read_identity(struct CardHandle *handle, UWORD *manf_out,
     }
     else
         netdev_diag_note(ANXDIAG_PC_FUNCE, ci, ANXDIAG_ABSENT);
+
+    /* An 802.11 card is prism2.device's, not ours.  Its FUNCID says LAN as
+       an NE2000's does, so without this the NE2000 fallback row wrote its
+       option register and probed it as a DP8390. */
+    if (wifi || netdev_wireless_id(manf, prod))
+    {
+        netdev_diag_note(ANXDIAG_PC_WIRELESS, ci,
+                         ((ULONG)manf << 16) | (ULONG)prod);
+        pc_reject_owned(keep_handle);
+        return FALSE;
+    }
 
     *manf_out   = manf;
     *prod_out   = prod;

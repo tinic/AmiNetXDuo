@@ -100,6 +100,10 @@ extern "C" {
                                        data cache is kept off it, 0 not
                                        needed, 1 TT0, 2 TT1, 3 the cache is
                                        off, 4 nothing made it coherent      */
+#define ANXDIAG_PC_WIRELESS   100   /* an 802.11 card, by MANFID or FUNCE
+                                       (manf << 16 | prod): not this
+                                       driver's; slot released, nothing
+                                       written to it                          */
 #define ANXDIAG_CACHE_WHY      99   /* why the transparent-translation
                                        registers were passed over: bit 0 RAM
                                        in the block, 1/2 TT0/TT1 in use,
