@@ -513,7 +513,10 @@ static BOOL open_ui(VOID)
 {
     if ((ns.screen = LockPubScreen(NULL)) == NULL) return FALSE;
     if ((ns.visual = GetVisualInfoA(ns.screen, NULL)) == NULL) return FALSE;
-    if (ns_banner_load(ns.screen, "PROGDIR:NetSwitch.ilbm", &ns.banner) &&
+    /* Resident, or from a launcher that gives none, there is no program
+       directory and PROGDIR: would be a volume to ask for. */
+    if (GetProgramDir() != (BPTR)0 &&
+        ns_banner_load(ns.screen, "PROGDIR:NetSwitch.ilbm", &ns.banner) &&
         make_window(ns.screen->Font)) return TRUE;
     free_window();
     ns_banner_free(ns.screen, &ns.banner);
