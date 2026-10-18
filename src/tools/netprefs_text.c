@@ -132,13 +132,13 @@ static int append(char *out, size_t cap, size_t *used,
 }
 
 static int append_field(char *out, size_t cap, size_t *used,
-                        const NpTextField *f)
+                        const NpTextField *f, const char *sep)
 {
     size_t n;
     if (f->value == NULL) return 1;
     n = np_len(f->key);
     if (!append(out, cap, used, f->key, n) ||
-        !append(out, cap, used, " = ", 3)) return 0;
+        !append(out, cap, used, sep, np_len(sep))) return 0;
     n = np_len(f->value);
     return append(out, cap, used, f->value, n) &&
            append(out, cap, used, "\n", 1);
@@ -146,6 +146,14 @@ static int append_field(char *out, size_t cap, size_t *used,
 
 int np_text_patch(const char *old, size_t oldlen, NpTextField *fields,
                   size_t count, char *out, size_t cap, size_t *newlen)
+{
+    return np_text_patch_sep(old, oldlen, fields, count, " = ",
+                             out, cap, newlen);
+}
+
+int np_text_patch_sep(const char *old, size_t oldlen, NpTextField *fields,
+                      size_t count, const char *sep, char *out, size_t cap,
+                      size_t *newlen)
 {
     size_t at = 0, used = 0, i;
     while (at < oldlen)
@@ -163,16 +171,49 @@ int np_text_patch(const char *old, size_t oldlen, NpTextField *fields,
         else if (!fields[field].seen)
         {
             fields[field].seen = 1;
-            if (!append_field(out, cap, &used, &fields[field])) return 0;
+            if (!append_field(out, cap, &used, &fields[field], sep)) return 0;
         }
         /* Drop duplicate keys owned by the GUI. */
     }
     if (used != 0 && out[used - 1] != '\n')
         if (!append(out, cap, &used, "\n", 1)) return 0;
     for (i = 0; i < count; i++)
-        if (!fields[i].seen && !append_field(out, cap, &used, &fields[i])) return 0;
+        if (!fields[i].seen && !append_field(out, cap, &used, &fields[i], sep))
+            return 0;
     *newlen = used;
     return 1;
+}
+
+size_t np_text_values(const char *text, size_t len, const char *key,
+                      char values[][NP_TEXT_VALUE_LEN], size_t max)
+{
+    size_t at = 0, found = 0;
+
+    while (at < len && found < max)
+    {
+        size_t start = at, p, n = 0;
+        NpTextField f;
+
+        while (at < len && text[at] != '\n') at++;
+        if (at < len) at++;
+        f.key = key;
+        f.value = NULL;
+        f.seen = 0;
+        if (field_of_line(text + start, at - start, &f, 1) != 0) continue;
+        /* Past the keyword, the blanks and any '=': the first word. */
+        p = start;
+        while (p < at && (text[p] == ' ' || text[p] == '\t')) p++;
+        while (p < at && text[p] != '=' && text[p] != ' ' && text[p] != '\t') p++;
+        while (p < at && (text[p] == ' ' || text[p] == '\t' || text[p] == '='))
+            p++;
+        while (p < at && text[p] != ' ' && text[p] != '\t' && text[p] != '\r' &&
+               text[p] != '\n' && text[p] != '#' && text[p] != ';' &&
+               n + 1 < NP_TEXT_VALUE_LEN)
+            values[found][n++] = text[p++];
+        values[found][n] = '\0';
+        found++;
+    }
+    return found;
 }
 
 /* One Shell word: p at its first character, returns one past its last. */
