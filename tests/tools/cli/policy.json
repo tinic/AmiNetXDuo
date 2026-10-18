@@ -142,6 +142,7 @@
     "source": "src/tools/installwifi.c",
     "values": {
       "PRIORITY": "cli-ssid",
+      "PRISM2": "cli-ssid",
       "TO": "RAM:cli-wireless.prefs"
     }
   },

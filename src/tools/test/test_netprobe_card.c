@@ -144,6 +144,37 @@ int main(void)
     /* The driver would try this one; the probe leaves it to the card page. */
     expect_kind(&bare, NETPROBE_PC_NONE, "MANFID, no FUNCID");
 
+    /* CARD wireless: the 802.11 cards above, and none of the others. */
+    {
+        /* A Prism2 2.9 identity outside Linux's tables, no FUNCID. */
+        NetprobeCis prism2_only = { 0x0032, 0x000c, 0, { 0, 0 }, 1, 0, 0 };
+        const NetprobeCis *yes[] = { &prism2, &wpc11, &airconnect, &aironet,
+                                     &wlan, &prism2_only };
+        const NetprobeCis *no[] = { &cnet, &dfe670, &dfe670e, &el3, &cfem,
+                                    &cxem, &xircom, &xircom_combo,
+                                    &xircom_other, &modem, &disk, &bare };
+        unsigned i;
+
+        for (i = 0; i < sizeof(yes) / sizeof(yes[0]); i++)
+        {
+            checks++;
+            if (!netprobe_pc_wireless(yes[i]))
+            {
+                failures++;
+                printf("  FAIL wireless card %u not called wireless\n", i);
+            }
+        }
+        for (i = 0; i < sizeof(no) / sizeof(no[0]); i++)
+        {
+            checks++;
+            if (netprobe_pc_wireless(no[i]))
+            {
+                failures++;
+                printf("  FAIL card %u called wireless\n", i);
+            }
+        }
+    }
+
     {
         NetprobeCis walked = { 0, 0, 0, { 0, 0 }, 0, 0, 0 };
         NetprobeCis none = { 0, 0, 0, { 0, 0 }, 0, 0, 0 };
