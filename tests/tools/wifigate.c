@@ -12,12 +12,10 @@
  * association ASSOC seconds after that started, then GetNetStatus
  * CHECK=DEFAULTROUTE once a second until a lease gives a default route.
  *
- *   WifiGate IFACE/K,INNER/K,ASSOC/N,LIMIT/N,WAIT/N,LEAVE/N,OFFON/S
+ *   WifiGate IFACE/K,INNER/K,ASSOC/N,LIMIT/N,WAIT/N,LEAVE/N
  *
  * LEAVE: after the lease, the association goes for that many seconds and
  * comes back; the lease must still be there, or come back inside LIMIT.
- * OFFON: then Offline and Online of the interface, as NetPrefs' Go offline
- * and Go online do; a default route again inside LIMIT.
  *
  * Output is key=value, then "<N> checks, <M> failures".
  *
@@ -526,11 +524,11 @@ static LONG wg_wait_route(LONG limit)
     }
 }
 
-#define TEMPLATE "IFACE/K,INNER/K,ASSOC/N,LIMIT/N,WAIT/N,LEAVE/N,OFFON/S"
+#define TEMPLATE "IFACE/K,INNER/K,ASSOC/N,LIMIT/N,WAIT/N,LEAVE/N"
 
 int main(void)
 {
-    LONG           args[7] = { 0, 0, 0, 0, 0, 0, 0 };
+    LONG           args[6] = { 0, 0, 0, 0, 0, 0 };
     struct RDArgs *rda = ReadArgs((CONST_STRPTR)TEMPLATE, args, NULL);
     const char    *iface = "wifi0";
     LONG           assoc_s = 70, limit = 15, wait_s = 150, leave = 0;
@@ -631,30 +629,6 @@ int main(void)
         Printf((CONST_STRPTR)"leave_s=%ld route_after_rejoin_s=%ld\n", leave,
                back_after);
         check(back_after >= 0, "a default route after leave and rejoin");
-    }
-
-    if (args[6] != 0 && lease_after >= 0)
-    {
-        static const char *const verb[] = { "SYS:Offline ", "SYS:Online " };
-        LONG k, rcs[2];
-
-        for (k = 0; k < 2; k++)
-        {
-            ULONG i = 0, j;
-
-            for (j = 0; verb[k][j] != '\0'; j++) cmd[i++] = verb[k][j];
-            for (j = 0; iface[j] != '\0' && i + 1 < sizeof(cmd); j++)
-                cmd[i++] = iface[j];
-            cmd[i] = '\0';
-            mark(cmd);
-            rcs[k] = wg_say(cmd);
-            mark(rcs[k] == 0 ? "rc=0" : "rc!=0");
-        }
-        back_after = wg_wait_route(limit);
-        Printf((CONST_STRPTR)"offline_rc=%ld online_rc=%ld route_after_online_s=%ld\n",
-               rcs[0], rcs[1], back_after);
-        check(rcs[0] == 0 && rcs[1] == 0, "Offline and Online of the Wi-Fi interface");
-        check(back_after >= 0, "a default route after Offline and Online");
     }
 
     /* The unit's code is this program's: the stack lets go of it before

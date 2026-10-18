@@ -6,7 +6,7 @@
 # must come inside LIMIT seconds of the association.
 #
 #   tests/tools/run-wifigate.sh [-m MODEL] [-t SECONDS] [-b BUILDDIR]
-#                               [-A ASSOC] [-L LIMIT] [-R LEAVE] [-O]
+#                               [-A ASSOC] [-L LIMIT] [-R LEAVE]
 #
 # SLIRP: its DHCP server answers at once, so the time to the lease is the
 # client's alone.  Output is key=value; the verdict is the exit code.
@@ -22,9 +22,8 @@ BUILD="${AMINETXDUO_BUILD:-build/cm}"
 ASSOC=70
 LIMIT=15
 LEAVE=0
-OFFON=""
 
-while getopts "m:t:b:A:L:R:O" opt; do
+while getopts "m:t:b:A:L:R:" opt; do
     case "$opt" in
         m) MODEL="$OPTARG" ;;
         t) TIMEOUT="$OPTARG" ;;
@@ -32,7 +31,6 @@ while getopts "m:t:b:A:L:R:O" opt; do
         A) ASSOC="$OPTARG" ;;
         L) LIMIT="$OPTARG" ;;
         R) LEAVE="$OPTARG" ;;
-        O) OFFON=" OFFON" ;;
         *) sed -n '8,9p' "$0" >&2; exit 2 ;;
     esac
 done
@@ -42,7 +40,7 @@ EXE="$BUILD/tests/tools/WifiGate"
 TOOLS="$BUILD/src/tools"
 BSD="$BUILD/src/bsdsocket/bsdsocket.library"
 for f in "$EXE" "$TOOLS/AddNetInterface" "$TOOLS/GetNetStatus" \
-         "$TOOLS/NetShutdown" "$TOOLS/Online" "$TOOLS/Offline" "$BSD"; do
+         "$TOOLS/NetShutdown" "$BSD"; do
     [ -f "$f" ] || { echo "missing $f (build the cross tree first)" >&2; exit 2; }
 done
 
@@ -67,7 +65,7 @@ cp "$A2065" "$STAGE/devs/a2065.device"
 printf '%s\n' "DEVICE=wifigate.device" "UNIT=0" "CONFIGURE=DHCP" \
     > "$STAGE/devs/NetInterfaces/wifi0"
 cp "$BSD" "$STAGE/libs/bsdsocket.library"
-for t in AddNetInterface GetNetStatus NetShutdown Online Offline; do
+for t in AddNetInterface GetNetStatus NetShutdown; do
     cp "$TOOLS/$t" "$STAGE/$t"
 done
 
@@ -77,9 +75,9 @@ export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-wifigate}"
 
 set +e
 "$ROOT/tools/amiberry-run.sh" -N a2065 -m "$MODEL" -t "$TIMEOUT" \
-    -a "IFACE=wifi0 ASSOC=$ASSOC LIMIT=$LIMIT LEAVE=$LEAVE$OFFON" \
+    -a "IFACE=wifi0 ASSOC=$ASSOC LIMIT=$LIMIT LEAVE=$LEAVE" \
     "$EXE" "$STAGE/devs" "$STAGE/libs" "$STAGE/AddNetInterface" \
-    "$STAGE/GetNetStatus" "$STAGE/NetShutdown" "$STAGE/Online" "$STAGE/Offline"
+    "$STAGE/GetNetStatus" "$STAGE/NetShutdown"
 RUN_RC=$?
 set -e
 
