@@ -454,6 +454,27 @@ static VOID set_static6_fields(BOOL enabled)
     set_attr(np.g_gateway6, GA_Disabled, (ULONG)!enabled);
 }
 
+/* For a path that may name an absent assign or volume: no requester. */
+static BOOL quiet_exists(const char *path)
+{
+    struct Process *me = (struct Process *)FindTask(NULL);
+    APTR saved = me->pr_WindowPtr;
+    BOOL found;
+
+    me->pr_WindowPtr = (APTR)-1L;
+    found = tool_exists(path);
+    me->pr_WindowPtr = saved;
+    return found;
+}
+
+/* As Install-AmiNetXDuo's C_PREFIX: a drawer installation names its own
+   commands through AmiNetXDuo:, because C: reaches that drawer last. */
+static const char *boot_prefix(VOID)
+{
+    return quiet_exists("AmiNetXDuo:C/AddNetInterface") ? "AmiNetXDuo:C/"
+                                                        : "C:";
+}
+
 static BOOL ensure_dir(const char *path)
 {
     BPTR lock;
@@ -647,6 +668,7 @@ static BOOL set_boot_state(const char *name, BOOL enabled, BOOL removing)
 {
     ULONG len = 0, at = 0, used = 0;
     ULONG extra = text_len(name) + 128;
+    const char *prefix = boot_prefix();
     BOOL startup_exists = tool_exists("S:Network-Startup");
     char *old = read_file("S:Network-Startup", &len,
                           (BOOL)!startup_exists);
@@ -711,10 +733,12 @@ static BOOL set_boot_state(const char *name, BOOL enabled, BOOL removing)
         if (used != 0 && out[used - 1] != '\n')
             if (!append_bytes(out, len + extra, &used, "\n", 1)) goto fail;
         if (!append_bytes(out, len + extra, &used,
-                          "; Added by AmiNetXDuo NetPrefs.\n"
-                          "C:AddNetInterface DEVS:NetInterfaces/",
-                          text_len("; Added by AmiNetXDuo NetPrefs.\n"
-                                   "C:AddNetInterface DEVS:NetInterfaces/")) ||
+                          "; Added by AmiNetXDuo NetPrefs.\n",
+                          text_len("; Added by AmiNetXDuo NetPrefs.\n")) ||
+            !append_bytes(out, len + extra, &used, prefix, text_len(prefix)) ||
+            !append_bytes(out, len + extra, &used,
+                          "AddNetInterface DEVS:NetInterfaces/",
+                          text_len("AddNetInterface DEVS:NetInterfaces/")) ||
             !append_bytes(out, len + extra, &used, name, text_len(name)) ||
             !append_bytes(out, len + extra, &used, " QUIET\n", 7)) goto fail;
     }
@@ -743,12 +767,15 @@ static LONG run_command(const char *command, const char *name, BOOL quiet)
 
     /* In a self-contained install C: deliberately searches the system first.
        Use the private commands beside this tool or in its C drawer,
-       rather than a stale command belonging to another stack.  The SYS:Prefs copy has no siblings and therefore uses C:. */
-    if (tool_exists("PROGDIR:AddNetInterface"))
+       rather than a stale command belonging to another stack.  The SYS:Prefs copy has no siblings and therefore uses C:.
+       Started resident or from some launchers there is no program directory,
+       and PROGDIR: would be a volume to ask for (GitHub #307). */
+    if (GetProgramDir() != (BPTR)0 && quiet_exists("PROGDIR:AddNetInterface"))
         prefix = "PROGDIR:";
-    else if (tool_exists("PROGDIR:C/AddNetInterface"))
+    else if (GetProgramDir() != (BPTR)0 &&
+             quiet_exists("PROGDIR:C/AddNetInterface"))
         prefix = "PROGDIR:C/";
-    else if (tool_exists("C:AddNetInterface"))
+    else if (quiet_exists("C:AddNetInterface"))
         prefix = "C:";
     else
         prefix = "AmiNetXDuo:C/";
