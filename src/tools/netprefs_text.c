@@ -311,3 +311,130 @@ int np_startup_line(const char *line, size_t len, const char *name,
     }
     return equal_nocase(base, (size_t)((line + b) - base), name);
 }
+
+/* A line without its leading blanks and one leading ';' and the blanks
+   after it: what it says, commented out or not. */
+static size_t said(const char *line, size_t len, size_t *end)
+{
+    size_t p = skip_blanks(line, len, 0), e = len;
+
+    if (p < len && line[p] == ';') p = skip_blanks(line, len, p + 1);
+    while (e > p && (line[e - 1] == '\n' || line[e - 1] == '\r' ||
+                     line[e - 1] == ' ' || line[e - 1] == '\t')) e--;
+    *end = e;
+    return p;
+}
+
+static int said_is(const char *line, size_t len, const char *what, int word)
+{
+    size_t e, p = said(line, len, &e), n = np_len(what);
+
+    if (e - p < n || !equal_nocase(line + p, n, what)) return 0;
+    return word ? e - p == n : (e - p > n && (line[p + n] == ' ' ||
+                                              line[p + n] == '\t'));
+}
+
+static int is_exact_start(const char *line, size_t len, const char *name)
+{
+    int commented, wildcard;
+
+    return np_startup_line(line, len, name, &commented, &wildcard) &&
+           !wildcard;
+}
+
+static size_t line_end(const char *text, size_t len, size_t at)
+{
+    while (at < len && text[at] != '\n') at++;
+    return at < len ? at + 1 : at;
+}
+
+/*
+ * The Installer's Wi-Fi block for name: "If EXISTS ENV:Sys/Wireless.prefs"
+ * through its EndIf, with the AddNetInterface line for name inside it or
+ * on the line straight after (a PC Card that starts without the file).
+ */
+static int wifi_block(const char *text, size_t len, const char *name,
+                      size_t *begin, size_t *end)
+{
+    size_t at = 0;
+
+    while (at < len)
+    {
+        size_t start = at, next = line_end(text, len, at), p;
+        int depth = 1, found = 0;
+
+        at = next;
+        if (!said_is(text + start, next - start,
+                     "If EXISTS ENV:Sys/Wireless.prefs", 1))
+            continue;
+        p = next;
+        while (p < len && depth != 0)
+        {
+            size_t q = line_end(text, len, p);
+
+            if (said_is(text + p, q - p, "If", 0)) depth++;
+            else if (said_is(text + p, q - p, "EndIf", 1)) depth--;
+            else if (is_exact_start(text + p, q - p, name)) found = 1;
+            p = q;
+        }
+        if (depth != 0) return 0;
+        if (!found && p < len &&
+            is_exact_start(text + p, line_end(text, len, p) - p, name))
+        {
+            found = 1;
+            p = line_end(text, len, p);
+        }
+        if (found)
+        {
+            *begin = start;
+            *end = p;
+            return 1;
+        }
+        at = p;
+    }
+    return 0;
+}
+
+int np_wifi_switch(const char *text, size_t len, const char *name,
+                   int enable, char *out, size_t cap, size_t *newlen)
+{
+    size_t begin, end, at, used = 0;
+    int off;
+
+    if (!wifi_block(text, len, name, &begin, &end)) return 0;
+    at = skip_blanks(text, len, begin);
+    off = at < len && text[at] == ';';
+    if (!append(out, cap, &used, text, begin)) return -1;
+    for (at = begin; at < end; )
+    {
+        size_t next = line_end(text, len, at);
+
+        if (off == !enable)
+        {
+            /* Already as asked: the block stays byte for byte. */
+            if (!append(out, cap, &used, text + at, next - at)) return -1;
+        }
+        else if (enable)
+        {
+            /* One ';' off each line: a WirelessManager line commented out
+               inside the block keeps its own. */
+            size_t p = skip_blanks(text, next, at);
+
+            if (p < next && text[p] == ';')
+            {
+                if (!append(out, cap, &used, text + at, p - at) ||
+                    !append(out, cap, &used, text + p + 1, next - p - 1))
+                    return -1;
+            }
+            else if (!append(out, cap, &used, text + at, next - at))
+                return -1;
+        }
+        else if (!append(out, cap, &used, ";", 1) ||
+                 !append(out, cap, &used, text + at, next - at))
+            return -1;
+        at = next;
+    }
+    if (!append(out, cap, &used, text + end, len - end)) return -1;
+    *newlen = used;
+    return 1;
+}

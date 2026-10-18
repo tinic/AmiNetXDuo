@@ -10,7 +10,7 @@
 # DEVS:Internet/name_resolution, the gadgets after the window is opened
 # again, and for the live group ShowNetStatus.  Groups: cold (no stack),
 # live (a2065 on slirp), boot (two boots: configure, then the startup the
-# configuration wrote).  Prints row_<id>=PASS|FAIL, row_<id>_fail=<check>
+# configuration wrote), wifiboot (At boot on the Installer's Wi-Fi blocks).  Prints row_<id>=PASS|FAIL, row_<id>_fail=<check>
 # for every check that failed, RESULT.  Exit 0 all rows passed, 1 a row
 # failed, 3 a boot reached no verdict, 2 usage or environment.  -k keeps
 # the drive.
@@ -39,7 +39,7 @@ while getopts "b:t:o:g:k" opt; do
         *) sed -n '3,17p' "$0" >&2; exit 2 ;;
     esac
 done
-[ ${#GROUPS_RUN[@]} -gt 0 ] || GROUPS_RUN=(cold live boot)
+[ ${#GROUPS_RUN[@]} -gt 0 ] || GROUPS_RUN=(cold live boot wifiboot)
 
 say() { printf '%s=%s\n' "$1" "$2"; }
 
@@ -756,6 +756,104 @@ check_boot() {
     hasnt reboot sns 'from DEVS:Internet'
 }
 
+# S:Network-Startup as the Installer writes it with Wi-Fi: a wired line, a
+# Raspberry Pi block (AddNetInterface inside the If) and a PC Card block
+# (AddNetInterface after the EndIf).  At boot off/on/off on each Wi-Fi
+# interface switches its whole block and nothing else.
+WIFI_STARTUP='; S:Network-Startup -- written by the AmiNetXDuo installer.
+C:AddNetInterface DEVS:NetInterfaces/ETH0 QUIET
+If EXISTS ENV:Sys/Wireless.prefs
+  Status >NIL: COMMAND=C:WirelessManager
+  If WARN
+    Run >NIL: <NIL: Stack 32768 +
+    C:WirelessManager DEVICE=wifipi.device UNIT=0
+  EndIf
+  Run >NIL: <NIL: C:AddNetInterface DEVS:NetInterfaces/WIFI0 QUIET TIMEOUT=30
+EndIf
+If EXISTS ENV:Sys/Wireless.prefs
+  Status >NIL: COMMAND=C:WirelessManager
+  If WARN
+    Run >NIL: <NIL: Stack 32768 +
+    C:WirelessManager DEVICE=DEVS:Networks/prism2.device UNIT=0
+  EndIf
+EndIf
+C:AddNetInterface DEVS:NetInterfaces/PCMCIA QUIET TIMEOUT=30
+Run >NIL: <NIL: C:sntp pool.ntp.org QUIET'
+
+# shellcheck disable=SC2034
+ROWS_wifiboot=(wifipi wifipcm)
+build_wifiboot() {
+    # List order: ETH0, PCMCIA, WIFI0.
+    row wifipi
+    open_np
+    click 1 AT 22
+    dump on0
+    click 21
+    save
+    emit "Copy S:Network-Startup DH0:np/wifipi-off.txt"
+    click 21
+    save
+    emit "Copy S:Network-Startup DH0:np/wifipi-on.txt"
+    click 21
+    save
+    emit "Copy S:Network-Startup DH0:np/wifipi-off2.txt"
+    close_np
+
+    row wifipcm
+    open_np
+    click 1 AT 14
+    dump on0
+    click 21
+    save
+    emit "Copy S:Network-Startup DH0:np/wifipcm-off.txt"
+    click 21
+    save
+    emit "Copy S:Network-Startup DH0:np/wifipcm-on.txt"
+    click 21
+    save
+    emit "Copy S:Network-Startup DH0:np/wifipcm-off2.txt"
+    close_np
+}
+
+stage_wifiboot() {
+    printf '%s\n' "$WIFI_STARTUP" > "$HD/S/Network-Startup"
+    printf '%s\n' "DEVICE=wifipi.device" "UNIT=0" "CONFIGURE=DHCP" \
+        > "$HD/Devs/NetInterfaces/WIFI0"
+    printf '%s\n' "DEVICE=DEVS:Networks/prism2.device" "UNIT=0" \
+        "CONFIGURE=DHCP" > "$HD/Devs/NetInterfaces/PCMCIA"
+}
+
+# The startup file with ';' before lines FIRST..LAST (1-based) of the
+# original, the rest byte for byte.
+wifi_expect() {
+    printf '%s\n' "$WIFI_STARTUP" | awk -v a="$1" -v b="$2" -v c="${3:-0}" \
+        -v d="${4:-0}" '{ if ((NR >= a && NR <= b) || (NR >= c && NR <= d))
+                              printf ";"; print }'
+}
+# same ROW TAG EXPECTED-TEXT: the capture is exactly that text.
+same() {
+    cmp -s <(tr -d '\r' < "$(f_of "$1" "$2")" 2>/dev/null) <(printf '%s\n' "$3") ||
+        fail "$1" "$2!=expected"
+}
+
+check_wifiboot() {
+    local pi_off both_off
+    pi_off=$(wifi_expect 3 10)
+    both_off=$(wifi_expect 3 10 11 18)
+
+    gad wifipi on0 0 g21.checked 1
+    gad wifipi on0 0 g4.str WIFI0
+    same wifipi off "$pi_off"
+    same wifipi on "$WIFI_STARTUP"
+    same wifipi off2 "$pi_off"
+
+    gad wifipcm on0 0 g21.checked 1
+    gad wifipcm on0 0 g4.str PCMCIA
+    same wifipcm off "$both_off"
+    same wifipcm on "$pi_off"
+    same wifipcm off2 "$both_off"
+}
+
 # --------------------------------------------------------------- the run --
 
 export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-dummy}"
@@ -810,7 +908,7 @@ run_group() {
     "build_$g"
     emit "Echo >DH0:.done done"
     startup_with "$SCRIPT"
-    [ "$g" = cold ] || net=1
+    [ "$g" = cold ] || [ "$g" = wifiboot ] || net=1
     boot "$g" "$net"
     if [ "$BOOT_STATUS" = 0 ] && declare -F "build_${g}2" >/dev/null; then
         SCRIPT=""

@@ -32,6 +32,13 @@ size_t np_text_values(const char *text, size_t len, const char *key,
 int np_startup_line(const char *line, size_t len, const char *name,
                     int *commented, int *wildcard);
 
+/* The Installer's Wi-Fi block for name in S:Network-Startup, switched as a
+   whole: enable strips one ';' from each of its lines, disable adds one.
+   Returns 1 with out written, 0 when there is no such block, -1 when cap is
+   too small.  Every other line is copied unchanged. */
+int np_wifi_switch(const char *text, size_t len, const char *name,
+                   int enable, char *out, size_t cap, size_t *newlen);
+
 /* A name safe both as an interface filename and as an AmigaDOS argument. */
 int np_interface_name_safe(const char *name, size_t limit);
 
