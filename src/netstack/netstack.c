@@ -3642,13 +3642,6 @@ static LONG ami_ns_interface_add_locked(const AmiIfConfig *cfg,
     *slot_cfg = open_cfg;
     slot_cfg->configured = TRUE;
 
-#ifdef AMINETXDUO_IPV6
-    if (slot_cfg->ip6type == AMI_IP6TYPE_OFF)
-    {
-        slot_cfg->ip6type = AMI_IP6TYPE_AUTO;
-    }
-#endif
-
     if ((UWORD)slot >= ns->ns_Config.interface_count)
         ns->ns_Config.interface_count = (UWORD)(slot + 1);
 

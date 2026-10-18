@@ -88,8 +88,39 @@ static VOID attach_policy(AmiIp6Type policy)
     netstack_shutdown();
 }
 
+/* CONFIGURE6=OFF from an interface file survives the attach: no IPv6 on
+   the interface, so no DHCPv6 either.  The API callers that cannot say
+   anything about IPv6 pass AUTO themselves (interfaces.c). */
+static VOID attach_off(VOID)
+{
+    AmiIfConfig cfg;
+    UWORD index = 99;
+    ULONG before;
+
+    nsh_reset();
+    CHECK(netstack_startup_loopback() == AMI_NET_OK, "loopback starts");
+    before = nsh.dhcpv6_configures;
+    memset(&cfg, 0, sizeof(cfg));
+    strcpy(cfg.name, "eth0");
+    strcpy(cfg.device, "a2065.device");
+    cfg.iptype = AMI_IPTYPE_NONE;
+    cfg.ip6type = AMI_IP6TYPE_OFF;
+    cfg.up = TRUE;
+    cfg.configured = TRUE;
+
+    CHECK(netstack_interface_start(&cfg, &index) == AMI_NET_OK,
+          "a CONFIGURE6=OFF interface attaches after library-open");
+    CHECK(netstack_get()->ns_Config.interfaces[index].ip6type ==
+              AMI_IP6TYPE_OFF,
+          "the attached interface keeps CONFIGURE6=OFF");
+    CHECK(nsh.dhcpv6_configures == before,
+          "and no DHCPv6 is set up for it");
+    netstack_shutdown();
+}
+
 int main(VOID)
 {
+    attach_off();
     attach_policy(AMI_IP6TYPE_DHCP);
     attach_policy(AMI_IP6TYPE_AUTO);
     printf("%lu checks, %lu failures\n", (unsigned long)checks,
