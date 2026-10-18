@@ -116,8 +116,11 @@ number remain identical; the readable script remains here. On 1 MiB rigs,
 conservative 40000-byte test stack. Workbench 3.2 itself requires 2 MiB;
 test 1 MiB configurations with Kickstart/Workbench 3.1.
 
-PCMCIA Wi-Fi is a manual installation: Prism2/Hermes drivers and firmware
-are not bundled or configured. Pi Wi-Fi keeps its automatic setup.
+PCMCIA Wi-Fi drivers and firmware are not bundled. When `prism2.device` is
+in DEVS: or DEVS:Networks, or `InstallNetProbe CARD wireless` reports an
+802.11 card, the PCMCIA page preselects "Something else" with that driver,
+and WirelessManager is set up for the card as for Pi Wi-Fi. One Wi-Fi device
+is set up at a time; `InstallWiFi PRISM2` finds a kept PC Card definition.
 
 `PCMCIA/` carries the unmodified Xircom driver, pccard.library, original
 source archives and their redistribution notices. `tools/pcmcia-drivers.py`

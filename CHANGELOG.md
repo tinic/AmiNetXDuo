@@ -7,6 +7,29 @@ are history.
 
 ## Unreleased
 
+- The archive's Installer is Commodore Installer 43.3 again, as in beta8.
+- Installer sets up WirelessManager for a PC Card Wi-Fi with prism2.device.
+- Installer no longer starts a WirelessManager older than 1.5; it installs
+  1.5 beside the older copy and starts that one.
+- A Wi-Fi interface obtains a DHCP lease within about 9 seconds of the
+  card joining the network.
+- Taking a prism2.device interface offline and online again while
+  WirelessManager runs no longer stops the machine.
+- `CONFIGURE6=OFF` is honoured for an interface added to a running stack.
+- `anxnet.device` and CheckNetDevice leave an 802.11 PC Card alone.
+- NetPrefs no longer asks for volume PROGDIR: in a drawer installation.
+- NetPrefs has DNS 1 and DNS 2 fields for a fixed address.
+- NetPrefs At boot switches a Wi-Fi interface's WirelessManager start with
+  its AddNetInterface line.
+- NetPrefs edits `KEYWORD value` lines in place, so no stale gateway
+  remains after a change to DHCP.
+- NetPrefs New refuses the name of an existing interface.
+- `anxwifipi.device` uses Emu68's mailbox.resource when present.
+- Removing the Pi Wi-Fi interface and flushing memory no longer resets the
+  machine.
+- The stack's timer tick holds Forbid() for one tick at a time, which
+  shortens pauses for other tasks under load.
+
 ## 1.0.0-rc1
 
 - Updating from 1.0.0-beta8 removes the icons beta8 left in C:, keeping

@@ -3455,7 +3455,15 @@
   list and General, IPv4, IPv6, Device and Tuning panels edit the settings the
   stack uses, including both static IPv6 addresses and the driver queue
   depths. It starts or stops an interface through the same commands used from
-  the Shell, and controls its line in S:Network-Startup. It does not flatten a
+  the Shell, and controls its line in S:Network-Startup; for a Wi-Fi
+  interface, At boot switches the Installer's whole Wi-Fi block, the
+  WirelessManager start and the AddNetInterface line together. DNS 1 and
+  DNS 2, on the IPv4 panel for a fixed address, edit the first two
+  nameserver lines of DEVS:Internet/name_resolution; changing from fixed
+  to DHCP offers to remove them. A running stack reads the name servers
+  at its next start. New refuses the name of an existing definition,
+  which DOS compares without case. Both KEYWORD=value and KEYWORD value
+  lines are edited in place. It does not flatten a
   hand-edited file: comments and unknown keywords are retained. Remove parks
   the definition under an ignored .disabled.info name rather than deleting it.
   A wildcard AddNetInterface line starts every definition; NetPrefs reports
@@ -3672,9 +3680,12 @@
 
   @{b}Wi-Fi@{ub}
 
-  PCMCIA Wi-Fi drivers and Hermes firmware are not supplied or set up by
-  the Installer. Install these separately and configure their interface
-  and supplicant manually. The automatic Wi-Fi setup below is for Pi Wi-Fi.
+  PCMCIA Wi-Fi drivers and Hermes firmware are not supplied by the
+  Installer. With prism2.device (Aminet driver/net/prism2v2) in DEVS: or
+  DEVS:Networks, or an 802.11 card in the slot, the Installer selects that
+  driver for the PC Card and sets up the Wi-Fi below for it as for the Pi
+  Wi-Fi. One Wi-Fi device is set up; a PC Card Wi-Fi takes the place of
+  the Pi Wi-Fi.
 
       C:WirelessManager               the supplicant that joins the
                                       Wi-Fi network for
@@ -3687,18 +3698,21 @@
                                       created; executing it removes
                                       them
 
-  The Installer adds these when the Pi Wi-Fi is selected, at every
-  user level; WirelessManager goes into
+  The Installer adds these when the Pi Wi-Fi or a PC Card Wi-Fi is
+  selected, at every user level; WirelessManager goes into
   the installation's own drawer in that layout. NetWirelessPrefs SETUP
   lists the networks in range first, and Join there writes the file. When
   it cannot open the device or is closed without a join, a window asks for
   the network name and passphrase. Either way the passphrase appears as
   asterisks and does not reach the installation log. A WirelessManager or
-  Wireless.prefs the Installer did not create is kept as it is.
+  Wireless.prefs the Installer did not create is kept as it is. A
+  WirelessManager older than 1.5 is kept but not started: the archive's
+  1.5 is installed beside it and S:Network-Startup starts that one.
 
   S:Network-Startup starts the Wi-Fi only when ENV:Sys/Wireless.prefs
   exists: WirelessManager first, then the interface, which waits at most
-  30 seconds for an address; DHCP continues after the boot goes on. With
+  30 seconds for an address. A PC Card Wi-Fi that is the primary
+  interface starts without the file as well, for an open network; DHCP continues after the boot goes on. With
   the Pi Ethernet as well, both start, the Ethernet first with
   PRIORITY=10, so the default route stays on the cable, and the Wi-Fi in
   the background, so the boot does not wait for it; the micro stack
