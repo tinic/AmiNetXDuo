@@ -757,36 +757,67 @@ fail:
     return FALSE;
 }
 
+/*
+ * The drawer of the commands beside this tool, or in its C drawer, as a full
+ * path.  The command line runs in a Shell of its own, where PROGDIR: is not
+ * this program's drawer: "PROGDIR:C/AddNetInterface" there asked for a
+ * volume PROGDIR and Save & Start waited on it (GitHub #307).
+ */
+static BOOL command_dir(char *dir, ULONG len)
+{
+    static char probe[NP_PATH_LEN];
+    BPTR home = GetProgramDir();
+    ULONG i;
+
+    if (home == (BPTR)0) return FALSE;
+    for (i = 0; i < 2; i++)
+    {
+        if (!NameFromLock(home, (STRPTR)dir, (LONG)len)) return FALSE;
+        if (i == 1 && !AddPart((STRPTR)dir, (STRPTR)"C", len)) return FALSE;
+        tool_copy_string(probe, sizeof(probe), dir);
+        if (AddPart((STRPTR)probe, (STRPTR)"AddNetInterface", sizeof(probe)) &&
+            quiet_exists(probe))
+            return TRUE;
+    }
+    return FALSE;
+}
+
+/* Static: the editor's frame budget (tools/check-stack-frames.sh). */
+static char np_line[NP_PATH_LEN + 48];
+static char np_dir[NP_PATH_LEN];
+
 static LONG run_command(const char *command, const char *name, BOOL quiet)
 {
-    char line[NP_PATH_LEN];
-    const char *prefix;
+    char *line = np_line;
+    char *dir = np_dir;
+    const ULONG cap = sizeof(np_line);
     BPTR input;
     BPTR output;
     LONG result;
 
     /* In a self-contained install C: deliberately searches the system first.
        Use the private commands beside this tool or in its C drawer,
-       rather than a stale command belonging to another stack.  The SYS:Prefs copy has no siblings and therefore uses C:.
-       Started resident or from some launchers there is no program directory,
-       and PROGDIR: would be a volume to ask for (GitHub #307). */
-    if (GetProgramDir() != (BPTR)0 && quiet_exists("PROGDIR:AddNetInterface"))
-        prefix = "PROGDIR:";
-    else if (GetProgramDir() != (BPTR)0 &&
-             quiet_exists("PROGDIR:C/AddNetInterface"))
-        prefix = "PROGDIR:C/";
-    else if (quiet_exists("C:AddNetInterface"))
-        prefix = "C:";
+       rather than a stale command belonging to another stack.  The SYS:Prefs
+       copy has no siblings and therefore uses C:.  The path is quoted: a
+       drawer name may hold a space. */
+    if (command_dir(dir, sizeof(np_dir)) &&
+        AddPart((STRPTR)dir, (STRPTR)command, sizeof(np_dir)))
+    {
+        tool_copy_string(line, cap, "\"");
+        tool_copy_string(line + text_len(line), cap - text_len(line), dir);
+        tool_copy_string(line + text_len(line), cap - text_len(line), "\"");
+    }
     else
-        prefix = "AmiNetXDuo:C/";
-
-    tool_copy_string(line, sizeof(line), prefix);
-    tool_copy_string(line + text_len(line), sizeof(line) - text_len(line), command);
-    tool_copy_string(line + text_len(line), sizeof(line) - text_len(line), " ");
-    tool_copy_string(line + text_len(line), sizeof(line) - text_len(line), name);
+    {
+        tool_copy_string(line, cap,
+                         quiet_exists("C:AddNetInterface") ? "C:"
+                                                           : "AmiNetXDuo:C/");
+        tool_copy_string(line + text_len(line), cap - text_len(line), command);
+    }
+    tool_copy_string(line + text_len(line), cap - text_len(line), " ");
+    tool_copy_string(line + text_len(line), cap - text_len(line), name);
     if (quiet)
-        tool_copy_string(line + text_len(line), sizeof(line) - text_len(line),
-                         " QUIET");
+        tool_copy_string(line + text_len(line), cap - text_len(line), " QUIET");
 
     /* A Preferences program must not borrow its launching Shell's streams:
        doing so can pull that screen to the front, and Online/Offline have no
