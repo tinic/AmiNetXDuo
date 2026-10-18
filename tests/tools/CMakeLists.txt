@@ -545,8 +545,9 @@ endif()
 target_compile_options(test_ptrprobe PRIVATE -Wall -Wextra)
 set_target_properties(test_ptrprobe PROPERTIES OUTPUT_NAME "PtrProbe")
 
-# WinClick clicks one gadget by GadgetID, for Workbench screenshots of a
-# window past its first page (tests/tools/run-wbgrab.sh -s netprefs).
+# WinClick clicks one gadget by GadgetID, types into one and reads them all
+# back: Workbench screenshots of a window past its first page
+# (tests/tools/run-wbgrab.sh -s netprefs) and tests/tools/run-netprefs.sh.
 add_executable(test_winclick winclick.c)
 target_include_directories(test_winclick PRIVATE ${AMINETXDUO_CORE_INCLUDES})
 if(AMIGA_NDK_INCLUDE)
