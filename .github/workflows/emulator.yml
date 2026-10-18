@@ -375,6 +375,15 @@ jobs:
           tools/ci-arm.sh -n "NetWireless, stub Wi-Fi unit" --
           tests/tools/run-netwireless.sh -b build/ci/default
 
+      # A Wi-Fi unit that associates 70 s after the interface came up, in
+      # front of the A2065: the DHCP lease has to follow the association.
+      - name: DHCP lease after a late Wi-Fi association
+        if: ${{ !cancelled() && steps.build.outcome == success }}
+        run: >-
+          tools/ci-arm.sh -n "DHCP lease after a late Wi-Fi association"
+          -r AMINETXDUO_A2065 --
+          tests/tools/run-wifigate.sh -b build/ci/default
+
       # src/crypto68k's assembly against the portable C it also compiles, on
       # the machine.  The host tier runs the same vectors every push and cannot
       # reach the assembly at all: it is m68k, and it is DIFFERENT code per
