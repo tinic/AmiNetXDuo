@@ -148,8 +148,12 @@ int main(void)
     {
         /* A Prism2 2.9 identity outside Linux's tables, no FUNCID. */
         NetprobeCis prism2_only = { 0x0032, 0x000c, 0, { 0, 0 }, 1, 0, 0 };
+        /* Netgear MA401RA, an A1200's: FUNCID LAN, no FUNCE. */
+        NetprobeCis ma401ra = { 0x000b, 0x7300, 6, { 0, 0 }, 1, 1, 0 };
         const NetprobeCis *yes[] = { &prism2, &wpc11, &airconnect, &aironet,
-                                     &wlan, &prism2_only };
+                                     &wlan, &prism2_only, &ma401ra };
+
+        expect_kind(&ma401ra, NETPROBE_PC_NONE, "Netgear MA401RA");
         const NetprobeCis *no[] = { &cnet, &dfe670, &dfe670e, &el3, &cfem,
                                     &cxem, &xircom, &xircom_combo,
                                     &xircom_other, &modem, &disk, &bare };

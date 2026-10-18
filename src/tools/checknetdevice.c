@@ -391,6 +391,11 @@ static VOID cnd_step(const AnxDiagStep *st)
     case ANXDIAG_PC_NOTLAN:
         say("  Not a LAN adapter; slot released.\n");
         return;
+    case ANXDIAG_PC_WIRELESS:
+        say("  Card $%04lx/$%04lx is a Wi-Fi card (prism2.device's); "
+            "slot released, nothing written.\n",
+            (v >> 16) & 0xffffUL, v & 0xffffUL);
+        return;
     case ANXDIAG_PC_MANFID:
         if (v == ANXDIAG_ABSENT)
         {
