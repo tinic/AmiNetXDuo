@@ -313,6 +313,11 @@ ULONG _nx_amiga_handshake_millis(VOID);
 
 #define NX_DHCP_CLIENT_SEND_ARP_PROBE
 
+/* DISCOVER backoff stops at 8 s, not RFC 2131's 64 s maximum.  The stack
+   does not hear a Wi-Fi association, and an unassociated card drops every
+   DISCOVER: the lease waited for the next one, up to 65 s after the join. */
+#define NX_DHCP_MAX_RETRANS_TIMEOUT             (8 * NX_IP_PERIODIC_RATE)
+
 
 /* ---------------------------------------------------------------- IPv6 ---- */
 

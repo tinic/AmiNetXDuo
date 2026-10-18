@@ -89,6 +89,18 @@ endif()
 target_compile_options(test_wifistub PRIVATE -Wall -Wextra)
 set_target_properties(test_wifistub PROPERTIES OUTPUT_NAME "WifiStub")
 
+# A Wi-Fi unit in front of the A2065 that drops every frame until it
+# associates, and the DHCP lease timed against that: tests/tools/run-wifigate.sh.
+add_executable(test_wifigate wifigate.c)
+target_include_directories(test_wifigate PRIVATE
+    ${AMINETXDUO_CORE_INCLUDES}
+    "${CMAKE_SOURCE_DIR}/src/sana2")
+if(AMIGA_NDK_INCLUDE)
+    target_include_directories(test_wifigate PRIVATE "${AMIGA_NDK_INCLUDE}")
+endif()
+target_compile_options(test_wifigate PRIVATE -Wall -Wextra)
+set_target_properties(test_wifigate PROPERTIES OUTPUT_NAME "WifiGate")
+
 # A program that only waits, the control for NetWireless's memory figure.
 add_executable(test_waitbreak waitbreak.c)
 target_include_directories(test_waitbreak PRIVATE ${AMINETXDUO_CORE_INCLUDES})
