@@ -11,7 +11,8 @@ typedef struct NpTextField
     int         seen;
 } NpTextField;
 
-/* Returns 1 and writes *newlen, or 0 when cap is too small. */
+/* Returns 1 and writes *newlen, or 0 when cap is too small.  Lines are
+   matched as KEYWORD=value or KEYWORD value; written as KEYWORD = value. */
 int np_text_patch(const char *old, size_t oldlen, NpTextField *fields,
                   size_t count, char *out, size_t cap, size_t *newlen);
 
