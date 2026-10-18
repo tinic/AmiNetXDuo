@@ -1686,6 +1686,13 @@ static void case_keeps_online(void)
     h_check(ami_sana2_keeps_online("anxgenet.device") == FALSE &&
             ami_sana2_keeps_online("DEVS:Networks/xgenet.device") == FALSE,
             "a different name ending in genet.device is not");
+    /* prism2.device spins in our task on the S2_ONLINE after an
+       S2_OFFLINE while WirelessManager holds the unit. */
+    h_check(ami_sana2_keeps_online("prism2.device") == TRUE &&
+            ami_sana2_keeps_online("DEVS:Networks/Prism2.device") == TRUE,
+            "prism2.device is kept online too");
+    h_check(ami_sana2_keeps_online("anxprism2.device") == FALSE,
+            "a different name ending in prism2.device is not");
     h_check(ami_sana2_keeps_online("genet.device/") == FALSE &&
             ami_sana2_keeps_online(NULL) == FALSE,
             "nor a directory or no name");
