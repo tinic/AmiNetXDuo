@@ -422,7 +422,10 @@
        "S:Network-Startup starts it before the Wi-Fi interface.\n\n"
        "A WirelessManager that this installer did not put on the machine, in "
        "C:, SYS:C or this installation's own drawer, is kept as it is, and "
-       "S:Network-Startup starts that copy.  A Wireless.prefs that this "
+       "S:Network-Startup starts that copy.  When that copy is older than "
+       "1.5, which loops without ever scanning on prism2.device 2.9, it is "
+       "still kept, and the archive's copy goes into the AmiNetXDuo drawer "
+       "and is the one S:Network-Startup starts.  A Wireless.prefs that this "
        "installer did not write is kept and used.  Only when S:User-Startup, "
        "S:Startup-Sequence or SYS:WBStartup names WirelessManager are the "
        "lines that start it commented out, so that two copies do not share "
@@ -1771,6 +1774,26 @@
                          (OR (AND HAVE_C_WM (= HAVE_D_WM 0))
                              (AND HAVE_D_WM (= WM_OURS 0)))) 1 0))
     (set WM_USER (if (AND (OR HAVE_C_WM HAVE_SYSC_WM) (= WM_OURS 0)) 1 0)))
+; A user's WirelessManager older than the archive's 1.5 is kept, never
+; replaced, and not started: 1.3 never scans with prism2.device 2.9 and loops
+; on disassociation notices at a whole CPU (A1200, MA401RA).  Ours goes beside
+; it -- the drawer layout's own C, or the AmiNetXDuo drawer -- and is the one
+; started.  A copy with no version string is the user's choice, as before.
+(set WM_OLD 0)
+(set WM_DEST D_C)
+(if WM_USER
+  (if (= 5 (run ("Version >NIL: \"%s\" 1 5 FILE"
+                 (if HAVE_C_WM "C:WirelessManager" "SYS:C/WirelessManager"))
+                (quiet) (safe)))
+    (
+      (set WM_OLD 1)
+      (set WM_USER 0)
+      (if (= DRAWER_LAYOUT 0)
+        (
+          (set WM_DEST DOCDIR)
+          (set WM_REC (tackon DOCDIR "WirelessManager"))
+        ))
+    )))
 (set WM_ELSEWHERE 0)
 (set WM_SCAN_N 0)
 (while (set WM_SCAN (select WM_SCAN_N "S:User-Startup" "S:Startup-Sequence"
@@ -3985,11 +4008,15 @@
 ; else's is replaced, so nothing is staged.
 (if (AND WIFI_SEL (= WM_USER 0))
         (copyfiles
-          (prompt "Installing WirelessManager into C:\n\n"
-                  "It joins the Wi-Fi network for the Wi-Fi device.")
+          (prompt (if (AND WM_OLD (= DRAWER_LAYOUT 0))
+                      (cat "Installing WirelessManager into the AmiNetXDuo "
+                           "drawer, beside the older C:WirelessManager.\n\n"
+                           "It joins the Wi-Fi network for the Wi-Fi device.")
+                      (cat "Installing WirelessManager into C:\n\n"
+                           "It joins the Wi-Fi network for the Wi-Fi device.")))
           (help   H_WM)
           (source S_WM)
-          (dest   D_C)
+          (dest   WM_DEST)
           (optional "force")))
 (set WM_OURS (if (OR WM_OURS (AND WIFI_SEL (= WM_USER 0))) 1 0))
 
@@ -4644,7 +4671,9 @@
 ; PRIORITY=10.  Micro brings up one interface, so there the block is written
 ; commented out after the primary, for whoever wants to swap.
 (set WM_CMD (if (AND WM_USER (OR HAVE_C_WM HAVE_SYSC_WM))
-                "C:WirelessManager" (cat C_PREFIX "WirelessManager")))
+                "C:WirelessManager"
+                (if (AND WM_OLD (= DRAWER_LAYOUT 0))
+                    WM_REC (cat C_PREFIX "WirelessManager"))))
 (set WIFI_TIMEOUT 30)
 (set WM_PFX (if WM_LIVE "" ";"))
 ; A PC Card Wi-Fi as the primary interface starts without Wireless.prefs as

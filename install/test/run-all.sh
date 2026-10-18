@@ -67,6 +67,8 @@
 #                   the kept anxwifipi definition alone brings the firmware back
 #   EMU68_WIFI_USERSTART S:User-Startup starts WirelessManager already
 #   EMU68_WIFI_DRAWER a drawer install beside the user's C:WirelessManager
+#   EMU68_WIFI_WMOLD the user's C:WirelessManager is 1.3: kept, and the
+#                   archive's 1.5 beside it is the one started
 #   EMU68_BOTH_NOVICE NOVICE still asks for the Wi-Fi network, a Latin-1 name
 #                   is written as UTF-8 hex, and Ethernet and Wi-Fi both
 #                   start, Ethernet at PRIORITY=10
@@ -136,7 +138,7 @@ SCENARIOS=(
     EMU68_GENET EMU68_WIFI EMU68_BOTH EMU68_BOTH_MICRO
     EMU68_WIFI_JOIN EMU68_WIFI_KEEP EMU68_WIFI_KEEPIT EMU68_WIFI_KEEPIT_BOTH EMU68_WIFI_KEEPIT_LIVE
     EMU68_WIFI_KEEPIT_FW
-    EMU68_WIFI_USERSTART EMU68_WIFI_DRAWER EMU68_BOTH_NOVICE
+    EMU68_WIFI_USERSTART EMU68_WIFI_DRAWER EMU68_WIFI_WMOLD EMU68_BOTH_NOVICE
     EMU68_GENET_OLD EMU68_GENET_OLD_BARE
     PCMCIA_WIFI PCMCIA_WIFI_PI PCMCIA_WIFI_KEEPIT CNET_KEEP
     CANCEL_DHCP MISSING_CORE MISSING_DRIVER MISSING_PROBE MISSING_MINIMAL
@@ -265,6 +267,7 @@ for scenario in "${SCENARIOS[@]}"; do
         EMU68_WIFI_KEEPIT_FW)  opts=(-l AVERAGE -e wifi -w keepitfw -R) ;;
         EMU68_WIFI_USERSTART)  opts=(-l AVERAGE -e wifi -w userstart) ;;
         EMU68_WIFI_DRAWER)     opts=(-l AVERAGE -e wifi -D -w userwm) ;;
+        EMU68_WIFI_WMOLD)      opts=(-l AVERAGE -e wifi -w userwmold) ;;
         EMU68_BOTH_NOVICE)     opts=(-l NOVICE -e both -w join) ;;
         PCMCIA_WIFI)           opts=(-l AVERAGE -w prism2) ;;
         PCMCIA_WIFI_PI)        opts=(-l AVERAGE -e wifi -w prism2pi) ;;
