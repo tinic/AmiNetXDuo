@@ -14,7 +14,7 @@
 #                                 [-m core|driver|probe|minimal]
 #                                 [-C] [-M] [-V] [-I] [-z] [-W]
 #                                 [-s yes|invalid] [-O] [-n]
-#                                 [-w join|keep|keepit|keepitlive|keepitfw|userstart|userwm|prism2|prism2pi|prism2keep|cnetkeep]
+#                                 [-w join|keep|keepit|keepitlive|keepitfw|userstart|userwm|userwmold|prism2|prism2pi|prism2keep|cnetkeep]
 #                                 [-f roadshow-leave|roadshow-replace|
 #                                     amitcpng-leave|amitcpng-replace]
 #
@@ -62,6 +62,10 @@
 #   userstart S:User-Startup already starts WirelessManager: commented lines.
 #   userwm    a user's C:WirelessManager (with -D: beside a drawer install):
 #             kept, none installed, started by the lines, the prefs written.
+#   userwmold the same C:WirelessManager carrying "$VER: WirelessManager 1.3":
+#             kept byte for byte, the archive's 1.5 installed beside it (the
+#             AmiNetXDuo drawer, or with -D the drawer's C) and the lines
+#             start that one.
 #   prism2    without -e: Cafferkey's prism2.device, the user's, staged in
 #             DEVS:Networks selects PCMCIA "Something else" with its name
 #             beside the card, with no PC Card in the slot.  NetWirelessPrefs SETUP cannot open it, the
@@ -216,7 +220,7 @@ while getopts "b:a:l:p:N:t:T:kHSDgRUEBIMq:x:f:e:c:m:CVzWs:P:Ow:nuX:" opt; do
                 "[-f existing-stack-mode] [-e genet|wifi|both|genet-old|genet-old-bare] [-P fail|broken]" \
                 "[-c dhcp] [-m core|driver|probe|minimal] [-C] [-M] [-V] [-I] [-z] [-W]" \
                 "[-s yes|invalid] [-O] [-n]" \
-                "[-w join|keep|keepit|keepitlive|keepitfw|userstart|userwm|prism2|prism2pi|prism2keep|cnetkeep]" >&2
+                "[-w join|keep|keepit|keepitlive|keepitfw|userstart|userwm|userwmold|prism2|prism2pi|prism2keep|cnetkeep]" >&2
            exit 2 ;;
     esac
 done
@@ -472,7 +476,8 @@ if [ -n "$EMU68_FIXTURE" ]; then
         genet|wifi|both|genet-old|genet-old-bare) ;;
         *) echo "unknown Emu68 fixture: $EMU68_FIXTURE" >&2; exit 2 ;;
     esac
-    { [ "$DRAWER" = "0" ] || [ "$WIFI_MODE" = userwm ]; } &&
+    { [ "$DRAWER" = "0" ] || [ "$WIFI_MODE" = userwm ] ||
+      [ "$WIFI_MODE" = userwmold ]; } &&
     [ "$PICK" != "drawer" ] &&
     [ "$EXPERT_CUSTOM" = "0" ] &&
     [ -z "$TRANSITION" ] && [ -z "$FOREIGN_MODE" ] || {
@@ -483,7 +488,7 @@ fi
 
 if [ -n "$WIFI_MODE" ]; then
     case "$WIFI_MODE" in
-        join|keep|keepit|keepitlive|keepitfw|userstart|userwm|prism2|prism2pi|prism2keep|cnetkeep) ;;
+        join|keep|keepit|keepitlive|keepitfw|userstart|userwm|userwmold|prism2|prism2pi|prism2keep|cnetkeep) ;;
         *) echo "unknown Wi-Fi mode: $WIFI_MODE" >&2; exit 2 ;;
     esac
     case "$WIFI_MODE:$EMU68_FIXTURE" in
@@ -1256,13 +1261,13 @@ WIFI_ANSWERED=0
 WM_EXPECT_LIVE=1
 WM_USER_FIXTURE=0
 case "$WIFI_MODE" in
-    join|keepit|keepitlive|keepitfw|userwm|prism2|prism2pi|prism2keep) WIFI_ANSWERED=1 ;;
+    join|keepit|keepitlive|keepitfw|userwm|userwmold|prism2|prism2pi|prism2keep) WIFI_ANSWERED=1 ;;
 esac
 case "$WIFI_MODE" in
     userstart) WM_EXPECT_LIVE=0 ;;
 esac
 case "$WIFI_MODE" in
-    keep|userwm) WM_USER_FIXTURE=1 ;;
+    keep|userwm|userwmold) WM_USER_FIXTURE=1 ;;
 esac
 if [ "$WIFI_ANSWERED" = 1 ]; then
     ANSWER_LINES+=("1|WIFI|$WIFI_TEST_SSID|$WIFI_TEST_PASS")
@@ -1891,6 +1896,9 @@ WIFI_KEEP_WM_SUM=""
 if [ "$WM_USER_FIXTURE" = 1 ]; then
     printf 'a WirelessManager from before -- installer must not replace\n' \
         > "$HD/C/WirelessManager"
+    # -w userwmold: one that says it is 1.3, as Version reads it.
+    [ "$WIFI_MODE" = userwmold ] &&
+        printf '$VER: WirelessManager 1.3 (13.3.2021)\n' >> "$HD/C/WirelessManager"
     chmod 755 "$HD/C/WirelessManager"
     WIFI_KEEP_WM_SUM=$(shasum "$HD/C/WirelessManager" | cut -d' ' -f1)
     echo "==> Wi-Fi fixture: a user's C:WirelessManager"
@@ -3495,6 +3503,16 @@ WPREFS_REAL=$(amiga_path "Prefs/Env-Archive/Sys/Wireless.prefs" 2>/dev/null || t
 WREC_REAL=$(amiga_path "S/AmiNetXDuo-WiFi" 2>/dev/null || true)
 WM_CMD_WANT="${CMD_PFX}WirelessManager"
 [ "$WM_USER_FIXTURE" = 1 ] && WM_CMD_WANT="C:WirelessManager"
+# -w userwmold: the archive's copy, beside the user's older one.
+WM_OURS_REAL=$WM_REAL
+if [ "$WIFI_MODE" = userwmold ]; then
+    if [ "$DRAWER" = 1 ]; then
+        WM_CMD_WANT="${CMD_PFX}WirelessManager"
+    else
+        WM_CMD_WANT="SYS:AmiNetXDuo/WirelessManager"
+        WM_OURS_REAL=$(amiga_path "AmiNetXDuo/WirelessManager" 2>/dev/null || true)
+    fi
+fi
 _sha256() { shasum -a 256 < "$1" | cut -d' ' -f1; }
 _sha1() { shasum < "$1" | cut -d' ' -f1; }
 _line() { # fixed text -> its first line number in S:Network-Startup, or empty
@@ -3523,6 +3541,13 @@ else
     if [ "$WM_USER_FIXTURE" = 1 ]; then
         if [ -z "$WM_SYS_REAL" ] || [ "$(_sha1 "$WM_SYS_REAL")" != "$WIFI_KEEP_WM_SUM" ]; then
             wifi_bad "the user's C:WirelessManager was replaced"
+        elif [ "$WIFI_MODE" = userwmold ]; then
+            if [ -z "$WM_OURS_REAL" ] ||
+               [ "$(_sha256 "$WM_OURS_REAL")" != "$(_sha256 "$WM_ARCHIVE")" ]; then
+                wifi_bad "no archive WirelessManager beside the user's older one"
+            else
+                echo "  ok      the user's 1.3 kept, the archive's beside it (${WM_OURS_REAL#"$HD"/})"
+            fi
         elif [ "$DRAWER" = 1 ] && [ -n "$WM_REAL" ]; then
             wifi_bad "a drawer install put a second WirelessManager beside the user's"
         else
@@ -3584,11 +3609,13 @@ else
     fi
     # The record: exactly what is ours.
     _rec_wm=1; _rec_prefs=0
-    [ "$WM_USER_FIXTURE" = 1 ] && _rec_wm=0
+    [ "$WM_USER_FIXTURE" = 1 ] && [ "$WIFI_MODE" != userwmold ] && _rec_wm=0
     [ "$WIFI_ANSWERED" = 1 ] && _rec_prefs=1
     _got_wm=0; _got_prefs=0
     if [ -n "$WREC_REAL" ]; then
         grep -Fqx -- "Delete ${CMD_PFX}WirelessManager QUIET" "$WREC_REAL" && _got_wm=1
+        [ "$WIFI_MODE" = userwmold ] &&
+            grep -Fqx -- "Delete $WM_CMD_WANT QUIET" "$WREC_REAL" && _got_wm=1
         grep -Fq -- "Delete ENVARC:Sys/Wireless.prefs" "$WREC_REAL" && _got_prefs=1
     fi
     if [ "$_got_wm" != "$_rec_wm" ] || [ "$_got_prefs" != "$_rec_prefs" ]; then
