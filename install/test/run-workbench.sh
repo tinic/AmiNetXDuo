@@ -1522,7 +1522,10 @@ if [ "$WIFI_MODE" = cnetkeep ]; then
     mkdir -p "$HD/Devs/NetInterfaces" "$HD/Devs/Internet"
     sed "s|^DEVICE=cnet.device|DEVICE=$_kd|" \
         "$ROOT/install/examples/NetInterfaces/cnet" > "$HD/Devs/NetInterfaces/eth0"
-    cp "$ROOT/install/examples/Internet/name_resolution" "$HD/Devs/Internet/"
+    # Without its live hostname line: the installer keeps a hand-set name,
+    # and this row wants the derived one.
+    sed "/^hostname/d" "$ROOT/install/examples/Internet/name_resolution" \
+        > "$HD/Devs/Internet/name_resolution"
     echo ";DEVICE=DEVS:Networks/prism2.device" >> "$HD/Devs/NetInterfaces/eth0"
     echo "==> cnetkeep fixture: DEVS:NetInterfaces/eth0 from the cnet example"
 fi
