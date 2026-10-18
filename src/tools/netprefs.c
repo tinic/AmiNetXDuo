@@ -55,6 +55,10 @@ struct Library       *AslBase;
 #define NP_SAVE_FIELDS     24
 /* Roadshow and the live status ABI expose at most 15 name characters. */
 #define NP_IFNAME_LEN      16
+#define NP_DNS_FIELDS      2
+/* Every active nameserver line is kept in place, these and the rest. */
+#define NP_DNS_LINES       8
+#define NP_RESOLVER        "DEVS:Internet/name_resolution"
 
 enum
 {
@@ -93,7 +97,9 @@ enum
     GID_APPLY,
     GID_LIVE_ACTION,
     GID_REMOVE,
-    GID_CLOSE
+    GID_CLOSE,
+    GID_DNS_1,
+    GID_DNS_2
 };
 
 enum
@@ -140,6 +146,7 @@ typedef struct NetPrefs
     struct Gadget *g_address;
     struct Gadget *g_netmask;
     struct Gadget *g_gateway;
+    struct Gadget *g_dns[NP_DNS_FIELDS];
     struct Gadget *g_ipv6;
     struct Gadget *g_address6[AMI_CFG_MAX_ADDRESS6];
     struct Gadget *g_gateway6;
@@ -169,6 +176,7 @@ typedef struct NetPrefs
     LONG           selected;
     ULONG          active_panel;
     LONG           live_state;
+    ULONG          loaded_iptype;   /* CONFIGURE of the file in the form */
     struct TextAttr *text_attr;     /* gadget font: the screen's or topaz 8 */
     struct TextFont *font;          /* the same, open, for Text() */
     NpLayout       layout;
@@ -178,6 +186,9 @@ static NetPrefs np = { .selected = -1, .live_state = NP_LIVE_UNKNOWN };
 static char np_address[16];
 static char np_netmask[16];
 static char np_gateway[16];
+/* The name servers the form showed: name_resolution is written only when
+   they are edited. */
+static char np_dns[NP_DNS_FIELDS][NP_TEXT_VALUE_LEN];
 static char np_address6[AMI_CFG_MAX_ADDRESS6][AMI_CFG_IP6_STRLEN + 5];
 static char np_gateway6[AMI_CFG_IP6_STRLEN];
 static char np_hwaddress[18];
@@ -245,20 +256,27 @@ static VOID requester(const char *body)
     (VOID)EasyRequestArgs(np.window, &easy, NULL, NULL);
 }
 
-static BOOL confirm(const char *body, const char *yes)
+/* TRUE for the first of two buttons. */
+static BOOL choose(const char *body, const char *buttons)
 {
     struct EasyStruct easy;
-    char buttons[48];
 
-    tool_copy_string(buttons, sizeof(buttons), yes);
-    tool_copy_string(buttons + text_len(buttons),
-                     sizeof(buttons) - text_len(buttons), "|Cancel");
     easy.es_StructSize   = sizeof(easy);
     easy.es_Flags        = 0;
     easy.es_Title        = (STRPTR)"AmiNetXDuo NetPrefs";
     easy.es_TextFormat   = (STRPTR)body;
     easy.es_GadgetFormat = (STRPTR)buttons;
     return (BOOL)(EasyRequestArgs(np.window, &easy, NULL, NULL) == 1);
+}
+
+static BOOL confirm(const char *body, const char *yes)
+{
+    char buttons[48];
+
+    tool_copy_string(buttons, sizeof(buttons), yes);
+    tool_copy_string(buttons + text_len(buttons),
+                     sizeof(buttons) - text_len(buttons), "|Cancel");
+    return choose(body, buttons);
 }
 
 static VOID set_status(const char *s)
@@ -320,6 +338,27 @@ static VOID set_attr(struct Gadget *g, ULONG tag, ULONG value)
     GT_SetGadgetAttrsA(g,
                        (np_filling_detached && in_panel(g)) ? NULL : np.window,
                        NULL, tags);
+}
+
+/*
+ * A page's gadget while another page is shown.  GadTools re-adds a string
+ * gadget to the window it is given when it changes the text, so a page that
+ * is not attached gets no window: from V39 that is accepted; V37 keeps the
+ * old text until the definition is loaded again.
+ */
+static VOID set_page_attr(struct Gadget *g, ULONG page, ULONG tag, ULONG value)
+{
+    struct TagItem tags[2];
+
+    if (page == np.active_panel || np_filling_detached)
+    {
+        set_attr(g, tag, value);
+        return;
+    }
+    if (GadToolsBase->lib_Version < 39) return;
+    tags[0].ti_Tag = tag; tags[0].ti_Data = value;
+    tags[1].ti_Tag = TAG_DONE; tags[1].ti_Data = 0;
+    GT_SetGadgetAttrsA(g, NULL, NULL, tags);
 }
 
 /*
@@ -441,9 +480,13 @@ static VOID set_name_locked(BOOL locked)
 
 static VOID set_static_fields(BOOL enabled)
 {
+    ULONG i;
+
     set_attr(np.g_address, GA_Disabled, (ULONG)!enabled);
     set_attr(np.g_netmask, GA_Disabled, (ULONG)!enabled);
     set_attr(np.g_gateway, GA_Disabled, (ULONG)!enabled);
+    for (i = 0; i < NP_DNS_FIELDS; i++)
+        set_attr(np.g_dns[i], GA_Disabled, (ULONG)!enabled);
 }
 
 static VOID set_static6_fields(BOOL enabled)
@@ -607,6 +650,82 @@ static char *patch_fields(const char *old, ULONG oldlen, NpTextField *fields,
     }
     *newlen = (ULONG)used;
     return out;
+}
+
+/* name_resolution where the stack reads it: the drawer's own copy when there
+   is one, the system's otherwise (ami_cfg_resolve). */
+static const char *resolver_path(char *buf, ULONG len)
+{
+    return ami_cfg_resolve(NP_RESOLVER, buf, len);
+}
+
+/* The first name servers the stack is given, "" for none. */
+static VOID load_dns(VOID)
+{
+    char resolved[AMI_CFG_PATH_LEN];
+    ULONG len = 0, found = 0, i;
+    char *data = read_file(resolver_path(resolved, sizeof(resolved)), &len,
+                           TRUE);
+
+    if (data != NULL)
+    {
+        found = (ULONG)np_text_values(data, len, "nameserver", np_dns,
+                                      NP_DNS_FIELDS);
+        ami_free(data);
+    }
+    for (i = found; i < NP_DNS_FIELDS; i++) np_dns[i][0] = '\0';
+}
+
+/* Static: a Shell command's 4 KB is not this tool's, but the frame is. */
+static char np_dns_lines[NP_DNS_LINES][NP_TEXT_VALUE_LEN];
+static NpTextField np_dns_fields[NP_DNS_LINES];
+
+/* The first two nameserver lines become first and second ("" removes one);
+   later lines, comments and other keywords stay.  remove drops every
+   nameserver line. */
+static BOOL write_dns(const char *first, const char *second, BOOL remove)
+{
+    static const char heading[] =
+        "; DEVS:Internet/name_resolution, written by AmiNetXDuo NetPrefs.\n";
+    char resolved[AMI_CFG_PATH_LEN];
+    const char *path = resolver_path(resolved, sizeof(resolved));
+    BOOL existed = tool_exists(path);
+    ULONG len = 0, count, i, cap;
+    size_t used = 0;
+    char *old = read_file(path, &len, (BOOL)!existed);
+    char *out;
+    BOOL ok;
+
+    if (old == NULL && existed) return FALSE;
+    if (old == NULL)
+    {
+        if (!ensure_dir("DEVS:Internet")) return FALSE;
+        len = sizeof(heading) - 1;
+        old = (char *)ami_alloc(len + 1);
+        if (old == NULL) return FALSE;
+        for (i = 0; i <= len; i++) old[i] = heading[i];
+    }
+    count = (ULONG)np_text_values(old, len, "nameserver", np_dns_lines,
+                                  NP_DNS_LINES);
+    if (count < NP_DNS_FIELDS) count = NP_DNS_FIELDS;
+    for (i = 0; i < count; i++)
+    {
+        const char *value = i == 0 ? first : i == 1 ? second : np_dns_lines[i];
+
+        np_dns_fields[i].key = "nameserver";
+        np_dns_fields[i].value =
+            (!remove && value != NULL && value[0] != '\0') ? value : NULL;
+        np_dns_fields[i].seen = FALSE;
+    }
+    cap = len + 2UL * NP_DNS_FIELDS * (NP_TEXT_VALUE_LEN + 12UL) + 2UL;
+    out = (char *)ami_alloc(cap);
+    ok = (BOOL)(out != NULL &&
+                np_text_patch_sep(old, len, np_dns_fields, count, " ",
+                                  out, cap, &used) &&
+                replace_file(path, out, (ULONG)used));
+    if (out != NULL) ami_free(out);
+    ami_free(old);
+    return ok;
 }
 
 static BOOL line_command(const char *line, ULONG len, const char *name,
@@ -889,7 +1008,11 @@ static VOID clear_form(VOID)
     set_attr(np.g_address, GTST_String, (ULONG)"");
     set_attr(np.g_netmask, GTST_String, (ULONG)"");
     set_attr(np.g_gateway, GTST_String, (ULONG)"");
+    load_dns();
+    for (i = 0; i < NP_DNS_FIELDS; i++)
+        set_attr(np.g_dns[i], GTST_String, (ULONG)np_dns[i]);
     set_static_fields(FALSE);
+    np.loaded_iptype = AMI_IPTYPE_DHCP;
     fill_panel(NP_PANEL_IPV6);
     set_attr(np.g_ipv6, GTCY_Active, AMI_IP6TYPE_AUTO);
 #ifndef AMINETXDUO_IPV6
@@ -987,7 +1110,11 @@ static VOID load_form(LONG index)
              (ULONG)(cfg.netmask != 0 ? np_netmask : ""));
     set_attr(np.g_gateway, GTST_String,
              (ULONG)(cfg.gateway != 0 ? np_gateway : ""));
+    load_dns();
+    for (i = 0; i < NP_DNS_FIELDS; i++)
+        set_attr(np.g_dns[i], GTST_String, (ULONG)np_dns[i]);
     set_static_fields((BOOL)(cfg.iptype == AMI_IPTYPE_STATIC));
+    np.loaded_iptype = cfg.iptype;
     fill_panel(NP_PANEL_IPV6);
     set_attr(np.g_ipv6, GTCY_Active, (ULONG)cfg.ip6type);
 #ifndef AMINETXDUO_IPV6
@@ -1055,7 +1182,7 @@ static BOOL save_form(BOOL apply)
     ULONG parsed6[AMI_CFG_IP6_WORDS], prefix6;
 #endif
     NpTextField *fields;
-    BOOL existed, old_boot, wildcard;
+    BOOL existed, old_boot, wildcard, edited;
     ULONG i, field_count = 0;
 
     tool_copy_string(name, sizeof(name), string_value(np.g_name));
@@ -1154,6 +1281,19 @@ static BOOL save_form(BOOL apply)
             select_panel(NP_PANEL_IPV4);
             requester("The gateway is not a valid IPv4 address.");
             return FALSE;
+        }
+        for (i = 0; i < NP_DNS_FIELDS; i++)
+        {
+            ULONG server;
+            const char *text = string_value(np.g_dns[i]);
+
+            if (text[0] != '\0' &&
+                (!ami_config_parse_ip(text, &server) || server == 0))
+            {
+                select_panel(NP_PANEL_IPV4);
+                requester("A DNS server is not a valid IPv4 address.");
+                return FALSE;
+            }
         }
         if (gateway != 0 && (gateway & mask) != (address & mask) &&
             !confirm("Gateway is outside this interface's network. Save anyway?",
@@ -1280,6 +1420,33 @@ static BOOL save_form(BOOL apply)
         return FALSE;
     }
     ami_free(patched);
+
+    /* Name servers are the machine's, in name_resolution, as NetSetup and
+       the Installer write them.  A fixed address supplies none (GitHub
+       #308); leaving one for DHCP, the ones it needed are offered for
+       removal so they do not outlive it. */
+    edited = FALSE;
+    for (i = 0; i < NP_DNS_FIELDS; i++)
+        if (tool_stricmp(string_value(np.g_dns[i]), np_dns[i]) != 0)
+            edited = TRUE;
+    if ((ipv4 == AMI_IPTYPE_STATIC && edited &&
+         !write_dns(string_value(np.g_dns[0]), string_value(np.g_dns[1]),
+                    FALSE)) ||
+        (ipv4 == AMI_IPTYPE_DHCP && existed &&
+         np.loaded_iptype == AMI_IPTYPE_STATIC && np_dns[0][0] != '\0' &&
+         choose("DHCP supplies the name servers.\n"
+                "Remove the ones in DEVS:Internet/name_resolution?",
+                "Remove|Keep") &&
+         !write_dns(NULL, NULL, TRUE)))
+    {
+        requester("Saved; DEVS:Internet/name_resolution unchanged.");
+        return FALSE;
+    }
+    np.loaded_iptype = ipv4;
+    load_dns();
+    for (i = 0; i < NP_DNS_FIELDS; i++)
+        set_page_attr(np.g_dns[i], NP_PANEL_IPV4, GTST_String,
+                      (ULONG)np_dns[i]);
 
     old_boot = boot_state(name, &wildcard, NULL);
     if (old_boot != checked(np.g_boot) &&
@@ -1876,6 +2043,11 @@ static BOOL make_window(VOID)
     ITEM(np.g_netmask,STRING_KIND,GID_NETMASK,NP_L_NETMASK);
     TAG1(GTST_MaxChars, 15);
     ITEM(np.g_gateway,STRING_KIND,GID_GATEWAY,NP_L_GATEWAY);
+    for (i = 0; i < NP_DNS_FIELDS; i++)
+    {
+        TAG1(GTST_MaxChars, 15);
+        ITEM(np.g_dns[i],STRING_KIND,GID_DNS_1 + i,NP_L_DNS_1 + i);
+    }
 
     /* IPv6 page. */
     context = CreateContext(&np.panel_gadgets[NP_PANEL_IPV6]);
