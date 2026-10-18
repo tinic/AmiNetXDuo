@@ -728,6 +728,21 @@ static BOOL write_dns(const char *first, const char *second, BOOL remove)
     return ok;
 }
 
+/* The running stack reads name_resolution when it starts, not when an
+   interface is added: TRUE when it is running without the first server
+   the form saved, so the status line can say so. */
+static BOOL dns_pending(VOID)
+{
+    static char live[TOOL_NAME_SERVERS_MAX][AMI_CFG_IP6_STRLEN];
+    ULONG n, i;
+
+    if (np_dns[0][0] == '\0' || !tool_stack_library_running()) return FALSE;
+    n = tool_stack_name_servers(live, (ULONG)TOOL_NAME_SERVERS_MAX);
+    for (i = 0; i < n; i++)
+        if (tool_stricmp(live[i], np_dns[0]) == 0) return FALSE;
+    return TRUE;
+}
+
 static BOOL line_command(const char *line, ULONG len, const char *name,
                          BOOL *commented, BOOL *wildcard)
 {
@@ -1460,7 +1475,8 @@ static BOOL save_form(BOOL apply)
     for (i = 0; i < NP_DNS_FIELDS; i++)
         if (tool_stricmp(string_value(np.g_dns[i]), np_dns[i]) != 0)
             edited = TRUE;
-    if ((ipv4 == AMI_IPTYPE_STATIC && edited &&
+    edited = (BOOL)(edited && ipv4 == AMI_IPTYPE_STATIC);
+    if ((edited &&
          !write_dns(string_value(np.g_dns[0]), string_value(np.g_dns[1]),
                     FALSE)) ||
         (ipv4 == AMI_IPTYPE_DHCP && existed &&
@@ -1506,10 +1522,13 @@ static BOOL save_form(BOOL apply)
             requester("Saved; AddNetInterface failed.");
             return FALSE;
         }
-        set_status("Saved and restarted.");
+        set_status(edited && dns_pending()
+                   ? "Saved and restarted; DNS at the next start."
+                   : "Saved and restarted.");
     }
     else
-        set_status("Saved.");
+        set_status(edited && dns_pending() ? "Saved; DNS at the next start."
+                                           : "Saved.");
     return TRUE;
 }
 
