@@ -539,14 +539,44 @@ LONG ami_sana2_online(AmiSana2If *iface)
  * S2_ONLINE a link-up issues is the driver's own no-op for a unit already
  * online.  What S2_OFFLINE would have saved is the MAC receiving into a
  * ring nobody reads, which the driver counts and drops.
+ *
+ * prism2.device 2.9 (Aminet driver/net/prism2v2), whose unit WirelessManager
+ * shares with us: S2_OFFLINE runs GoOffline(), which issues P2_CMD_DISABLE;
+ * the S2_ONLINE after it runs GoOnline(), which issues P2_CMD_ENABLE and
+ * then busy-waits for P2_EVENTF_CMD with no bound (P2DoCmd()).  DevBeginIO()
+ * runs the command in the caller's task, so the spin is ours, at network
+ * priority.  Measured on a real A1200 (MA401RA, Prism 2.5) twice: with
+ * WirelessManager 1.5 running, `Offline prism2` returns and the machine
+ * stays up; `Online prism2` then hangs the whole machine.  Without
+ * WirelessManager our close is the last one and Online opens a fresh unit,
+ * which does not hang.  The driver honours AbortIO() on a queued CMD_READ,
+ * CMD_FLUSH returns every opener's reads, and its S2_ONLINE acts only when
+ * UNITF_ONLINE is clear, so the same reasoning as genet holds.
  */
 BOOL ami_sana2_keeps_online(const char *device)
 {
+    static const char *const keep[] =
+    {
+        "genet.device",
+        "prism2.device",
+    };
+    const char *base;
+    UWORD       i;
+
     /* A device name is a file name: DEVS:Networks/genet.device and
        Genet.device are this driver too (F-114). */
     if (device == NULL)
         return FALSE;
-    return ami_str_iequal(ami_sana2_basename(device), "genet.device");
+
+    base = ami_sana2_basename(device);
+
+    for (i = 0; i < (UWORD)(sizeof(keep) / sizeof(keep[0])); i++)
+    {
+        if (ami_str_iequal(base, keep[i]))
+            return TRUE;
+    }
+
+    return FALSE;
 }
 
 /* ------------------------------------------------------- bounded offline */
