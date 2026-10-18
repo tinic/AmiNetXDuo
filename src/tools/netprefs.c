@@ -1235,6 +1235,15 @@ static BOOL save_form(BOOL apply)
     tool_copy_string(path + text_len(path), sizeof(path) - text_len(path), "/");
     tool_copy_string(path + text_len(path), sizeof(path) - text_len(path), name);
     existed = tool_exists(path);
+    /* AmigaDOS names ignore case: New "eth0" is the file "ETH0", and its
+       form would replace that definition's settings. */
+    if (existed && np.selected < 0)
+    {
+        ami_free(fields);
+        select_panel(NP_PANEL_GENERAL);
+        requester("An interface of this name already exists.");
+        return FALSE;
+    }
     old = read_file(path, &oldlen, (BOOL)!existed);
     /* Do not flatten an existing file merely because it became unreadable. */
     if (old == NULL && existed)
