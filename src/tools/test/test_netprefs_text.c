@@ -80,6 +80,39 @@ int main(void)
                      "UNIT = 0\n") == 0,
               "KEYWORD value replaced and removed; bare keyword kept");
     }
+    {
+        static const char res[] =
+            ";nameserver 192.168.1.1\n"
+            "nameserver 8.8.8.8\n"
+            "hostname amiga\n";
+        NpTextField ns[] = {
+            { "nameserver", "1.1.1.1", 0 },
+            { "nameserver", "9.9.9.9", 0 }
+        };
+        len = 0;
+        check(np_text_patch_sep(res, sizeof(res) - 1, ns, 2, " ",
+                                out, sizeof(out), &len), "resolver patch fits");
+        out[len] = '\0';
+        check(strcmp(out,
+                     ";nameserver 192.168.1.1\n"
+                     "nameserver 1.1.1.1\n"
+                     "hostname amiga\n"
+                     "nameserver 9.9.9.9\n") == 0,
+              "resolver lines in their own form");
+    }
+
+    {
+        static const char res[] =
+            ";nameserver 192.168.1.1\n"
+            "  NAMESERVER=8.8.8.8 # router\n"
+            "domain local\n"
+            "nameserver\t1.1.1.1\r\n"
+            "nameserver 9.9.9.9\n";
+        char v[2][NP_TEXT_VALUE_LEN];
+        check(np_text_values(res, sizeof(res) - 1, "nameserver", v, 2) == 2 &&
+              strcmp(v[0], "8.8.8.8") == 0 && strcmp(v[1], "1.1.1.1") == 0,
+              "active values in order, at most max");
+    }
 
     {
         static const char line[] = "C:AddNetInterface DEVS:NetInterfaces/eth0 QUIET\n";

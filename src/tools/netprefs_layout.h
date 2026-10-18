@@ -25,6 +25,8 @@ enum
     NP_L_ADDRESS,
     NP_L_NETMASK,
     NP_L_GATEWAY,
+    NP_L_DNS_1,
+    NP_L_DNS_2,
     NP_L_IPV6,
     NP_L_ADDRESS6_1,
     NP_L_ADDRESS6_2,

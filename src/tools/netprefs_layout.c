@@ -42,6 +42,8 @@ const NpItem np_items[NP_L_COUNT] =
     [NP_L_ADDRESS]       = { "Address",         NP_PLACE_LEFT,  NP_PAGE_IPV4 },
     [NP_L_NETMASK]       = { "Netmask",         NP_PLACE_LEFT,  NP_PAGE_IPV4 },
     [NP_L_GATEWAY]       = { "Gateway",         NP_PLACE_LEFT,  NP_PAGE_IPV4 },
+    [NP_L_DNS_1]         = { "DNS 1",           NP_PLACE_LEFT,  NP_PAGE_IPV4 },
+    [NP_L_DNS_2]         = { "DNS 2",           NP_PLACE_LEFT,  NP_PAGE_IPV4 },
     [NP_L_IPV6]          = { "Mode",            NP_PLACE_LEFT,  NP_PAGE_IPV6 },
     [NP_L_ADDRESS6_1]    = { "Address 1",       NP_PLACE_LEFT,  NP_PAGE_IPV6 },
     [NP_L_ADDRESS6_2]    = { "Address 2",       NP_PLACE_LEFT,  NP_PAGE_IPV6 },
@@ -73,13 +75,16 @@ const char *const np_live_labels[] =
     { "New", "Stack off", "Not added", "Offline", "Online", "Unknown", 0 };
 const char *const np_action_labels[] = { "Go online", "Go offline", 0 };
 
-enum { K_FILL, K_INT, K_CYCLE_IPV4, K_CYCLE_IPV6, K_CHECK, K_TEXT, K_ICON };
-enum { AT_FIELD, AT_PANEL, AT_NEXT, AT_RIGHT };
+enum { K_FILL, K_FIELD, K_INT, K_CYCLE_IPV4, K_CYCLE_IPV6, K_CHECK, K_TEXT,
+       K_ICON };
+enum { AT_FIELD, AT_PANEL, AT_NEXT, AT_RIGHT, AT_FIELD2 };
 enum { DEVICE_ICON_PAD = 4, DEVICE_ICON_GAP = 3 };
 
 /* One gadget on a page row.  AT_FIELD: the shared field column; AT_PANEL:
    the page's left edge; AT_NEXT: after the previous cell; AT_RIGHT: flush
-   with the right edge.  A K_FILL cell stretches to the right edge. */
+   with the right edge; AT_FIELD2: a second column, after a K_FIELD in the
+   first.  A K_FILL cell stretches to the right edge, a K_FIELD holds a
+   dotted quad. */
 typedef struct NpCell
 {
     unsigned char item, row, kind, digits, at;
@@ -95,9 +100,11 @@ static const NpCell cells[] =
     { NP_L_MDNS,          3, K_CHECK,      0,  AT_FIELD },
 
     { NP_L_IPV4,          0, K_CYCLE_IPV4, 0,  AT_FIELD },
-    { NP_L_ADDRESS,       1, K_FILL,       0,  AT_FIELD },
-    { NP_L_NETMASK,       2, K_FILL,       0,  AT_FIELD },
-    { NP_L_GATEWAY,       3, K_FILL,       0,  AT_FIELD },
+    { NP_L_ADDRESS,       1, K_FIELD,      0,  AT_FIELD },
+    { NP_L_NETMASK,       2, K_FIELD,      0,  AT_FIELD },
+    { NP_L_DNS_1,         2, K_FILL,       0,  AT_FIELD2 },
+    { NP_L_GATEWAY,       3, K_FIELD,      0,  AT_FIELD },
+    { NP_L_DNS_2,         3, K_FILL,       0,  AT_FIELD2 },
 
     { NP_L_IPV6,          0, K_CYCLE_IPV6, 0,  AT_FIELD },
     { NP_L_ADDRESS6_1,    1, K_FILL,       0,  AT_FIELD },
@@ -214,7 +221,8 @@ static void place_label(const Metrics *m, NpLayout *l, int item)
 
 /* Places one page row and returns the rightmost pixel it needs. */
 static int place_row(const Metrics *m, NpLayout *l, int page, int row,
-                     int panel_x, int field_x, int right, int row_y)
+                     int panel_x, int field_x, int field2_x, int right,
+                     int row_y)
 {
     int pos = panel_x, need = panel_x;
     int i;
@@ -235,6 +243,7 @@ static int place_row(const Metrics *m, NpLayout *l, int page, int row,
         switch (c->at)
         {
         case AT_FIELD: x = field_x; break;
+        case AT_FIELD2: x = field2_x; break;
         case AT_PANEL: x = panel_x + lead; break;
         case AT_NEXT:  x = pos + CELL_GAP + lead; break;
         default:
@@ -349,7 +358,8 @@ static int page_y(const NpLayout *l, const Metrics *m, int row)
 int np_layout(const NpFont *font, int max_w, int max_h, NpLayout *out)
 {
     Metrics m;
-    int left_w, x0, panel_x, field_x, need, right, target, i, page, row;
+    int left_w, x0, panel_x, field_x, field2_x, need, right, target, i, page,
+        row;
 
     m.font = font;
     m.gh = font->height + 7;
@@ -375,12 +385,18 @@ int np_layout(const NpFont *font, int max_w, int max_h, NpLayout *out)
             field_x = max_i(field_x, label_w(&m, cells[i].item));
     field_x += panel_x + LABEL_GAP;
 
+    field2_x = 0;
+    for (i = 0; i < CELL_COUNT; i++)
+        if (cells[i].at == AT_FIELD2)
+            field2_x = max_i(field2_x, label_w(&m, cells[i].item));
+    field2_x += field_x + m.field_min + CELL_GAP + LABEL_GAP;
+
     /* First pass with no room to spare finds the width every row needs. */
     need = common_need(&m, x0);
     for (page = NP_PAGE_GENERAL; page < NP_PAGE_COMMON; page++)
         for (row = 0; row < PAGE_ROWS; row++)
             need = max_i(need, place_row(&m, out, page, row, panel_x, field_x,
-                                         0, 0) + PAD_X);
+                                         field2_x, 0, 0) + PAD_X);
 
     target = TARGET_W < max_w ? TARGET_W : max_w;
     out->inner_w = max_i(need + MARGIN_X, target);
@@ -389,7 +405,7 @@ int np_layout(const NpFont *font, int max_w, int max_h, NpLayout *out)
     place_common(&m, out, x0, right);
     for (page = NP_PAGE_GENERAL; page < NP_PAGE_COMMON; page++)
         for (row = 0; row < PAGE_ROWS; row++)
-            (void)place_row(&m, out, page, row, panel_x, field_x,
+            (void)place_row(&m, out, page, row, panel_x, field_x, field2_x,
                             right - PAD_X, page_y(out, &m, row));
 
     return out->inner_w <= max_w && out->inner_h <= max_h;
