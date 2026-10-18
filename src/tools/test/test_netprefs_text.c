@@ -58,6 +58,30 @@ int main(void)
     }
 
     {
+        /* KEYWORD value is a setting too: replaced, removed, not doubled. */
+        static const char spaced[] =
+            "CONFIGURE STATIC\n"
+            "GATEWAY\t10.1.1.1\n"
+            "# GATEWAY 10.9.9.9\n"
+            "UNIT\n";
+        NpTextField sf[] = {
+            { "CONFIGURE", "DHCP", 0 },
+            { "GATEWAY", NULL, 0 },
+            { "UNIT", "0", 0 }
+        };
+        len = 0;
+        check(np_text_patch(spaced, sizeof(spaced) - 1, sf, 3,
+                            out, sizeof(out), &len), "spaced patch fits");
+        out[len] = '\0';
+        check(strcmp(out,
+                     "CONFIGURE = DHCP\n"
+                     "# GATEWAY 10.9.9.9\n"
+                     "UNIT\n"
+                     "UNIT = 0\n") == 0,
+              "KEYWORD value replaced and removed; bare keyword kept");
+    }
+
+    {
         static const char line[] = "C:AddNetInterface DEVS:NetInterfaces/eth0 QUIET\n";
         check(np_startup_line(line, sizeof(line) - 1,
           "eth0", &commented, &wildcard) && !commented && !wildcard,

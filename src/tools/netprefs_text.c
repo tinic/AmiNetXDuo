@@ -88,7 +88,7 @@ static int iptype_is_address_mode(const char *line, size_t len, size_t value)
 static long field_of_line(const char *line, size_t len,
                           NpTextField *fields, size_t count)
 {
-    size_t begin = 0, end, value, i;
+    size_t begin = 0, end, gap, value, i;
     int alphabetic_iptype;
     long first = -1;
     while (begin < len && (line[begin] == ' ' || line[begin] == '\t')) begin++;
@@ -96,12 +96,17 @@ static long field_of_line(const char *line, size_t len,
     end = begin;
     while (end < len && line[end] != '=' && line[end] != ' ' &&
            line[end] != '\t' && line[end] != '\r' && line[end] != '\n') end++;
-    while (end < len && (line[end] == ' ' || line[end] == '\t')) end++;
-    if (end >= len || line[end] != '=') return -1;
-    value = end + 1;
-    end = begin;
-    while (end < len && line[end] != '=' && line[end] != ' ' &&
-           line[end] != '\t' && line[end] != '\r' && line[end] != '\n') end++;
+    gap = end;
+    while (gap < len && (line[gap] == ' ' || line[gap] == '\t')) gap++;
+    /* KEYWORD=value, or KEYWORD value as the parser also reads it: a
+       "GATEWAY 10.0.0.1" left behind would still be the gateway. */
+    if (gap < len && line[gap] == '=')
+        value = gap + 1;
+    else if (gap > end && gap < len && line[gap] != '\r' &&
+             line[gap] != '\n' && line[gap] != '#' && line[gap] != ';')
+        value = gap;
+    else
+        return -1;
     alphabetic_iptype = equal_nocase(line + begin, end - begin, "IPTYPE") &&
                         iptype_is_address_mode(line, len, value);
     for (i = 0; i < count; i++)
