@@ -807,6 +807,7 @@ static BOOL set_boot_state(const char *name, BOOL enabled, BOOL removing)
     char *old = read_file("S:Network-Startup", &len,
                           (BOOL)!startup_exists);
     char *out;
+    size_t block = 0;
     BOOL exact = FALSE, wildcard_active = FALSE;
 
     /* An unreadable startup file is not an empty one.  Treating it as empty
@@ -818,6 +819,20 @@ static BOOL set_boot_state(const char *name, BOOL enabled, BOOL removing)
         if (old == NULL) return FALSE;
         old[0] = '\0';
     }
+    /* An Installer Wi-Fi block for this interface is switched whole, the
+       WirelessManager start with its AddNetInterface (GitHub #307): with
+       the line alone back, the card started unjoined. */
+    out = (char *)ami_alloc(len + 256);
+    if (out == NULL) { ami_free(old); return FALSE; }
+    if (np_wifi_switch(old, len, name, enabled, out, len + 256, &block) == 1)
+    {
+        ami_free(old);
+        old = out;
+        len = (ULONG)block;
+        exact = enabled;
+    }
+    else
+        ami_free(out);
     out = (char *)ami_alloc(len + extra);
     if (out == NULL) { ami_free(old); return FALSE; }
 

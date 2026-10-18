@@ -233,5 +233,92 @@ int main(void)
     check(!np_interface_name_safe("eth\"foo", 16), "quote rejected");
     check(!np_interface_name_safe("eth>ram:x", 16), "redirection rejected");
     check(!np_interface_name_safe("eth|foo", 16), "pipe rejected");
+
+    {
+        /* The Installer's Wi-Fi blocks: Pi or secondary (A), PC Card
+           primary (B), WirelessManager written commented out. */
+        static const char a[] =
+            "; head\n"
+            "C:AddNetInterface DEVS:NetInterfaces/eth0 QUIET\n"
+            "If EXISTS ENV:Sys/Wireless.prefs\n"
+            "  Status >NIL: COMMAND=C:WirelessManager\n"
+            "  If WARN\n"
+            "    Run >NIL: <NIL: Stack 32768 +\n"
+            "    C:WirelessManager DEVICE=wifipi.device UNIT=0\n"
+            "  EndIf\n"
+            "  Run >NIL: <NIL: C:AddNetInterface DEVS:NetInterfaces/wifi0 QUIET TIMEOUT=30\n"
+            "EndIf\n"
+            "Run >NIL: <NIL: C:sntp pool.ntp.org QUIET\n";
+        static const char a_off[] =
+            "; head\n"
+            "C:AddNetInterface DEVS:NetInterfaces/eth0 QUIET\n"
+            ";If EXISTS ENV:Sys/Wireless.prefs\n"
+            ";  Status >NIL: COMMAND=C:WirelessManager\n"
+            ";  If WARN\n"
+            ";    Run >NIL: <NIL: Stack 32768 +\n"
+            ";    C:WirelessManager DEVICE=wifipi.device UNIT=0\n"
+            ";  EndIf\n"
+            ";  Run >NIL: <NIL: C:AddNetInterface DEVS:NetInterfaces/wifi0 QUIET TIMEOUT=30\n"
+            ";EndIf\n"
+            "Run >NIL: <NIL: C:sntp pool.ntp.org QUIET\n";
+        static const char b[] =
+            "If EXISTS ENV:Sys/Wireless.prefs\n"
+            "  Status >NIL: COMMAND=SYS:AmiNetXDuo/WirelessManager\n"
+            "  If WARN\n"
+            "    Run >NIL: <NIL: Stack 32768 +\n"
+            "    SYS:AmiNetXDuo/WirelessManager DEVICE=DEVS:Networks/prism2.device UNIT=0\n"
+            "  EndIf\n"
+            "EndIf\n"
+            "AmiNetXDuo:C/AddNetInterface DEVS:NetInterfaces/pcmcia QUIET TIMEOUT=30\n"
+            "; tail\n";
+        static const char b_off[] =
+            ";If EXISTS ENV:Sys/Wireless.prefs\n"
+            ";  Status >NIL: COMMAND=SYS:AmiNetXDuo/WirelessManager\n"
+            ";  If WARN\n"
+            ";    Run >NIL: <NIL: Stack 32768 +\n"
+            ";    SYS:AmiNetXDuo/WirelessManager DEVICE=DEVS:Networks/prism2.device UNIT=0\n"
+            ";  EndIf\n"
+            ";EndIf\n"
+            ";AmiNetXDuo:C/AddNetInterface DEVS:NetInterfaces/pcmcia QUIET TIMEOUT=30\n"
+            "; tail\n";
+        static const char wm_off[] =
+            "If EXISTS ENV:Sys/Wireless.prefs\n"
+            "  ;Status >NIL: COMMAND=C:WirelessManager\n"
+            "  ;If WARN\n"
+            "  ;  C:WirelessManager DEVICE=wifipi.device UNIT=0\n"
+            "  ;EndIf\n"
+            "  C:AddNetInterface DEVS:NetInterfaces/wifi0 QUIET TIMEOUT=30\n"
+            "EndIf\n";
+        char o1[1024], o2[1024];
+        size_t n1 = 0, n2 = 0;
+
+#define SAME(o, n, s) ((n) == sizeof(s) - 1 && memcmp((o), (s), (n)) == 0)
+        check(np_wifi_switch(a, sizeof(a) - 1, "wifi0", 0, o1, sizeof(o1),
+                             &n1) == 1 && SAME(o1, n1, a_off),
+              "Pi block off, every line of it and no other");
+        check(np_wifi_switch(a_off, sizeof(a_off) - 1, "wifi0", 0, o2,
+                             sizeof(o2), &n2) == 1 && SAME(o2, n2, a_off),
+              "off again changes nothing");
+        check(np_wifi_switch(a_off, sizeof(a_off) - 1, "wifi0", 1, o2,
+                             sizeof(o2), &n2) == 1 && SAME(o2, n2, a),
+              "Pi block back on, byte for byte");
+        check(np_wifi_switch(a, sizeof(a) - 1, "wifi0", 1, o2, sizeof(o2),
+                             &n2) == 1 && SAME(o2, n2, a),
+              "on again changes nothing");
+        check(np_wifi_switch(a, sizeof(a) - 1, "eth0", 0, o2, sizeof(o2),
+                             &n2) == 0, "a wired line is not a block");
+        check(np_wifi_switch(b, sizeof(b) - 1, "pcmcia", 0, o1, sizeof(o1),
+                             &n1) == 1 && SAME(o1, n1, b_off),
+              "PC Card block off, AddNetInterface after EndIf with it");
+        check(np_wifi_switch(b_off, sizeof(b_off) - 1, "pcmcia", 1, o2,
+                             sizeof(o2), &n2) == 1 && SAME(o2, n2, b),
+              "PC Card block back on");
+        check(np_wifi_switch(wm_off, sizeof(wm_off) - 1, "wifi0", 0, o1,
+                             sizeof(o1), &n1) == 1 &&
+              np_wifi_switch(o1, n1, "wifi0", 1, o2, sizeof(o2), &n2) == 1 &&
+              SAME(o2, n2, wm_off),
+              "WirelessManager commented out stays so after off and on");
+#undef SAME
+    }
     return failures != 0;
 }
