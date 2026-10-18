@@ -70,6 +70,14 @@
 #   EMU68_BOTH_NOVICE NOVICE still asks for the Wi-Fi network, a Latin-1 name
 #                   is written as UTF-8 hex, and Ethernet and Wi-Fi both
 #                   start, Ethernet at PRIORITY=10
+#   PCMCIA_WIFI     the user's prism2.device on the disk beside the board:
+#                   the PC Card is the Wi-Fi, started with WirelessManager
+#                   after the board; no Pi firmware
+#   PCMCIA_WIFI_PI  the same with the Pi Wi-Fi present: the card is the
+#                   primary and the only Wi-Fi
+#   PCMCIA_WIFI_KEEPIT "Keep it" with run 1's S:Network-Startup gone: the
+#                   kept pcmcia definition brings the Wi-Fi block back
+#   CNET_KEEP       a kept eth0 whose comment names prism2.device: no Wi-Fi
 #   EMU68_GENET_OLD / _BARE  a GENET Emu68 1.0.x leaves unmapped: Emu68's
 #                   genet.device is used, or with none the Installer stops
 #                   before writing anything
@@ -130,6 +138,7 @@ SCENARIOS=(
     EMU68_WIFI_KEEPIT_FW
     EMU68_WIFI_USERSTART EMU68_WIFI_DRAWER EMU68_BOTH_NOVICE
     EMU68_GENET_OLD EMU68_GENET_OLD_BARE
+    PCMCIA_WIFI PCMCIA_WIFI_PI PCMCIA_WIFI_KEEPIT CNET_KEEP
     CANCEL_DHCP MISSING_CORE MISSING_DRIVER MISSING_PROBE MISSING_MINIMAL
     NO_CARD STALE_PI_DRIVERS HARDWARE_XSURF100 HARDWARE_PCMCIA
     TERMINAL STATIC_NO_BOOT
@@ -257,6 +266,10 @@ for scenario in "${SCENARIOS[@]}"; do
         EMU68_WIFI_USERSTART)  opts=(-l AVERAGE -e wifi -w userstart) ;;
         EMU68_WIFI_DRAWER)     opts=(-l AVERAGE -e wifi -D -w userwm) ;;
         EMU68_BOTH_NOVICE)     opts=(-l NOVICE -e both -w join) ;;
+        PCMCIA_WIFI)           opts=(-l AVERAGE -w prism2) ;;
+        PCMCIA_WIFI_PI)        opts=(-l AVERAGE -e wifi -w prism2pi) ;;
+        PCMCIA_WIFI_KEEPIT)    opts=(-l AVERAGE -w prism2keep -R) ;;
+        CNET_KEEP)             opts=(-l AVERAGE -w cnetkeep) ;;
         EMU68_GENET_OLD)       opts=(-l NOVICE -e genet-old) ;;
         EMU68_GENET_OLD_BARE)  opts=(-l NOVICE -e genet-old-bare) ;;
         CANCEL_DHCP)           opts=(-l AVERAGE -c dhcp) ;;

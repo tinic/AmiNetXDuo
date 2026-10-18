@@ -137,6 +137,14 @@ static int has_id(const uint32_t *ids, uint32_t id)
     return 0;
 }
 
+int netprobe_pc_wireless(const NetprobeCis *cis)
+{
+    if (cis->have_manf &&
+        has_id(excluded_wireless_ids, ((uint32_t)cis->manf << 16) | cis->prod))
+        return 1;
+    return wireless(cis);
+}
+
 int netprobe_pc_kind(const NetprobeCis *cis)
 {
     if (cis->have_manf)

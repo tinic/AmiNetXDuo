@@ -143,11 +143,26 @@ static BOOL pcmcia_identity(NetprobeCis *cis)
                   (cis->have_manf || cis->have_funcid));
 }
 
+/* CARD wireless: an 802.11 card in the slot, by its identity, or owned by
+   prism2.device, whose card need not say so.  Its driver is the user's. */
+static BOOL pcmcia_wireless(VOID)
+{
+    static NetprobeSlot slot;
+
+    netprobe_pcmcia_read(&slot);
+    if (slot.slot == NETPROBE_SLOT_OWNED && same(slot.owner, "prism2.device"))
+        return TRUE;
+    return (BOOL)(slot.slot >= NETPROBE_SLOT_FREE &&
+                  netprobe_pc_wireless(&slot.cis));
+}
+
 static BOOL pcmcia_card_present(const char *name)
 {
     NetprobeCis cis = { 0 };
     int         kind;
 
+    if (same(name, "wireless"))
+        return pcmcia_wireless();
     if (!pcmcia_identity(&cis))
         return FALSE;
 
@@ -265,7 +280,7 @@ int main(int argc, char **argv)
         if (same(card, "pcmcia") || same(card, "cnet") ||
             same(card, "3c589") ||
             same(card, "3ccfem556") || same(card, "3cxem556") ||
-            same(card, "xircom"))
+            same(card, "xircom") || same(card, "wireless"))
             present = pcmcia_card_present(card);
         else if (same(card, "uae"))
             present = netprobe_device_present("uaenet.device");
