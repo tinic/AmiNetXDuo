@@ -64,13 +64,17 @@ BUDGETS=(
     # +72 default and fat / +36 minimal / +20 micro on 2026-10-19 (#306): 18
     # bytes of reply counters per NX_DHCP interface record, for the DHCP
     # lines of CreateAmiNetXDuoStatusReport.
-    "default:68940"
-    "minimal:17988"
+    # +56 default and fat / +28 minimal / +12 micro on 2026-10-19 (#306): 14
+    # bytes per NX_DHCP interface record for the REQUESTING restart (its
+    # count and retransmission count), the offered address, the server
+    # identifier sent and the last send status.
+    "default:68996"
+    "minimal:18016"
     # First budgeted as a shipping profile at 0.28.9: 15,716 bytes, with
     # headroom to the next KiB boundary.
-    "micro:16428"
+    "micro:16440"
     # The full stack's options, so the full stack's budget.
-    "fat:68940"
+    "fat:68996"
 )
 
 budget=""

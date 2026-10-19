@@ -296,8 +296,13 @@ typedef struct AmiDhcpCounters {
     ULONG   adc_OffersAccepted;
     ULONG   adc_AcksReceived;
     ULONG   adc_LastReplySource;        /* host byte order                  */
+    ULONG   adc_OfferedAddress;         /* yiaddr of the last Offer taken   */
+    ULONG   adc_RequestServer;          /* option 54 of the last REQUEST    */
+    ULONG   adc_Xid;                    /* current transaction ID           */
+    ULONG   adc_RequestRestarts;        /* REQUESTING gave up, back to INIT */
     UBYTE   adc_LastReplyType;          /* option 53; 0 when it had none    */
     UBYTE   adc_LastReject;
+    UBYTE   adc_LastSendStatus;         /* NetX status of the last send     */
 } AmiDhcpCounters;
 
 LONG    netstack_interface_dhcp_counters(UWORD index, AmiDhcpCounters *out);
