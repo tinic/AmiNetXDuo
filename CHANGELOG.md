@@ -32,6 +32,12 @@ are history.
 - The stack's timer tick runs at priority 19, one below input.device.
 - CreateAmiNetXDuoStatusReport lists DHCP client counters and the last
   discarded reply's cause.
+- A DHCP client with no answer to its request starts again with a
+  discover after five requests.
+- CreateAmiNetXDuoStatusReport lists the offered address, server identifier,
+  transaction ID, last send status and restart count for DHCP.
+- CreateAmiNetXDuoStatusReport lists the tick service cost, longest
+  Forbid(), budget overruns, deferred ticks and timer wheel lag.
 
 ## 1.0.0-rc1
 
