@@ -194,12 +194,25 @@ fi
     exit 2
 }
 
-BUSY=$(ssh "$PEER" "ps -eo args= | grep '[f]itz-serve' | wc -l" 2>/dev/null || echo 0)
-[ "$BUSY" = "0" ] || {
-    echo "the peer already has $BUSY fitz-serve process(es) running." >&2
-    echo "Something else is using it; this changes its root qdisc, so wait." >&2
-    exit 2
-}
+# Another run on the peer owns its root qdisc while it lasts.  Wait for it,
+# bounded: on 2026-10-16 the nightly found two fitz-serve there and refused
+# outright, which turned somebody else's measurement into a red gate.
+BUSY_WAIT="${AMINETXDUO_LOSSGATE_PEER_WAIT:-900}"
+busy_waited=0
+while :; do
+    BUSY=$(ssh "$PEER" "ps -eo args= | grep '[f]itz-serve' | wc -l" 2>/dev/null || echo 0)
+    [ "$BUSY" = "0" ] && break
+    if [ "$busy_waited" -ge "$BUSY_WAIT" ]; then
+        echo "peer_busy=$BUSY peer_waited_s=$busy_waited" >&2
+        echo "the peer still has $BUSY fitz-serve process(es) running." >&2
+        echo "Something else is using it; this changes its root qdisc." >&2
+        exit 2
+    fi
+    [ $((busy_waited % 60)) = 0 ] &&
+        echo "==> the peer has $BUSY fitz-serve process(es); waiting (${busy_waited}s of ${BUSY_WAIT}s)"
+    sleep 15; busy_waited=$((busy_waited + 15))
+done
+[ "$busy_waited" = 0 ] || echo "peer_waited_s=$busy_waited"
 
 GUEST=""
 
