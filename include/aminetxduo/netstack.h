@@ -285,6 +285,22 @@ LONG    netstack_interface_dhcp_renew(UWORD index);
    values collapse: BOUND, RENEWING and REBINDING are all AMI_DHCP_BOUND.
    Zero (NOT_STARTED) with the stack down or no client created. */
 UWORD   netstack_interface_dhcp_raw_state(UWORD index);
+
+/* What the DHCP client sent and what it did with the replies, for a status
+   report (#306).  adc_LastReject is NETSTATUS_DHCPREJECT_*. */
+typedef struct AmiDhcpCounters {
+    ULONG   adc_DiscoversSent;
+    ULONG   adc_RequestsSent;
+    ULONG   adc_RepliesSeen;            /* reached the client on port 68    */
+    ULONG   adc_RepliesRejected;
+    ULONG   adc_OffersAccepted;
+    ULONG   adc_AcksReceived;
+    ULONG   adc_LastReplySource;        /* host byte order                  */
+    UBYTE   adc_LastReplyType;          /* option 53; 0 when it had none    */
+    UBYTE   adc_LastReject;
+} AmiDhcpCounters;
+
+LONG    netstack_interface_dhcp_counters(UWORD index, AmiDhcpCounters *out);
 LONG    netstack_interface_dhcp_stop(UWORD index, BOOL release);
 
 /* ------------------------------------------------------------------ IPv6,

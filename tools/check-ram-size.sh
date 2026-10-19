@@ -61,13 +61,16 @@ BUDGETS=(
     # +32 default / +24 minimal / +20 micro on 2026-10-05 (NetX 02604196):
     # 12 bytes of receive-pass state in NX_IP and a 4-byte window cap per
     # interface (five interfaces in default, three in minimal, two in micro).
-    "default:68868"
-    "minimal:17952"
+    # +72 default and fat / +36 minimal / +20 micro on 2026-10-19 (#306): 18
+    # bytes of reply counters per NX_DHCP interface record, for the DHCP
+    # lines of CreateAmiNetXDuoStatusReport.
+    "default:68940"
+    "minimal:17988"
     # First budgeted as a shipping profile at 0.28.9: 15,716 bytes, with
     # headroom to the next KiB boundary.
-    "micro:16408"
+    "micro:16428"
     # The full stack's options, so the full stack's budget.
-    "fat:68868"
+    "fat:68940"
 )
 
 budget=""

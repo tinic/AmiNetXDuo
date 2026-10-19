@@ -206,6 +206,9 @@ LONG netstack_interface_dhcp_renew(UWORD i)
 { (VOID)i; h_unreachable("netstack_interface_dhcp_renew"); return -1; }
 UWORD netstack_interface_dhcp_raw_state(UWORD i)
 { (VOID)i; h_unreachable("netstack_interface_dhcp_raw_state"); return 0; }
+LONG netstack_interface_dhcp_counters(UWORD i, AmiDhcpCounters *out)
+{ (VOID)i; (VOID)out; h_unreachable("netstack_interface_dhcp_counters");
+  return -1; }
 LONG netstack_interface_dhcp_lease(UWORD i, AmiDhcpLease *out)
 { (VOID)i; (VOID)out; h_unreachable("netstack_interface_dhcp_lease"); return -1; }
 BOOL netstack_ipv6_address_get(UWORD i, UWORD slot, ULONG a[4], ULONG *p, ULONG *st)
