@@ -324,6 +324,18 @@ typedef struct NetStatusAddress6
 #define NETSTATUS_DHCPRAW_FORCERENEW    8
 #define NETSTATUS_DHCPRAW_PROBING       9
 
+/* nsd_LastReject: why the client last discarded a reply. */
+#define NETSTATUS_DHCPREJECT_NONE       0
+#define NETSTATUS_DHCPREJECT_SHORT      1   /* shorter than a BOOTP header  */
+#define NETSTATUS_DHCPREJECT_POOL       2   /* no packet to copy it into    */
+#define NETSTATUS_DHCPREJECT_SIZE       3   /* larger than a client packet  */
+#define NETSTATUS_DHCPREJECT_CHADDR     4   /* not our hardware address     */
+#define NETSTATUS_DHCPREJECT_XID        5   /* not our transaction ID       */
+#define NETSTATUS_DHCPREJECT_NO_TYPE    6   /* no message type option       */
+#define NETSTATUS_DHCPREJECT_TYPE       7   /* type not expected now        */
+#define NETSTATUS_DHCPREJECT_OPTIONS    8   /* options did not parse        */
+#define NETSTATUS_DHCPREJECT_STATE      9   /* state takes no replies       */
+
 typedef struct NetStatusDhcp
 {
     UWORD   nsd_Index;                  /* NX_IP interface index             */
@@ -345,6 +357,17 @@ typedef struct NetStatusDhcp
 
     char    nsd_HostName[NETSTATUS_NAME_LEN];
     char    nsd_DomainName[NETSTATUS_NAME_LEN];
+
+    /* The client's own counters, filled in every state (#306). */
+    ULONG   nsd_DiscoversSent;
+    ULONG   nsd_RequestsSent;
+    ULONG   nsd_RepliesSeen;            /* reached the client on port 68     */
+    ULONG   nsd_RepliesRejected;
+    ULONG   nsd_OffersAccepted;
+    ULONG   nsd_AcksReceived;
+    ULONG   nsd_LastReplySource;        /* host byte order; 0 = none yet     */
+    UBYTE   nsd_LastReplyType;          /* DHCP option 53; 0 = it had none   */
+    UBYTE   nsd_LastReject;             /* NETSTATUS_DHCPREJECT_*            */
 } NetStatusDhcp;
 
 /* ---------------------------------------------------- NETSTATUS_DHCP6 --- */

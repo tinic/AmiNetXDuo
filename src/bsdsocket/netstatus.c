@@ -353,6 +353,7 @@ static VOID ns_fill_dhcp(NsWriter *w)
     {
         NetStatusDhcp *out;
         AmiDhcpLease   lease;
+        AmiDhcpCounters counters;
         LONG           state;
         UWORD          i;
 
@@ -365,6 +366,19 @@ static VOID ns_fill_dhcp(NsWriter *w)
         state = netstack_interface_dhcp_state(index);
 
         out->nsd_RawState = netstack_interface_dhcp_raw_state(index);
+
+        if (netstack_interface_dhcp_counters(index, &counters) == AMI_NET_OK)
+        {
+            out->nsd_DiscoversSent   = counters.adc_DiscoversSent;
+            out->nsd_RequestsSent    = counters.adc_RequestsSent;
+            out->nsd_RepliesSeen     = counters.adc_RepliesSeen;
+            out->nsd_RepliesRejected = counters.adc_RepliesRejected;
+            out->nsd_OffersAccepted  = counters.adc_OffersAccepted;
+            out->nsd_AcksReceived    = counters.adc_AcksReceived;
+            out->nsd_LastReplySource = counters.adc_LastReplySource;
+            out->nsd_LastReplyType   = counters.adc_LastReplyType;
+            out->nsd_LastReject      = counters.adc_LastReject;
+        }
 
         if (state == AMI_DHCP_BOUND)
             out->nsd_State = NETSTATUS_DHCP_BOUND;

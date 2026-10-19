@@ -3256,6 +3256,55 @@ UWORD netstack_interface_dhcp_raw_state(UWORD index)
     return (UWORD)ns->ns_DhcpState[index];
 }
 
+_Static_assert(NETSTATUS_DHCPREJECT_NONE    == NX_DHCP_REJECT_NONE,    "ABI");
+_Static_assert(NETSTATUS_DHCPREJECT_SHORT   == NX_DHCP_REJECT_SHORT,   "ABI");
+_Static_assert(NETSTATUS_DHCPREJECT_POOL    == NX_DHCP_REJECT_POOL,    "ABI");
+_Static_assert(NETSTATUS_DHCPREJECT_SIZE    == NX_DHCP_REJECT_SIZE,    "ABI");
+_Static_assert(NETSTATUS_DHCPREJECT_CHADDR  == NX_DHCP_REJECT_CHADDR,  "ABI");
+_Static_assert(NETSTATUS_DHCPREJECT_XID     == NX_DHCP_REJECT_XID,     "ABI");
+_Static_assert(NETSTATUS_DHCPREJECT_NO_TYPE == NX_DHCP_REJECT_NO_TYPE, "ABI");
+_Static_assert(NETSTATUS_DHCPREJECT_TYPE    == NX_DHCP_REJECT_TYPE,    "ABI");
+_Static_assert(NETSTATUS_DHCPREJECT_OPTIONS == NX_DHCP_REJECT_OPTIONS, "ABI");
+_Static_assert(NETSTATUS_DHCPREJECT_STATE   == NX_DHCP_REJECT_STATE,   "ABI");
+
+/* Plain reads of the client record; a torn counter in a report is harmless. */
+LONG netstack_interface_dhcp_counters(UWORD index, AmiDhcpCounters *out)
+{
+    AmiNetStack *ns = ami_ns;
+    UINT         i;
+
+    if (out == NULL)
+        return AMI_NET_ERR_STATE;
+
+    ami_ns_zero(out, sizeof(*out));
+
+    if (ns == NULL || !ns->ns_DhcpCreated ||
+        index >= (UWORD)AMI_CFG_MAX_ATTACHED)
+        return AMI_NET_ERR_STATE;
+
+    for (i = 0; i < (UINT)NX_DHCP_CLIENT_MAX_RECORDS; i++)
+    {
+        const NX_DHCP_INTERFACE_RECORD *r =
+            &ns->ns_Dhcp.nx_dhcp_interface_record[i];
+
+        if (r->nx_dhcp_record_valid == NX_FALSE ||
+            r->nx_dhcp_interface_index != (UINT)index)
+            continue;
+
+        out->adc_DiscoversSent   = r->nx_dhcp_discoveries_sent;
+        out->adc_RequestsSent    = r->nx_dhcp_requests_sent;
+        out->adc_RepliesSeen     = r->nx_dhcp_replies_received;
+        out->adc_RepliesRejected = r->nx_dhcp_replies_rejected;
+        out->adc_OffersAccepted  = r->nx_dhcp_offers_accepted;
+        out->adc_AcksReceived    = r->nx_dhcp_acks_received;
+        out->adc_LastReplySource = r->nx_dhcp_last_reply_source;
+        out->adc_LastReplyType   = r->nx_dhcp_last_reply_type;
+        out->adc_LastReject      = r->nx_dhcp_last_reject;
+        return AMI_NET_OK;
+    }
+    return AMI_NET_ERR_STATE;
+}
+
 LONG netstack_interface_dhcp_renew(UWORD index)
 {
     AmiNetStack  *ns = ami_ns;
@@ -3356,6 +3405,13 @@ UWORD netstack_interface_dhcp_raw_state(UWORD index)
 {
     (VOID)index;
     return 0U;                          /* NX_DHCP_STATE_NOT_STARTED */
+}
+
+LONG netstack_interface_dhcp_counters(UWORD index, AmiDhcpCounters *out)
+{
+    (VOID)index;
+    (VOID)out;
+    return AMI_NET_ERR_STATE;
 }
 
 LONG netstack_interface_dhcp_renew(UWORD index)

@@ -357,6 +357,30 @@ static VOID sr_name_device(const char *path)
         tool_copy_string(sr_named[sr_named_count++], TOOL_NAME_LEN, base);
 }
 
+static const char *sr_dhcp_reject(UBYTE reject)
+{
+    static const char *const names[] = {
+        "none", "short", "pool", "size", "chaddr", "xid", "no_msgtype",
+        "type", "options", "state"
+    };
+
+    if (reject < sizeof(names) / sizeof(names[0]))
+        return names[reject];
+    return NULL;
+}
+
+static const char *sr_dhcp_type(UBYTE type)
+{
+    static const char *const names[] = {
+        "none", "discover", "offer", "request", "decline", "ack", "nak",
+        "release", "inform", "forcerenew"
+    };
+
+    if (type < sizeof(names) / sizeof(names[0]))
+        return names[type];
+    return NULL;
+}
+
 static const char *sr_dhcp_state(UWORD state)
 {
     switch (state)
@@ -494,6 +518,29 @@ static VOID sr_live(struct Library *base)
             sr_str(&sr_out, sr_k, sr_dhcp_state(d->nsd_State));
             sr_key(sr_k, sizeof(sr_k), prefix, "raw_state", NULL);
             sr_ulong(&sr_out, sr_k, d->nsd_RawState);
+
+            if (d->nsd_RawState != NETSTATUS_DHCPRAW_NOT_STARTED ||
+                d->nsd_DiscoversSent != 0)
+            {
+                sr_key(sr_k, sizeof(sr_k), prefix, "discovers_sent", NULL);
+                sr_ulong(&sr_out, sr_k, d->nsd_DiscoversSent);
+                sr_key(sr_k, sizeof(sr_k), prefix, "requests_sent", NULL);
+                sr_ulong(&sr_out, sr_k, d->nsd_RequestsSent);
+                sr_key(sr_k, sizeof(sr_k), prefix, "replies_seen", NULL);
+                sr_ulong(&sr_out, sr_k, d->nsd_RepliesSeen);
+                sr_key(sr_k, sizeof(sr_k), prefix, "replies_rejected", NULL);
+                sr_ulong(&sr_out, sr_k, d->nsd_RepliesRejected);
+                sr_key(sr_k, sizeof(sr_k), prefix, "offers_accepted", NULL);
+                sr_ulong(&sr_out, sr_k, d->nsd_OffersAccepted);
+                sr_key(sr_k, sizeof(sr_k), prefix, "acks_received", NULL);
+                sr_ulong(&sr_out, sr_k, d->nsd_AcksReceived);
+                sr_key(sr_k, sizeof(sr_k), prefix, "last_reject", NULL);
+                sr_str(&sr_out, sr_k, sr_dhcp_reject(d->nsd_LastReject));
+                sr_key(sr_k, sizeof(sr_k), prefix, "last_reply_type", NULL);
+                sr_str(&sr_out, sr_k, sr_dhcp_type(d->nsd_LastReplyType));
+                sr_key(sr_k, sizeof(sr_k), prefix, "last_reply_server", NULL);
+                sr_addr_ipv4(&sr_out, sr_k, d->nsd_LastReplySource);
+            }
 
             if (d->nsd_State != NETSTATUS_DHCP_BOUND)
                 continue;

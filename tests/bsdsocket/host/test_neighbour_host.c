@@ -263,6 +263,9 @@ LONG netstack_interface_dhcp_state(UWORD i)
 { (VOID)i; h_unreachable("netstack_interface_dhcp_state"); return -1; }
 UWORD netstack_interface_dhcp_raw_state(UWORD i)
 { (VOID)i; h_unreachable("netstack_interface_dhcp_raw_state"); return 0; }
+LONG netstack_interface_dhcp_counters(UWORD i, AmiDhcpCounters *out)
+{ (VOID)i; (VOID)out; h_unreachable("netstack_interface_dhcp_counters");
+  return -1; }
 LONG netstack_interface_dhcp_lease(UWORD i, AmiDhcpLease *out)
 { (VOID)i; (VOID)out; h_unreachable("netstack_interface_dhcp_lease"); return -1; }
 LONG netstack_interface_dhcp6_status(UWORD i, AmiDhcp6Status *out)
