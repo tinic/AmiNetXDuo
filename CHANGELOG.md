@@ -31,8 +31,8 @@ are history.
   shortens pauses for other tasks under load.
 - The stack's timer tick runs at priority 20 with a 16 ms budget again,
   as in beta8.
-- CreateAmiNetXDuoStatusReport lists DHCP client counters and the reason
-  for the last discarded reply.
+- CreateAmiNetXDuoStatusReport lists DHCP client counters and the last
+  discarded reply's cause.
 
 ## 1.0.0-rc1
 
