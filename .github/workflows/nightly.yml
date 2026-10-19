@@ -38,11 +38,12 @@ jobs:
           fetch-depth: 0
 
       # Docs- and tool-only pushes do not package a candidate, so walk the
-      # recent successful main runs to the newest one that did.
+      # recent successful main runs to the newest one that did.  Any event:
+      # a dispatched full run packages one too.
       - name: Find the newest candidate on main
         id: pick
         run: |
-          gh run list --workflow ci.yml --branch main --event push \
+          gh run list --workflow ci.yml --branch main \
              --status success --limit 30 --json databaseId,headSha \
              --jq '.[] | "\(.databaseId) \(.headSha)"' |
           while read -r run sha; do
