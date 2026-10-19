@@ -63,7 +63,9 @@
  * input.device or the filesystem handlers and disk drivers; normal programs
  * run at 0.
  *
- *   20  input.device, AmiNetXDuo tick (TX_AMIGA_TIMER_PRIORITY, tx_port.h)
+ *   20  input.device
+ *   19  AmiNetXDuo tick (TX_AMIGA_TIMER_PRIORITY, tx_port.h)
+ *   15  card.resource
  *   10+ filesystem handlers, scsi.device and other disk drivers
  *    6  ehide.device (seen on the A3000)
  *    5  console.device, trackdisk.device, TCP: handler and its sessions
@@ -125,8 +127,8 @@
 #error "the TCP: processes must outrank normal programs"
 #endif
 #if defined(TX_AMIGA_TIMER_PRIORITY)
-#if TX_AMIGA_TIMER_PRIORITY > AMI_EXEC_INPUT_PRIORITY
-#error "the tick must not outrank input.device"
+#if TX_AMIGA_TIMER_PRIORITY >= AMI_EXEC_INPUT_PRIORITY
+#error "the tick must stay below input.device"
 #endif
 #if TX_AMIGA_TIMER_PRIORITY <= AMI_EXEC_HANDLER_PRIORITY
 #error "the tick must outrank the filesystem handlers and disk drivers"

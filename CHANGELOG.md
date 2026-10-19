@@ -29,8 +29,7 @@ are history.
   machine.
 - The stack's timer tick holds Forbid() for one tick at a time, which
   shortens pauses for other tasks under load.
-- The stack's timer tick runs at priority 20 with a 16 ms budget again,
-  as in beta8.
+- The stack's timer tick runs at priority 19, one below input.device.
 - CreateAmiNetXDuoStatusReport lists DHCP client counters and the last
   discarded reply's cause.
 

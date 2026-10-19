@@ -418,16 +418,17 @@ void    _tx_amiga_start_interrupts(void);
 #endif
 #endif
 
-/* Exec priority of the periodic tick Task: 20, as in beta8, level with
-   input.device and above the filesystem handlers and disk drivers (10).  It
-   must outrank every ThreadX task so that it preempts the baton holder, and a
-   busy handler or disk driver must not starve the wheel.  One service holds
-   the machine for about TX_AMIGA_TIMER_BUDGET_MS, one Forbid() per tick, so
-   input.device waits at most one tick.  Ladder asserted in
+/* Exec priority of the periodic tick Task: 19, one below input.device and
+   above the filesystem handlers, disk drivers (10) and card.resource (15).
+   It must outrank every ThreadX task so that it preempts the baton holder,
+   and a busy handler or disk driver must not starve the wheel.  Strictly
+   below input.device, so input preempts it between ticks: Exec does not
+   preempt for an equal priority.  One service holds the machine for about
+   TX_AMIGA_TIMER_BUDGET_MS, one Forbid() per tick.  Ladder asserted in
    src/thread_priorities.h.  */
 
 #ifndef TX_AMIGA_TIMER_PRIORITY
-#define TX_AMIGA_TIMER_PRIORITY                 20
+#define TX_AMIGA_TIMER_PRIORITY                 19
 #endif
 
 /* ----------------------------------------------------------- the tick ---- */
@@ -464,7 +465,7 @@ void    _tx_amiga_start_interrupts(void);
    throws ticks away.  */
 
 #ifndef TX_AMIGA_TIMER_BUDGET_MS
-#define TX_AMIGA_TIMER_BUDGET_MS                16UL
+#define TX_AMIGA_TIMER_BUDGET_MS                2UL
 #endif
 
 /* Startup validation window for the wakeup source, in milliseconds, and the rate
