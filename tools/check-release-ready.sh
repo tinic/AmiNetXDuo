@@ -21,8 +21,8 @@ if ! grep -q 'tools/check-ci-success\.sh "\$GITHUB_SHA"' "$workflow" ||
 fi
 
 emulator=.github/workflows/emulator.yml
-if ! grep -q 'name: release-candidate-${{ github\.sha }}' "$emulator" ||
-   ! grep -q 'tools/check-release-candidate\.sh build/dist "\$GITHUB_SHA"' "$emulator"; then
+if ! grep -q 'name: release-candidate-${{ steps\.candidate\.outputs\.sha }}' "$emulator" ||
+   ! grep -q 'tools/check-release-candidate\.sh build/dist "\$CANDIDATE_SHA"' "$emulator"; then
     echo "check-release-ready=FAIL emulator E2E does not consume the CI candidate" >&2
     exit 1
 fi
