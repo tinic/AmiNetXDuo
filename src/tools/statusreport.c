@@ -297,6 +297,16 @@ static const SrField sr_health_fields[] =
     SR_F("tick_lost",        NetStatusHealth, nsl_TickLost),
     SR_F("tick_clipped",     NetStatusHealth, nsl_TickClipped),
     SR_F("tick_worst_stall_ms", NetStatusHealth, nsl_TickWorstStallMs),
+    /* The service cost before the worst stall: small beside a long stall
+       means the tick task was starved, not that the service was slow. */
+    SR_F("tick_worst_service_us", NetStatusHealth, nsl_TickWorstServiceUs),
+    SR_F("tick_worst_hold_us", NetStatusHealth, nsl_TickWorstHoldUs),
+    SR_F("tick_service_us",  NetStatusHealth, nsl_TickServiceUs),
+    SR_F("tick_ticks",       NetStatusHealth, nsl_TickTicks),
+    SR_F("tick_catchups",    NetStatusHealth, nsl_TickCatchups),
+    SR_F("tick_over_budget", NetStatusHealth, nsl_TickOverBudget),
+    SR_F("tick_deferred",    NetStatusHealth, nsl_TickDeferred),
+    SR_F("tick_skew_peak",   NetStatusHealth, nsl_TickSkewPeak),
     SR_F("alloc_live",       NetStatusHealth, nsl_AllocLive),
     SR_F("alloc_peak",       NetStatusHealth, nsl_AllocPeak),
     SR_F("alloc_refused",    NetStatusHealth, nsl_AllocRefused),
