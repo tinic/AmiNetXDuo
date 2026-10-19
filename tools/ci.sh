@@ -511,7 +511,9 @@ host_test_targets() { # builddir
 #      571 with tools_refcompat_onlink: DONTROUTE's on-link rule, 127/8.
 #      572 with tools_refcompat_addif: AddNetInterface's TIMEOUT tool type
 #      and its per-launch Workbench log name.
-HOST_TESTS_EXPECTED=572
+#      573 with dhcp_request_restart_regression (#306): REQUESTING gives up
+#      after the retransmission window and starts again with a new XID.
+HOST_TESTS_EXPECTED=573
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,

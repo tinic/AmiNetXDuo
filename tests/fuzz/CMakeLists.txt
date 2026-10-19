@@ -331,6 +331,34 @@ target_compile_definitions(dhcp_lease_option_regression PRIVATE
 target_compile_options(dhcp_lease_option_regression PRIVATE -UAMINETXDUO_IPV6 ${_fuzz_san})
 target_link_options(dhcp_lease_option_regression PRIVATE ${_fuzz_san})
 
+# #306: a server that never ACKs.  REQUESTING gives up after
+# NX_DHCP_MAX_REQUEST_RETRANS and starts again from INIT with a new XID; the
+# replies go in through IPv4 and UDP, so the receive path is the real one.
+add_executable(dhcp_request_restart_regression
+    dhcp_request_restart_regression.c
+    fuzz_txstub.c
+    "${AMINETXDUO_NETXDUO}/common/src/nxd_udp_socket_send.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_udp_socket_send.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_udp_socket_source_send.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_udp_socket_create.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_udp_socket_delete.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_udp_socket_bind.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_udp_socket_unbind.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_udp_socket_receive.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_udp_socket_receive_notify.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_ip_gateway_address_get.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_ip_gateway_address_clear.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_ip_interface_address_get.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_ip_interface_address_set.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_ip_packet_deferred_receive.c"
+    ${_fuzz_nx_src})
+target_include_directories(dhcp_request_restart_regression PRIVATE
+    "${AMINETXDUO_NETXDUO}/addons/dhcp" ${_fuzz_nx_inc})
+target_compile_definitions(dhcp_request_restart_regression PRIVATE
+    NX_DISABLE_ERROR_CHECKING TX_DISABLE_ERROR_CHECKING ${_fuzz_nx_def})
+target_compile_options(dhcp_request_restart_regression PRIVATE -UAMINETXDUO_IPV6 ${_fuzz_san})
+target_link_options(dhcp_request_restart_regression PRIVATE ${_fuzz_san})
+
 add_executable(fuzz_mdns
     fuzz_mdns.c
     "${AMINETXDUO_NETXDUO}/addons/mdns/nxd_mdns.c"
@@ -684,6 +712,9 @@ add_test(NAME dhcp_lease_regression
 
 add_test(NAME dhcp_lease_option_regression
          COMMAND dhcp_lease_option_regression)
+
+add_test(NAME dhcp_request_restart_regression
+         COMMAND dhcp_request_restart_regression)
 
 # The seed set carries the backlog's chunk sizes, the nine-hex-digit one that
 # wrapped to zero and read as a terminator, and the size line long enough to be
