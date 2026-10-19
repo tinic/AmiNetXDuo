@@ -293,9 +293,10 @@ fi
 same_rc "SYS:ShowNetStatus" 1 "SYS:ShowNetStatus QUIET" 1 \
         "and returns what the loud run returned"
 
-says "SYS:AddNetInterface nosuch0 QUIET" 1 'no interface "nosuch0"' \
-     "AddNetInterface QUIET still reports a missing interface file"
-want_rc "SYS:AddNetInterface nosuch0 QUIET" 1 20 "and still fails"
+# Roadshow's QUIET: no error message, and a failure is WARN (rc 5).
+says_nothing "SYS:AddNetInterface nosuch0 QUIET" 1 \
+             "AddNetInterface QUIET says nothing about a missing interface file"
+want_rc "SYS:AddNetInterface nosuch0 QUIET" 1 5 "and fails as WARN"
 
 says_nothing "SYS:CheckNetConfig QUIET" 1 "CheckNetConfig QUIET prints nothing"
 same_rc "SYS:CheckNetConfig" 1 "SYS:CheckNetConfig QUIET" 1 \
@@ -355,11 +356,13 @@ same_rc "SYS:DeleteNetRoute DESTINATION=192.168.77.0" 1 \
         "SYS:DeleteNetRoute DESTINATION=192.168.77.0 QUIET" 1 \
         "and returns what the loud run returned"
 
-says "SYS:ConfigureNetInterface nosuch0 QUIET ADDRESS 10.99.99.99/24" 1 \
-     'no interface "nosuch0"' \
-     "ConfigureNetInterface QUIET still reports an unknown interface"
-says "SYS:RemoveNetInterface nosuch0 QUIET" 1 'no interface "nosuch0"' \
-     "RemoveNetInterface QUIET still reports an unknown interface"
+says_nothing "SYS:ConfigureNetInterface nosuch0 QUIET ADDRESS 10.99.99.99/24" 1 \
+             "ConfigureNetInterface QUIET says nothing about an unknown interface"
+want_rc "SYS:ConfigureNetInterface nosuch0 QUIET ADDRESS 10.99.99.99/24" 1 5 \
+        "and fails as WARN"
+says_nothing "SYS:RemoveNetInterface nosuch0 QUIET" 1 \
+             "RemoveNetInterface QUIET says nothing about an unknown interface"
+want_rc "SYS:RemoveNetInterface nosuch0 QUIET" 1 5 "and fails as WARN"
 
 says_nothing "SYS:NetShutdown QUIET" 1 "NetShutdown QUIET says nothing"
 same_rc "SYS:NetShutdown" 1 "SYS:NetShutdown QUIET" 1 \
