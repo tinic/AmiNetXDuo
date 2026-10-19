@@ -672,7 +672,12 @@ cleanup() {
     rig_drop_drive
     return 0
 }
-trap cleanup EXIT INT TERM HUP
+# EXIT does the cleanup.  A signal trap that only cleaned up let the script
+# carry on after INT or TERM: a cancelled run went on booting guests.
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # headless=true stops Amiberry OPENING A WINDOW; it does not stop it asking SDL
 # for a video subsystem.  osdep_platform_init_sdl() calls SDL_Init with

@@ -2216,7 +2216,12 @@ cleanup() {
     SERIAL_PID=""
     release_lock
 }
-trap cleanup EXIT INT TERM HUP
+# EXIT does the cleanup.  A signal trap that only cleaned up let the script
+# carry on after INT or TERM: a cancelled run went on booting guests.
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # CI is headless by default.  AMINETXDUO_EMU_VISIBLE=1 is deliberately narrow:
 # it exposes the guest display for a human visual-review run while retaining
