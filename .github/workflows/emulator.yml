@@ -165,7 +165,7 @@ jobs:
       vars.AMINETXDUO_KICKSTART_RUNNER != '' &&
       (github.event_name != 'workflow_dispatch' || inputs.run_kickstart)
     runs-on: ${{ vars.AMINETXDUO_KICKSTART_RUNNER }}
-    env:
+    env: &lab-env
       # Set these on the runner, or as repository variables.  They are PATHS
       # on that machine -- nothing copyrighted is ever uploaded to GitHub.
       AMINETXDUO_KICKSTART: ${{ vars.AMINETXDUO_KICKSTART }}
@@ -231,42 +231,16 @@ jobs:
         with:
           submodules: recursive
 
-      # THE LAB ENV, WHICHEVER WAY THE LISTENER STARTED (#56).  @reboot sourced
-      # env.sh and keepalive.sh did not, so oommsg ran or skipped by accident.
-      # Only names that are empty here are filled: a repository variable, or
-      # the listener's own value, wins.  A step-level `env:` still beats this.
+      # WHAT AN EARLIER RUN LEFT RUNNING.  A guest or a harness from a run
+      # that was cancelled keeps writing this checkout's logs and holding its
+      # ports, and tools/check-rate.sh then refuses the throughput gate
+      # (reason=stale_emulator), as it did on 2026-10-16 and 2026-10-17.
+      - name: Stop what an earlier run left running
+        run: tools/ci-reap.py
+
+      # THE LAB ENV, WHICHEVER WAY THE LISTENER STARTED (#56).
       - name: Lab environment
-        run: |
-          f="$HOME/amiga-assets/env.sh"
-          if [ ! -f "$f" ]; then
-            if [ "${AMINETXDUO_LAB_RIG:-}" = 1 ]; then
-              echo "::error::$f is missing on the lab rig"; exit 1
-            fi
-            echo "no $f, nothing to load"; exit 0
-          fi
-          # Only what env.sh itself defines: clear the inherited names first.
-          # NUL-separated so a value may hold spaces, brackets or newlines;
-          # names are logged, values never are.
-          bash -c 'for v in $(compgen -v AMINETXDUO_); do unset "$v"; done
-                   . "$1" >/dev/null
-                   for v in $(compgen -v AMINETXDUO_); do
-                     printf "%s\0%s\0" "$v" "${!v}"
-                   done' _ "$f" |
-          while IFS= read -r -d '' name && IFS= read -r -d '' value; do
-            case "$name" in
-              *TOKEN*|*PASS*|*SECRET*|*KEY*|*CRED*)
-                echo "$name: not exported (credential-shaped name)"; continue ;;
-            esac
-            if [ -n "${!name:-}" ]; then
-              echo "$name: kept the job's value"
-              continue
-            fi
-            # GitHub's multi-line form, with a delimiter the value cannot hold.
-            eof="EOF_$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
-            case "$value" in *"$eof"*) echo "::error::$name: delimiter clash"; exit 1 ;; esac
-            printf '%s<<%s\n%s\n%s\n' "$name" "$eof" "$value" "$eof" >> "$GITHUB_ENV"
-            echo "$name: from env.sh"
-          done
+        run: tools/ci-lab-env.sh
 
       # THE PINNED TOOLCHAIN, WHICH THIS JOB NEVER ASKED FOR.
       #
@@ -378,7 +352,7 @@ jobs:
       # A Wi-Fi unit that associates 70 s after the interface came up, in
       # front of the A2065: the DHCP lease has to follow the association.
       - name: DHCP lease after a late Wi-Fi association
-        if: ${{ !cancelled() && steps.build.outcome == success }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: >-
           tools/ci-arm.sh -n "DHCP lease after a late Wi-Fi association"
           -r AMINETXDUO_A2065 --
@@ -843,6 +817,95 @@ jobs:
           -r AMINETXDUO_FILESYSBOX -r AMINETXDUO_PEER --
           tools/ci.sh smb
 
+      # A CANCELLED RUN LEAVES ITS GUESTS BEHIND.
+      #
+      # `concurrency: cancel-in-progress` cancels this workflow the moment
+      # another run of it starts, and the job time limit cancels it too.  On a
+      # hosted runner the whole VM goes with it; here the machine stays.  The
+      # runner signals the step's shell only, so the harness under it is
+      # re-parented to init and goes on starting guests.  Run 39112947759 hit
+      # the time limit in the release matrix: a sweep for "amiberry .*build/"
+      # killed guests for ten seconds while run-all.sh started the next row,
+      # and the last one ran for 8 h 47 m.
+      #
+      # tools/ci-reap.py stops every process whose environment carries this
+      # job's GITHUB_WORKSPACE -- harness and guest alike, wherever they were
+      # re-parented -- so it cannot reach the demo guest or another checkout.
+      - name: Leave no guests behind
+        if: always()
+        run: |
+          tools/ci-reap.py
+          pat="amiberry .*$GITHUB_WORKSPACE/build/"
+          leftover_guests=$(pgrep -cf "$pat" || true)
+          echo "leftover_guests=$leftover_guests"
+          test "$leftover_guests" = 0
+
+      - name: Upload emulator logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          # amiberry-run.sh writes build/amiberry-testhd-<tag>/, not
+          # build/testhd-<tag>/, so the conformance TAP log was never
+          # collected -- which mattered while run-fsuae.sh exited 0 on every
+          # run and grading it by hand was the only way to see a failure.
+          name: emulator-logs-kickstart
+          path: |
+            build/ci/emu-*.log
+            build/serial*.log
+            build/amiberry-testhd-*/bsdsocktest.log
+            build/amiberry-testhd-*/conf-out.txt
+            build/cardsweep-results.txt
+            build/cardsweep-logs/*.log
+            build/lossgate-*/median.txt
+            build/lossgate-*/samples.txt
+            build/smb-*-serial.log
+            build/smbhd-*/smbcheck.txt
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # ------------------------------------------------------------------------
+  # THE RELEASE ARCHIVE, IN A JOB OF ITS OWN.
+  #
+  # The release matrix takes about four hours and nothing in it hangs: on
+  # 2026-10-18 every row reached a verdict in 51 to 690 s.  It grew from 50
+  # rows (2026-10-10) to 85, and each install got slower with the 5.8 MB rc1
+  # archive (beta8: 2.3 MB); cpu_speed=max does not help, the time is the
+  # Installer copying.  Behind 2.5 h of harnesses it overran the 6 h job limit
+  # three nights running.  It runs after `kickstart` on the same runner, so
+  # the two never share the machine.
+  # ------------------------------------------------------------------------
+  release:
+    name: Release archive on Kickstart 3.1 (self-hosted)
+    needs: kickstart
+    if: ${{ !cancelled() && needs.kickstart.result != 'skipped' }}
+    runs-on: ${{ vars.AMINETXDUO_KICKSTART_RUNNER }}
+    env: *lab-env
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Stop what an earlier run left running
+        run: tools/ci-reap.py
+
+      - name: Lab environment
+        run: tools/ci-lab-env.sh
+
+      - name: Toolchain
+        run: tools/fetch-toolchain.sh
+
+      - name: Check the ROM is really there
+        run: |
+          if [ ! -f "$AMINETXDUO_KICKSTART" ]; then
+            echo "::error::AMINETXDUO_KICKSTART is set to '$AMINETXDUO_KICKSTART'," \
+                 "which does not exist on this runner."
+            exit 1
+          fi
+
+      - name: Build the shipping configuration
+        id: build
+        run: AMINETXDUO_CI_CROSS="default" tools/ci.sh cross
+
       # THE ONE THAT WOULD HAVE STOPPED 0.17.0 AND 0.17.1 SHIPPING.
       #
       # Everything above runs a test program on a bare directory drive.  This
@@ -856,40 +919,79 @@ jobs:
       # Use the candidate CI accepted for this exact commit.  Rebuilding here
       # used to create a second set of release bytes from a hand-copied minimal
       # configuration, after CI had already built the real archive.
+      # A COMMIT THAT CHANGED ONLY DOCUMENTATION HAS NO CANDIDATE.  ci.yml's
+      # plan puts it in `docs` mode and skips the package job, so a nightly
+      # on such a HEAD had nothing to install.  The candidate is then the one
+      # CI built for the newest earlier commit on main that has one, and the
+      # next step requires everything since it to be documentation by
+      # tools/ci-plan.sh -- the same rule that skipped the package job.
       - name: Find the exact CI candidate
         id: candidate
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         uses: actions/github-script@v7
         with:
           script: |
+            const repo = { owner: context.repo.owner, repo: context.repo.repo };
+            const hasCandidate = async (run) => {
+              const a = await github.rest.actions.listWorkflowRunArtifacts({
+                ...repo, run_id: run.id, name: `release-candidate-${run.head_sha}`
+              });
+              return a.data.artifacts.some((x) => !x.expired);
+            };
             const runs = await github.rest.actions.listWorkflowRuns({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              workflow_id: 'ci.yml',
-              head_sha: context.sha,
-              event: 'push',
-              per_page: 10
+              ...repo, workflow_id: 'ci.yml', head_sha: context.sha,
+              event: 'push', per_page: 10
             });
             const run = runs.data.workflow_runs[0];
             if (!run || run.status !== 'completed' || run.conclusion !== 'success') {
               core.setFailed(`no successful latest CI run for ${context.sha}`);
               return;
             }
-            core.setOutput('run_id', run.id);
+            if (await hasCandidate(run)) {
+              core.setOutput('run_id', run.id);
+              core.setOutput('sha', context.sha);
+              return;
+            }
+            const earlier = await github.rest.actions.listWorkflowRuns({
+              ...repo, workflow_id: 'ci.yml', branch: 'main', event: 'push',
+              status: 'success', created: `<${run.created_at}`, per_page: 30
+            });
+            for (const r of earlier.data.workflow_runs) {
+              if (await hasCandidate(r)) {
+                core.info(`candidate_sha=${r.head_sha} candidate_run=${r.id}`);
+                core.setOutput('run_id', r.id);
+                core.setOutput('sha', r.head_sha);
+                return;
+              }
+            }
+            core.setFailed(`no release candidate for ${context.sha} or the 30 CI runs before it`);
+
+      - name: Only documentation since the candidate
+        id: docsonly
+        if: ${{ !cancelled() && steps.candidate.outcome == 'success' && steps.candidate.outputs.sha != github.sha }}
+        env:
+          CANDIDATE_SHA: ${{ steps.candidate.outputs.sha }}
+        run: |
+          git fetch -q --depth=1 origin "$CANDIDATE_SHA"
+          plan=$(tools/ci-plan.sh "$CANDIDATE_SHA" "$GITHUB_SHA" push)
+          echo "$plan"
+          printf '%s\n' "$plan" | grep -qx 'mode=docs'
 
       - name: Download the exact CI candidate
-        if: ${{ !cancelled() && steps.candidate.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.candidate.outcome == 'success' && steps.docsonly.outcome != 'failure' }}
         uses: actions/download-artifact@v4
         with:
-          name: release-candidate-${{ github.sha }}
+          name: release-candidate-${{ steps.candidate.outputs.sha }}
           path: build/dist
           github-token: ${{ github.token }}
           run-id: ${{ steps.candidate.outputs.run_id }}
 
       - name: Verify the exact CI candidate
         id: dist
-        if: ${{ !cancelled() && steps.candidate.outcome == 'success' }}
-        run: tools/check-release-candidate.sh build/dist "$GITHUB_SHA"
+        if: ${{ !cancelled() && steps.candidate.outcome == 'success' && steps.docsonly.outcome != 'failure' }}
+        env:
+          CANDIDATE_SHA: ${{ steps.candidate.outputs.sha }}
+        run: tools/check-release-candidate.sh build/dist "$CANDIDATE_SHA"
 
       # -H IS THE HALF THIS ARM CLAIMS TO DO, and it is why the arm goes
       # through tools/ci.sh rather than calling run-workbench.sh here.  Without
@@ -931,32 +1033,11 @@ jobs:
           -r AMINETXDUO_ADF_DIR -r AMINETXDUO_INSTALLER --
           tools/ci.sh e2ecards
 
-      # A CANCELLED RUN LEAVES ITS GUESTS BEHIND.
-      #
-      # `concurrency: cancel-in-progress` cancels this workflow the moment
-      # another run of it starts.  On a hosted runner the whole VM goes with
-      # it; here the machine stays, and an amiberry from the cancelled run
-      # keeps running with its tag, its serial port and its testhd directory.
-      # The next run takes the same three and shares them with a guest nobody
-      # is reading -- which produces a corrupted artifact rather than a failed
-      # one, and those are much harder to notice.  Seen for real on 2026-08-12.
-      #
-      # Scoped to this job's workspace through the config path amiberry was
-      # started with, so it cannot reach the demo guest or any other checkout
-      # on the same machine.
-      # A cancelled harness can start its last guest after the first sweep:
-      # run 37611441501 left matrix-STATIC_NO_DRIVERS-install.uae running with
-      # PPID 1 three seconds after this step began and reported zero guests.
-      # Sweep for ten seconds to catch that late child as well.
       - name: Leave no guests behind
         if: always()
         run: |
+          tools/ci-reap.py
           pat="amiberry .*$GITHUB_WORKSPACE/build/"
-          for pass in 1 2 3 4 5; do
-            pkill -TERM -f "$pat" || true
-            sleep 2
-            pkill -KILL -f "$pat" || true
-          done
           leftover_guests=$(pgrep -cf "$pat" || true)
           echo "leftover_guests=$leftover_guests"
           test "$leftover_guests" = 0
@@ -965,22 +1046,10 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          # amiberry-run.sh writes build/amiberry-testhd-<tag>/, not
-          # build/testhd-<tag>/, so the conformance TAP log was never
-          # collected -- which mattered while run-fsuae.sh exited 0 on every
-          # run and grading it by hand was the only way to see a failure.
-          name: emulator-logs-kickstart
+          name: emulator-logs-release
           path: |
             build/ci/emu-*.log
             build/serial*.log
-            build/amiberry-testhd-*/bsdsocktest.log
-            build/amiberry-testhd-*/conf-out.txt
-            build/cardsweep-results.txt
-            build/cardsweep-logs/*.log
-            build/lossgate-*/median.txt
-            build/lossgate-*/samples.txt
-            build/smb-*-serial.log
-            build/smbhd-*/smbcheck.txt
           if-no-files-found: ignore
           retention-days: 14
 
@@ -1002,10 +1071,11 @@ jobs:
   gate:
     name: tier report
     runs-on: ubuntu-latest
-    needs: [kickstart, cli-crashes]
+    needs: [kickstart, release, cli-crashes]
     if: always()
     env:
       RESULT: ${{ needs.kickstart.result }}
+      RELEASE_RESULT: ${{ needs.release.result }}
       CLI_RESULT: ${{ needs.cli-crashes.result }}
       # true when the tier was asked for: nightly, a tag, or a dispatch that
       # ticked the box.
@@ -1020,6 +1090,7 @@ jobs:
             echo "| tier | ROM | expected | result |"
             echo "|---|---|---|---|"
             echo "| Kickstart 3.1 | self-hosted only | $EXPECTED | $RESULT |"
+            echo "| Release archive, Kickstart 3.1 | self-hosted only | $EXPECTED | $RELEASE_RESULT |"
             echo "| Shipped CLI (default/fat, 4/8 KB) | self-hosted only | $CLI_EXPECTED | $CLI_RESULT |"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -1037,8 +1108,20 @@ jobs:
           # sweep -- the only cross-core coverage there is -- among what did
           # not happen.  `failure` is the tier speaking for itself and is
           # already red; do not report it twice.
+          # The release job runs only after this one, so a kickstart result
+          # of success or failure with the release job missing is a release
+          # gate that did not run.
           case "$RESULT" in
-              success|failure) exit 0 ;;
+              success|failure)
+                  case "$RELEASE_RESULT" in
+                      success|failure) exit 0 ;;
+                  esac
+                  if [ "$EXPECTED" = "true" ]; then
+                      echo "::error::The release archive job did NOT run" \
+                           "($RELEASE_RESULT) on a run that expected it."
+                      exit 1
+                  fi
+                  exit 0 ;;
           esac
 
           {

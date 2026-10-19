@@ -149,6 +149,12 @@ SCENARIOS=(
 )
 declare -a RESULTS
 
+# A cancelled run stops here.  Without these the loop went on to the next
+# scenario each time the one under it was killed (run 39112947759).
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
 ROOT=$(cd "$HERE/../.." && pwd)
 GCC="${AMIGA_GCC:-$HOME/amigaos/tools/m68k-amigaos-gcc/bin/m68k-amigaos-gcc}"
 NDK="${AMIGA_NDK:-$HOME/amigaos/tools/m68k-amigaos-gcc/m68k-amigaos/ndk-include}"
@@ -299,6 +305,11 @@ SPACES_DRAWER)         opts=(-l AVERAGE -D -W) ;;
     AMINETXDUO_MODEL="${scenario_model:-${AMINETXDUO_MODEL:-}}" \
         "$ROOT/install/test/run-workbench.sh" "${opts[@]}" "${ARGS[@]}"
     rc=$?
+    # Killed by a signal: the run is being stopped, not judged.
+    if [ "$rc" -ge 128 ]; then
+        echo "==> $scenario was stopped by a signal (exit $rc); not starting another"
+        exit "$rc"
+    fi
     case "$rc" in
         # run-workbench.sh's own codes: 2 is "this box cannot run this test",
         # 3 is "no second machine could reach the guest".  Neither is a pass

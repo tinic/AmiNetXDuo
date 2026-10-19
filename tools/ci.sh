@@ -2736,6 +2736,7 @@ stage_matrix() {
            bad=$((bad + 1)) ;;
     esac
 
+    rc=0
     "$ROOT/tests/tools/run-cpuspeed.sh" -b "$BUILD/default" || rc=$?
     case "$rc" in
         0) note "PASS  every CPU arm came up and carried a packet" ;;
@@ -3014,6 +3015,7 @@ stage_bridged() {
     fi
 
     printf '\n-- NetShutdown, and the programs using the network\n'
+    rc=0
     "$ROOT/tests/tools/run-netshutdown.sh" -b "$BUILD/default" || rc=$?
     case "$rc" in
         0) note "PASS  both arms: the cooperative one let go, the deaf one" \

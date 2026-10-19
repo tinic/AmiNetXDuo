@@ -132,8 +132,7 @@ SYS:netstat -i
 SYS:ShowNetStatus eth0
 $PING_COMMAND
 SYS:ConfigureNetInterface eth0 CONFIGURE=DHCP NETMASK 255.255.255.0
-SYS:ConfigureNetInterface eth0 CONFIGURE=AUTO
-SYS:ConfigureNetInterface eth0 CONFIGURE=DHCP TIMEOUT 3
+SYS:ConfigureNetInterface eth0 CONFIGURE=BOOTP
 SYS:ConfigureNetInterface eth0 TIMEOUT 30
 SYS:ConfigureNetInterface nosuch0 RELEASE
 SYS:ShowNetStatus eth0

@@ -2216,7 +2216,12 @@ cleanup() {
     SERIAL_PID=""
     release_lock
 }
-trap cleanup EXIT INT TERM HUP
+# EXIT does the cleanup.  A signal trap that only cleaned up let the script
+# carry on after INT or TERM: a cancelled run went on booting guests.
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # CI is headless by default.  AMINETXDUO_EMU_VISIBLE=1 is deliberately narrow:
 # it exposes the guest display for a human visual-review run while retaining
@@ -2760,10 +2765,17 @@ INSTALL_STATUS=$BOOT_STATUS
 
 # Every Installer run reaches its last page: the window title says 100%.
 # A run that stops part way -- an Installer that dies -- closes earlier.
-INSTALL_RUNS_DONE=$(awk '
-    /^installdrive: run [0-9]+: starting/ { last = "" }
-    /^installdrive:   window "/ { last = $0 }
-    /^installdrive: run [0-9]+ finished/ { if (last ~ /\(100% done\)"$/) ok++; else bad++ }
+# A pretend run copies nothing, so its progress never reaches 100%; its last
+# page is the one with Proceed and no "Abort Install".
+case "$FOREIGN_MODE" in *-pretend) _pretend=1 ;; *) _pretend=0 ;; esac
+INSTALL_RUNS_DONE=$(awk -v pretend="$_pretend" '
+    /^installdrive: run [0-9]+: starting/ { last = ""; abort = 1 }
+    /^installdrive:   window "/ { last = $0; abort = 0 }
+    /^installdrive:   gadget [0-9]+ "Abort Install"/ { abort = 1 }
+    /^installdrive: run [0-9]+ finished/ {
+        if (last ~ /\(100% done\)"$/ || (pretend && last != "" && !abort)) ok++
+        else bad++
+    }
     END { printf "%d %d\n", ok, bad }' "$HD/installdrive.txt" 2>/dev/null)
 [ -f "$HD/installdrive.txt" ] || INSTALL_RUNS_DONE="-1 -1"
 echo "installer_runs_completed=${INSTALL_RUNS_DONE% *} installer_runs_stopped=${INSTALL_RUNS_DONE#* }"
