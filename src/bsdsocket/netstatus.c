@@ -378,6 +378,11 @@ static VOID ns_fill_dhcp(NsWriter *w)
             out->nsd_LastReplySource = counters.adc_LastReplySource;
             out->nsd_LastReplyType   = counters.adc_LastReplyType;
             out->nsd_LastReject      = counters.adc_LastReject;
+            out->nsd_LastSendStatus  = counters.adc_LastSendStatus;
+            out->nsd_OfferedAddress  = counters.adc_OfferedAddress;
+            out->nsd_RequestServer   = counters.adc_RequestServer;
+            out->nsd_Xid             = counters.adc_Xid;
+            out->nsd_RequestRestarts = counters.adc_RequestRestarts;
         }
 
         if (state == AMI_DHCP_BOUND)

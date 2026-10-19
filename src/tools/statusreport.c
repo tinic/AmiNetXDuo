@@ -540,6 +540,16 @@ static VOID sr_live(struct Library *base)
                 sr_str(&sr_out, sr_k, sr_dhcp_type(d->nsd_LastReplyType));
                 sr_key(sr_k, sizeof(sr_k), prefix, "last_reply_server", NULL);
                 sr_addr_ipv4(&sr_out, sr_k, d->nsd_LastReplySource);
+                sr_key(sr_k, sizeof(sr_k), prefix, "offered_address", NULL);
+                sr_addr_ipv4(&sr_out, sr_k, d->nsd_OfferedAddress);
+                sr_key(sr_k, sizeof(sr_k), prefix, "request_server", NULL);
+                sr_addr_ipv4(&sr_out, sr_k, d->nsd_RequestServer);
+                sr_key(sr_k, sizeof(sr_k), prefix, "xid", NULL);
+                sr_hex(&sr_out, sr_k, d->nsd_Xid);
+                sr_key(sr_k, sizeof(sr_k), prefix, "last_send_status", NULL);
+                sr_ulong(&sr_out, sr_k, d->nsd_LastSendStatus);
+                sr_key(sr_k, sizeof(sr_k), prefix, "request_restarts", NULL);
+                sr_ulong(&sr_out, sr_k, d->nsd_RequestRestarts);
             }
 
             if (d->nsd_State != NETSTATUS_DHCP_BOUND)

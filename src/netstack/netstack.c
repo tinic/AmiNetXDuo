@@ -3300,6 +3300,11 @@ LONG netstack_interface_dhcp_counters(UWORD index, AmiDhcpCounters *out)
         out->adc_LastReplySource = r->nx_dhcp_last_reply_source;
         out->adc_LastReplyType   = r->nx_dhcp_last_reply_type;
         out->adc_LastReject      = r->nx_dhcp_last_reject;
+        out->adc_OfferedAddress  = r->nx_dhcp_offered_address;
+        out->adc_RequestServer   = r->nx_dhcp_request_server;
+        out->adc_Xid             = r->nx_dhcp_xid;
+        out->adc_RequestRestarts = r->nx_dhcp_request_restarts;
+        out->adc_LastSendStatus  = r->nx_dhcp_last_send_status;
         return AMI_NET_OK;
     }
     return AMI_NET_ERR_STATE;

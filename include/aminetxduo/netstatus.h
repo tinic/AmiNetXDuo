@@ -368,6 +368,12 @@ typedef struct NetStatusDhcp
     ULONG   nsd_LastReplySource;        /* host byte order; 0 = none yet     */
     UBYTE   nsd_LastReplyType;          /* DHCP option 53; 0 = it had none   */
     UBYTE   nsd_LastReject;             /* NETSTATUS_DHCPREJECT_*            */
+    UBYTE   nsd_LastSendStatus;         /* NetX status of the last send; 0 ok */
+    UBYTE   nsd_Pad0;
+    ULONG   nsd_OfferedAddress;         /* yiaddr of the last Offer taken    */
+    ULONG   nsd_RequestServer;          /* option 54 the last REQUEST sent   */
+    ULONG   nsd_Xid;                    /* current transaction ID            */
+    ULONG   nsd_RequestRestarts;        /* REQUESTING gave up, back to INIT  */
 } NetStatusDhcp;
 
 /* ---------------------------------------------------- NETSTATUS_DHCP6 --- */
