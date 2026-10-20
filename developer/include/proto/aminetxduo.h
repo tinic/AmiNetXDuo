@@ -1,4 +1,4 @@
-/* Automatically generated header (sfdc 1.11e)! Do not edit! */
+/* Automatically generated header (sfdc 1.13)! Do not edit! */
 
 #ifndef PROTO_AMINETXDUO_H
 #define PROTO_AMINETXDUO_H

@@ -1,4 +1,4 @@
-/* Automatically generated header (sfdc 1.11e)! Do not edit! */
+/* Automatically generated header (sfdc 1.13)! Do not edit! */
 
 #ifndef _INLINE_AMINETXDUO_H
 #define _INLINE_AMINETXDUO_H

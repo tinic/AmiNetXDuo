@@ -1,4 +1,4 @@
-/* Automatically generated header (sfdc 1.11e)! Do not edit! */
+/* Automatically generated header (sfdc 1.13)! Do not edit! */
 
 #ifndef CLIB_AMINETXDUO_PROTOS_H
 #define CLIB_AMINETXDUO_PROTOS_H
@@ -38,10 +38,10 @@ LONG NetStackControl(ULONG magic, ULONG op, APTR arg, ULONG size);
 
 /* RFC 3493 section 4, interface identification.  bsdsocket.library revision */
 /* 3 and up.  These four LVOs are fixed forever. */
-ULONG if_nametoindex(const char * ifname);
-char * if_indextoname(ULONG ifindex, char * ifname);
+ULONG if_nametoindex(const char *ifname);
+char * if_indextoname(ULONG ifindex, char *ifname);
 struct if_nameindex * if_nameindex(void);
-VOID if_freenameindex(struct if_nameindex * ptr);
+VOID if_freenameindex(struct if_nameindex *ptr);
 
 #ifdef __cplusplus
 }

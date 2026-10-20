@@ -1,105 +1,123 @@
-**This is not a release of AmiNetXDuo.** It is a build artifact: the
-m68k-amigaos cross toolchain this project compiles against, built from source
-and published here because nothing upstream publishes this pairing.
+**This is a compiler/toolchain package, not an AmiNetXDuo product release.**
 
-Which asset is pinned, and its expected hash, is recorded in
-`tools/fetch-toolchain.sh`. This file describes what the assets are.
+Use codewiz/AmigaPorts GCC `amiga16.2` at
+`8dc8d8365a3825b74dfba58f8e80545b052e0cd5` and its complete runtime/SDK
+baseline. Both compiler and binutils source match codewiz. Earlier GCC fixes
+remain through upstream ancestry. No bebbo `devel-cma` changes are included.
 
-## The assets
+## Version policy
 
-| | |
-|---|---|
-| GCC | 16.2.0b (C/C++/ObjC), tinic/gcc `f098a8ef` (AmigaPorts `amiga16.2` `1d4ca5d4` + 3 m68k commits) |
-| binutils | 2.46, tinic/binutils-gdb `a3afdefb` (AmigaPorts `amiga-2.46` `2efe6986` + PRs #35-#37), no local patches |
-| NDK | 3.9 (`INCLUDE_VERSION` 45) + Roadshow bsdsocket/SANA-II headers |
-| Also | libnix, libgcc, libpthread, vasm, sfdc, fd2sfd, fd2pragma, gprof |
-| Prefix | `opt/m68k-amigaos/` |
+`tools/toolchain-version.sh` is the single identity source. The package name
+is upstream GCC `BASE-VER` plus our revision: **16.2.1b-anx.2**. The release
+tag is **toolchain-m68k-amigaos-gcc-16.2.1b-anx.2**.
+Increment `anx.N` for our source/build/SDK/packaging revisions within one
+upstream version; restart at `anx.1` when the upstream version changes.
+Never replace assets at an existing tag. The original compiler banner and
+`.manifest` remain intact; `.aminetxduo-toolchain-version` records our revision.
+Use `gcc -dumpfullversion` for `16.2.1b`; `-dumpversion` reports only `16`.
+
+## Assets
 
 | Asset | Host | Size | SHA-256 |
 |---|---|---|---|
-| `m68k-amigaos-gcc-16.2.9-ndk3.9-linux-x86_64.tar.xz` | Linux x86-64 (glibc) | 37,791,756 | `adf6daa38acb5fef21ad692178be21e57ee7cd84d87615876d850e4fd07da431` |
-| `m68k-amigaos-gcc-16.2.9-ndk3.9-darwin-arm64.tar.xz` | macOS arm64 | 32,433,400 | `99f2e4ccd38add25a066df18a75ec363ae261708317c54c7263a17efe2ed3e2d` |
+| `m68k-amigaos-gcc-16.2.1b-anx.2-ndk3.2-linux-x86_64.tar.xz` | Linux x86-64 | 50,047,140 | `8529a742091a28f23c03c4bbfbd9148eaeb15a9c362fb200c79ed818e5390369` |
+| `m68k-amigaos-gcc-16.2.1b-anx.2-ndk3.2-darwin-arm64.tar.xz` | macOS arm64 | 36,764,512 | `b3b4bac39a02b57b0d463e064df0780f80b397e5200ae38bb393034054a375b7` |
 
-**Not covered:** macOS x86-64 and Linux aarch64. There is no asset for either;
-`tools/build-toolchain.sh` builds on both.
+Each extracts to `opt/m68k-amigaos/`. `tools/fetch-toolchain.sh` selects the
+host asset, checks its full hash and verifies GCC plus package identity on
+fresh and warm caches. Linux arm64 and macOS x86-64 have no published asset;
+use the source recipe on those hosts.
 
-```sh
-sha256sum m68k-amigaos-gcc-16.2.9-ndk3.9-linux-x86_64.tar.xz
-tar xJf   m68k-amigaos-gcc-16.2.9-ndk3.9-linux-x86_64.tar.xz
-# -> opt/m68k-amigaos/bin/m68k-amigaos-gcc
+## The 0/-1 correction
+
+`anx.1` is withdrawn and its assets remain unchanged. It carried the
+previously withdrawn linker heuristic from
+[AmigaPorts/binutils-gdb#37](https://github.com/AmigaPorts/binutils-gdb/pull/37).
+HUNK PC8 relocations also describe valid indexed operands, so guessing branch
+identity from opcode-like bytes rejects legal code. The earlier assembler
+proposal [#36](https://github.com/AmigaPorts/binutils-gdb/pull/36) depended on
+sound final validation; this reset carries neither patch. Binutils is the
+unmodified codewiz `15f4b0aa` baseline. No new upstream proposal is made.
+
+The installed-tool regression verifies 64 D/A indexed PC8 cases with final
+0/-1 displacements and compares their emitted bytes exactly. The withdrawn
+linker fails this positive control. The assembler still rejects known local
+short branches with reserved displacements. Use local short branches where
+the assembler can resolve them and word branches for deferred targets.
+The generic HUNK linker does not provide a universal final short-branch check.
+AmiNetXDuo's manually encoded Alert branch is also guarded at compile time;
+its current instruction remains `6022` (displacement 34).
+
+## Sources and build provenance
+
+These assets are repackaged from fresh native builds for
+[tinic/gcc#2](https://github.com/tinic/gcc/pull/2), using codewiz's build
+workflow. Repackaging adds our version marker and changes the archive prefix;
+it does not change compiler, binutils, runtime or SDK file bytes. The complete
+extraction round trip, hard links and symlinks are checked. GNU tar rewrites
+member and hard-link paths while preserving symlink targets.
+
+Build driver: AmigaPorts/m68k-amigaos-gcc
+`de370a15e783261e82d0ba0ab809eff128356de1`.
+
+```
+amiga-netinclude  7d155ca3a3090afe3466f819dd178f2af6f5c176  https://github.com/AmigaPorts/amiga-netinclude
+binutils          15f4b0aa860f74022c6aff7ace15bc0a307d5510  https://github.com/AmigaPorts/binutils-gdb
+clib2             78e05e255495382bbf880d0d37d20763d129f01e  https://github.com/AmigaPorts/clib2
+fd2pragma         bcffac5c89295baf1db033addc984312b4b4a722  https://github.com/AmigaPorts/fd2pragma
+fd2sfd            a0ae60d140fdfd30f889810faea07cc6968d1fd0  https://github.com/AmigaPorts/fd2sfd
+gcc               8dc8d8365a3825b74dfba58f8e80545b052e0cd5  https://github.com/tinic/gcc
+ira               bb7c11384a32c409341fdb0d16d715b7959a0290  https://github.com/AmigaPorts/ira
+ixemul            f0dd997994263c6ac783b563222a9f53a00c013c  https://github.com/AmigaPorts/ixemul
+lha               979815dc8699a9c5018de067946737c83ec6f697  https://github.com/AmigaPorts/lha
+libdebug          76c7dbfeaac79516117dc810e3ba9b34d5f54a69  https://github.com/AmigaPorts/libdebug
+libnix            df91c92564490bae1a5abd9e302f466aa7684bac  https://github.com/AmigaPorts/libnix
+newlib-cygwin     e07bea74897b6ee7b645602d66fcff6c6792d1a9  https://github.com/AmigaPorts/newlib-cygwin
+sfdc              4e7afc044c1ff129574fcf3b839c3351edcfe2fb  https://github.com/AmigaPorts/sfdc
+vasm              de93f7dd067001532cff663730133601edb274cb  https://github.com/AmigaPorts/vasm
+vbcc              55a487d500dccccad806cf3916e90bcd95189ec9  https://github.com/AmigaPorts/vbcc
+vlink             ce46ccfda0e30eda5b12b9a5d0259d8eaefdefe9  https://github.com/AmigaPorts/vlink
+aros-stuff        9e09fb0f9f5150058c788fb42787927907b28a46  https://github.com/AmigaPorts/aros-stuff
 ```
 
-`tools/fetch-toolchain.sh` picks the asset for your `uname -s`/`uname -m`,
-checks the hash and unpacks it.
+NDK 3.2: <https://aminet.net/dev/misc/NDK3.2.lha>, SHA-256
+`96cabd4ad683dced632e147bf86dee0f50dcb1254386216c25c362916a6409bb`.
+Other archive hashes are pinned by the build driver's `default-archives`.
+`tools/build-toolchain.sh --print-pins` shows the standalone source recipe;
+it uses the upstream build graph without historical local bebbo patches.
+The native CI builds below were executed; the standalone pinned recipe has
+not been rebuilt separately.
 
-The earlier `toolchain-m68k-amigaos-gcc-15.2.0` release remains published. It is
-Linux-only and was repackaged from an AmigaPorts image layer rather than built
-here; its own notes describe it.
+This baseline uses GCC 16.2.1b, binutils 2.46, current AmigaPorts newlib/libnix
+and NDK 3.2. Its eight multilibs cover 68000, baserel and 68020-60 with
+baserel/baserel32 and optional 68881. The common `libm020` is built for
+68020-60; the old separate `libm060` variants are gone.
 
-## binutils 2.46
+## Validation and limits
 
-From asset series 16.2.9 binutils is tinic/binutils-gdb `a3afdefb`: AmigaPorts
-`amiga-2.46` `2efe6986` (which includes the same-named-section PC-relative fix,
-AmigaPorts/binutils-gdb#32) plus AmigaPorts/binutils-gdb#35, #36 and #37: GAS
-byte-branch adjust and 0/-1 fixes, and ld rejects byte displacement 0/-1. It carries the `HUNK_RELOC32` `strip`, slim-LTO
-archive symbol index and C++ COMDAT `ar` repairs, so no local diffs are applied.
-Series 16.2.8 used `ffe2ad82` (`106606ef` + #32).
-Series 16.2.4 to 16.2.7 used bebbo `amiga-2.46` `a50544a9` with the three diffs
-in `tools/patches/binutils-2.46/`. Series up to 16.2.3 used 2.39.0
-(`ab4e5183f56fd83165356a03c890bf0b681d7535`).
+Compiler CI: [Linux 39349235159](https://github.com/tinic/gcc/actions/runs/39349235159),
+[macOS 39349239433](https://github.com/tinic/gcc/actions/runs/39349239433),
+[newlib 39349345711](https://github.com/tinic/gcc/actions/runs/39349345711).
+All three jobs succeeded. The compiler reports 742 Linux and 697 macOS PASS
+records, with the same 607 distinct PASS labels (parallel multilib checks
+repeat). Newlib reports 36 passes on each soft-float/FPU board. C++ pthread
+tests are explicitly skipped because libstdc++ thread support is disabled.
+The Amiga gas/ld gates pass. Broader gas all.exp has 9 passes and 27 existing
+non-Amiga failures; those remain failures, not a full gas-suite pass.
 
-## How these were built
+The allocator gate verifies the actual custom `libc_a-mallocr.o` in all eight
+`libc.a`/`libg.a` variants. Corruption and unexpected-multilib negative controls
+are rejected. Startup-object, NDK register ABI and resolver checks remain
+active. Micro/default/fat builds retain warnings as errors. This is not the
+full GNU C/C++ suite or physical Amiga validation, and makes no performance
+claim. Historical Enforcer evidence for the older runtime does not validate
+this new runtime.
 
-`tools/build-toolchain.sh`, run on each host. It pins every source to an exact
-commit rather than a branch, because bebbo's branches move.
+## Source and licenses
 
-```
-build driver   https://codeberg.org/bebbo/amiga-gcc            86f8ba62f7a5035e309600c86962681e1cbacccb
-binutils/GDB   https://github.com/tinic/binutils-gdb           a3afdefba01d87798425f28f12a567a65e6f2c4a   (fix/amiga-pcrel-byte-linkcheck)
-GCC            https://github.com/tinic/gcc                    f098a8ef44ac8d11204a3cb0c39c1e4f5cd63fc8   (amiga16.2)
-newlib         https://franke.ms/git/bebbo/newlib-cygwin       0909ae9abc18b38595425143e7a63d9e2fc31174
-libnix         https://franke.ms/git/bebbo/libnix              b7268e35510b8b7b4ccdad67fbcbb25e73189aef
-sfdc           https://franke.ms/git/bebbo/sfdc                5d4efca359e949547553463f5873778bd85e5506
-fd2sfd         https://franke.ms/git/bebbo/fd2sfd              7f14d7f15aac2b8426f577f838069e53bf6008ea
-netinclude     https://franke.ms/git/bebbo/amiga-netinclude    b9a8d2cdd410dbb896a93bc9c64b253be436dd89
-aros-stuff     https://franke.ms/git/bebbo/aros-stuff          c0a06b4ccd13f52d1518540aa88a450d70581458
-fd2pragma      https://github.com/adtools/fd2pragma            8c0f352c348a3252f84170eab737919372562e82
-vasm           https://github.com/mheyer32/vasm                bb048d9d3cf54d5e38c643182a0ff55b552f65be
-NDK 3.9        http://hp.alinea-computer.de/AmigaOS/NDK39.lha  sha256 ca5d8f923158d69a9c15b59d6e1580555ca6c0a48be21c5226c71f90fc927ca6
-```
-
-bebbo's GitHub repositories are gone. Codeberg and his own franke.ms Gitea are
-what survive, and they are not interchangeable. Each line above is the remote
-verified to serve its pin.
-
-GCC is tinic/gcc `f098a8ef` (AmigaPorts `amiga16.2` `1d4ca5d4` + 3 m68k commits). binutils carries no
-local diffs; newlib and aros-stuff carry the diffs under
-`tools/patches/newlib/` and `tools/patches/aros-stuff/`. amiga-gcc's own
-Makefile gets `--with-system-zlib`, `--disable-gdb --disable-sim` and
-`--enable-plugins` on the binutils configure line. The rest is carried as
-configure and compiler flags:
-
-* binutils 2.39's `objdump.c:4196` assigns `dummy_fprintf` to
-  `memory_error_func` across incompatible types. clang 16+ and GCC 14+ both
-  make that an error rather than a warning, so `--disable-werror` does not
-  reach it, and the two spell the demoting switch differently. The script
-  probes by compiling the offending assignment; an empty-file probe answers
-  yes to both spellings on GCC and picks the wrong one.
-* binutils 2.39 bundles a zlib whose headers collide with a current macOS SDK.
-  `--with-system-zlib` is passed on both hosts.
-
-macOS additionally needs Homebrew's `gmp`/`mpfr`/`texinfo` on the search path,
-and GNU `rsync` rather than the `openrsync` macOS ships, which mishandles
-libnix's `--exclude` patterns. No container is used on either host.
-
-## Source
-
-These are GCC and GNU binutils binaries, GPLv3+, redistributed here. The
-corresponding source is the exact commit list above; `tools/build-toolchain.sh`
-clones those commits and reproduces the toolchain. Pristine upstream GCC and
-binutils, from which bebbo's branches derive, are at
-https://ftp.gnu.org/gnu/gcc/ and https://ftp.gnu.org/gnu/binutils/.
-
-The NDK 3.9 headers under `m68k-amigaos/ndk-include` are Amiga OS SDK material
-and are not GPL. They are included exactly as upstream ships them, and their
-terms are Hyperion/Amiga's, not this project's.
+GCC/binutils are GPLv3+; corresponding sources are the exact repositories and
+commits above. Runtimes/helpers and SDKs retain their own licenses. Upstream
+GNU sources are at <https://ftp.gnu.org/gnu/gcc/> and
+<https://ftp.gnu.org/gnu/binutils/>. Included NDK/SDK material is under its
+own terms, not this project's license. Older releases retain their original
+assets and provenance.

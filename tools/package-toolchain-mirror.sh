@@ -18,8 +18,8 @@
 set -euo pipefail
 
 
-# Immutable asset series.  The compiler itself still reports 16.2.0b.
-GCC_VERSION="16.2.9"
+. "$(dirname "$0")/toolchain-version.sh"
+GCC_VERSION="$TC_ASSET_VERSION"
 PREFIX="opt/m68k-amigaos"
 
 # The platform is part of the asset name because there is now more than one,
@@ -46,7 +46,7 @@ while [ $# -gt 0 ]; do
     shift
 done
 
-ASSET="m68k-amigaos-gcc-${GCC_VERSION}-ndk3.9-${PLATFORM}.tar.xz"
+ASSET="m68k-amigaos-gcc-${GCC_VERSION}-ndk${TC_NDK_VERSION}-${PLATFORM}.tar.xz"
 [ -n "$OUT" ] || OUT="${TMPDIR:-/tmp}/$ASSET"
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "missing required tool: $1" >&2; exit 2; }; }
@@ -77,7 +77,12 @@ sha256_of() {
 
 # A compiler version match did not catch the stale 16.2.2 libc allocator.
 # Refuse to publish an archive containing any of those installed objects.
+HOST_VERSION=$("$FROM/bin/m68k-amigaos-gcc" -dumpfullversion)
+[ "$HOST_VERSION" = "$TC_GCC_VERSION" ] || {
+    echo "!! expected GCC $TC_GCC_VERSION, got $HOST_VERSION" >&2; exit 1; }
 python3 "$(dirname "$0")/check-toolchain-malloc.py" "$FROM"
+python3 "$(dirname "$0")/toolchain-branch-selftest.py" "$FROM"
+printf '%s\n' "$TC_ASSET_VERSION" > "$FROM/.aminetxduo-toolchain-version"
 
 echo "==> packaging $FROM"
 echo "    -> $OUT"
@@ -91,10 +96,10 @@ echo "    -> $OUT"
 # .../opt/m68k-amigaos, and a tree that is already in the right shape is
 # archived with no path rewriting at all.  Renaming is the fallback, for a tree
 # somewhere else, and it is the risky path: BOTH tars rewrite SYMLINK TARGETS
-# as well as member names by default, so a source directory named
+# as well as member names and hard-link targets by default, so a source directory named
 # `m68k-amigaos` silently turns every `m68k-amigaos-*` symlink target into
 # `opt/m68k-amigaos-*` and ships a tarball of dangling links.  Measured, not
-# assumed: bsdtar needs the `S` modifier and GNU tar needs `flags=r` to stop.
+# assumed: bsdtar needs the `S` modifier and GNU tar needs `flags=rh` to stop.
 SRC_PARENT=$(cd "$FROM/.." && pwd)
 SRC_BASE=$(basename "$FROM")
 
@@ -120,7 +125,7 @@ else
     if [ "$IS_BSDTAR" = "1" ]; then
         TAR_FLAGS+=(-s "|^${SRC_BASE}|${PREFIX}|S")
     else
-        TAR_FLAGS+=(--transform "flags=r;s|^${SRC_BASE}|${PREFIX}|")
+        TAR_FLAGS+=(--transform "flags=rh;s|^${SRC_BASE}|${PREFIX}|")
     fi
 fi
 

@@ -134,7 +134,8 @@ amiga_client_prepare()
     # POSIX argv[] from dos.library and runs the client on its private stack.
     # --wrap=exit,_exit: so that shim can put the task's stack bounds back when a
     # client ends by exit()ing off the swapped stack instead of returning.
-    AMIGA_CLIENT_LDFLAGS="$AMIGA_CLIENT_LINK_ARCH -nostartfiles $AMIGA_CLIENT_STARTFILE -L$AMIGA_CLIENT_LIBDIR -Wl,--wrap=main,--wrap=exit,--wrap=_exit"
+    # Preserve Amiga path normalization while newlib supplies unlink/_unlink.
+    AMIGA_CLIENT_LDFLAGS="$AMIGA_CLIENT_LINK_ARCH -nostartfiles $AMIGA_CLIENT_STARTFILE -L$AMIGA_CLIENT_LIBDIR -Wl,--wrap=main,--wrap=exit,--wrap=_exit,--wrap=unlink"
 
     export AMIGA_CLIENT_LIBDIR AMIGA_CLIENT_COMPAT_A AMIGA_CLIENT_LDFLAGS
     export AMIGA_CLIENT_STARTFILE

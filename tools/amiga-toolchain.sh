@@ -158,5 +158,5 @@ if [ ! -d "$AMIGA_NDK" ]; then
 fi
 
 if [ "${AMIGA_TOOLCHAIN_QUIET:-0}" != "1" ]; then
-    echo "==> toolchain: $AMIGA_TOOLCHAIN_ROOT ($("$AMIGA_GCC" -dumpversion 2>/dev/null || echo '?'))"
+    echo "==> toolchain: $AMIGA_TOOLCHAIN_ROOT ($("$AMIGA_GCC" -dumpfullversion 2>/dev/null || echo '?'))"
 fi

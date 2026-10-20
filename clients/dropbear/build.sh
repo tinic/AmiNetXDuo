@@ -433,7 +433,7 @@ done
 for p in $MAKE_PROGRAMS; do
     make -C "$OUT" -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)" \
          PROGRAMS="$p" \
-         LDFLAGS="$AMIGA_CLIENT_LDFLAGS -Wl,--wrap=open,--wrap=_open_r,--wrap=read,--wrap=_read_r,--wrap=write,--wrap=_write_r,--wrap=close,--wrap=spawn_command,--wrap=getenv,--wrap=ioctl,--wrap=signal$FAST_WRAPS$PROF_WRAPS -Wl,-Map=$OUT/$p.map" \
+         LDFLAGS="$AMIGA_CLIENT_LDFLAGS -Wl,--wrap=open,--wrap=_open_r,--wrap=read,--wrap=_read_r,--wrap=write,--wrap=_write_r,--wrap=close,--wrap=spawn_command,--wrap=getenv,--wrap=getpid,--wrap=ioctl,--wrap=signal$FAST_WRAPS$PROF_WRAPS -Wl,-Map=$OUT/$p.map" \
          LIBS="${SHIM_OBJS[*]} $PROF_LIBS -Wl,--start-group -lamigaclient -lc -Wl,--end-group"
 done
 

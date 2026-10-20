@@ -1897,6 +1897,19 @@ stage_conformance() {
 stage_clientshims() {
     hr "the SSH/SCP port's shims, with the prototype gate on"
 
+    local toolchain_root
+    toolchain_root=$(tools/fetch-toolchain.sh --print-root) || return 1
+    if ! python3 tools/toolchain-allocator-selftest.py "$toolchain_root" > "$BUILD/tcallocator.log" 2>&1; then
+        cat "$BUILD/tcallocator.log"
+        fail "toolchain allocator positive/negative controls"
+        return 1
+    fi
+    if ! python3 tools/toolchain-branch-selftest.py "$toolchain_root" > "$BUILD/tcbranch.log" 2>&1; then
+        cat "$BUILD/tcbranch.log"
+        fail "toolchain branch/indexed PC8 controls"
+        return 1
+    fi
+
     local rc=0
 
     tools/check-client-shims.sh > "$BUILD/client-shims.log" 2>&1 || rc=$?

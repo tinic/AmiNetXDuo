@@ -10,6 +10,7 @@
 #define CS_LIBC_H
 
 #include <stddef.h>
+#include "cs_ndk_compat.h"
 
 int stricmp(const char *a, const char *b);
 int strnicmp(const char *a, const char *b, size_t n);

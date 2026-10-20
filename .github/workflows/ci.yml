@@ -359,6 +359,7 @@ jobs:
             tools/version.sh \
             tools/fetch-toolchain.sh \
             tools/build-toolchain.sh \
+            tools/toolchain-version.sh \
             tools/package-toolchain-mirror.sh \
             tools/amiga-toolchain.sh \
             tools/toolchain-resolve-selftest.sh \

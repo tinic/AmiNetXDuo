@@ -19,7 +19,7 @@ runs:
       uses: actions/cache@v4
       with:
         path: ~/.cache/aminetxduo/toolchain
-        key: m68k-amigaos-gcc-16.2.9-${{ steps.pin.outputs.sha }}-${{ hashFiles('tools/fix-toolchain-crt0.py', 'tools/fix-toolchain-inline-const.py', 'tools/check-toolchain-malloc.py') }}
+        key: m68k-amigaos-gcc-${{ steps.pin.outputs.sha }}-${{ hashFiles('tools/fix-toolchain-crt0.py', 'tools/fix-toolchain-inline-const.py', 'tools/check-toolchain-malloc.py') }}
 
     - name: Fetch the toolchain
       if: steps.toolchain-cache.outputs.cache-hit != 'true'
@@ -32,6 +32,8 @@ runs:
         tools/fetch-toolchain.sh --check-crt0
         tools/fetch-toolchain.sh --check-inlines
         python3 tools/check-toolchain-malloc.py "$(tools/fetch-toolchain.sh --print-root)"
+        python3 tools/toolchain-allocator-selftest.py "$(tools/fetch-toolchain.sh --print-root)"
+        python3 tools/toolchain-branch-selftest.py "$(tools/fetch-toolchain.sh --print-root)"
 
     - name: Restore compiled objects
       uses: actions/cache@v4
