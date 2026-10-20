@@ -14,6 +14,7 @@
 #include "netdev_nic.h"
 
 #include <exec/types.h>
+#include <proto/exec.h>
 
 #include <stdint.h>     /* uintptr_t: the probe record below is a
                            ULONG and the host tier compiles this
@@ -120,10 +121,27 @@ static volatile UBYTE *pnp_port(const NetdevCard *card, volatile UBYTE *board,
            (ULONG)(port & 0x07ffu) * (ULONG)card->stride;
 }
 
+/*
+ * One access, latch write and bus cycle together, under Disable().  The
+ * X-Surf's IDE status is bit 7 of the same $7E, and the iComp wiki
+ * (wiki.icomp.de/wiki/X-Surf) says "Reading $007E can also change A11" and
+ * "For PnP isolation, disable IRQs first": an IDE interrupt between the two
+ * would send this access to the other port.  Per access rather than over the
+ * sequence: isolation is ~40 ms of beam-timed spins, and nothing between
+ * accesses depends on the latch, because every access writes it again.
+ */
+static VOID pnp_put(const NetdevCard *card, volatile UBYTE *board, UWORD port,
+                    UBYTE v)
+{
+    Disable();
+    PNP_W8(pnp_port(card, board, port), v);
+    Enable();
+}
+
 static VOID pnp_write_address(const NetdevCard *card, volatile UBYTE *board,
                               UBYTE v)
 {
-    PNP_W8(pnp_port(card, board, PNP_ADDRESS), v);
+    pnp_put(card, board, PNP_ADDRESS, v);
 }
 
 /* Address then data, which is every configuration write there is. */
@@ -131,12 +149,18 @@ static VOID pnp_write_reg(const NetdevCard *card, volatile UBYTE *board,
                           UBYTE reg, UBYTE v)
 {
     pnp_write_address(card, board, reg);
-    PNP_W8(pnp_port(card, board, PNP_WRITE_DATA), v);
+    pnp_put(card, board, PNP_WRITE_DATA, v);
 }
 
 static UBYTE pnp_read_data(const NetdevCard *card, volatile UBYTE *board)
 {
-    return *pnp_port(card, board, PNP_READ_DATA);
+    UBYTE v;
+
+    Disable();
+    v = *pnp_port(card, board, PNP_READ_DATA);
+    Enable();
+
+    return v;
 }
 
 /*
