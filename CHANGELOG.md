@@ -7,6 +7,10 @@ are history.
 
 ## Unreleased
 
+- anxnet.device sets up the X-Surf ISA bridge with interrupts off, so an
+  IDE interrupt no longer disturbs the shared $7E register.
+- CreateAmiNetXDuoStatusReport ADDRESSES records the server identifier bytes
+  of the last DHCP request, and reports the running stack build and profile.
 - anxnet.device drives the Ameristar A2065 (Zorro II 1053/1).
 - anxnet.device works on a real A2065-class board: the LANCE gets its
   memory at $8000 and frame data in 68000 byte order.
