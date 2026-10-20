@@ -7,6 +7,9 @@ are history.
 
 ## Unreleased
 
+- anxnet.device drives the Ameristar A2065 (Zorro II 1053/1).
+- anxnet.device works on a real A2065-class board: the LANCE gets its
+  memory at $8000 and frame data in 68000 byte order.
 - The archive's Installer is Commodore Installer 43.3 again, as in beta8.
 - Installer sets up WirelessManager for a PC Card Wi-Fi with prism2.device.
 - Installer no longer starts a WirelessManager older than 1.5; it installs
