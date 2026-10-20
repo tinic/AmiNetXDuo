@@ -494,6 +494,56 @@ static void check_tee(void)
 
 /* ------------------------------------------------------------------ main --- */
 
+/* The DHCP REQUEST checkpoints and the resident library's build (#306). */
+static void check_checkpoints(void)
+{
+    static const UBYTE opt54[8] = { 0x36, 0x04, 0xc0, 0xa8, 0x00, 0x01, 0x37, 0x05 };
+    static const char  id[] =
+        "bsdsocket.library 1.0.0 (AmiNetXDuo, ABI 4.12, build 6275a6a8, profile micro)\r\n";
+    SrOut o;
+    char  field[32];
+    char *src;
+    char  path[1024];
+
+    o = sink(0);
+    sr_addr_bytes(&o, "dhcp.eth0.req_opt54_built", opt54, sizeof(opt54));
+    CHECK(out[0] == '\0', "option bytes hold an address: none without ADDRESSES: '%s'", out);
+
+    o = sink(1);
+    sr_addr_bytes(&o, "dhcp.eth0.req_opt54_built", opt54, sizeof(opt54));
+    sr_addr_bytes(&o, "dhcp.eth0.req_opts_final", NULL, 24);
+    CHECK(strcmp(out, "dhcp.eth0.req_opt54_built=3604c0a800013705\n"
+                      "dhcp.eth0.req_opts_final=unavailable\n") == 0,
+          "option bytes as hex: '%s'", out);
+
+    CHECK(sr_id_field(id, "build", field, sizeof(field)) && strcmp(field, "6275a6a8") == 0,
+          "build from the IdString: '%s'", field);
+    CHECK(sr_id_field(id, "profile", field, sizeof(field)) && strcmp(field, "micro") == 0,
+          "profile from the IdString: '%s'", field);
+    CHECK(!sr_id_field("bsdsocket.library 0.29 (AmiNetXDuo, ABI 4.11)\r\n", "build",
+                       field, sizeof(field)), "an older IdString has no build");
+    CHECK(!sr_id_field("bsdsocket.library 1.0 (AmiNetXDuo, ABI 4.12, build , profile fat)",
+                       "build", field, sizeof(field)), "an empty build is no build");
+
+    /* The report prints the four keys and the library carries the two fields. */
+    snprintf(path, sizeof(path), "%s/src/tools/statusreport.c", source_dir());
+    src = slurp(path);
+    CHECK(src != NULL, "read %s", path);
+    if (src != NULL)
+    {
+        CHECK(strstr(src, "\"req_opt54_index_before\"") && strstr(src, "\"req_opt54_index_after\"") &&
+              strstr(src, "\"req_opt54_built\"") && strstr(src, "\"req_opts_final\""),
+              "statusreport.c prints the four req_ keys");
+        free(src);
+    }
+    snprintf(path, sizeof(path), "%s/src/bsdsocket/library.c", source_dir());
+    src = slurp(path);
+    CHECK(src != NULL && strstr(src, "\", build \" AMINETXDUO_VERSION_HASH") &&
+          strstr(src, "\", profile \" AMINETXDUO_VERSION_PROFILE"),
+          "the IdString carries build and profile");
+    free(src);
+}
+
 int main(int argc, char **argv)
 {
     const char *group = (argc > 1) ? argv[1] : NULL;
@@ -503,6 +553,7 @@ int main(int argc, char **argv)
         check_lines();
         check_decoding();
         check_tee();
+        check_checkpoints();
     }
     if (group == NULL || strcmp(group, "passive") == 0)
         check_passive();

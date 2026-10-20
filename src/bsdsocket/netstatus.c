@@ -383,6 +383,13 @@ static VOID ns_fill_dhcp(NsWriter *w)
             out->nsd_RequestServer   = counters.adc_RequestServer;
             out->nsd_Xid             = counters.adc_Xid;
             out->nsd_RequestRestarts = counters.adc_RequestRestarts;
+            out->nsd_ReqOpt54Valid       = counters.adc_ReqOpt54Valid;
+            out->nsd_ReqOpt54IndexBefore = counters.adc_ReqOpt54IndexBefore;
+            out->nsd_ReqOpt54IndexAfter  = counters.adc_ReqOpt54IndexAfter;
+            for (i = 0; i < (UWORD)sizeof(out->nsd_ReqOpt54Built); i++)
+                out->nsd_ReqOpt54Built[i] = counters.adc_ReqOpt54Built[i];
+            for (i = 0; i < (UWORD)sizeof(out->nsd_ReqOptsFinal); i++)
+                out->nsd_ReqOptsFinal[i] = counters.adc_ReqOptsFinal[i];
         }
 
         if (state == AMI_DHCP_BOUND)

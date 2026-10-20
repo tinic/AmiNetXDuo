@@ -68,13 +68,16 @@ BUDGETS=(
     # bytes per NX_DHCP interface record for the REQUESTING restart (its
     # count and retransmission count), the offered address, the server
     # identifier sent and the last send status.
-    "default:68996"
-    "minimal:18016"
+    # +152 default and fat / +76 minimal / +40 micro on 2026-10-19 (#306):
+    # 38 bytes per NX_DHCP interface record for the last REQUEST's option 54
+    # checkpoints, its two indexes, 8 bytes as written and 24 before the send.
+    "default:69148"
+    "minimal:18092"
     # First budgeted as a shipping profile at 0.28.9: 15,716 bytes, with
     # headroom to the next KiB boundary.
-    "micro:16440"
+    "micro:16480"
     # The full stack's options, so the full stack's budget.
-    "fat:68996"
+    "fat:69148"
 )
 
 budget=""

@@ -374,6 +374,14 @@ typedef struct NetStatusDhcp
     ULONG   nsd_RequestServer;          /* option 54 the last REQUEST sent   */
     ULONG   nsd_Xid;                    /* current transaction ID            */
     ULONG   nsd_RequestRestarts;        /* REQUESTING gave up, back to INIT  */
+
+    /* Where the last REQUEST's option 54 was built, and its bytes (#306). */
+    UWORD   nsd_ReqOpt54IndexBefore;    /* option index before it            */
+    UWORD   nsd_ReqOpt54IndexAfter;     /* and after it                      */
+    UBYTE   nsd_ReqOpt54Valid;          /* the REQUEST carried option 54     */
+    UBYTE   nsd_Pad1;
+    UBYTE   nsd_ReqOpt54Built[8];       /* 8 bytes from there, as written    */
+    UBYTE   nsd_ReqOptsFinal[24];       /* 24 from there, before the send    */
 } NetStatusDhcp;
 
 /* ---------------------------------------------------- NETSTATUS_DHCP6 --- */

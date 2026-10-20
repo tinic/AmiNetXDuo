@@ -303,6 +303,11 @@ typedef struct AmiDhcpCounters {
     UBYTE   adc_LastReplyType;          /* option 53; 0 when it had none    */
     UBYTE   adc_LastReject;
     UBYTE   adc_LastSendStatus;         /* NetX status of the last send     */
+    UBYTE   adc_ReqOpt54Valid;          /* the last REQUEST carried option 54 */
+    UWORD   adc_ReqOpt54IndexBefore;    /* its option index before writing  */
+    UWORD   adc_ReqOpt54IndexAfter;     /* and after                        */
+    UBYTE   adc_ReqOpt54Built[8];       /* 8 bytes from there, as written   */
+    UBYTE   adc_ReqOptsFinal[24];       /* 24 from there, before the send   */
 } AmiDhcpCounters;
 
 LONG    netstack_interface_dhcp_counters(UWORD index, AmiDhcpCounters *out);

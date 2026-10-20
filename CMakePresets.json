@@ -29,6 +29,7 @@
       "displayName": "fat",
       "description": "Libs/fat, Devs/Networks/fat, C/fat. The full stack at -O2 for 68020 and up.",
       "cacheVariables": {
+        "AMINETXDUO_PROFILE": "fat",
         "AMINETXDUO_CPU": "68020-60",
         "AMINETXDUO_OPT": "O2"
       }
@@ -39,6 +40,7 @@
       "displayName": "minimal",
       "description": "Libs/minimal. No IPv6, TLS, mDNS, BPF, multicast, ARexx or TCP:.",
       "cacheVariables": {
+        "AMINETXDUO_PROFILE": "minimal",
         "AMINETXDUO_AREXX": {
           "type": "BOOL",
           "value": "OFF"
@@ -78,6 +80,7 @@
       "displayName": "micro",
       "description": "Libs/micro. Smallest profile, one interface; one binary for every 68k.",
       "cacheVariables": {
+        "AMINETXDUO_PROFILE": "micro",
         "AMINETXDUO_ADDRALLOC": {
           "type": "BOOL",
           "value": "OFF"

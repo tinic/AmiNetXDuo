@@ -260,7 +260,63 @@ VOID sr_addr_mac(SrOut *o, const char *key, const UBYTE *mac)
     sr_emit(o, key, buf);
 }
 
+VOID sr_addr_bytes(SrOut *o, const char *key, const UBYTE *bytes, ULONG n)
+{
+    static const char digits[] = "0123456789abcdef";
+    char              buf[65];
+    ULONG             i;
+
+    if (o == NULL || !o->addresses)
+        return;
+    if (bytes == NULL)
+    {
+        sr_emit(o, key, SR_UNAVAILABLE);
+        return;
+    }
+
+    if (n > 32UL)
+        n = 32UL;
+    for (i = 0; i < n; i++)
+    {
+        buf[2 * i]     = digits[(bytes[i] >> 4) & 0xf];
+        buf[2 * i + 1] = digits[bytes[i] & 0xf];
+    }
+    buf[2 * n] = '\0';
+
+    sr_emit(o, key, buf);
+}
+
 /* ----------------------------------------------------------------- keys --- */
+
+BOOL sr_id_field(const char *id, const char *name, char *dst, ULONG dstlen)
+{
+    ULONG i;
+    ULONG j;
+    ULONG n;
+
+    if (id == NULL || name == NULL || dst == NULL || dstlen == 0UL)
+        return FALSE;
+    dst[0] = '\0';
+
+    for (i = 0; id[i] != '\0'; i++)
+    {
+        if (id[i] != ',' || id[i + 1] != ' ')
+            continue;
+        for (j = 0; name[j] != '\0' && id[i + 2 + j] == name[j]; j++)
+            ;
+        if (name[j] != '\0' || id[i + 2 + j] != ' ')
+            continue;
+
+        i += 3 + j;
+        for (n = 0; n + 1UL < dstlen && id[i + n] != '\0' && id[i + n] != ',' &&
+                    id[i + n] != ')'; n++)
+            dst[n] = id[i + n];
+        dst[n] = '\0';
+        return n != 0UL;
+    }
+
+    return FALSE;
+}
 
 VOID sr_key_part(char *dst, ULONG dstlen, const char *text)
 {
