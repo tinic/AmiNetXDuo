@@ -74,6 +74,26 @@ static struct { unsigned long off; UBYTE val; } wtrace[TRACE_MAX];
 static unsigned wtrace_n;
 static UBYTE   *trace_base;
 
+/*
+ * Disable() depth, and the writes made outside it.  Every latch write and the
+ * access it steers must sit inside one window (the IDE interrupt on the same
+ * $7E); the closing latch clear is the one write allowed outside.
+ */
+static int      dis_depth;
+static int      dis_max;
+static unsigned w_enabled;
+
+VOID Disable(VOID)
+{
+    if (++dis_depth > dis_max)
+        dis_max = dis_depth;
+}
+
+VOID Enable(VOID)
+{
+    dis_depth--;
+}
+
 static void trace_w8(volatile UBYTE *p, UBYTE v)
 {
     if (wtrace_n < (unsigned)TRACE_MAX && trace_base != NULL)
@@ -83,6 +103,8 @@ static void trace_w8(volatile UBYTE *p, UBYTE v)
         wtrace[wtrace_n].val = v;
         wtrace_n++;
     }
+    if (dis_depth == 0)
+        w_enabled++;
     *p = v;
 }
 
@@ -200,6 +222,9 @@ static void board_reset(void)
     waits    = 0;
     cr_window_answers = 1;
     cr_keeper = 0;
+    dis_depth = 0;
+    dis_max   = 0;
+    w_enabled = 0;
 }
 
 /* ============================================ the two ports, one address = */
@@ -595,6 +620,10 @@ static void d_the_sequence(void)
                board[card->pnp->hi_reg], 0x00u);
     expect(wtrace_n > 0 && is_latch((int)wtrace_n - 1, 0x00),
            "and clearing it is the last write the sequence makes");
+
+    expect_hex("every other write is under Disable()", w_enabled, 1u);
+    expect(dis_depth == 0 && dis_max == 1,
+           "in balanced, unnested windows");
 
     /* The identifier a byte array drives is all zeroes, so the checksum does
        not match -- and the run is expected to carry on regardless. */
