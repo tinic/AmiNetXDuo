@@ -29,7 +29,7 @@ PIN_AMIGA_GCC_SHA="de370a15e783261e82d0ba0ab809eff128356de1"
 # reads it as a pin.
 PINS="
 amiga-netinclude|https://github.com/AmigaPorts/amiga-netinclude|7d155ca3a3090afe3466f819dd178f2af6f5c176|main
-binutils|https://github.com/tinic/binutils-gdb|6f53cbde391ed1fa95a24a61ac2adb6edf229df8|amiga-2.46
+binutils|https://github.com/AmigaPorts/binutils-gdb|15f4b0aa860f74022c6aff7ace15bc0a307d5510|amiga-2.46
 clib2|https://github.com/AmigaPorts/clib2|78e05e255495382bbf880d0d37d20763d129f01e|master
 fd2pragma|https://github.com/AmigaPorts/fd2pragma|bcffac5c89295baf1db033addc984312b4b4a722|master
 fd2sfd|https://github.com/AmigaPorts/fd2sfd|a0ae60d140fdfd30f889810faea07cc6968d1fd0|master
@@ -47,7 +47,6 @@ vlink|https://github.com/AmigaPorts/vlink|ce46ccfda0e30eda5b12b9a5d0259d8eaefdef
 aros-stuff|https://github.com/AmigaPorts/aros-stuff|9e09fb0f9f5150058c788fb42787927907b28a46|master
 "
 
-# Binutils keeps the two existing byte-branch guards on the codewiz baseline.
 # The compiler commit is also present in the upstream fork network.
 # shellcheck disable=SC2034 # Resolved dynamically as MIRROR_<module>.
 MIRROR_gcc="https://github.com/AmigaPorts/gcc"

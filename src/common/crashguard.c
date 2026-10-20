@@ -485,6 +485,15 @@ AMIGA_ASM_ARGS VOID ami_alert_report(ULONG num)
 #define AMI_ALERT_STUB_OLD      20
 #define AMI_ALERT_STUB_EXIT     24
 #define AMI_ALERT_STUB_PASS     36
+#define AMI_ALERT_PASS_DISP     (AMI_ALERT_STUB_PASS - 2)
+
+/* This instruction is encoded below without going through the assembler.
+ * Keep its signed byte displacement distinct from the word/long sentinels. */
+#if AMI_ALERT_PASS_DISP < -128 || AMI_ALERT_PASS_DISP > 127 || \
+    AMI_ALERT_PASS_DISP == 0 || AMI_ALERT_PASS_DISP == -1 || \
+    (AMI_ALERT_PASS_DISP & 1)
+#error "Alert pass-through requires an even, encodable short-branch displacement"
+#endif
 
 static UWORD *ami_alert_stub;
 
@@ -604,7 +613,7 @@ VOID ami_crash_remove_alert_hook(VOID)
     was = SetFunction((struct Library *)SysBase, -108, old);
     if (was != (APTR)stub)
         (VOID)SetFunction((struct Library *)SysBase, -108, was);
-    stub[0] = (UWORD)(0x6000 | (AMI_ALERT_STUB_PASS - 2)); /* bra.s PASS   */
+    stub[0] = (UWORD)(0x6000 | (AMI_ALERT_PASS_DISP & 0xff)); /* bra.s PASS   */
     CacheClearU();
     Enable();
 
