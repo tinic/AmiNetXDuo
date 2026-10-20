@@ -113,6 +113,7 @@ xsurf500    no ACA500 and no X-Surf 500 is modelled by any emulator (netdev_card
 genet       the Pi 4's own MAC behind a PiStorm32, anxgenet.device: no emulator has a GENET or an Emu68 device tree; proven on the real A1200 only
 zz9000      the MNT ZZ9000's ARM-side Ethernet, anxzz9000.device: no emulator models the card; proven on the real A3000 only
 zz9000z2    the same card's Zorro II record, same core, same reason
+ameristar   the Ameristar A2065: the a2065 row under another autoconfig identity and OUI; no emulator offers that identity
 "
 
 cards_rows() { # [board[,board...]]

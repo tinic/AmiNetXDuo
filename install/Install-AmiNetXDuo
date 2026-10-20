@@ -780,7 +780,7 @@
     (set DEV_NAME "genet.device"))
   (set CARD_KEY
     (select CARD_INDEX
-      "" "" "xsurf100" "xsurf500" "a2065" "ariadne" "ariadne2"
+      "" "" "xsurf100" "xsurf500" A2065_KEY "ariadne" "ariadne2"
       "hydra" "lanrover" "xsurf" "pcmcia" "" "" ""))
   (set DEFAULT_IF
     (select CARD_INDEX
@@ -958,6 +958,7 @@
 ; several cards in one Amiga.
 (set DRIVER_DEFAULT 0)
 (set CARD_DEFAULT   0)
+(set A2065_KEY "a2065")
 (set DET_N     0)
 (set PCM_DEFAULT 0)
 (set EMU_DEV "uaenet.device")
@@ -1116,6 +1117,14 @@
         (bitor CARD_DEFAULT
           (select PROBE_N 4 16 32 64 128 256 512 2))))
     (set PROBE_N (+ PROBE_N 1))
+  ))
+; The Ameristar A2065 is the A2065 choice under its own CARD= name.  A
+; Commodore board, when both are fitted, keeps the name.
+(if (= 0 (run ("\"%s\" CARD ameristar" S_NETPROBE) (quiet) (safe)))
+  (
+    (if (= (bitand CARD_DEFAULT 16) 0)
+      (set A2065_KEY "ameristar"))
+    (set CARD_DEFAULT (bitor CARD_DEFAULT 16))
   ))
 
 ; A PC Card has no ConfigDev.  InstallNetProbe briefly asks card.resource for

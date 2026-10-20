@@ -778,15 +778,18 @@ LONG lance_attach(NetdevNic *nic)
 
     /*
      * The station address is in the autoconfig serial number: there is no
-     * address PROM on either card and a read below the SRAM returns zero.
-     * Commodore put the low four bytes in the serial field and left the OUI to
-     * the card row -- 00:80:10 for the A2065, 00:60:30 for the Ariadne.
+     * address PROM on any of these cards and a read below the SRAM returns
+     * zero.  The OUI is the card row's -- 00:80:10 Commodore, 00:00:9F
+     * Ameristar, 00:60:30 Village Tronic -- and the low three serial bytes
+     * follow, as in Linux a2065.c/ariadne.c and NetBSD if_le_zbus.c.  The
+     * serial's top byte is not used: Commodore and Village Tronic put the
+     * OUI's last byte there, Ameristar does not.
      */
     nic->mac_source = (UBYTE)ANXDIAG_MAC_SERIAL;
 
-    nic->factory[0] = (UBYTE)(nic->card->serial_oui >> 8);
-    nic->factory[1] = (UBYTE)(nic->card->serial_oui);
-    nic->factory[2] = (UBYTE)(nic->serial >> 24);
+    nic->factory[0] = (UBYTE)(nic->card->serial_oui >> 16);
+    nic->factory[1] = (UBYTE)(nic->card->serial_oui >> 8);
+    nic->factory[2] = (UBYTE)(nic->card->serial_oui);
     nic->factory[3] = (UBYTE)(nic->serial >> 16);
     nic->factory[4] = (UBYTE)(nic->serial >> 8);
     nic->factory[5] = (UBYTE)(nic->serial);

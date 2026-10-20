@@ -65,6 +65,7 @@ typedef struct ClassicCard
 static const ClassicCard classic_cards[] =
 {
     { "a2065",     514,    112 },
+    { "ameristar", 1053,     1 },
     { "ariadne",   2167,   201 },
     { "ariadne2",  2167,   202 },
     { "hydra",     2121,     1 },
