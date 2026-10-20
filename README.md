@@ -59,7 +59,7 @@ Any SANA-II driver works. The archive also brings its own:
 
 | Driver | Cards |
 |---|---|
-| `anxnet.device` | A2065, Ariadne, Ariadne II, AmigaNet, LAN Rover, X-Surf, X-Surf 100, X-Surf 500; PCMCIA: NE2000-compatible, D-Link DL10019/DL10022 (DFE-670TXD), 3Com 3C589, Megahertz/3Com LAN+modem |
+| `anxnet.device` | A2065, Ameristar A2065, Ariadne, Ariadne II, AmigaNet, LAN Rover, X-Surf, X-Surf 100, X-Surf 500; PCMCIA: NE2000-compatible, D-Link DL10019/DL10022 (DFE-670TXD), 3Com 3C589, Megahertz/3Com LAN+modem |
 | `anxgenet.device` | Raspberry Pi 4/CM4 Ethernet, PiStorm32 with [Emu68](https://github.com/michalsc/Emu68/releases) 1.1 alpha.1 or newer |
 | `anxwifipi.device` | Raspberry Pi 4 Wi-Fi, PiStorm32 with Emu68 (experimental) |
 

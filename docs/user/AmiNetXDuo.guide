@@ -2072,16 +2072,18 @@
 
   Reports what anxnet.device or anxgenet.device found on this machine.
 
-  anxnet.device is one driver for twelve classic card definitions. It finds
-  the card itself, so nothing needs configuring. CARD= in the interface file
-  pins
-  it to one when a machine has more than one. Naming a card the driver
+  anxnet.device is one driver for thirteen classic card definitions. It
+  finds the card itself, so nothing needs configuring. CARD= in the
+  interface file pins it to one when a machine has more than one. Naming a card the driver
   does not know is reported as an error, with the list beside it. The
   names are:
 
-      a2065      ariadne     ariadne2    hydra       lanrover
-      xsurf      xsurf100    xsurf500    pcmcia      3c589
-      3ccfem556  3cxem556
+      a2065      ameristar   ariadne     ariadne2    hydra
+      lanrover   xsurf       xsurf100    xsurf500    pcmcia
+      3c589      3ccfem556   3cxem556
+
+  a2065 and ameristar take their media from the board's jumper: B-C for
+  the AUI port, A-B for BNC.
 
   anxgenet.device is the separate driver for the Ethernet of a Raspberry Pi
   4 or CM4 on a PiStorm32 running Emu68 1.1 alpha.1 or newer. Emu68 1.0.x is
