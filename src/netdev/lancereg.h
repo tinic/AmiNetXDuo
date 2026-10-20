@@ -16,6 +16,7 @@
 #define LE_CSR1         1       /* init block address, low 16 */
 #define LE_CSR2         2       /* init block address, high 8 */
 #define LE_CSR3         3       /* bus behaviour: BSWP, ACON, BCON */
+#define LE_C3_BSWP      0x0004  /* CSR3: frame data in 68000 byte order */
 
 /* CSR0.  Every bit here except INEA/STRT/STOP/INIT/TDMD is write-1-to-clear. */
 #define LE_C0_ERR       0x8000
