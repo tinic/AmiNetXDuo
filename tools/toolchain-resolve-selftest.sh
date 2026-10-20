@@ -18,6 +18,7 @@ set -uo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 bad=0
+. "$ROOT/tools/toolchain-version.sh"
 
 say()  { printf '%s=%s\n' "$1" "$2"; }
 fail() { printf 'FAIL %s\n' "$*" >&2; bad=$((bad + 1)); }
@@ -40,9 +41,10 @@ make_root() {
     local dir="$1" ver="$2"
     mkdir -p "$dir/bin" "$dir/m68k-amigaos/ndk-include/exec" \
              "$dir/m68k-amigaos/ndk-include/inline"
-    printf '#!/bin/sh\nif [ "$1" = -dumpversion ]; then echo %s; exit 0; fi\nif [ "$1" = -print-multi-lib ]; then exec "%s/bin/m68k-amigaos-gcc" "$@"; fi\nexit 0\n' \
+    printf '#!/bin/sh\nif [ "$1" = -dumpversion ] || [ "$1" = -dumpfullversion ]; then echo %s; exit 0; fi\nif [ "$1" = -print-multi-lib ]; then exec "%s/bin/m68k-amigaos-gcc" "$@"; fi\nexit 0\n' \
         "$ver" "$AMIGA_TOOLCHAIN_ROOT" > "$dir/bin/m68k-amigaos-gcc"
     chmod +x "$dir/bin/m68k-amigaos-gcc"
+    printf '%s\n' "$TC_ASSET_VERSION" > "$dir/.aminetxduo-toolchain-version"
     : > "$dir/m68k-amigaos/ndk-include/exec/types.h"
     : > "$dir/m68k-amigaos/ndk-include/inline/dos.h"
 
@@ -122,7 +124,7 @@ say stale_cache_without_pin "$( [ "$rc" = 3 ] && echo refused || echo USED )"
 # The runner's actual state.  The pin wins on its own name, so the symlink
 # being wrong costs nothing and the arm is green.
 
-make_root "$PIN" 16.2.0b
+make_root "$PIN" "$TC_GCC_VERSION"
 out=$(resolve); rc=$?
 if [ "$rc" != 0 ] || [ "$out" != "$PIN" ]; then
     fail "with the pin installed the resolver chose rc=$rc root='$out', want $PIN"
@@ -138,6 +140,18 @@ say pin_beats_stale_current "$( [ "$out" = "$PIN" ] && echo pass || echo FAIL )"
 # the pin, so this must take the already-here exit and never reach the network.
 # Without it, a fake root that failed to appear downloads 200 MB in the host
 # CI stage instead of failing the case.
+printf 'wrong-revision\n' > "$PIN/.aminetxduo-toolchain-version"
+AMINETXDUO_TOOLCHAIN_CACHE="$CACHE" \
+AMINETXDUO_TOOLCHAIN_URL="file:///nonexistent-this-must-not-be-fetched" \
+    "$ROOT/tools/fetch-toolchain.sh" >"$TMP/identity.txt" 2>&1
+irc=$?
+[ "$irc" != 0 ] || fail "fetch accepted the wrong package revision"
+grep -q 'expected GCC.*package' "$TMP/identity.txt" || fail "identity refusal lacks package diagnostic"
+have=$(cd "$CACHE/current" 2>/dev/null && pwd -P || echo none)
+[ "$have" = "$STALE" ] || fail "identity failure changed current"
+say wrong_package_revision "$( [ "$irc" != 0 ] && echo refused || echo USED )"
+printf '%s\n' "$TC_ASSET_VERSION" > "$PIN/.aminetxduo-toolchain-version"
+
 AMINETXDUO_TOOLCHAIN_CACHE="$CACHE" \
 AMINETXDUO_TOOLCHAIN_URL="file:///nonexistent-this-must-not-be-fetched" \
     "$ROOT/tools/fetch-toolchain.sh" >/dev/null 2>&1

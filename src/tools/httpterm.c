@@ -1906,11 +1906,13 @@ static VOID term_comp_scan(BPTR lock, const char *prefix,
 
     while (ExNext(lock, fib))
     {
+        /* SDKs spell this byte string as either char[] or TEXT[]. */
+        const char *name = (const char *)fib->fib_FileName;
+
         if (acc->tc_count >= cap)
             break;
-        if (term_comp_match(fib->fib_FileName, prefix))
-            term_comp_add(acc, fib->fib_FileName,
-                          fib->fib_DirEntryType > 0);
+        if (term_comp_match(name, prefix))
+            term_comp_add(acc, name, fib->fib_DirEntryType > 0);
     }
 }
 

@@ -75,11 +75,14 @@ int atoi(const char *s)
     return (int)strtol(s, NULL, 10);
 }
 
-/* The C locale's table, without the locale object around it. */
+/* Older newlib headers call this function. Newlib without locale info
+ * already maps __locale_ctype_ptr() directly to the C-locale table. */
+#ifndef __locale_ctype_ptr
 const char *__locale_ctype_ptr(void)
 {
     return _ctype_;
 }
+#endif
 
 /* amiga.lib's, whose objects tools/check-pcrel-exact.py cannot read. */
 VOID NewList(struct List *list)

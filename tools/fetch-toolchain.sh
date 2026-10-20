@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# Acquire the pinned m68k-amigaos cross toolchain: GCC 16.2.0b, binutils
-# 2.46, NDK 3.9, built by tools/build-toolchain.sh from pinned commits.
+# Acquire the pinned codewiz/AmigaPorts m68k-amigaos toolchain. Package
+# identity is upstream GCC version plus our revision (toolchain-version.sh).
 #
 #   tools/fetch-toolchain.sh              # fetch (or reuse), report the root
 #   eval "$(tools/fetch-toolchain.sh --export)"   # ... and export it
@@ -24,21 +24,9 @@ set -euo pipefail
 
 # ------------------------------------------------------------------- pin ----
 
-# binutils 2.46 (tinic/binutils-gdb a3afdefb, no local patches): it builds this tree
-# at -DAMINETXDUO_LTO=ON and emits the four shipped images byte for byte as
-# the earlier 2.39 assets do.  NDK 3.9, not the newer 3.2: 3.2 renamed long-standing types and the
-# sources are written to the spellings both accept.
-TC_GCC_VERSION="16.2.0b"
-# 16.2.4 moved binutils from 2.39 to 2.46 and GCC to bebbo amiga16.2 134541b3
-# plus the sibcall fix. 16.2.5 added the LTO visibility-warning fix. 16.2.6
-# rebases GCC onto AmigaPorts v16.2-rc15 (0edaa619), which carries the
-# sibcall fix, plus AmigaPorts/gcc PR #82 for the visibility warning
-# (tinic/gcc amiga16.2-rc15-anx). 16.2.7 is AmigaPorts amiga16.2 1d4ca5d4
-# with no local patches. 16.2.8 is tinic/gcc f098a8ef (AmigaPorts 1d4ca5d4 + 3 m68k commits) and binutils ffe2ad82 (PC-relative fix).
-# 16.2.9 adds binutils a3afdefb: GAS byte-branch adjust and 0/-1 fixes, ld rejects byte displacement 0/-1 (AmigaPorts #35-#37).
-# The reported version remains 16.2.0b.
-# Older asset hashes remain at their original tags.
-TC_ASSET_VERSION="16.2.9"
+# The immutable package contains the complete upstream toolchain, including
+# NDK 3.2 and its runtime libraries. Historical releases remain unchanged.
+. "$(dirname "$0")/toolchain-version.sh"
 TC_PREFIX_IN_TAR="opt/m68k-amigaos"
 
 # Compiler assets live with the fork rather than topping the product releases.
@@ -55,11 +43,11 @@ ARCH=$(uname -m)
 case "$OS/$ARCH" in
     Linux/x86_64|Linux/amd64)
         TC_PLATFORM="linux-x86_64"
-        TC_SHA256="adf6daa38acb5fef21ad692178be21e57ee7cd84d87615876d850e4fd07da431"
+        TC_SHA256="032c0c4bc564d36815c42c0ffecc961762ef37c46a0d25a0dbc2046e4c33dd80"
         ;;
     Darwin/arm64|Darwin/aarch64)
         TC_PLATFORM="darwin-arm64"
-        TC_SHA256="99f2e4ccd38add25a066df18a75ec363ae261708317c54c7263a17efe2ed3e2d"
+        TC_SHA256="968c1d73995c60df349dcd82be6786e5c09d0e305dc7a13a057b00f5b4685896"
         ;;
     *)
         TC_PLATFORM=""
@@ -84,7 +72,7 @@ no_asset() {
     exit 2
 }
 
-TC_MIRROR_ASSET="m68k-amigaos-gcc-${TC_ASSET_VERSION}-ndk3.9-${TC_PLATFORM}.tar.xz"
+TC_MIRROR_ASSET="m68k-amigaos-gcc-${TC_ASSET_VERSION}-ndk${TC_NDK_VERSION}-${TC_PLATFORM}.tar.xz"
 TC_MIRROR_URL="${AMINETXDUO_TOOLCHAIN_URL:-https://github.com/${TC_MIRROR_REPO}/releases/download/${TC_MIRROR_TAG}/${TC_MIRROR_ASSET}}"
 
 # ---------------------------------------------------------------- options ----
@@ -210,8 +198,20 @@ repair_and_verify_crt0() {
     fi
 }
 
+verify_identity() {
+    local tree="$1" version package
+    version=$("$tree/bin/m68k-amigaos-gcc" -dumpfullversion 2>/dev/null || true)
+    package=$(cat "$tree/.aminetxduo-toolchain-version" 2>/dev/null || true)
+    if [ "$version" != "$TC_GCC_VERSION" ] || [ "$package" != "$TC_ASSET_VERSION" ]; then
+        echo "!! expected GCC $TC_GCC_VERSION / package $TC_ASSET_VERSION" >&2
+        echo "   got GCC ${version:-nothing} / package ${package:-nothing}; refusing $tree" >&2
+        return 1
+    fi
+}
+
 if [ "$FORCE" = "0" ] && [ -x "$ROOT/bin/m68k-amigaos-gcc" ]; then
     say "==> toolchain already at $ROOT"
+    verify_identity "$ROOT" || exit 1
     # The directory name is the raw asset hash, not the version of the repair
     # applied after extraction.  A local warm cache can therefore predate a
     # new repair even though CI's separate cache key cannot.  Repair and check
@@ -337,6 +337,8 @@ if ! python3 "$(dirname "$0")/fix-toolchain-inline-const.py" \
     exit 1
 fi
 
+verify_identity "$TMP/x/$TC_PREFIX_IN_TAR" || exit 1
+
 rm -rf "$ROOT" "$ROOT.tmp"
 mkdir -p "$CACHE"
 mv "$TMP/x/$TC_PREFIX_IN_TAR" "$ROOT.tmp"
@@ -350,18 +352,6 @@ point_current_at_pin
 
 say "==> installed $ROOT"
 
-# ---------------------------------------------------------------- verify -----
-
-# The asset was selected by this host's uname, so it is meant to run here, and
-# "it does not" is a defect in the asset rather than an expected condition to
-# be narrated -- which is what it used to be, back when there was one Linux
-# tarball for every host.
-VER=$("$ROOT/bin/m68k-amigaos-gcc" -dumpversion 2>/dev/null || echo "")
-if [ "$VER" != "$TC_GCC_VERSION" ]; then
-    echo "!! expected GCC $TC_GCC_VERSION, got '${VER:-nothing}'" >&2
-    echo "   The $TC_PLATFORM asset does not run on this $OS/$ARCH host." >&2
-    exit 1
-fi
-say "    m68k-amigaos-gcc $VER runs"
+say "    m68k-amigaos-gcc $TC_GCC_VERSION / package $TC_ASSET_VERSION runs"
 
 emit_root

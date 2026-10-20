@@ -3,23 +3,15 @@
 # Build the pinned m68k-amigaos cross toolchain from source.  The slow path:
 # tools/fetch-toolchain.sh downloads a prebuilt copy of exactly this.
 #
-#   tools/build-toolchain.sh                     # build into ./build-toolchain
+#   tools/build-toolchain.sh                     # build into ./build/toolchain
 #   tools/build-toolchain.sh --package out.tar.xz
 #   tools/build-toolchain.sh --fetch-only        # just clone the sources
 #   tools/build-toolchain.sh --print-pins        # what this would build
 #
-# GCC 16.2.0b + binutils 2.46 + NDK 3.9, PINNED BY COMMIT, not by branch.
-# binutils is tinic/binutils-gdb a3afdefb (AmigaPorts amiga-2.46 2efe6986 plus
-# AmigaPorts PRs #35-#37: GAS byte-branch adjust and 0/-1 fixes, ld rejects
-# byte displacement 0/-1); it already carries the changes the
-# three diffs in tools/patches/binutils-2.46/ made, so none are applied.  This
-# tree builds at -DAMINETXDUO_LTO=ON with it.  Moving the pin back is the one PINS line below:
-# tools/patches/binutils/ still holds the 2.39 set.  Each entry records the
-# remote verified to serve its pin: bebbo's GitHub repos are gone and Codeberg
-# does not carry every branch.
-#
-# On macOS GNU rsync is REQUIRED: openrsync mishandles libnix's --exclude
-# patterns and silently installs the wrong set of objects.
+# Build the pinned codewiz/AmigaPorts baseline, including its runtime
+# libraries and NDK 3.2. Package identity is the upstream GCC version plus
+# our revision from toolchain-version.sh. Every source and archive is pinned.
+# macOS requires GNU rsync, coreutils, sed and make.
 #
 # SPDX-License-Identifier: MIT
 
@@ -28,51 +20,53 @@ set -euo pipefail
 # ------------------------------------------------------------------ pins ----
 
 # The amiga-gcc build system itself.
-PIN_AMIGA_GCC_URL="https://codeberg.org/bebbo/amiga-gcc"
-PIN_AMIGA_GCC_SHA="86f8ba62f7a5035e309600c86962681e1cbacccb"
+PIN_AMIGA_GCC_URL="https://github.com/AmigaPorts/m68k-amigaos-gcc"
+PIN_AMIGA_GCC_SHA="de370a15e783261e82d0ba0ab809eff128356de1"
 
 # projects/<name>|<remote that serves this commit>|<commit>|<branch it was on>
 #
 # The branch is recorded only so a human can find the commit again; nothing
 # reads it as a pin.
 PINS="
-binutils|https://github.com/tinic/binutils-gdb|a3afdefba01d87798425f28f12a567a65e6f2c4a|fix/amiga-pcrel-byte-linkcheck
-gcc|https://github.com/tinic/gcc|f098a8ef44ac8d11204a3cb0c39c1e4f5cd63fc8|amiga16.2
-newlib-cygwin|https://franke.ms/git/bebbo/newlib-cygwin|0909ae9abc18b38595425143e7a63d9e2fc31174|amiga
-libnix|https://franke.ms/git/bebbo/libnix|b7268e35510b8b7b4ccdad67fbcbb25e73189aef|master
-sfdc|https://franke.ms/git/bebbo/sfdc|5d4efca359e949547553463f5873778bd85e5506|master
-fd2sfd|https://franke.ms/git/bebbo/fd2sfd|7f14d7f15aac2b8426f577f838069e53bf6008ea|master
-amiga-netinclude|https://franke.ms/git/bebbo/amiga-netinclude|b9a8d2cdd410dbb896a93bc9c64b253be436dd89|master
-aros-stuff|https://franke.ms/git/bebbo/aros-stuff|c0a06b4ccd13f52d1518540aa88a450d70581458|master
-fd2pragma|https://github.com/adtools/fd2pragma|8c0f352c348a3252f84170eab737919372562e82|master
-vasm|https://github.com/mheyer32/vasm|bb048d9d3cf54d5e38c643182a0ff55b552f65be|master
+amiga-netinclude|https://github.com/AmigaPorts/amiga-netinclude|7d155ca3a3090afe3466f819dd178f2af6f5c176|main
+binutils|https://github.com/tinic/binutils-gdb|6f53cbde391ed1fa95a24a61ac2adb6edf229df8|amiga-2.46
+clib2|https://github.com/AmigaPorts/clib2|78e05e255495382bbf880d0d37d20763d129f01e|master
+fd2pragma|https://github.com/AmigaPorts/fd2pragma|bcffac5c89295baf1db033addc984312b4b4a722|master
+fd2sfd|https://github.com/AmigaPorts/fd2sfd|a0ae60d140fdfd30f889810faea07cc6968d1fd0|master
+gcc|https://github.com/tinic/gcc|8dc8d8365a3825b74dfba58f8e80545b052e0cd5|amiga16.2
+ira|https://github.com/AmigaPorts/ira|bb7c11384a32c409341fdb0d16d715b7959a0290|master
+ixemul|https://github.com/AmigaPorts/ixemul|f0dd997994263c6ac783b563222a9f53a00c013c|master
+lha|https://github.com/AmigaPorts/lha|979815dc8699a9c5018de067946737c83ec6f697|master
+libdebug|https://github.com/AmigaPorts/libdebug|76c7dbfeaac79516117dc810e3ba9b34d5f54a69|master
+libnix|https://github.com/AmigaPorts/libnix|df91c92564490bae1a5abd9e302f466aa7684bac|master
+newlib-cygwin|https://github.com/AmigaPorts/newlib-cygwin|e07bea74897b6ee7b645602d66fcff6c6792d1a9|amiga
+sfdc|https://github.com/AmigaPorts/sfdc|4e7afc044c1ff129574fcf3b839c3351edcfe2fb|master
+vasm|https://github.com/AmigaPorts/vasm|de93f7dd067001532cff663730133601edb274cb|master
+vbcc|https://github.com/AmigaPorts/vbcc|55a487d500dccccad806cf3916e90bcd95189ec9|master
+vlink|https://github.com/AmigaPorts/vlink|ce46ccfda0e30eda5b12b9a5d0259d8eaefdefe9|master
+aros-stuff|https://github.com/AmigaPorts/aros-stuff|9e09fb0f9f5150058c788fb42787927907b28a46|master
 "
 
-# A second remote to try, keyed by project name (MIRROR_<name>, read by name
-# construction below).  None is set: gcc's was bebbo's Codeberg, which does not
-# carry the fork commit gcc is now pinned to.
+# Binutils keeps the two existing byte-branch guards on the codewiz baseline.
+# The compiler commit is also present in the upstream fork network.
+# shellcheck disable=SC2034 # Resolved dynamically as MIRROR_<module>.
+MIRROR_gcc="https://github.com/AmigaPorts/gcc"
 
-# NDK 3.9.  A single unmirrored third-party host, which is why the built
-# toolchain is worth publishing at all.  Pinned by content.
-PIN_NDK_URL="http://hp.alinea-computer.de/AmigaOS/NDK39.lha"
-PIN_NDK_SHA256="ca5d8f923158d69a9c15b59d6e1580555ca6c0a48be21c5226c71f90fc927ca6"
+# NDK 3.2: the exact archive in codewiz's pinned default-archives table.
+PIN_NDK_URL="https://aminet.net/dev/misc/NDK3.2.lha"
+PIN_NDK_SHA256="96cabd4ad683dced632e147bf86dee0f50dcb1254386216c25c362916a6409bb"
 
 # What the result must report, checked at the end.
-EXPECT_GCC_VERSION="16.2.0b"
+. "$(dirname "$0")/toolchain-version.sh"
+EXPECT_GCC_VERSION="$TC_GCC_VERSION"
 
-# amiga-gcc target list.  NOT `all`: that drags in gdb, which wants a host
-# GMP/MPFR it does not need here, and libSDL12, which this project never uses.
-# GCC/libnix can install an older bootstrap libc before the pinned newlib
-# tree is built. Build newlib after libnix so its libc.a wins in every
-# multilib, but before libgcc's C++ runtime, which needs newlib math headers.
-# Separate invocations prevent -j from racing those installs.
-MAKE_TARGETS="binutils gcc gprof fd2sfd fd2pragma sfdc vasm libnix ndk ndk13"
-POST_NEWLIB_TARGETS="libgcc libpthread"
+# Use codewiz's dependency graph and the same complete toolchain target.
+MAKE_TARGETS="all"
 
 # --------------------------------------------------------------- options ----
 
 HERE=$(cd "$(dirname "$0")" && pwd)
-WORK="$PWD/build-toolchain"
+WORK="$PWD/build/toolchain"
 PREFIX=""
 PACKAGE=""
 JOBS=""
@@ -92,7 +86,7 @@ while [ $# -gt 0 ]; do
                 [ -n "$n" ] || continue
                 printf '%-17s %s %s (%s)\n' "$n" "$s" "$u" "$b"
             done
-            printf 'NDK3.9.lha        sha256:%s %s\n' "$PIN_NDK_SHA256" "$PIN_NDK_URL"
+            printf 'NDK3.2.lha        sha256:%s %s\n' "$PIN_NDK_SHA256" "$PIN_NDK_URL"
             exit 0 ;;
         -h|--help)  sed -n '2,19p' "$0"; exit 0 ;;
         *) echo "usage: $0 [--work DIR] [--prefix DIR] [--package FILE.tar.xz] [-j N] [--fetch-only]" >&2; exit 2 ;;
@@ -124,41 +118,7 @@ sha256_of() {
     else shasum -a 256 "$1" | cut -d' ' -f1; fi
 }
 
-# binutils 2.39 has an old-style function-pointer mismatch that every current
-# compiler rejects OUTRIGHT: objdump.c:4196 assigns dummy_fprintf, which
-# ignores its arguments and returns int, to memory_error_func, which returns
-# void.  clang 16+ and GCC 14+ both promoted that from a warning to an error,
-# so --disable-werror does not reach it.  They spell the switch that demotes it
-# differently, and neither accepts the other's spelling, so ask the compiler
-# which one it has rather than deciding from $OS -- this failed on Linux/GCC 14
-# exactly as it failed on macOS/clang, and a uname gate would have hidden that.
-#
-# The probe compiles the offending assignment, not an empty file: GCC accepts
-# an unrecognised -Wno-anything in silence unless some other diagnostic fires,
-# so "does the compiler take this flag" answers yes to both spellings and picks
-# the wrong one.  "Does this flag make THIS code compile" has one right answer.
 CC_PROBE="${CC:-cc}"
-NO_PTR_WARN=""
-PROBE_SRC='typedef void (*memerr)(int, unsigned long, void *);
-int dummy_fprintf(void *s, const char *f, ...);
-memerr p;
-int main(void) { p = dummy_fprintf; return 0; }'
-for f in "" -Wno-incompatible-function-pointer-types -Wno-incompatible-pointer-types; do
-    if printf '%s\n' "$PROBE_SRC" | "$CC_PROBE" ${f:+"$f"} -c -x c - -o /dev/null >/dev/null 2>&1; then
-        NO_PTR_WARN="$f"
-        break
-    fi
-done
-if [ -n "$NO_PTR_WARN" ]; then
-    echo "==> binutils 2.39 objdump.c needs $NO_PTR_WARN"
-elif printf '%s\n' "$PROBE_SRC" | "$CC_PROBE" -c -x c - -o /dev/null >/dev/null 2>&1; then
-    : # this compiler still only warns
-else
-    echo "!! $CC_PROBE rejects binutils 2.39's objdump.c:4196 and neither" >&2
-    echo "   -Wno-incompatible-function-pointer-types nor" >&2
-    echo "   -Wno-incompatible-pointer-types demotes it." >&2
-    exit 2
-fi
 
 case "$OS" in
 Darwin)
@@ -169,7 +129,7 @@ Darwin)
     # not on it.
     export CPPFLAGS="-I$BREW/include ${CPPFLAGS:-}"
     export LDFLAGS="-L$BREW/lib ${LDFLAGS:-}"
-    export PATH="$BREW/bin:$BREW/opt/texinfo/bin:$PATH"
+    export PATH="$BREW/bin:$BREW/opt/coreutils/libexec/gnubin:$BREW/opt/gnu-sed/libexec/gnubin:$BREW/opt/texinfo/bin:$PATH"
 
     # libnix installs with `rsync --exclude`, and macOS's openrsync gets those
     # patterns wrong: the build succeeds and the library is short some objects.
@@ -190,8 +150,7 @@ Darwin)
     for t in lha makeinfo bison flex m4; do need "$t"; done
     ;;
 Linux)
-    # Nothing beyond the shared objdump.c switch: the system zlib and gmp/mpfr
-    # are where configure looks, and rsync is GNU rsync.
+    # The system GMP/MPFR/MPC are where configure looks; rsync is GNU rsync.
     #
     # bison, flex and m4 are checked HERE and not left to the build.  binutils
     # generates its parsers from .y and .l, and a missing m4 does not merely
@@ -239,7 +198,7 @@ fi
 # everywhere gives one order, the one every earlier asset has.
 export LC_ALL=C
 
-export CFLAGS="-Os $NO_PTR_WARN ${CFLAGS:-}"
+export CFLAGS="-O2 ${CFLAGS:-}"
 export CXXFLAGS="$CFLAGS"
 
 echo "==> host $OS/$ARCH, -j$JOBS"
@@ -314,14 +273,14 @@ done
 
 # --- NDK ---------------------------------------------------------------------
 
-NDK_LHA="$SRC/download/NDK3.9.lha"
+NDK_LHA="$SRC/download/NDK3.2.lha"
 if [ ! -f "$NDK_LHA" ] || [ "$(sha256_of "$NDK_LHA")" != "$PIN_NDK_SHA256" ]; then
-    echo "    NDK3.9.lha <- $PIN_NDK_URL"
+    echo "    NDK3.2.lha <- $PIN_NDK_URL"
     curl -fsSL --retry 3 --retry-connrefused --retry-delay 2 --connect-timeout 30 \
          "$PIN_NDK_URL" -o "$NDK_LHA.tmp"
     got=$(sha256_of "$NDK_LHA.tmp")
     if [ "$got" != "$PIN_NDK_SHA256" ]; then
-        echo "!! NDK3.9.lha does not match its pin" >&2
+        echo "!! NDK3.2.lha does not match its pin" >&2
         echo "   want $PIN_NDK_SHA256" >&2
         echo "   got  $got" >&2
         rm -f "$NDK_LHA.tmp"
@@ -329,188 +288,36 @@ if [ ! -f "$NDK_LHA" ] || [ "$(sha256_of "$NDK_LHA")" != "$PIN_NDK_SHA256" ]; th
     fi
     mv "$NDK_LHA.tmp" "$NDK_LHA"
 fi
-echo "    NDK3.9.lha sha256 verified"
+echo "    NDK3.2.lha sha256 verified"
 
 [ "$FETCH_ONLY" = "1" ] && { echo "==> --fetch-only, stopping"; exit 0; }
 
-# --------------------------------------------------------------- patches ----
-
-# binutils 2.39 bundles a zlib whose headers collide with a current macOS SDK's
-# _stdio.h and the build dies in libz_a-zutil.o.  The system zlib is fine and
-# is what everything else links anyway, on both hosts, so this is unconditional
-# rather than one more thing that is only exercised on one platform.
-if ! grep -q 'with-system-zlib' "$SRC/Makefile"; then
-    python3 - "$SRC/Makefile" <<'PY'
-import sys
-p = sys.argv[1]
-s = open(p).read()
-anchor = "CONFIG_BINUTILS =--prefix=$(PREFIX)"
-i = s.index(anchor)
-j = s.index("\n", i) + 1
-s = s[:j] + "CONFIG_BINUTILS += --with-system-zlib\n" + s[j:]
-open(p, "w").write(s)
-PY
-    echo "==> patched CONFIG_BINUTILS += --with-system-zlib"
-fi
-
-# MAKE_TARGETS deliberately leaves gdb out -- it wants a host GMP and MPFR it
-# does not need here -- but the top-level configure still runs for it, and from
-# binutils 2.46 that configure ERRORS on a host with gmp.h and no mpfr.h rather
-# than dropping the directory.  Nothing this builds comes out of gdb, gprof
-# included, so switch it off where the decision already was.
-if ! grep -q 'disable-gdb' "$SRC/Makefile"; then
-    python3 - "$SRC/Makefile" <<'PY'
-import sys
-p = sys.argv[1]
-s = open(p).read()
-anchor = "CONFIG_BINUTILS =--prefix=$(PREFIX)"
-i = s.index(anchor)
-j = s.index("\n", i) + 1
-s = s[:j] + "CONFIG_BINUTILS += --disable-gdb --disable-sim\n" + s[j:]
-open(p, "w").write(s)
-PY
-    echo "==> patched CONFIG_BINUTILS += --disable-gdb --disable-sim"
-fi
-
-# -flto.  Two changes to binutils; GCC needs no patch for it, only the pin
-# above.  That pin is tinic/gcc amiga16.2 f098a8ef: AmigaPorts amiga16.2
-# 1d4ca5d4 plus 3 local m68k commits; it
-# has the LTO visibility-warning fix (PR #82), the A5/SP argument-register
-# diagnostic (PR #83) and the narrow __asm argument lowering (PR #84).  It carries the
-# sibcall fix that 16.2.4 and 16.2.5 added on bebbo 134541b3: an indirect
-# sibcall, and on 68000 a direct one under -fbaserel/-resident/-mpcrel, no
-# longer loads its target over an a0 argument (bsd_wait_sliced() entered
-# bsd_send_once() with its own address as `arg'); it jumps through a1 instead.
-#
-# First, amiga-gcc configures binutils with --disable-plugins for every target
-# but m68k-elf, so ld accepts -plugin and ignores it.  GCC's liblto_plugin.so
-# is then never loaded, no IR is ever read, and an LTO link quietly produces a
-# library with nothing in it.  Upstream amiga-gcc dropped that gate in 7e75d1c.
-if ! grep -q 'enable-plugins' "$SRC/Makefile"; then
-    python3 - "$SRC/Makefile" <<'PY'
-import sys
-p = sys.argv[1]
-s = open(p).read()
-old = """ifneq (m68k-elf,$(TARGET))
-CONFIG_BINUTILS += --disable-plugins
-endif
-"""
-i = s.index(old)
-s = s[:i] + "CONFIG_BINUTILS += --enable-plugins\n" + s[i + len(old):]
-open(p, "w").write(s)
-PY
-    echo "==> patched CONFIG_BINUTILS += --enable-plugins"
-fi
-
-# Second, bfd.  With the plugin loaded, five defects in the amigaos back end
-# and in the generic archive scan lose the plugin's symbols: slim LTO archive
-# members are never pulled in, the IR dummy BFD's definitions and references
-# are dropped when ld round-trips it, --gc-sections purges the link, and the
-# IR hunk is written without the length header libiberty reads back.  The
-# diffs are against the pinned binutils commit; each is skipped if it is
-# already in the tree, so a rebuild in a populated work directory is a no-op.
-#
-# WHICH set applies is decided by the branch recorded in PINS above, not by a
-# fixed directory name.  The two diffs above are written against 2.39's bfd and
-# do not apply to 2.46, which carries LTO support for the HUNK target of its
-# own and needs three different repairs instead: `strip` there drops every
-# HUNK_RELOC32, `ar` there writes a native Amiga library, which has no
-# symbol index a slim LTO member can appear in, and writing that index for a
-# C++ COMDAT object then divides by zero in amiga_slurp_symbol_table.  A pin that moves without its
-# patch set is exactly the failure this table exists to make impossible, so an
-# unrecorded branch stops the build rather than quietly producing an unpatched
-# binutils.
-BU_BRANCH=$(printf '%s\n' "$PINS" | awk -F'|' '$1 == "binutils" { print $4 }')
-case "$BU_BRANCH" in
-    amiga-2.39.0) BU_PATCH_SET="binutils" ;;
-    amiga-2.46)   BU_PATCH_SET="binutils-2.46" ;;
-    fix/amiga-pcrel-local-regression) BU_PATCH_SET="binutils-current" ;;
-    fix/amiga-pcrel-byte-linkcheck) BU_PATCH_SET="binutils-current" ;;
-    *)
-        echo "!! no patch set under tools/patches/ for binutils $BU_BRANCH" >&2
-        echo "   Write one and name it here.  An unpatched binutils links" >&2
-        echo "   images that LoadSeg() will not relocate." >&2
-        exit 2 ;;
-esac
-
-echo "==> binutils patches: tools/patches/$BU_PATCH_SET ($BU_BRANCH)"
-BU_PATCHES="$HERE/patches/$BU_PATCH_SET"
-if [ ! -d "$BU_PATCHES" ]; then
-    echo "!! tools/patches/$BU_PATCH_SET is missing" >&2
-    exit 2
-fi
-for patch in "$BU_PATCHES"/*.diff; do
-    [ -f "$patch" ] || continue
-    if git -C "$SRC/projects/binutils" apply --reverse --check "$patch" 2>/dev/null; then
-        echo "    $(basename "$patch") already applied"
-    else
-        echo "    $(basename "$patch")"
-        git -C "$SRC/projects/binutils" apply "$patch"
-    fi
-done
-
-# newlib commit 120371e fixed the type mismatch behind amiga-gcc issue #8 by
-# changing __argv from an array into a pointer, but left both startup paths
-# writing __argv[0] before the command-line initializer owns it.  Every
-# ordinary crt0-linked command then writes a longword through address zero
-# before main().  Match libnix's actual contract in SOURCE: crt0 captures the
-# OS inputs, __nocommandline alone constructs argc/argv, and a shared header
-# makes another cross-translation-unit array/pointer mismatch a compile error.
-#
-# Reverse-apply means upstream has taken this exact fix and needs no patch.  A
-# different upstream edit matches neither direction and stops here for review;
-# silently building a new, unverified crt0 shape is how this regression shipped.
-NEWLIB_PATCH="$HERE/patches/newlib/argv-contract.diff"
-if git -C "$SRC/projects/newlib-cygwin" apply --reverse --check \
-       "$NEWLIB_PATCH" 2>/dev/null; then
-    echo "==> newlib argc/argv contract already fixed upstream"
-elif git -C "$SRC/projects/newlib-cygwin" apply --check \
-         "$NEWLIB_PATCH" 2>/dev/null; then
-    echo "==> newlib argc/argv contract: $(basename "$NEWLIB_PATCH")"
-    git -C "$SRC/projects/newlib-cygwin" apply "$NEWLIB_PATCH"
-else
-    echo "!! newlib crt0 argc/argv contract is neither the pinned source" >&2
-    echo "!! nor the reviewed fixed source; refusing an unverified build." >&2
-    exit 2
-fi
-
-# aros-stuff's pthread.c calls timersub(), which libnix's <sys/time.h> does
-# not declare; GCC 14+ makes that implicit declaration an error, and the build
-# stopped at libpthread before ndk and packaging.  A fallback after its
-# <sys/time.h>; the same three ways out as above.
-PTHREAD_PATCH="$HERE/patches/aros-stuff/pthread-timersub.diff"
-if git -C "$SRC/projects/aros-stuff" apply --reverse --check \
-       "$PTHREAD_PATCH" 2>/dev/null; then
-    echo "==> pthread timersub already present"
-elif git -C "$SRC/projects/aros-stuff" apply --check "$PTHREAD_PATCH" 2>/dev/null; then
-    echo "==> pthread timersub: $(basename "$PTHREAD_PATCH")"
-    git -C "$SRC/projects/aros-stuff" apply "$PTHREAD_PATCH"
-else
-    echo "!! aros-stuff pthread.c is neither the pinned source nor the" >&2
-    echo "!! reviewed fixed source; refusing an unverified build." >&2
-    exit 2
-fi
+# The pinned AmigaPorts build system carries the HUNK/LTO, startup, header
+# and pthread fixes. Build those reviewed sources directly; do not apply
+# the historical patches for the older bebbo build system.
 
 # ----------------------------------------------------------------- build ----
 
 mkdir -p "$PREFIX"
+MAKE_TOOL=$(command -v gmake || command -v make)
 echo "==> make $MAKE_TARGETS"
-( cd "$SRC" && make NDK=3.9 PREFIX="$PREFIX" -j"$JOBS" $MAKE_TARGETS )
-echo "==> make newlib (after libnix, before the C++ runtime)"
-( cd "$SRC" && make NDK=3.9 PREFIX="$PREFIX" -j"$JOBS" newlib )
-echo "==> make $POST_NEWLIB_TARGETS"
-( cd "$SRC" && make NDK=3.9 PREFIX="$PREFIX" -j"$JOBS" $POST_NEWLIB_TARGETS )
+( cd "$SRC" && "$MAKE_TOOL" PREFIX="$PREFIX" -j"$JOBS" $MAKE_TARGETS )
+# These are the remaining package steps in codewiz's toolchain.yml.
+( cd "$SRC" && "$MAKE_TOOL" PREFIX="$PREFIX" -j4 all-sdk )
+( cd "$SRC" && "$MAKE_TOOL" PREFIX="$PREFIX" -j"$JOBS" vbcc vlink )
+( cd "$SRC" && "$MAKE_TOOL" PREFIX="$PREFIX" -j"$JOBS" zlib libpng )
 
 # Catch the precise stale allocator that escaped the 16.2.2 packages even
 # though their source checkout carried the fix.  This checks the *installed*
 # libraries, not merely the pinned source or build logs.
 python3 "$HERE/check-toolchain-malloc.py" "$PREFIX"
+python3 "$HERE/toolchain-branch-selftest.py" "$PREFIX"
 
 # ------------------------------------------------------------- post-build ----
 
 # The same repairs fetch-toolchain.sh applies to a downloaded tree, applied
 # here so a locally built one is equally sound before anything links against
-# it. The source-level argv fix above should make the binary repair a no-op;
+# it. The pinned upstream argv fix should make the binary repair a no-op;
 # the immediate --check is the gate proving that every compiled multilib has
 # the reviewed shape. Both are idempotent, so an upstream-fixed tree needs no
 # special branch here.
@@ -546,7 +353,7 @@ mkdir -p "$PREFIX/lib/bfd-plugins"
 ln -sf "$LTO_PLUGIN_REL" "$PREFIX/lib/bfd-plugins/liblto_plugin.so"
 echo "==> lib/bfd-plugins/liblto_plugin.so -> $LTO_PLUGIN_REL"
 
-VER=$("$PREFIX/bin/m68k-amigaos-gcc" -dumpversion 2>/dev/null || echo "")
+VER=$("$PREFIX/bin/m68k-amigaos-gcc" -dumpfullversion 2>/dev/null || echo "")
 if [ "$VER" != "$EXPECT_GCC_VERSION" ]; then
     echo "!! expected GCC $EXPECT_GCC_VERSION, got '${VER:-nothing}'" >&2
     exit 1
@@ -554,6 +361,8 @@ fi
 [ -f "$PREFIX/m68k-amigaos/ndk-include/exec/types.h" ] || {
     echo "!! no NDK headers under $PREFIX/m68k-amigaos/ndk-include" >&2; exit 1; }
 
+( cd "$SRC" && scripts/manifest ) > "$PREFIX/.manifest"
+printf '%s\n' "$TC_ASSET_VERSION" > "$PREFIX/.aminetxduo-toolchain-version"
 echo "==> built GCC $VER at $PREFIX"
 
 # --------------------------------------------------------------- package ----

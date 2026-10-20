@@ -2,10 +2,11 @@
 """Verify the pinned newlib allocator in every installed toolchain multilib.
 
 The 16.2.2 packages shipped a bootstrap libc despite pinning fixed newlib
-source. For this immutable asset series, compare installed malloc.o bytes
-against the known-good newlib build, in both libc.a and libg.a. A future
-source, compiler, or flag change must deliberately update this map and its
-runtime Enforcer proof; unknown bytes fail closed.
+source. Compare the actual installed allocator member in both libc.a and libg.a,
+using a separate map for each pinned runtime. Source, compiler or flag changes
+require a reviewed map update and runtime validation; unknown bytes fail closed.
+The AmigaPorts profile is covered by its newlib simulator suite, not by the
+historical runtime Enforcer evidence for the legacy profile.
 """
 
 import hashlib
@@ -36,6 +37,19 @@ EXPECTED_MALLOC_SHA256 = {
 }
 
 
+# AmigaPorts GCC 16.2.1b / newlib e07bea74: eight multilibs. The custom
+# allocator moved to mallocr.cpp; libc_a-malloc.o is only a public wrapper
+# around _malloc_r and must never stand in for the allocator in this gate.
+AMIGAPORTS_MALLOC_SHA256 = {'libb': '8c7f05d2f0797840a85e0558631f4252f43232696be98803b2ce84c3c1d22dfc',
+ 'libb/libm020': '844d6107c440008eae78c139da5ab2fa747fadd0f414181c394e3fe14c6b2dbb',
+ 'libb/libm020/libm881': '844d6107c440008eae78c139da5ab2fa747fadd0f414181c394e3fe14c6b2dbb',
+ 'libb32/libm020': '99a4b73ee31ed218e3b1a9b324ad2f9c97f8c951ea05c2ec6ea58c2a9315ff93',
+ 'libb32/libm020/libm881': '99a4b73ee31ed218e3b1a9b324ad2f9c97f8c951ea05c2ec6ea58c2a9315ff93',
+ '': 'ab3e4f26097acfeca5f630eaf297397d87e0e2bed93338186d998abfb56793a7',
+ 'libm020': '33fb458d92179450e1da66a2f438531f71530dac93e0a88f3c7cc9bc2d5761cb',
+ 'libm020/libm881': '33fb458d92179450e1da66a2f438531f71530dac93e0a88f3c7cc9bc2d5761cb'}
+
+
 def main() -> int:
     if len(sys.argv) != 2:
         print(f"usage: {sys.argv[0]} <toolchain-prefix>", file=sys.stderr)
@@ -60,7 +74,12 @@ def main() -> int:
         if line.strip():
             variant = line.split(";", 1)[0]
             compiler_variants.add("" if variant == "." else variant)
-    if compiler_variants != set(EXPECTED_MALLOC_SHA256):
+    expected_malloc = EXPECTED_MALLOC_SHA256
+    allocator_member = "malloc.o"
+    if compiler_variants == set(AMIGAPORTS_MALLOC_SHA256):
+        expected_malloc = AMIGAPORTS_MALLOC_SHA256
+        allocator_member = "libc_a-mallocr.o"
+    if compiler_variants != set(expected_malloc):
         failures.append(
             "compiler multilib paths differ from pinned allocator map: "
             f"{sorted(compiler_variants)}"
@@ -69,7 +88,7 @@ def main() -> int:
     for archive_name in ("libc.a", "libg.a"):
         expected = {
             str(pathlib.PurePosixPath(variant) / archive_name)
-            for variant in EXPECTED_MALLOC_SHA256
+            for variant in expected_malloc
         }
         actual = {
             archive.relative_to(libdir).as_posix()
@@ -77,7 +96,7 @@ def main() -> int:
         }
         for extra in sorted(actual - expected):
             failures.append(f"m68k-amigaos/lib/{extra}: unexpected unverified multilib")
-    for variant, want in EXPECTED_MALLOC_SHA256.items():
+    for variant, want in expected_malloc.items():
         for companion in ("crt0.o", "libm.a"):
             path = libdir / variant / companion
             if not path.is_file():
@@ -88,17 +107,17 @@ def main() -> int:
                 failures.append(f"{archive.relative_to(prefix)}: missing archive")
                 continue
             result = subprocess.run(
-                [str(ar), "p", str(archive), "malloc.o"],
+                [str(ar), "p", str(archive), allocator_member],
                 check=False,
                 capture_output=True,
             )
             if result.returncode or not result.stdout:
-                failures.append(f"{archive.relative_to(prefix)}: missing malloc.o")
+                failures.append(f"{archive.relative_to(prefix)}: missing {allocator_member}")
                 continue
             got = hashlib.sha256(result.stdout).hexdigest()
             if got != want:
                 failures.append(
-                    f"{archive.relative_to(prefix)}: malloc.o {got}, want {want}"
+                    f"{archive.relative_to(prefix)}: {allocator_member} {got}, want {want}"
                 )
 
     if failures:
@@ -106,7 +125,7 @@ def main() -> int:
         for failure in failures:
             print(f"  {failure}", file=sys.stderr)
         return 1
-    print("toolchain allocator verification passed: 11 libc and 11 libg multilibs")
+    print(f"toolchain allocator verification passed: {len(expected_malloc)} libc and {len(expected_malloc)} libg multilibs ({allocator_member})")
     return 0
 
 
