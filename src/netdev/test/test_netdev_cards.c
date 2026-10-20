@@ -169,6 +169,26 @@ int main(void)
                1);
     expect_int("netdev_card_by_zorro(a2065)",
                netdev_card_by_zorro(514, 112) == netdev_card_by_name("a2065"), 1);
+    expect_int("netdev_card_by_zorro(ameristar)",
+               netdev_card_by_zorro(1053, 1) == netdev_card_by_name("ameristar"),
+               1);
+    /* The Ameristar A2065 is the Commodore board: same chip, window and SRAM,
+       and only the OUI in front of the serial differs. */
+    {
+        const NetdevCard *cbm = netdev_card_by_name("a2065");
+        const NetdevCard *ams = netdev_card_by_name("ameristar");
+
+        expect_int("ameristar chip",     ams->chip,     cbm->chip);
+        expect_int("ameristar reg_off",  (int)ams->reg_off,  (int)cbm->reg_off);
+        expect_int("ameristar stride",   ams->stride,   cbm->stride);
+        expect_int("ameristar mem_off",  (int)ams->mem_off,  (int)cbm->mem_off);
+        expect_int("ameristar mem_size", (int)ams->mem_size, (int)cbm->mem_size);
+        expect_int("ameristar lance_swap", ams->lance_swap, cbm->lance_swap);
+        expect_int("a2065 OUI 00:80:10", (int)cbm->serial_oui, 0x008010);
+        expect_int("ameristar OUI 00:00:9F", (int)ams->serial_oui, 0x00009f);
+        expect_int("ariadne OUI 00:60:30",
+                   (int)netdev_card_by_name("ariadne")->serial_oui, 0x006030);
+    }
     /* The same manufacturer with another product, an unknown one, and the
        PCMCIA rows' MANFIDs, which are not autoconfig records. */
     expect_int("netdev_card_by_zorro(4626, 24)",

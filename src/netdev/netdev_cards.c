@@ -81,17 +81,17 @@ const NetdevCard netdev_cards[] =
       NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0, NULL, NULL, 0 },
 
     /*
-     * The two LANCE boards.  Registers are RDP then RAP, a word apart, and the
+     * The LANCE boards (and the Ameristar A2065, appended below).  Registers are RDP then RAP, a word apart, and the
      * 32 KB SRAM behind them holds the rings, the buffers and the init block.
      * The Ariadne crosses the SRAM byte lanes -- see lance.c.
      */
     { "a2065",      514,   112, 0x4000,     2,      0,
       NETDEV_CHIP_LANCE,   10000000UL, 0,  0x8000,  0x8000,  0x0000,
-      NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0x0080, NULL, NULL, 0 },
+      NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0x008010UL, NULL, NULL, 0 },
 
     { "ariadne",   2167,   201, 0x0370,     2,      0,
       NETDEV_CHIP_LANCE,   10000000UL, 0,  0x8000,  0x8000,  0x0000,
-      NETDEV_BUS_ZORRO, 0, 0, 1, NULL, 0x0060, NULL, NULL, 0 },
+      NETDEV_BUS_ZORRO, 0, 0, 1, NULL, 0x006030UL, NULL, NULL, 0 },
 
     /*
      * The A1200/A600 PCMCIA slot.  No autoconfig record and no board base:
@@ -157,6 +157,16 @@ const NetdevCard netdev_cards[] =
     { "3cxem556",  0x0101, 0x0035, 0x0300,   1,      0,
       NETDEV_CHIP_EL3,     10000000UL, 0,       0,       0,       0,
       NETDEV_BUS_PCMCIA, 0x00a20000UL, 0x00010000UL, 0, NULL, 0, NULL, NULL, 0 },
+
+    /*
+     * The Ameristar A2065: the Commodore board under Ameristar's autoconfig
+     * identity, same LANCE, same window, same 32 KB SRAM.  Only the OUI in
+     * front of the serial differs, 00:00:9F, as in Linux a2065.c and NetBSD
+     * if_le_zbus.c.  Appended, never inserted: the unit pin is published.
+     */
+    { "ameristar", 1053,     1, 0x4000,     2,      0,
+      NETDEV_CHIP_LANCE,   10000000UL, 0,  0x8000,  0x8000,  0x0000,
+      NETDEV_BUS_ZORRO, 0, 0, 0, NULL, 0x00009fUL, NULL, NULL, 0 },
 
 #endif /* NETDEV_HAS_CLASSIC */
 

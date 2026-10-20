@@ -241,7 +241,7 @@ static VOID test_filter_waits_for_transmit(VOID)
  *
  * The station address is the one worth pinning.  Neither the A2065 nor the
  * Ariadne has an address PROM -- a read below the SRAM returns zero -- so the
- * address is SYNTHESISED: the OUI comes from the card row and the low four
+ * address is SYNTHESISED: the OUI comes from the card row and the low three
  * bytes from the autoconfig serial number.  Get it wrong and every card of a
  * kind can end up with the same address, or with one whose group bit is set,
  * and a card sweep still passes because both ends agree on whatever was
@@ -261,22 +261,27 @@ static void test_attach_address_comes_from_the_serial(void)
 {
     static NetdevCard a2065;
     static NetdevCard ariadne;
+    static NetdevCard ameristar;
 
     printf("\n-- attach: the address is synthesised, not read\n");
 
     a2065          = card;
     a2065.mem_size = LE_END + 16;
-    a2065.serial_oui = 0x0080u;          /* 00:80:10, Commodore */
+    a2065.serial_oui = 0x008010UL;       /* 00:80:10, Commodore */
 
     ariadne          = card;
     ariadne.mem_size = LE_END + 16;
-    ariadne.serial_oui = 0x0060u;        /* 00:60:30, Village Tronic */
+    ariadne.serial_oui = 0x006030UL;     /* 00:60:30, Village Tronic */
+
+    ameristar          = card;
+    ameristar.mem_size = LE_END + 16;
+    ameristar.serial_oui = 0x00009fUL;   /* 00:00:9F, Ameristar */
 
     attach_reset(&a2065, 0x10ABCDEFUL, 0);
     expect_u32("a2065 attaches", (ULONG)(LONG)lance_attach(&nic), 0);
     expect_u32("factory[0] is the row's OUI, high", nic.factory[0], 0x00);
-    expect_u32("factory[1] is the row's OUI, low",  nic.factory[1], 0x80);
-    expect_u32("factory[2] is serial 31..24", nic.factory[2], 0x10);
+    expect_u32("factory[1] is the row's OUI, mid",  nic.factory[1], 0x80);
+    expect_u32("factory[2] is the row's OUI, low",  nic.factory[2], 0x10);
     expect_u32("factory[3] is serial 23..16", nic.factory[3], 0xAB);
     expect_u32("factory[4] is serial 15..8",  nic.factory[4], 0xCD);
     expect_u32("factory[5] is serial 7..0",   nic.factory[5], 0xEF);
@@ -295,6 +300,28 @@ static void test_attach_address_comes_from_the_serial(void)
     expect_u32("ariadne attaches", (ULONG)(LONG)lance_attach(&nic), 0);
     expect_u32("and takes ITS row's OUI", nic.factory[1], 0x60);
     expect_u32("with the same serial underneath", nic.factory[5], 0xEF);
+
+    /*
+     * The Ameristar A2065: 00:00:9F and serial bits 23..0, as Linux a2065.c
+     * and NetBSD if_le_zbus.c have it.  The serial's top byte is not part
+     * of the address: give it one that is not 0x9F and check it is dropped.
+     */
+    attach_reset(&ameristar, 0x55123456UL, 0);
+    expect_u32("ameristar attaches", (ULONG)(LONG)lance_attach(&nic), 0);
+    expect_u32("ameristar factory[0]", nic.factory[0], 0x00);
+    expect_u32("ameristar factory[1]", nic.factory[1], 0x00);
+    expect_u32("ameristar factory[2]", nic.factory[2], 0x9F);
+    expect_u32("ameristar factory[3] is serial 23..16", nic.factory[3], 0x12);
+    expect_u32("ameristar factory[4] is serial 15..8",  nic.factory[4], 0x34);
+    expect_u32("ameristar factory[5] is serial 7..0",   nic.factory[5], 0x56);
+
+    /* The Commodore row drops the serial's top byte the same way. */
+    attach_reset(&a2065, 0x55123456UL, 0);
+    expect_u32("a2065 attaches, any serial top byte",
+               (ULONG)(LONG)lance_attach(&nic), 0);
+    expect_u32("a2065 keeps 00:80:10 whatever serial 31..24 is",
+               ((ULONG)nic.factory[1] << 8) | nic.factory[2], 0x8010);
+    expect_u32("a2065 factory[3] is serial 23..16", nic.factory[3], 0x12);
 }
 
 /* The chip-presence check, and the refusal that protects it. */
@@ -306,7 +333,7 @@ static void test_attach_refuses_what_is_not_a_lance(void)
 
     c          = card;
     c.mem_size = LE_END + 16;
-    c.serial_oui = 0x0080u;
+    c.serial_oui = 0x008010UL;
 
     /* CSR0 answering with anything in its high byte is not a LANCE. */
     attach_reset(&c, 1, (UWORD)(LE_C0_STOP | 0x0100u));  /* garbage in the high byte */
@@ -326,7 +353,7 @@ static void test_attach_refuses_what_is_not_a_lance(void)
 
         small          = card;
         small.mem_size = LE_END - 1;
-        small.serial_oui = 0x0080u;
+        small.serial_oui = 0x008010UL;
         attach_reset(&small, 1, 0);
         expect_u32("a board smaller than the ring geometry is refused",
                    (ULONG)(LONG)lance_attach(&nic), (ULONG)(LONG)-1);

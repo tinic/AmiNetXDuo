@@ -111,10 +111,11 @@ typedef struct NetdevCard
      * ASIC 15 the reset).  NULL for every card whose file is evenly spaced.
      */
     const ULONG *regmap;
-    UWORD       serial_oui;     /* non-zero: the station address is this OUI
-                                   prefix plus the autoconfig serial number,
-                                   which is where Commodore put it -- there is
-                                   no address PROM in the board window        */
+    ULONG       serial_oui;     /* non-zero: the station address is this
+                                   24-bit OUI plus the low three bytes of the
+                                   autoconfig serial number, which is where
+                                   Commodore put it -- there is no address
+                                   PROM in the board window                   */
     /*
      * The ISA Plug and Play bridge in front of the chip, or NULL when the
      * register file decodes as soon as the board is mapped -- which is every

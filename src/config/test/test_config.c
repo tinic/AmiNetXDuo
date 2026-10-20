@@ -2100,7 +2100,7 @@ static void test_interface_card(void)
     CHECK_STR(seen[0].hint,
               "CARD is one of XSURF100, XSURF, ARIADNE2, HYDRA, LANROVER, "
               "A2065, ARIADNE, PCMCIA, XSURF500, 3C589, 3CCFEM556, "
-              "3CXEM556, GENET, ZZ9000");
+              "3CXEM556, AMERISTAR, GENET");
 }
 
 /* Host-name precedence, strongest first: name_resolution, DHCP option 12,

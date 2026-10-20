@@ -70,6 +70,17 @@ extern VOID netdev_trace_val(const char *tag, ULONG v);
 #define LE_TX_RING      (1u << LE_TX_LOG)       /* 4 */
 #define LE_BUFSZ        1536
 
+/*
+ * Where the chip sees the SRAM.  Every address handed to the Am7990 -- the init
+ * block in CSR1/CSR2, the ring bases and the buffer addresses -- is this plus
+ * the offset: the boards decode the SRAM at $8000 in the chip's own address
+ * space, as NetBSD's le_zbus (sc_addr) has it for the A2065, the Ameristar and
+ * the Ariadne.  Amiberry masks chip addresses to 15 bits, so the emulator
+ * accepts an offset alone; real boards do not.
+ */
+#define LE_CHIP_BASE    0x8000UL
+#define LE_CHIP(off)    (LE_CHIP_BASE + (ULONG)(off))
+
 #define LE_INIT_OFF     0x0000                  /* 24 bytes */
 #define LE_RXD_OFF      0x0020                  /* 16 x 8, to 0xa0 */
 #define LE_TXD_OFF      0x00a0                  /* 4 x 8, to 0xc0 */
@@ -341,8 +352,8 @@ static VOID lance_reset(NetdevNic *nic)
  */
 static VOID le_write_init(NetdevNic *nic)
 {
-    ULONG rxd = (ULONG)LE_RXD_OFF;
-    ULONG txd = (ULONG)LE_TXD_OFF;
+    ULONG rxd = LE_CHIP(LE_RXD_OFF);
+    ULONG txd = LE_CHIP(LE_TXD_OFF);
     UWORD i;
 
     le_put16(nic, LE_INIT_OFF + 0, nic->promisc ? LE_MODE_PROM : 0);
@@ -400,7 +411,7 @@ static VOID le_rings(NetdevNic *nic)
     for (i = 0; i < LE_RX_RING; i++)
     {
         ULONG d   = LE_RXD_OFF + (ULONG)i * 8;
-        ULONG buf = LE_RXB_OFF + (ULONG)i * LE_BUFSZ;
+        ULONG buf = LE_CHIP(LE_RXB_OFF + (ULONG)i * LE_BUFSZ);
 
         le_put16(nic, d + 0, (UWORD)(buf & 0xffff));
         le_put16(nic, d + 2, (UWORD)(LE_R1_OWN | ((buf >> 16) & 0xff)));
@@ -412,7 +423,7 @@ static VOID le_rings(NetdevNic *nic)
     for (i = 0; i < LE_TX_RING; i++)
     {
         ULONG d   = LE_TXD_OFF + (ULONG)i * 8;
-        ULONG buf = LE_TXB_OFF + (ULONG)i * LE_BUFSZ;
+        ULONG buf = LE_CHIP(LE_TXB_OFF + (ULONG)i * LE_BUFSZ);
 
         le_put16(nic, d + 0, (UWORD)(buf & 0xffff));
         le_put16(nic, d + 2, (UWORD)((buf >> 16) & 0xff));   /* not OWN */
@@ -441,9 +452,16 @@ LONG lance_init(NetdevNic *nic)
     nic->filter_pending = FALSE;
 
     /* Where the init block is, split across CSR1 and CSR2. */
-    LANCE_CSR_PUT(nic, LE_CSR1, (UWORD)(LE_INIT_OFF & 0xffff));
-    LANCE_CSR_PUT(nic, LE_CSR2, (UWORD)((LE_INIT_OFF >> 16) & 0xff));
-    LANCE_CSR_PUT(nic, LE_CSR3, 0);     /* no BSWP: the board does the lanes */
+    LANCE_CSR_PUT(nic, LE_CSR1, (UWORD)(LE_CHIP(LE_INIT_OFF) & 0xffff));
+    LANCE_CSR_PUT(nic, LE_CSR2, (UWORD)((LE_CHIP(LE_INIT_OFF) >> 16) & 0xff));
+    /*
+     * BSWP: the chip puts frame bytes in 68000 order.  It touches only the
+     * DMA of frame data, never the descriptors or the init block.  Linux
+     * a2065.c and NetBSD le_zbus set it for the A2065 and the Ameristar;
+     * Amiberry ignores the bit, so the emulator passes either way.  The
+     * Ariadne's board crosses the lanes itself (lance_swap) and keeps 0.
+     */
+    LANCE_CSR_PUT(nic, LE_CSR3, nic->card->lance_swap ? 0 : LE_C3_BSWP);
 
     LANCE_CSR_PUT(nic, LE_CSR0, LE_C0_INIT);
 
@@ -676,7 +694,7 @@ LONG lance_tx(NetdevNic *nic, const UBYTE *frame, UWORD len)
     le_put16(nic, d + 6, 0);
     le_put16(nic, d + 2,
              (UWORD)(LE_T1_OWN | LE_T1_STP | LE_T1_ENP |
-                     (UWORD)(((LE_TXB_OFF + (ULONG)nic->tx_next * LE_BUFSZ)
+                     (UWORD)((LE_CHIP(LE_TXB_OFF + (ULONG)nic->tx_next * LE_BUFSZ)
                               >> 16) & 0xff)));
 
     nic->tx_next = (UWORD)((nic->tx_next + 1) & (LE_TX_RING - 1));
@@ -778,15 +796,18 @@ LONG lance_attach(NetdevNic *nic)
 
     /*
      * The station address is in the autoconfig serial number: there is no
-     * address PROM on either card and a read below the SRAM returns zero.
-     * Commodore put the low four bytes in the serial field and left the OUI to
-     * the card row -- 00:80:10 for the A2065, 00:60:30 for the Ariadne.
+     * address PROM on any of these cards and a read below the SRAM returns
+     * zero.  The OUI is the card row's -- 00:80:10 Commodore, 00:00:9F
+     * Ameristar, 00:60:30 Village Tronic -- and the low three serial bytes
+     * follow, as in Linux a2065.c/ariadne.c and NetBSD if_le_zbus.c.  The
+     * serial's top byte is not used: Commodore and Village Tronic put the
+     * OUI's last byte there, Ameristar does not.
      */
     nic->mac_source = (UBYTE)ANXDIAG_MAC_SERIAL;
 
-    nic->factory[0] = (UBYTE)(nic->card->serial_oui >> 8);
-    nic->factory[1] = (UBYTE)(nic->card->serial_oui);
-    nic->factory[2] = (UBYTE)(nic->serial >> 24);
+    nic->factory[0] = (UBYTE)(nic->card->serial_oui >> 16);
+    nic->factory[1] = (UBYTE)(nic->card->serial_oui >> 8);
+    nic->factory[2] = (UBYTE)(nic->card->serial_oui);
     nic->factory[3] = (UBYTE)(nic->serial >> 16);
     nic->factory[4] = (UBYTE)(nic->serial >> 8);
     nic->factory[5] = (UBYTE)(nic->serial);
