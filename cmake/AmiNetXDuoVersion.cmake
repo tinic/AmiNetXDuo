@@ -206,6 +206,13 @@ else()
     set(AMINETXDUO_VERSION_CPU "")
 endif()
 
+# --------------------------------------------------------------- profile ----
+#
+# The drawer, from CMakePresets.json: fat, minimal and micro set it, and the
+# default preset sets nothing, so nothing is "default".
+set(AMINETXDUO_PROFILE "default" CACHE STRING
+    "The CMakePresets.json drawer this tree is, for bsdsocket.library's IdString")
+
 # --------------------------------------------------------------- header -----
 
 configure_file(

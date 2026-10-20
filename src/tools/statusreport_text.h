@@ -70,6 +70,9 @@ VOID sr_version(SrOut *o, const char *key, ULONG version, ULONG revision);
 VOID sr_addr_str(SrOut *o, const char *key, const char *value);
 VOID sr_addr_ipv4(SrOut *o, const char *key, ULONG addr);      /* host order */
 VOID sr_addr_mac(SrOut *o, const char *key, const UBYTE *mac);  /* six bytes */
+/* Up to 32 bytes as one run of hex digits, "3604c0a8...".  They can hold an
+   address.  NULL bytes is SR_UNAVAILABLE. */
+VOID sr_addr_bytes(SrOut *o, const char *key, const UBYTE *bytes, ULONG n);
 
 /* ------------------------------------------------------------- keys --- */
 
@@ -81,6 +84,10 @@ VOID sr_addr_mac(SrOut *o, const char *key, const UBYTE *mac);  /* six bytes */
 VOID sr_key(char *dst, ULONG dstlen, const char *a, const char *b,
             const char *c);
 VOID sr_key_part(char *dst, ULONG dstlen, const char *text);
+
+/* The value of ", <name> <value>" in a library IdString, up to the next ','
+   or ')'.  FALSE when it is not there or is empty. */
+BOOL sr_id_field(const char *id, const char *name, char *dst, ULONG dstlen);
 VOID sr_key_index(char *dst, ULONG dstlen, const char *prefix, ULONG index,
                   const char *suffix);
 

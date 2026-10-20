@@ -83,6 +83,10 @@
    nothing about which; objdump does not answer it either. */
 #define AMINETXDUO_VERSION_CPU      "@AMINETXDUO_VERSION_CPU@"
 
+/* The CMakePresets.json drawer the tree was configured from: default, fat,
+   minimal or micro.  In bsdsocket.library's IdString. */
+#define AMINETXDUO_VERSION_PROFILE  "@AMINETXDUO_PROFILE@"
+
 #define TOOL_VERSTAG(name_) \
     "$VER: " name_ " " AMINETXDUO_VERSION " (" AMINETXDUO_VERSION_DATE ") " \
     "AmiNetXDuo " AMINETXDUO_VERSION_HASH AMINETXDUO_VERSION_CPU

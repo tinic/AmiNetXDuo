@@ -51,9 +51,12 @@ static const char bsd_lib_ver[] __attribute__((used)) =
     " (" AMINETXDUO_VERSION_DATE ") AmiNetXDuo " AMINETXDUO_VERSION_HASH
     AMINETXDUO_VERSION_CPU;
 
+/* The build and profile are what CreateAmiNetXDuoStatusReport prints as
+   stack.build and stack.profile: the library in memory, not the file. */
 static char bsd_lib_id[] =
     "bsdsocket.library " AMINETXDUO_VERSION " (AmiNetXDuo, ABI "
-    BSD_LIB_ABI_TEXT ")\r\n";
+    BSD_LIB_ABI_TEXT ", build " AMINETXDUO_VERSION_HASH
+    ", profile " AMINETXDUO_VERSION_PROFILE ")\r\n";
 
 static struct AmiSocketBase *bsd_lib_init(
     register struct AmiSocketBase *base    __asm("d0"),

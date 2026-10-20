@@ -3272,6 +3272,7 @@ LONG netstack_interface_dhcp_counters(UWORD index, AmiDhcpCounters *out)
 {
     AmiNetStack *ns = ami_ns;
     UINT         i;
+    UINT         j;
 
     if (out == NULL)
         return AMI_NET_ERR_STATE;
@@ -3305,6 +3306,13 @@ LONG netstack_interface_dhcp_counters(UWORD index, AmiDhcpCounters *out)
         out->adc_Xid             = r->nx_dhcp_xid;
         out->adc_RequestRestarts = r->nx_dhcp_request_restarts;
         out->adc_LastSendStatus  = r->nx_dhcp_last_send_status;
+        out->adc_ReqOpt54Valid       = r->nx_dhcp_request_opt54_valid;
+        out->adc_ReqOpt54IndexBefore = r->nx_dhcp_request_opt54_index_before;
+        out->adc_ReqOpt54IndexAfter  = r->nx_dhcp_request_opt54_index_after;
+        for (j = 0; j < sizeof(out->adc_ReqOpt54Built); j++)
+            out->adc_ReqOpt54Built[j] = r->nx_dhcp_request_opt54_bytes[j];
+        for (j = 0; j < sizeof(out->adc_ReqOptsFinal); j++)
+            out->adc_ReqOptsFinal[j] = r->nx_dhcp_request_final_opts[j];
         return AMI_NET_OK;
     }
     return AMI_NET_ERR_STATE;

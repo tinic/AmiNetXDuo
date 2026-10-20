@@ -269,6 +269,23 @@ int main(void)
           (unsigned long)rec->nx_dhcp_request_server);
     CHECK(rec->nx_dhcp_last_send_status == NX_SUCCESS, "last send status %u",
           rec->nx_dhcp_last_send_status);
+    {
+        /* The REQUEST's option 54 checkpoints: where it was built, its bytes,
+           and the bytes before the send, against what the driver got. */
+        static const unsigned char opt54[6] = { 0x36, 0x04, 0xc0, 0xa8, 0x00, 0x01 };
+        UINT before = rec->nx_dhcp_request_opt54_index_before;
+
+        CHECK(rec->nx_dhcp_request_opt54_valid == NX_TRUE, "option 54 checkpoints taken");
+        CHECK(before > NX_BOOTP_OFFSET_OPTIONS && rec->nx_dhcp_request_opt54_index_after == before + 6,
+              "option 54 index %u to %u", before, rec->nx_dhcp_request_opt54_index_after);
+        CHECK(memcmp(rec->nx_dhcp_request_opt54_bytes, opt54, sizeof(opt54)) == 0,
+              "option 54 bytes as written");
+        CHECK(before + sizeof(rec->nx_dhcp_request_final_opts) <= sent_len &&
+              memcmp(sent + before, opt54, sizeof(opt54)) == 0 &&
+              memcmp(rec->nx_dhcp_request_final_opts, sent + before,
+                     sizeof(rec->nx_dhcp_request_final_opts)) == 0,
+              "the bytes before the send are the bytes on the wire");
+    }
     old_xid = rec->nx_dhcp_xid;
     for (seconds = 0; seconds < 600 && rec->nx_dhcp_state == NX_DHCP_STATE_REQUESTING; seconds++)
         tick();

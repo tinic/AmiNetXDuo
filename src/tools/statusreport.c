@@ -135,7 +135,7 @@ static VOID sr_system(VOID)
 
 /* ------------------------------------------------------------- libraries --- */
 
-#define SR_ID_LEN   80
+#define SR_ID_LEN   128
 
 /* A resident module as Exec knows it, copied under Forbid(): it can expunge
    the moment Forbid() ends. */
@@ -560,6 +560,25 @@ static VOID sr_live(struct Library *base)
                 sr_ulong(&sr_out, sr_k, d->nsd_LastSendStatus);
                 sr_key(sr_k, sizeof(sr_k), prefix, "request_restarts", NULL);
                 sr_ulong(&sr_out, sr_k, d->nsd_RequestRestarts);
+
+                /* Option 54 of the last REQUEST: where it was built, its
+                   bytes as written, and the same place just before the send. */
+                sr_key(sr_k, sizeof(sr_k), prefix, "req_opt54_index_before", NULL);
+                if (d->nsd_ReqOpt54Valid)
+                    sr_ulong(&sr_out, sr_k, d->nsd_ReqOpt54IndexBefore);
+                else
+                    sr_str(&sr_out, sr_k, NULL);
+                sr_key(sr_k, sizeof(sr_k), prefix, "req_opt54_index_after", NULL);
+                if (d->nsd_ReqOpt54Valid)
+                    sr_ulong(&sr_out, sr_k, d->nsd_ReqOpt54IndexAfter);
+                else
+                    sr_str(&sr_out, sr_k, NULL);
+                sr_key(sr_k, sizeof(sr_k), prefix, "req_opt54_built", NULL);
+                sr_addr_bytes(&sr_out, sr_k, d->nsd_ReqOpt54Valid ? d->nsd_ReqOpt54Built : NULL,
+                              sizeof(d->nsd_ReqOpt54Built));
+                sr_key(sr_k, sizeof(sr_k), prefix, "req_opts_final", NULL);
+                sr_addr_bytes(&sr_out, sr_k, d->nsd_ReqOpt54Valid ? d->nsd_ReqOptsFinal : NULL,
+                              sizeof(d->nsd_ReqOptsFinal));
             }
 
             if (d->nsd_State != NETSTATUS_DHCP_BOUND)
@@ -607,10 +626,19 @@ static VOID sr_stack(VOID)
 
     sr_yesno(&sr_out, "stack.running", running);
 
-    /* Neither is in anything the library publishes; the file's $VER is,
-       and reading that means the file, not the library in memory. */
-    sr_str(&sr_out, "stack.profile", NULL);
-    sr_str(&sr_out, "stack.build", NULL);
+    /* From the resident library's IdString, so the library in memory and
+       not the file in LIBS:.  An older library does not carry them. */
+    {
+        char field[SR_ID_LEN];
+        BOOL ours = sr_find_library("bsdsocket.library", &sr_lib) && sr_lib.ours;
+
+        sr_str(&sr_out, "stack.profile",
+               (ours && sr_id_field(sr_lib.id, "profile", field, sizeof(field)))
+                   ? field : NULL);
+        sr_str(&sr_out, "stack.build",
+               (ours && sr_id_field(sr_lib.id, "build", field, sizeof(field)))
+                   ? field : NULL);
+    }
 
     base = running ? tool_netstatus_open_resident() : NULL;
 
