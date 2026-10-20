@@ -210,7 +210,10 @@ int isatty(int fd)
     return _isatty(fd);
 }
 
-int unlink(const char *path)
+/* Newlib also defines unlink beside _unlink. Interpose through the linker
+   so pulling in its syscall does not introduce a second public definition. */
+extern __typeof__(unlink) __wrap_unlink;
+int __wrap_unlink(const char *path)
 {
     return _unlink(amiga_fix_path(path));
 }

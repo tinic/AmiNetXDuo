@@ -11,6 +11,8 @@
 #include <proto/exec.h>
 #include <proto/dos.h>
 #include <intuition/intuition.h> /* struct Window, for the OSC title */
+/* NDK 3.2 inline vararg helpers reference this private base in their bodies. */
+static struct IntuitionBase *cs_IntuitionBase;
 #define INTUITION_BASE_NAME cs_IntuitionBase
 #include <proto/intuition.h>
 /* BEFORE <proto/bsdsocket.h>, and the order is load-bearing: the NDK's inline
@@ -1306,7 +1308,6 @@ static int con_write(int fd, const void *buf, size_t len)
 #define CS_OSC       2
 #define CS_ERR       4                    /* fd 2 is a console too          */
 
-static struct IntuitionBase *cs_IntuitionBase;
 static int                cs_mode = -1;
 static const char        *cs_name;          /* CHARSET=, or NULL           */
 static sshcs_out          cs_out[2];        /* fd 1, fd 2                  */
@@ -2150,7 +2151,8 @@ char *__wrap_getenv(const char *name)
 
 /* A Process address is unique for as long as the process exists, which is what
    dbrandom.c and gensignkey.c want: a per-run distinguisher, not an identity. */
-pid_t getpid(void)
+extern __typeof__(getpid) __wrap_getpid;
+pid_t __wrap_getpid(void)
 {
     return (pid_t)(ULONG)FindTask(NULL);
 }
