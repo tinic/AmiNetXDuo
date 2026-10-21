@@ -29,6 +29,7 @@ include(CTest)
 add_test(NAME adopt_pool_wake COMMAND test_adopt_pool wake)
 add_test(NAME adopt_pool_sweep COMMAND test_adopt_pool sweep)
 add_test(NAME adopt_pool_evict COMMAND test_adopt_pool evict)
+add_test(NAME soak_orphan_baton_identity COMMAND test_adopt_pool orphan-baton)
 
 # Which of one Task's threads the Exec-wait bracket suspends and resumes.
 # tx_amiga_exec_wait.c is #included whole; netstack_baton.c is compiled as it
