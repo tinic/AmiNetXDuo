@@ -7,6 +7,8 @@ are history.
 
 ## Unreleased
 
+- The trust store is Mozilla's root set of 20 October 2026, which drops the
+  eMudhra emSign roots after their CA keys were found to be computable.
 - IPv6 socket addresses now use the BSD length/family prefix, matching IPv4.
   `sockaddr_storage` exposes `ss_family` for either family. Rebuild pre-release
   IPv6 applications with the supplied Developer headers and install them with

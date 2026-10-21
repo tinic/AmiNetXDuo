@@ -6,9 +6,9 @@ certificate set, as extracted and published by the curl project.
 | | |
 |---|---|
 | Source | <https://curl.se/ca/cacert.pem> |
-| Snapshot | "Certificate data from Mozilla as of: Thu Jul 16 03:12:01 2026 GMT" |
-| SHA-256 | `3ff344e30b9b1ed2971044eabb438a08f2e2245ddb5f8ab1a3ad8b63ab4eaf91` |
-| Roots | 119 |
+| Snapshot | "Certificate data from Mozilla as of: Tue Oct 20 13:32:40 2026 GMT" |
+| SHA-256 | `796f1389bfea13c0ed78f663b765baaff54a508e5483786bd6ece73c5e3e3cbe` |
+| Roots | 118 |
 | Licence | **MPL 2.0** — see below.  The rest of this project is MIT. |
 
 `cacert.pem.sha256` is curl.se's own published checksum file, copied verbatim,
