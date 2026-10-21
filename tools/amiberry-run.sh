@@ -646,7 +646,7 @@ READERPID="$ROOT/build/amiberry-$TAG.readerpid"
 rm -f "$READERPID"
 
 cleanup() {
-    local rp
+    local rp log_writer="$AMIBERRY_PID"
     rp=$(cat "$READERPID" 2>/dev/null || true)
     [ -n "$NC_PID" ] && kill -TERM "$NC_PID" 2>/dev/null || true
     NC_PID=""
@@ -664,6 +664,16 @@ cleanup() {
             AMIBERRY_PID=""
         fi
     fi
+    # A caller can terminate a parked guest before the normal post-run path.
+    # Flush the capped log on that path too, before the caller reads it.
+    if [ -n "$LOGCAP_PID" ]; then
+        # Cancellation between starting the FIFO reader and launching its
+        # writer leaves the reader blocked in open(), with no EOF to await.
+        [ -n "$log_writer" ] || kill -TERM "$LOGCAP_PID" 2>/dev/null || true
+        wait "$LOGCAP_PID" 2>/dev/null || true
+        LOGCAP_PID=""
+    fi
+    [ -z "$LOGPIPE" ] || rm -f "$LOGPIPE"
     # And the port and the bridge go back only once nothing of ours can
     # still be on them.
     rig_release_port
@@ -876,14 +886,8 @@ EMU_PID=$AMIBERRY_PID
 cleanup
 wait "$EMU_PID" 2>/dev/null || true
 
-# The capper still has the tail of the run in its ring, so nothing may read
-# $UAELOG until it has reached EOF and printed it.  Every assertion below reads
-# that file.
-if [ -n "$LOGCAP_PID" ]; then
-    wait "$LOGCAP_PID" 2>/dev/null || true
-    LOGCAP_PID=""
-fi
-[ -z "$LOGPIPE" ] || rm -f "$LOGPIPE"
+# cleanup also waits for the capper's EOF tail. Every assertion below may now
+# read the complete bounded log, just as callers may after a signal exit.
 
 # ------------------------------------------------- WHOSE TRANSCRIPT IS THIS --
 #
