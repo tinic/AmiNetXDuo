@@ -19,6 +19,7 @@
  */
 
 #include "tx_amiga_pool.c"
+#include "../../soak/orphan_baton.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -35,6 +36,9 @@ static struct Task     *fake_current;
 static unsigned         signal_calls;
 static struct Task     *signal_task;
 static ULONG            signal_mask;
+static unsigned         forbid_depth;
+static unsigned         observe_orphan;
+static unsigned         unlocked_observation;
 
 struct ExecBase        *SysBase;
 volatile UINT           _tx_amiga_kernel_up;
@@ -72,14 +76,16 @@ UINT tx_amiga_discard_thread(TX_THREAD *thread_ptr, ULONG generation)
     return TX_SUCCESS;
 }
 
-VOID  Forbid(VOID)  { }
-VOID  Permit(VOID)  { }
+VOID  Forbid(VOID)  { forbid_depth++; }
+VOID  Permit(VOID)  { if (forbid_depth) forbid_depth--; }
 VOID  Disable(VOID) { }
 VOID  Enable(VOID)  { }
 
 struct Task *FindTask(const char *name)
 {
     (void) name;
+    if (observe_orphan && !forbid_depth)
+        unlocked_observation++;
     return fake_current;
 }
 
@@ -177,6 +183,9 @@ static void reset(void)
     signal_calls                      = 0U;
     signal_task                       = (struct Task *) 0;
     signal_mask                       = 0UL;
+    forbid_depth                      = 0U;
+    observe_orphan                    = 0U;
+    unlocked_observation              = 0U;
 }
 
 /* Register `task` as parked the way _tx_amiga_slot_claim_or_park() does. */
@@ -451,6 +460,71 @@ static void test_evict(void)
 }
 
 
+/* Orphan releases its slot before returning. Force reuse of that exact slot
+   through the real pool, without relying on a lucky emulator scheduling race. */
+static void test_orphan_baton(void)
+{
+    struct _tx_amiga_adopt_slot *slot, *replacement;
+    TX_THREAD *old;
+    ULONG generation;
+
+    reset();
+    (void) fake_spawn(0, 0, fake_name_a);
+    (void) fake_spawn(1, 0, fake_name_b);
+    slot = claim_as(0);
+    old = &slot->as_thread;
+    generation = slot->as_generation;
+    old->tx_thread_id = TX_THREAD_ID;
+    old->tx_thread_amiga_task = &fake_task[0];
+    _tx_thread_current_ptr = old;
+    fake_current = &fake_task[0];
+    expect("orphan: unchanged adoption still holding baton is rejected",
+           soak_orphan_baton_violation(old, generation), TX_TRUE);
+
+    Forbid();
+    _tx_amiga_slot_release_locked(slot);
+    Permit();
+    expect("orphan: freed slot still holding baton is rejected",
+           soak_orphan_baton_violation(old, generation), TX_TRUE);
+    _tx_thread_current_ptr = TX_NULL;
+    expect("orphan: released baton is accepted",
+           soak_orphan_baton_violation(old, generation), TX_FALSE);
+
+    replacement = claim_as(1);
+    expect("orphan control: pool recycled the exact old address",
+           replacement == slot, 1UL);
+    expect("orphan control: replacement has another generation",
+           replacement->as_generation != generation, 1UL);
+    Forbid();
+    _tx_amiga_slot_publish_locked(replacement);
+    Permit();
+    replacement->as_thread.tx_thread_id = TX_THREAD_ID;
+    replacement->as_thread.tx_thread_amiga_task = &fake_task[1];
+    _tx_thread_current_ptr = &replacement->as_thread;
+    fake_current = &fake_task[0];
+    expect("orphan control: old pointer-only assertion falsely reports failure",
+           _tx_thread_current_ptr == old, 1UL);
+    observe_orphan = 1U;
+    expect("orphan: live replacement holding baton is accepted",
+           soak_orphan_baton_violation(old, generation), TX_FALSE);
+    expect("orphan: identity snapshot is protected against task switches",
+           unlocked_observation, 0UL);
+    expect("orphan: observation releases its Forbid",
+           forbid_depth, 0UL);
+
+    replacement->as_thread.tx_thread_amiga_task = (VOID *) 0;
+    expect("orphan: replacement without an owner is rejected",
+           soak_orphan_baton_violation(old, generation), TX_TRUE);
+    replacement->as_thread.tx_thread_amiga_task = &fake_task[0];
+    expect("orphan: replacement still owned by orphaning Task is rejected",
+           soak_orphan_baton_violation(old, generation), TX_TRUE);
+    replacement->as_thread.tx_thread_amiga_task = &fake_task[1];
+    replacement->as_thread.tx_thread_id = 0UL;
+    expect("orphan: replacement without a live ThreadX identity is rejected",
+           soak_orphan_baton_violation(old, generation), TX_TRUE);
+    observe_orphan = 0U;
+}
+
 int main(int argc, char **argv)
 {
     const char *which = (argc > 1) ? argv[1] : "";
@@ -461,9 +535,11 @@ int main(int argc, char **argv)
         test_sweep();
     else if (strcmp(which, "evict") == 0)
         test_evict();
+    else if (strcmp(which, "orphan-baton") == 0)
+        test_orphan_baton();
     else
     {
-        printf("usage: %s wake|sweep|evict\n", argv[0]);
+        printf("usage: %s wake|sweep|evict|orphan-baton\n", argv[0]);
         return 2;
     }
 

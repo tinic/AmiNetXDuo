@@ -21,6 +21,8 @@
 #include <proto/dos.h>
 #include <proto/timer.h>
 
+#include "orphan_baton.h"
+
 
 extern TX_THREAD       *_tx_thread_current_ptr;
 extern TX_THREAD       *_tx_thread_execute_ptr;
@@ -813,7 +815,7 @@ ULONG   live;
     {
         s_viol_hit(V_ORPHAN);
     }
-    if (S_CURRENT == w -> thread)
+    if (soak_orphan_baton_violation(w -> thread, w -> generation) != TX_FALSE)
     {
         s_viol_hit(V_BATON_AFTER_ORPHAN);
     }
@@ -988,7 +990,7 @@ ULONG   us;
         {
             s_viol_hit(V_ORPHAN);
         }
-        if (S_CURRENT == c -> thread)
+        if (soak_orphan_baton_violation(c -> thread, c -> generation) != TX_FALSE)
         {
             s_viol_hit(V_BATON_AFTER_ORPHAN);
         }
