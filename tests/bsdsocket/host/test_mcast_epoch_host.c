@@ -132,7 +132,7 @@ static LONG h_membership(struct AmiSocketBase *base, AmiSocket *sock,
         req.ipv6mr_interface = 2; /* POSIX number -> NetX slot 1 */
         memcpy(unaligned + 1, &req, sizeof(req));
         return bsd_mcast6_setopt(base, sock,
-                                join ? AMI_IPV6_JOIN_GROUP_BSD : AMI_IPV6_LEAVE_GROUP_BSD,
+                                join ? IPV6_JOIN_GROUP : IPV6_LEAVE_GROUP,
                                 unaligned + 1, sizeof(req));
     }
     else
@@ -240,7 +240,7 @@ static LONG h_scalar_option(struct AmiSocketBase *base, AmiSocket *sock,
 {
     if (v6)
     {
-        LONG option = loop ? AMI_IPV6_MULTICAST_LOOP_BSD : AMI_IPV6_MULTICAST_HOPS_BSD;
+        LONG option = loop ? IPV6_MULTICAST_LOOP : IPV6_MULTICAST_HOPS;
         return get ? bsd_mcast6_getopt(base, sock, option, out, len)
                    : bsd_mcast6_setopt(base, sock, option, out, *len);
     }
@@ -469,6 +469,20 @@ int main(void)
           "IPv4 group is not treated as IPv6");
     check(a.as_Nx.udp.nx_udp_socket_time_to_live == 7,
           "IPv4 multicast TTL preserved");
+
+    {
+        LONG option;
+        unsigned raw;
+        for (raw = 0; raw < 2; raw++) {
+            a.as_Flags = ASF_INET6 | (raw ? ASF_RAW : 0);
+            for (option = 9; option <= 13; option++)
+                check(bsd_mcast6_is_option(&a, option),
+                      "AROS multicast options classified on all socket types");
+            for (option = 17; option <= 21; option++)
+                check(!bsd_mcast6_is_option(&a, option),
+                      "Linux multicast aliases rejected on all socket types");
+        }
+    }
 
     t_membership_paths(FALSE);
     t_membership_paths(TRUE);

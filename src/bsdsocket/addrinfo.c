@@ -279,6 +279,10 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
     LONG             flags    = 0;
     LONG             verdict  = EAI_NONAME;
     BOOL             aborted  = FALSE;
+    BOOL             allow4 = TRUE;
+#ifdef AMINETXDUO_IPV6
+    BOOL             allow6 = TRUE;
+#endif
     LONG             status;
     UINT             port = 0;
     char            *canon = NULL;
@@ -339,6 +343,16 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
     if (protocol == 0)
         protocol = (socktype == SOCK_DGRAM) ? IPPROTO_UDP : IPPROTO_TCP;
 
+    /* RFC 3493: filtering is opt-in. ULA and link-local are configured
+       IPv6 addresses too; a global route is not an API prerequisite. */
+    if ((flags & AI_ADDRCONFIG) != 0)
+    {
+        allow4 = netstack_ipv4_configured();
+#ifdef AMINETXDUO_IPV6
+        allow6 = netstack_ipv6_configured();
+#endif
+    }
+
     if (nodename == NULL || *nodename == '\0')
     {
         /*
@@ -348,7 +362,7 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
          */
 #ifdef AMINETXDUO_IPV6
         if ((family == AF_UNSPEC || family == AF_INET6) &&
-            netstack_ipv6_enabled())
+            allow6 && netstack_ipv6_enabled())
         {
             addr.nxd_ip_version       = NX_IP_VERSION_V6;
             addr.nxd_ip_address.v6[0] = 0UL;
@@ -364,7 +378,7 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
             bsd_gai_append(&head, &tail, node);
         }
 #endif
-        if (family == AF_UNSPEC || family == AF_INET)
+        if (allow4 && (family == AF_UNSPEC || family == AF_INET))
         {
             bsd_addr_from_v4(&addr, ((flags & AI_PASSIVE) != 0)
                                         ? 0UL : 0x7F000001UL);
@@ -400,7 +414,7 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
         {
             ULONG scope;
 
-            if (family == AF_INET)
+            if (family == AF_INET || !allow6)
                 return EAI_ADDRFAMILY;
 
             scope = bsd_gai_zone_index(SocketBase, zone);
@@ -435,7 +449,7 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
 
         if (ami_config_parse_ip((const char *)nodename, &v4))
         {
-            if (family == AF_INET6)
+            if (family == AF_INET6 || !allow4)
             {
                 return EAI_ADDRFAMILY;
             }
@@ -462,8 +476,8 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
     verdict = EAI_NONAME;
 
 #ifdef AMINETXDUO_IPV6
-    if ((family == AF_INET6 && netstack_ipv6_enabled()) ||
-        (family == AF_UNSPEC && netstack_ipv6_have_global()))
+    if (allow6 && (family == AF_INET6 || family == AF_UNSPEC) &&
+        netstack_ipv6_enabled())
     {
         ULONG words[4];
 
@@ -503,7 +517,7 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
     }
 #endif
 
-    if ((family == AF_UNSPEC || family == AF_INET) && !aborted)
+    if (allow4 && (family == AF_UNSPEC || family == AF_INET) && !aborted)
     {
         ULONG v4 = 0;
 

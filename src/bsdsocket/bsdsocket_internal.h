@@ -117,27 +117,6 @@
 #define AMI_EHOSTUNREACH       65
 #define AMI_ENOSYS             78
 
-#define AMI_IPV6_V6ONLY_BSD         IPV6_V6ONLY
-#define AMI_IPV6_V6ONLY_LINUX       26
-
-/* IPV6_UNICAST_HOPS: 4 in BSD, 16 in Linux. Same argument, same treatment. */
-#define AMI_IPV6_UNICAST_HOPS_BSD   IPV6_UNICAST_HOPS
-#define AMI_IPV6_UNICAST_HOPS_LINUX 16
-
-#define AMI_IPV6_TCLASS_BSD         IPV6_TCLASS
-#define AMI_IPV6_TCLASS_LINUX       67
-
-#define AMI_IPV6_MULTICAST_IF_BSD     IPV6_MULTICAST_IF
-#define AMI_IPV6_MULTICAST_IF_LINUX   17
-#define AMI_IPV6_MULTICAST_HOPS_BSD   IPV6_MULTICAST_HOPS
-#define AMI_IPV6_MULTICAST_HOPS_LINUX 18
-#define AMI_IPV6_MULTICAST_LOOP_BSD   IPV6_MULTICAST_LOOP
-#define AMI_IPV6_MULTICAST_LOOP_LINUX 19
-#define AMI_IPV6_JOIN_GROUP_BSD       IPV6_JOIN_GROUP
-#define AMI_IPV6_JOIN_GROUP_LINUX     20
-#define AMI_IPV6_LEAVE_GROUP_BSD      IPV6_LEAVE_GROUP
-#define AMI_IPV6_LEAVE_GROUP_LINUX    21
-
 #define AMI_INET6_ADDRSTRLEN        INET6_ADDRSTRLEN
 
 #define BSD_LIB_NAME        "bsdsocket.library"
@@ -1101,10 +1080,6 @@ LONG  bsd_getsockopt_ipv6(struct AmiSocketBase *base, AmiSocket *sock,
                           LONG level, LONG optname, APTR optval,
                           socklen_t *optlen);
 
-/* Whether the Linux option numbering can be read on this socket. FALSE on a
-   raw one, where RFC 3542 claims 26 for IPV6_CHECKSUM; the whole rationale is
-   at the definition in in6.c. */
-BOOL  bsd_v6_linux_numbering(const AmiSocket *sock);
 #endif /* AMINETXDUO_IPV6 */
 
 /* cmsg.c, RFC 3542 ancillary data.

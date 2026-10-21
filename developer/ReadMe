@@ -44,31 +44,32 @@ already uses.  There is no second library to open and no link library to add:
 
 A program that already opens bsdsocket.library has done all of it.
 
-Standard spellings are deliberately not used.  RFC 3493 puts
-if_nametoindex() in <net/if.h>, and shipping a <net/if.h> would mean include
-order decides silently, per source file, whether the NDK's header or ours
-wins.  The path is <aminetxduo/ifindex.h> instead, and <proto/aminetxduo.h>
-finds it.
-
+Standard IPv6 declarations are in <sys/socket.h>, <netinet/in.h>,
+<netinet/icmp6.h>, <net/if.h> and <netdb.h>. Put this drawer's include directory
+before the installed netinclude directory. The aminetxduo/in6.h, cmsg.h and
+ifindex.h paths remain compatibility includes; extension vector glue stays
+in proto/aminetxduo.h.
 
 Checking that the vectors are there
 -----------------------------------
 
-A header cannot tell whether the library in memory has them.  Only
-lib_Revision can:
+Revision numbers are implementation-specific. Query SBTC_RELEASESTRPTR using
+the existing SocketBaseTagList call, require success, then use
+AMI_SOCKET_HAS_IFINDEX or AMI_SOCKET_HAS_NETSTATUS from
+<aminetxduo/capabilities.h>. These check AmiNetXDuo identity, revision and the
+negative vector-table size. See examples/IfNames.c for the full sequence.
+A failed query or unknown identity must disable these private vectors.
 
-    SocketBase = OpenLibrary("bsdsocket.library", 4);
-    if (SocketBase != NULL && SocketBase->lib_Revision >= AMI_IFINDEX_MIN_REVISION)
-        ... if_nametoindex() and friends are safe to call ...
+IPv6 itself adds no vector: probe socket(AF_INET6, ...) to test support.
+IPv4-only and IPv6 builds can have the same library revision.
 
-Every added VECTOR carries the revision that introduced it, as an
-AMI_*_MIN_REVISION constant next to it.  Do this check.  They are past the end
-of every published table, so an older bsdsocket.library has MakeLibrary()'s
-terminator in the slot and calling one is a guru, not a failure code.
+Standard constant data
+----------------------
 
-Definitions that are only types and constants -- everything in
-<aminetxduo/in6.h> -- need no such check: they name calls the NDK already
-declares, and nothing was added to the vector table for them.
+in6addr_any and in6addr_loopback are declared by <netinet/in.h>. If your C
+runtime does not define them, compile support/in6_addr.c once into your
+application (or into a support archive). Do not add duplicate definitions
+when the runtime supplies these symbols. No second shared library is needed.
 
 
 What it covers
@@ -100,10 +101,11 @@ this build has IPv6 with socket(AF_INET6, SOCK_STREAM, 0).
         SITELOCAL / V4MAPPED / V4COMPAT and the MC_ scopes
     AI_ADDRCONFIG
 
-Every one of them is #ifndef-guarded, because a program written against this
-NDK could not name them and will have spelled the numbers out for itself.
-Two of the option numbers have a second value in the Linux lineage; the
-library accepts both, and the header says which is which.
+Use the SDK definitions rather than spelling numbers in application code.
+AF_INET6 is 28, matching AROS. IPv6 options use one namespace on every socket
+type; old Linux numeric aliases are rejected. V6ONLY is 27 because AROS's 26
+collides with CHECKSUM. AI_ADDRCONFIG is the real, opt-in flag 0x0400 and
+counts assigned non-loopback IPv4/IPv6 addresses, including ULA/link-local.
 
 AI_V4MAPPED is deliberately absent.  This library never synthesises
 ::ffff:a.b.c.d from an A record, so no value for it would be truthful.  Code

@@ -5,16 +5,25 @@ Baseline: AmigaPorts/amiga-netinclude
 Commit: c9fed00ba3186d9b02bc0de13eb0cf3c83f087e1
 https://github.com/AmigaPorts/amiga-netinclude/pull/2
 
-Only netinet/in.h and sys/socket.h are carried here. They retain the
+The baseline netinet/in.h, sys/socket.h, netdb.h and net/if.h retain the
 upstream license notices and Latin-1 encoding; trailing spaces are removed.
 The baseline includes codewiz's self-contained-header fixes; no generated
 library vectors change.
 
 Changes relative to that baseline:
 
-  netinet/in.h: define SIN6_LEN and insert sin6_len before sin6_family.
-  sys/socket.h: define the 128-byte BSD sockaddr_storage with ss_len and
-                ss_family, naturally aligned for sockaddr_in/in6 on m68k.
+  BSD sockaddr_in6 length/family prefix and 128-byte sockaddr_storage.
+  AROS AF_INET6=28; AF_MAX=29 covers the highest defined family.
+  Standard IPv6 options/macros/payloads reachable from netinet/in.h.
+  Standard ancillary macros in sys/socket.h; ICMPv6 filters in netinet/icmp6.h.
+  Interface identification in net/if.h, real AI_ADDRCONFIG=0x0400 in netdb.h.
+  Optional external address constants in Developer/support/in6_addr.c.
+
+New supplemental headers are MIT-licensed, independently implemented.
+See docs/SDK-AROS-ABI.md in the source repository for the exact AROS reference,
+intentional exceptions (V6ONLY, legacy resolver ABI, IP_PKTINFO), symbol
+ownership and upstream decisions. Alignment is not blanket AROS binary
+compatibility or an assertion that upstream has accepted these allocations.
 
 The library, applications and staged Developer drawer use these same files.
 Put Developer/include before the compiler's NDK/netinclude directory. The
@@ -24,7 +33,8 @@ modified. This overlay can be replaced by an upstream pin when accepted.
 The old pre-release IPv6 structure put its family byte at offset zero.
 All provided IPv6 applications must be rebuilt with the corrected headers
 and shipped with bsdsocket.library ABI 4.11 or later from AmiNetXDuo.
-Existing IPv4 layouts, function vectors and option numbers are unchanged.
+Established IPv4 layouts, vectors and options are unchanged. The pre-release
+IP_PKTINFO extension moves from 8 to 26 so it no longer aliases IP_RETOPTS.
 
 Run the compile/layout gate with:
   python3 tests/toolchain/check_ipv6_sdk.py --toolchain /path/to/toolchain

@@ -8,7 +8,7 @@
 
 #include "aminetxduo/config.h"
 
-_Static_assert(AF_INET6 == 23, "AF_INET6 is not the Roadshow NDK's 23");
+_Static_assert(AF_INET6 == 28, "AF_INET6 must match AROS without aliasing AF_IPX");
 
 _Static_assert(sizeof(struct in6_addr) == 16, "in6_addr is not 16 bytes");
 
@@ -138,35 +138,6 @@ BOOL bsd_addr_normalise(const AmiSocket *sock, NXD_ADDRESS *addr)
  * Level IPPROTO_IPV6.
  */
 
-/*
- * Whether the Linux numbering can be read on this socket.
- */
-BOOL bsd_v6_linux_numbering(const AmiSocket *sock)
-{
-    return (BOOL)((sock->as_Flags & ASF_RAW) == 0);
-}
-
-static LONG bsd_v6only_option(const AmiSocket *sock, LONG optname)
-{
-    return (optname == AMI_IPV6_V6ONLY_BSD ||
-            (optname == AMI_IPV6_V6ONLY_LINUX &&
-             bsd_v6_linux_numbering(sock)));
-}
-
-static LONG bsd_hops_option(const AmiSocket *sock, LONG optname)
-{
-    return (optname == AMI_IPV6_UNICAST_HOPS_BSD ||
-            (optname == AMI_IPV6_UNICAST_HOPS_LINUX &&
-             bsd_v6_linux_numbering(sock)));
-}
-
-static LONG bsd_tclass_option(const AmiSocket *sock, LONG optname)
-{
-    return (optname == AMI_IPV6_TCLASS_BSD ||
-            (optname == AMI_IPV6_TCLASS_LINUX &&
-             bsd_v6_linux_numbering(sock)));
-}
-
 LONG bsd_setsockopt_ipv6(struct AmiSocketBase *base, AmiSocket *sock,
                          LONG level, LONG optname, APTR optval,
                          socklen_t optlen)
@@ -208,7 +179,7 @@ LONG bsd_setsockopt_ipv6(struct AmiSocketBase *base, AmiSocket *sock,
     else
         return bsd_fail(base, AMI_EINVAL);
 
-    if (bsd_v6only_option(sock, optname))
+    if (optname == IPV6_V6ONLY)
     {
         /*
          * BSD requires this to be set before bind().  After that the socket's
@@ -227,8 +198,8 @@ LONG bsd_setsockopt_ipv6(struct AmiSocketBase *base, AmiSocket *sock,
         return 0;
     }
 
-    hops = bsd_hops_option(sock, optname);
-    if (hops || bsd_tclass_option(sock, optname))
+    hops = (optname == IPV6_UNICAST_HOPS);
+    if (hops || (optname == IPV6_TCLASS))
     {
         /* IPv6 hops and traffic class share the IPv4 TTL/TOS fields. Both
            accept -1..255, then apply through the same NetX bracket. */
@@ -276,11 +247,11 @@ LONG bsd_getsockopt_ipv6(struct AmiSocketBase *base, AmiSocket *sock,
     if (optval == NULL || optlen == NULL)
         return bsd_fail(base, AMI_EFAULT);
 
-    if (bsd_v6only_option(sock, optname))
+    if (optname == IPV6_V6ONLY)
         value = ((sock->as_Flags & ASF_V6ONLY) != 0) ? 1 : 0;
-    else if (bsd_hops_option(sock, optname))
+    else if (optname == IPV6_UNICAST_HOPS)
         value = sock->as_Ttl;
-    else if (bsd_tclass_option(sock, optname))
+    else if (optname == IPV6_TCLASS)
         value = sock->as_Tos;
     else
         return bsd_fail(base, AMI_ENOPROTOOPT);

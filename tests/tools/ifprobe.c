@@ -16,6 +16,8 @@
 
 #include <proto/exec.h>
 #include <proto/dos.h>
+#include <aminetxduo/capabilities.h>
+#include <bsdsocket/socketbasetags.h>
 
 static struct List *p_obtain_interface_list(struct Library *base)
 {
@@ -878,16 +880,32 @@ static VOID p_if_freenameindex(struct Library *base,
                       : "d2", "d3", "a1", "cc", "memory");
 }
 
+static LONG p_socket_tags(struct Library *base, struct TagItem *tags)
+{
+    register struct Library *a6 __asm("a6") = base;
+    register struct TagItem *a0 __asm("a0") = tags;
+    register LONG d0 __asm("d0");
+    __asm __volatile ("jsr a6@(-294:W)"
+                      : "=r" (d0), "+r" (a0)
+                      : "r" (a6)
+                      : "d1", "a1", "cc", "memory");
+    return d0;
+}
+
 static VOID p_ifindex_phase(struct Library *base)
 {
     struct probe_if_nameindex *ni;
     char                       name[16];
     ULONG                      n = 0;
 
-    if (base->lib_Revision < 3)
+    struct TagItem tags[2] = {
+        { SBTM_GETVAL(SBTC_RELEASESTRPTR), 0 }, { TAG_DONE, 0 }
+    };
+
+    if (p_socket_tags(base, tags) != 0 ||
+        !AMI_SOCKET_HAS_IFINDEX(base, (const char *)tags[0].ti_Data))
     {
-        Printf((CONST_STRPTR)"ifindex: library revision %ld, need 3, skipped\n",
-               (LONG)base->lib_Revision);
+        Printf((CONST_STRPTR)"ifindex: extensions unavailable, skipped\n");
         return;
     }
 

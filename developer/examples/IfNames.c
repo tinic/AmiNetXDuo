@@ -26,6 +26,8 @@
 
 /* The drawer.  proto/ pulls in clib/ for the prototypes and inline/ for the
    glue; aminetxduo/ifindex.h comes with it and carries the types. */
+#include <proto/bsdsocket.h>
+#include <bsdsocket/socketbasetags.h>
 #include <proto/aminetxduo.h>
 
 /* What the inline macros jump through.  The name is SocketBase because the
@@ -39,6 +41,9 @@ int main(void)
     char                 name[IF_NAMESIZE];
     ULONG                n;
     int                  rc = RETURN_OK;
+    struct TagItem       tags[2] = {
+        { SBTM_GETVAL(SBTC_RELEASESTRPTR), 0 }, { TAG_DONE, 0 }
+    };
 
     SocketBase = OpenLibrary((CONST_STRPTR)"bsdsocket.library", 4);
     if (SocketBase == NULL) {
@@ -46,14 +51,11 @@ int main(void)
         return RETURN_FAIL;
     }
 
-    /* The three-liner.  Nothing else can tell a caller whether the vectors
-       are there, and calling them on an older library jumps into
-       MakeLibrary()'s (APTR)-1 terminator. */
-    if (SocketBase->lib_Revision < AMI_IFINDEX_MIN_REVISION) {
-        Printf((CONST_STRPTR)"IfNames: bsdsocket.library revision %ld, "
-                             "if_nametoindex needs %ld\n",
-               (LONG)SocketBase->lib_Revision,
-               (LONG)AMI_IFINDEX_MIN_REVISION);
+    /* The established query vector is safe even on a foreign stack.
+       A revision alone never identifies the extension vector table. */
+    if (SocketBaseTagList(tags) != 0 ||
+        !AMI_SOCKET_HAS_IFINDEX(SocketBase, (const char *)tags[0].ti_Data)) {
+        Printf((CONST_STRPTR)"IfNames: interface-index extensions unavailable\n");
         CloseLibrary(SocketBase);
         return RETURN_FAIL;
     }

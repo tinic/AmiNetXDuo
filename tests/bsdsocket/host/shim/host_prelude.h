@@ -81,6 +81,13 @@ struct ami_sockaddr_in6 {
 #define in6_pktinfo ami_in6_pktinfo
 #endif
 
+/* Force the target supplemental API, not libc's different ICMP filter ABI. */
+#include "../../../../developer/netinclude/netinet6/in6.h"
+#include "../../../../developer/netinclude/netinet/icmp6.h"
+#include "../../../../developer/netinclude/sys/cmsg.h"
+#define IP_PKTINFO 26
+#define IP_RECVDSTADDR 7
+
 /* Named in bsdsocket_vectors.h prototypes; declared here so the prototype
  * does not introduce a type scoped to itself (-Werror). */
 struct rt_msghdr;

@@ -24,15 +24,13 @@ DEST="${1:?usage: stage-developer.sh <destdir>}"
 # The published half of include/aminetxduo/.
 #
 #   ifindex.h  RFC 3493 section 4, the four LVOs at -0x372..-0x384.
-#   in6.h      the AF_INET6 names the NDK does not define.  No vectors: it is
-#              option numbers and address macros; standard layouts are in netinclude/.
-#   cmsg.h     RFC 3542 ancillary data.  No vectors either: it rides
-#              sendmsg/recvmsg.  Two of the NDK's own CMSG_* macros are
-#              replaced here, so a caller wants it AFTER <sys/socket.h>.
+#   in6.h      compatibility include for the common IPv6 SDK declarations.
+#   cmsg.h     compatibility include and CMSG_BUFFER convenience macros.
+#              Standard ancillary declarations come through sys/socket.h.
+#   capabilities.h  identity/revision/table-size checks for private vectors.
 #
-# NOT netstatus.h: NetStackQuery and NetStackControl work and are stable, but
-# publishing them freezes their request structures, and that is a decision to
-# take deliberately rather than by adding a line here.  NOT bpf.h: the
+# netstatus.h publishes the versioned NetStackQuery/NetStackControl request
+# structures. NOT bpf.h: the
 # application-facing BPF surface, BIOC*, bpf_hdr, bpf_program, bpf_stat,
 # DLT_*, the BPF_* opcodes, FIONREAD, SIOCGIFADDR, is already in the NDK's
 # net/bpf.h, sys/filio.h and sys/sockio.h, and everything AMI_BPF_* in ours is
@@ -50,7 +48,7 @@ DEST="${1:?usage: stage-developer.sh <destdir>}"
 #              the RX_FLAGS tag with the VERIFIED checksum verdict.  GRO is
 #              stack-side.  Tags and typedefs only, no vectors;
 #              published so any SANA-II driver can offer them, not just ours.
-PUBLIC_HEADERS=(ifindex.h in6.h cmsg.h netstatus.h tcp.h tlslib.h anxs2ext.h)
+PUBLIC_HEADERS=(capabilities.h ifindex.h in6.h cmsg.h netstatus.h tcp.h tlslib.h anxs2ext.h)
 
 # Copy only when the bytes differ.  The CMake build re-runs this on EVERY
 # build (developer_drawer, tests/tools/CMakeLists.txt) so that editing a
@@ -73,7 +71,7 @@ done
 # The pre-1.0 socket ABI correction must reach consumers through the same
 # standard headers used to compile the library. This is a source-controlled
 # SDK overlay, not a mutation of the user's installed compiler headers.
-for h in netinet/in.h sys/socket.h; do
+for h in netinet/in.h netinet6/in6.h netinet/icmp6.h sys/socket.h sys/cmsg.h netdb.h net/if.h; do
     stage "$ROOT/developer/netinclude/$h" "$DEST/include/$h"
 done
 
@@ -90,3 +88,5 @@ stage "$ROOT/developer/ReadMe"                 "$DEST/ReadMe"
 stage "$ROOT/developer/examples/IfNames.c"     "$DEST/examples/IfNames.c"
 stage "$ROOT/developer/examples/V6Only.c"      "$DEST/examples/V6Only.c"
 stage "$ROOT/developer/examples/TLSInfo.c"     "$DEST/examples/TLSInfo.c"
+
+stage "$ROOT/developer/support/in6_addr.c" "$DEST/support/in6_addr.c"

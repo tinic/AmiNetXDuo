@@ -194,6 +194,7 @@ VOID netstack_pool_sample(VOID);
 
 /* Interface handles.  Index 0..count-1 in configuration order; the loopback
    interface is always present and is not counted here. */
+BOOL    netstack_ipv4_configured(VOID);
 UWORD   netstack_interface_count(VOID);
 LONG    netstack_interface_up(UWORD index);
 /* Down and offline are two states, not one: down stops the stack, offline also
@@ -338,6 +339,7 @@ BOOL netstack_ipv6_address_origin(UWORD interface_index, UWORD slot,
    netstack_ipv6_enabled() is weaker and is not a substitute: every interface
    gets a link-local whether or not a router has ever spoken to it. */
 BOOL netstack_ipv6_have_global(VOID);
+BOOL netstack_ipv6_configured(VOID);
 
 /* Select the best source for talking to `dest`.  interface_index is a
    zero-based NetX interface, or -1 to let the route choose.  The find form

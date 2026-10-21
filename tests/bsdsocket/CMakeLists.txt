@@ -1,3 +1,8 @@
+# Host libc owns the base types; supplement only headers it lacks.
+if(NOT CMAKE_CROSSCOMPILING)
+    add_compile_options(-idirafter "${CMAKE_SOURCE_DIR}/developer/netinclude")
+endif()
+
 # Host tests for src/bsdsocket, which had none until 2026-08-04 despite being
 # 24,827 lines and the whole of the socket API.
 #

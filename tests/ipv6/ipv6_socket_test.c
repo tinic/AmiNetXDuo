@@ -21,6 +21,8 @@
 #include <sys/uio.h>
 #include <netinet/in.h>
 #include "aminetxduo/cmsg.h"
+#include "aminetxduo/capabilities.h"
+#include <bsdsocket/socketbasetags.h>
 
 #include "tapdev.h"
 
@@ -148,7 +150,7 @@ struct t_fdset
 };
 
 #define T_AF_INET           2
-#define T_AF_INET6          23
+#define T_AF_INET6          28
 #define T_AF_UNSPEC         0
 #define T_SOCK_STREAM       1
 #define T_SOCK_DGRAM        2
@@ -898,6 +900,10 @@ struct sockaddr_storage storage;
 UBYTE               short_addr[4];
 
     t_log("AF_INET6 socket basics");
+    fd = bsd_socket(23, T_SOCK_DGRAM, 0);
+    (VOID)t_check((BOOL)(fd < 0 && bsd_Errno() == T_EAFNOSUPPORT),
+                  "AF_IPX 23 no longer aliases IPv6", bsd_Errno());
+    if (fd >= 0) bsd_CloseSocket(fd);
 
     fd = bsd_socket(T_AF_INET6, T_SOCK_STREAM, 0);
     if (!t_check((BOOL)(fd >= 0), "socket(AF_INET6, SOCK_STREAM)", bsd_Errno()))
@@ -905,7 +911,7 @@ UBYTE               short_addr[4];
         return;
     }
 
-    /* IPV6_V6ONLY defaults to off, and answers to both numberings. */
+    /* One option namespace, including on non-raw sockets. */
     value = -1;
     len   = sizeof(value);
     rc = bsd_getsockopt(fd, T_IPPROTO_IPV6, T_IPV6_V6ONLY_BSD, &value, &len);
@@ -915,8 +921,8 @@ UBYTE               short_addr[4];
     value = -1;
     len   = sizeof(value);
     rc = bsd_getsockopt(fd, T_IPPROTO_IPV6, T_IPV6_V6ONLY_LINUX, &value, &len);
-    (VOID)t_check((BOOL)(rc == 0 && value == 0),
-                  "IPV6_V6ONLY (Linux numbering) answers too", value);
+    (VOID)t_check((BOOL)(rc < 0 && bsd_Errno() == 42),
+                  "old Linux IPV6_V6ONLY alias is rejected", value);
 
     value = 1;
     rc = bsd_setsockopt(fd, T_IPPROTO_IPV6, T_IPV6_V6ONLY_BSD, &value,
@@ -2357,6 +2363,10 @@ struct icmp6_filter filt;
                   "IPV6_RECVPKTINFO defaults to off", value);
 
     value = 1;
+    { LONG traffic = 42;
+      rc = bsd_setsockopt(fd, IPPROTO_IPV6, IPV6_TCLASS, &traffic, sizeof(traffic));
+      (VOID)t_check((BOOL)(rc == 0), "AROS traffic-class option is accepted", rc);
+    }
     rc = bsd_setsockopt(fd, IPPROTO_IPV6, IPV6_RECVPKTINFO, &value,
                         sizeof(value));
     (VOID)t_check((BOOL)(rc == 0), "setsockopt IPV6_RECVPKTINFO=1",
@@ -2412,6 +2422,11 @@ struct icmp6_filter filt;
                          info.ipi6_ifindex == 1),
                   "the sticky source reads back",
                   (LONG)info.ipi6_ifindex);
+
+    value = 0; len = sizeof(value);
+    rc = bsd_getsockopt(fd, IPPROTO_IPV6, IPV6_TCLASS, &value, &len);
+    (VOID)t_check((BOOL)(rc == 0 && value == 42),
+                  "packet-info flag does not overwrite traffic class", value);
 
     /* All-zero clears it, per RFC 3542 6.6. */
     t_bzero(&info, sizeof(info));
@@ -2479,6 +2494,9 @@ struct icmp6_filter filt;
     if (t_check((BOOL)(fd >= 0), "udp4 socket", bsd_Errno()))
     {
         value = 1;
+        rc = bsd_setsockopt(fd, IPPROTO_IP, IP_RETOPTS, &value, sizeof(value));
+        (VOID)t_check((BOOL)(rc < 0 && bsd_Errno() == 42),
+                      "IP_RETOPTS no longer enables packet info", rc);
         rc = bsd_setsockopt(fd, IPPROTO_IP, IP_PKTINFO, &value, sizeof(value));
         (VOID)t_check((BOOL)(rc == 0), "setsockopt IP_PKTINFO=1", bsd_Errno());
 
@@ -3082,6 +3100,80 @@ BOOL                saw_dstaddr = FALSE;
     (VOID)bsd_CloseSocket(client);
 }
 
+/* Run before attaching tap0, and again after assigning its addresses. */
+static VOID t_test_addrconfig(BOOL have4, BOOL have6)
+{
+    struct t_addrinfo hints;
+    struct t_addrinfo *res;
+    struct t_addrinfo *entry;
+    LONG rc;
+    BOOL saw4 = FALSE, saw6 = FALSE;
+
+    t_log("AI_ADDRCONFIG with configured families: v4=%ld v6=%ld",
+          (LONG)have4, (LONG)have6);
+    t_bzero(&hints, sizeof(hints));
+    hints.ai_socktype = T_SOCK_STREAM;
+    hints.ai_flags = T_AI_NUMERICHOST | AI_ADDRCONFIG;
+    rc = bsd_getaddrinfo((APTR)"192.0.2.1", (APTR)"80", &hints, &res);
+    (VOID)t_check((BOOL)(have4 ? rc == 0 : rc == EAI_ADDRFAMILY),
+                  "ADDRCONFIG filters IPv4 literals without using loopback", rc);
+    if (res != NULL) bsd_freeaddrinfo(res);
+    rc = bsd_getaddrinfo((APTR)"fd00::1", (APTR)"80", &hints, &res);
+    (VOID)t_check((BOOL)(have6 ? rc == 0 : rc == EAI_ADDRFAMILY),
+                  "ADDRCONFIG filters IPv6 literals using assigned addresses", rc);
+    if (res != NULL) bsd_freeaddrinfo(res);
+
+    hints.ai_flags = AI_PASSIVE | AI_ADDRCONFIG;
+    rc = bsd_getaddrinfo(NULL, (APTR)"80", &hints, &res);
+    for (entry = res; entry != NULL; entry = entry->ai_next) {
+        if (entry->ai_family == T_AF_INET) saw4 = TRUE;
+        if (entry->ai_family == T_AF_INET6) saw6 = TRUE;
+    }
+    (VOID)t_check((BOOL)(saw4 == have4 && saw6 == have6 &&
+                    (have4 || have6 ? rc == 0 : rc == EAI_ADDRFAMILY)),
+                  "ADDRCONFIG filters wildcard results by family", rc);
+    if (res != NULL) bsd_freeaddrinfo(res);
+
+    hints.ai_flags = T_AI_NUMERICHOST;
+    rc = bsd_getaddrinfo((APTR)"fd00::1", (APTR)"80", &hints, &res);
+    (VOID)t_check((BOOL)(rc == 0),
+                  "without ADDRCONFIG an IPv6 literal needs no global address", rc);
+    if (res != NULL) bsd_freeaddrinfo(res);
+    rc = bsd_getaddrinfo((APTR)"192.0.2.1", (APTR)"80", &hints, &res);
+    (VOID)t_check((BOOL)(rc == 0),
+                  "without ADDRCONFIG an IPv4 literal needs no configured address", rc);
+    if (res != NULL) bsd_freeaddrinfo(res);
+}
+
+static VOID t_test_extension_detection(VOID)
+{
+    struct Library fake;
+    struct TagItem tags[2] = {
+        { SBTM_GETVAL(SBTC_RELEASESTRPTR), 0 }, { TAG_DONE, 0 }
+    };
+    LONG rc;
+    t_bzero(&fake, sizeof(fake));
+    fake.lib_Version = 4;
+    fake.lib_Revision = 99;
+    fake.lib_NegSize = 0x400;
+    (VOID)t_check(!AMI_SOCKET_HAS_IFINDEX(&fake, "Roadshow 4.99"),
+                  "foreign high revision does not enable extension vectors", 0);
+    (VOID)t_check(!AMI_SOCKET_HAS_IFINDEX(&fake, (const char *)NULL),
+                  "missing release identity fails closed", 0);
+    fake.lib_NegSize = 0x372;
+    (VOID)t_check(!AMI_SOCKET_HAS_IFINDEX(&fake, "AmiNetXDuo test"),
+                  "short vector table fails closed", 0);
+    fake.lib_NegSize = 0x400;
+    fake.lib_Revision = 2;
+    (VOID)t_check(!AMI_SOCKET_HAS_IFINDEX(&fake, "AmiNetXDuo test"),
+                  "old AmiNetXDuo revision fails closed", 0);
+    rc = LP1(0x126, LONG, SocketBaseTagList, struct TagItem *, tags, a0,
+             , SocketBase);
+    (VOID)t_check((BOOL)(rc == 0 && AMI_SOCKET_HAS_IFINDEX(SocketBase,
+                                         (const char *)tags[0].ti_Data)),
+                  "established tag query detects the live extension table", rc);
+}
+
 static VOID t_test_getaddrinfo(VOID)
 {
 struct t_addrinfo   hints;
@@ -3255,8 +3347,13 @@ APTR                p;
 }
 
 
-int main(void)
+int main(int argc, char **argv)
 {
+    BOOL v6only = (BOOL)(argc > 1 && t_streq(argv[1], "addrconfig6only"));
+    BOOL configured6 = (BOOL)(v6only ||
+                            (argc > 1 && t_streq(argv[1], "addrconfig6")));
+    BOOL test_config = (BOOL)(configured6 ||
+                             (argc > 1 && t_streq(argv[1], "addrconfig4")));
     t_log("AmiNetXDuo, AF_INET6 through bsdsocket.library");
 
     {
@@ -3286,9 +3383,15 @@ int main(void)
             LONG addrc;
 
             UnLock(conf);
+            if (test_config) t_test_addrconfig(FALSE, FALSE);
             addrc = tap_bring_up(SocketBase);
             (VOID)t_check((BOOL)(addrc == 0), "AddNetInterface(tap0)",
                           (ULONG)addrc);
+            if (addrc == 0 && test_config) {
+                /* Give DAD time to finish for the ULA/link-local test runs. */
+                if (configured6) Delay(150);
+                t_test_addrconfig((BOOL)!v6only, configured6);
+            }
         }
         else
         {
@@ -3301,6 +3404,8 @@ int main(void)
         }
     }
 
+    t_test_extension_detection();
+    if (v6only) goto finished;
     t_test_conversions();
     t_test_socket_basics();
     t_test_tcp_loopback();
@@ -3328,6 +3433,7 @@ int main(void)
     t_test_cmsg_receive4();
     t_test_getaddrinfo();
 
+finished:
     CloseLibrary(SocketBase);
     SocketBase = NULL;
 

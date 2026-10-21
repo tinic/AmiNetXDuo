@@ -2138,6 +2138,34 @@ NX_PACKET_POOL *netstack_pool(VOID)
     return (ns != NULL && ns->ns_PoolMemory != NULL) ? &ns->ns_Pool : NULL;
 }
 
+/* AI_ADDRCONFIG counts assigned non-loopback addresses, not reachability. */
+BOOL netstack_ipv4_configured(VOID)
+{
+    AmiNetStack *ns = ami_netstack_raw();
+    AmiNetCaller *caller;
+    UWORD i;
+    BOOL found = FALSE;
+
+    if (ns == NULL || !ns->ns_IpCreated)
+        return FALSE;
+    caller = ami_netstack_enter_alloc();
+    if (caller == NULL)
+        return FALSE;
+    for (i = 0; i < (UWORD)NX_MAX_PHYSICAL_INTERFACES; i++)
+    {
+        NX_INTERFACE *iface = &ns->ns_Ip.nx_ip_interface[i];
+        ULONG addr = iface->nx_interface_ip_address;
+        if (iface->nx_interface_valid && addr != 0 &&
+            (addr >> 24) != 127 && (addr >> 24) < 224)
+        {
+            found = TRUE;
+            break;
+        }
+    }
+    ami_netstack_leave_free(caller);
+    return found;
+}
+
 UWORD netstack_interface_count(VOID)
 {
     AmiNetStack *ns = ami_ns;

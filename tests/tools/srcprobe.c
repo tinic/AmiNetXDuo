@@ -36,7 +36,7 @@ typedef struct ProbeAddr6
 } ProbeAddr6;
 
 #define P_AF_INET           2
-#define P_AF_INET6          23
+#define P_AF_INET6          28
 #define P_SOCK_STREAM       1
 #define P_SOCK_DGRAM        2
 

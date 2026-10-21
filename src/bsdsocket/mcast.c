@@ -777,35 +777,15 @@ LONG bsd_mcast6_prepare_send(struct AmiSocketBase *base, AmiSocket *sock,
 
 BOOL bsd_mcast6_is_option(const AmiSocket *sock, LONG optname)
 {
-    /* The Linux numbering is withdrawn on a raw socket. See
-       bsd_v6_linux_numbering() in in6.c. */
-    if (!bsd_v6_linux_numbering(sock))
-    {
-        switch (optname)
-        {
-            case AMI_IPV6_JOIN_GROUP_LINUX:
-            case AMI_IPV6_LEAVE_GROUP_LINUX:
-            case AMI_IPV6_MULTICAST_IF_LINUX:
-            case AMI_IPV6_MULTICAST_HOPS_LINUX:
-            case AMI_IPV6_MULTICAST_LOOP_LINUX:
-                return FALSE;
-            default:
-                break;
-        }
-    }
+    (VOID)sock;
 
     switch (optname)
     {
-        case AMI_IPV6_JOIN_GROUP_BSD:
-        case AMI_IPV6_JOIN_GROUP_LINUX:
-        case AMI_IPV6_LEAVE_GROUP_BSD:
-        case AMI_IPV6_LEAVE_GROUP_LINUX:
-        case AMI_IPV6_MULTICAST_IF_BSD:
-        case AMI_IPV6_MULTICAST_IF_LINUX:
-        case AMI_IPV6_MULTICAST_HOPS_BSD:
-        case AMI_IPV6_MULTICAST_HOPS_LINUX:
-        case AMI_IPV6_MULTICAST_LOOP_BSD:
-        case AMI_IPV6_MULTICAST_LOOP_LINUX:
+        case IPV6_JOIN_GROUP:
+        case IPV6_LEAVE_GROUP:
+        case IPV6_MULTICAST_IF:
+        case IPV6_MULTICAST_HOPS:
+        case IPV6_MULTICAST_LOOP:
             return TRUE;
         default:
             return FALSE;
@@ -845,14 +825,11 @@ LONG bsd_mcast6_setopt(struct AmiSocketBase *base, AmiSocket *sock,
 
     switch (optname)
     {
-        case AMI_IPV6_JOIN_GROUP_BSD:
-        case AMI_IPV6_JOIN_GROUP_LINUX:
-        case AMI_IPV6_LEAVE_GROUP_BSD:
-        case AMI_IPV6_LEAVE_GROUP_LINUX:
+        case IPV6_JOIN_GROUP:
+        case IPV6_LEAVE_GROUP:
         {
             struct ipv6_mreq mreq;
-            BOOL             join = (optname == AMI_IPV6_JOIN_GROUP_BSD ||
-                                     optname == AMI_IPV6_JOIN_GROUP_LINUX);
+            BOOL             join = (optname == IPV6_JOIN_GROUP);
 
             if (optval == NULL)
                 return bsd_fail(base, AMI_EFAULT);
@@ -866,8 +843,7 @@ LONG bsd_mcast6_setopt(struct AmiSocketBase *base, AmiSocket *sock,
             return bsd_mcast6_update(base, sock, &mreq, join);
         }
 
-        case AMI_IPV6_MULTICAST_IF_BSD:
-        case AMI_IPV6_MULTICAST_IF_LINUX:
+        case IPV6_MULTICAST_IF:
         {
             NX_IP *ip = bsd_stack_ip(base);
             LONG   iface;
@@ -899,8 +875,7 @@ LONG bsd_mcast6_setopt(struct AmiSocketBase *base, AmiSocket *sock,
             return 0;
         }
 
-        case AMI_IPV6_MULTICAST_HOPS_BSD:
-        case AMI_IPV6_MULTICAST_HOPS_LINUX:
+        case IPV6_MULTICAST_HOPS:
             if (bsd_mcast6_get_int(base, optval, optlen, &value) != 0)
                 return -1;
             if (value < -1 || value > 255)
@@ -913,8 +888,7 @@ LONG bsd_mcast6_setopt(struct AmiSocketBase *base, AmiSocket *sock,
             sock->as_Mcast6Hops = (value < 0) ? 1 : value;
             return 0;
 
-        case AMI_IPV6_MULTICAST_LOOP_BSD:
-        case AMI_IPV6_MULTICAST_LOOP_LINUX:
+        case IPV6_MULTICAST_LOOP:
             /* Accepted, stored nowhere, always reads back 0. See the note at
                the top of this half. */
             if (bsd_mcast6_get_int(base, optval, optlen, &value) != 0)
@@ -931,8 +905,7 @@ LONG bsd_mcast6_getopt(struct AmiSocketBase *base, AmiSocket *sock,
 {
     switch (optname)
     {
-        case AMI_IPV6_MULTICAST_IF_BSD:
-        case AMI_IPV6_MULTICAST_IF_LINUX:
+        case IPV6_MULTICAST_IF:
         {
             LONG iface;
 
@@ -949,20 +922,16 @@ LONG bsd_mcast6_getopt(struct AmiSocketBase *base, AmiSocket *sock,
                                           : iface + 1);
         }
 
-        case AMI_IPV6_MULTICAST_HOPS_BSD:
-        case AMI_IPV6_MULTICAST_HOPS_LINUX:
+        case IPV6_MULTICAST_HOPS:
             return bsd_opt_get_long(base, optval, optlen,
                                       sock->as_Mcast6Hops);
 
-        case AMI_IPV6_MULTICAST_LOOP_BSD:
-        case AMI_IPV6_MULTICAST_LOOP_LINUX:
+        case IPV6_MULTICAST_LOOP:
             return bsd_opt_get_long(base, optval, optlen, 0);
 
         /* Set-only, as the IPv4 pair are. */
-        case AMI_IPV6_JOIN_GROUP_BSD:
-        case AMI_IPV6_JOIN_GROUP_LINUX:
-        case AMI_IPV6_LEAVE_GROUP_BSD:
-        case AMI_IPV6_LEAVE_GROUP_LINUX:
+        case IPV6_JOIN_GROUP:
+        case IPV6_LEAVE_GROUP:
             return bsd_fail(base, AMI_EOPNOTSUPP);
 
         default:

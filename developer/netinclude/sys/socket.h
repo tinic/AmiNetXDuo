@@ -196,10 +196,10 @@ struct	linger {
 #define	AF_CNT		21		/* Computer Network Technology */
 #define pseudo_AF_RTIP	22		/* Help Identify RTIP packets */
 #define	AF_IPX		23		/* Novell Internet Protocol */
-#define AF_INET6        23              /* IP version 6 */
+#define AF_INET6        28              /* IP version 6 */
 #define	AF_SIP		24		/* Simple Internet Protocol */
 #define pseudo_AF_PIP	25		/* Help Identify PIP packets */
-#define	AF_MAX		26
+#define	AF_MAX		29
 
 /*
  * Structure used by kernel to store most
@@ -242,6 +242,7 @@ struct sockproto {
 #define	PF_LOCAL	AF_LOCAL
 #define	PF_UNIX		PF_LOCAL	/* backward compatibility */
 #define	PF_INET		AF_INET
+#define PF_INET6        AF_INET6
 #define	PF_IMPLINK	AF_IMPLINK
 #define	PF_PUP		AF_PUP
 #define	PF_CHAOS	AF_CHAOS
@@ -333,17 +334,7 @@ struct cmsghdr {
 /* followed by	__UBYTE  cmsg_data[]; */
 };
 
-/* given pointer to struct cmsghdr, return pointer to data */
-#define	CMSG_DATA(cmsg)		((__UBYTE *)((cmsg) + 1))
-
-/* given pointer to struct cmsghdr, return pointer to next cmsghdr */
-#define	CMSG_NXTHDR(mhdr, cmsg)	\
-	(((__APTR)(cmsg) + (cmsg)->cmsg_len + sizeof(struct cmsghdr) > \
-	    (mhdr)->msg_control + (mhdr)->msg_controllen) ? \
-	    (struct cmsghdr *)NULL : \
-	    (struct cmsghdr *)((__APTR)(cmsg) + ALIGN((cmsg)->cmsg_len)))
-
-#define	CMSG_FIRSTHDR(mhdr)	((struct cmsghdr *)(mhdr)->msg_control)
+#include <sys/cmsg.h>
 
 /* "Socket"-level control message types: */
 #define	SCM_RIGHTS	0x01		/* access rights (array of __LONG) */

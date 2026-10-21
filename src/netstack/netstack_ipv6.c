@@ -439,7 +439,7 @@ static BOOL ami_ns6_address_get(AmiNetStack *ns, UWORD interface_index,
     return FALSE;
 }
 
-BOOL netstack_ipv6_have_global(VOID)
+static BOOL ami_ns6_configured(BOOL global_only)
 {
     AmiNetStack  *ns = ami_netstack_raw();
     AmiNetCaller *caller;
@@ -466,7 +466,13 @@ BOOL netstack_ipv6_have_global(VOID)
 
             /* 2000::/3 only: neither a link-local nor fc00::/7 is routed off
                the site that made it up. */
-            if ((addr[0] & 0xE0000000UL) != 0x20000000UL)
+            if (global_only && (addr[0] & 0xE0000000UL) != 0x20000000UL)
+                continue;
+
+            /* AI_ADDRCONFIG includes ULA and link-local, but not ::, ::1
+               or multicast. Physical interfaces exclude the loopback device. */
+            if ((addr[0] == 0 && addr[1] == 0 && addr[2] == 0 &&
+                 addr[3] <= 1) || (addr[0] >> 24) == 0xff)
                 continue;
 
             /* RFC 4862 5.4: TENTATIVE is still under duplicate address
@@ -482,6 +488,16 @@ BOOL netstack_ipv6_have_global(VOID)
 
     ami_netstack_leave_free(caller);
     return found;
+}
+
+BOOL netstack_ipv6_have_global(VOID)
+{
+    return ami_ns6_configured(TRUE);
+}
+
+BOOL netstack_ipv6_configured(VOID)
+{
+    return ami_ns6_configured(FALSE);
 }
 
 BOOL netstack_ipv6_address_get(UWORD interface_index, UWORD slot,

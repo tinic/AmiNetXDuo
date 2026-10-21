@@ -32,7 +32,8 @@ extern "C" {
 /* a third-party netstat or ifconfig needs: ShowNetStatus, netstat and arp are */
 /* built on nothing else.  Published means frozen, NetStatusHeader and every */
 /* NETCTRL_* request structure in netstatus.h are part of the ABI from here on, */
-/* and a caller checks lib_Revision against AMI_NETSTATUS_MIN_REVISION first. */
+/* callers first verify AmiNetXDuo identity, revision and vector-table size. */
+/* See aminetxduo/capabilities.h and examples/IfNames.c. */
 LONG NetStackQuery(ULONG magic, ULONG what, APTR buffer, ULONG size);
 LONG NetStackControl(ULONG magic, ULONG op, APTR arg, ULONG size);
 

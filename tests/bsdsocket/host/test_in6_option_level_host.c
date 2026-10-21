@@ -92,8 +92,8 @@ LONG bsd_mcast6_getopt(struct AmiSocketBase *base, AmiSocket *sock,
 static void test_hops_and_class(void)
 {
     static const LONG options[2][2] = {
-        { AMI_IPV6_UNICAST_HOPS_BSD, AMI_IPV6_UNICAST_HOPS_LINUX },
-        { AMI_IPV6_TCLASS_BSD, AMI_IPV6_TCLASS_LINUX }
+        { IPV6_UNICAST_HOPS, 16 },
+        { IPV6_TCLASS, 67 }
     };
     static const LONG values[] = { -2, -1, 0, 255, 256, 65536 };
     unsigned int kind, numbering, raw, width, v;
@@ -108,8 +108,7 @@ static void test_hops_and_class(void)
         WORD short_value = (WORD)value;
         LONG actual = width == 0 ? value : (LONG)short_value;
         LONG rc;
-        BOOL numbered = raw == 0 || numbering == 0 ||
-                        options[kind][numbering] == options[kind][0];
+        BOOL numbered = numbering == 0;
         BOOL valid = actual >= -1 && actual <= 255;
         LONG expected = actual < 0
                             ? (kind == 0 ? (LONG)NX_IP_TIME_TO_LIVE : 0)
@@ -173,20 +172,20 @@ static void test_multicast_dispatch(void)
     h_mcast_owned = TRUE;
     h_mcast_sets = h_mcast_gets = 0;
     CHECK(bsd_setsockopt_ipv6(&h_base, &h_sock, IPPROTO_IPV6,
-                              AMI_IPV6_MULTICAST_HOPS_BSD, &value, len) == 73);
+                              IPV6_MULTICAST_HOPS, &value, len) == 73);
     CHECK(h_mcast_sets == 1 && h_mcast_gets == 0);
     CHECK(h_mcast_value == &value && h_mcast_length == len);
     CHECK(bsd_getsockopt_ipv6(&h_base, &h_sock, IPPROTO_IPV6,
-                              AMI_IPV6_MULTICAST_HOPS_BSD, &value, &len) == 73);
+                              IPV6_MULTICAST_HOPS, &value, &len) == 73);
     CHECK(h_mcast_gets == 1 && h_mcast_sets == 1);
     CHECK(h_mcast_value == &value && h_mcast_length_ptr == &len);
 
     before = h_mcast_classifies;
     CHECK(bsd_setsockopt_ipv6(&h_base, &h_sock, IPPROTO_ICMPV6,
-                              AMI_IPV6_MULTICAST_HOPS_BSD, &value, len) == -1);
+                              IPV6_MULTICAST_HOPS, &value, len) == -1);
     CHECK(h_base.sb_Errno == AMI_ENOPROTOOPT);
     CHECK(bsd_getsockopt_ipv6(&h_base, &h_sock, IPPROTO_ICMPV6,
-                              AMI_IPV6_MULTICAST_HOPS_BSD, &value, &len) == -1);
+                              IPV6_MULTICAST_HOPS, &value, &len) == -1);
     CHECK(h_base.sb_Errno == AMI_ENOPROTOOPT);
     CHECK(h_mcast_classifies == before && h_mcast_sets == 1 && h_mcast_gets == 1);
     h_mcast_owned = FALSE;
@@ -196,7 +195,7 @@ static void test_multicast_dispatch(void)
 static void test_getter_widths(void)
 {
     static const LONG options[] = {
-        AMI_IPV6_UNICAST_HOPS_BSD, AMI_IPV6_TCLASS_BSD, AMI_IPV6_V6ONLY_BSD
+        IPV6_UNICAST_HOPS, IPV6_TCLASS, IPV6_V6ONLY
     };
     static const LONG values[] = { 42, 255, 1 };
     unsigned kind;
@@ -258,13 +257,13 @@ int main(void)
     h_sock.as_Ttl = 9;
 
     CHECK(bsd_setsockopt_ipv6(&h_base, &h_sock, IPPROTO_ICMPV6,
-                              AMI_IPV6_UNICAST_HOPS_BSD, &value,
+                              IPV6_UNICAST_HOPS, &value,
                               (socklen_t)sizeof(value)) == -1);
     CHECK(h_base.sb_Errno == AMI_ENOPROTOOPT);
     CHECK(h_sock.as_Ttl == 9);
 
     CHECK(bsd_getsockopt_ipv6(&h_base, &h_sock, IPPROTO_ICMPV6,
-                              AMI_IPV6_UNICAST_HOPS_BSD, &value, &len) == -1);
+                              IPV6_UNICAST_HOPS, &value, &len) == -1);
     CHECK(h_base.sb_Errno == AMI_ENOPROTOOPT);
     CHECK(value == 42);
 
@@ -274,12 +273,12 @@ int main(void)
 
     h_enter_result = 0;
     CHECK(bsd_setsockopt_ipv6(&h_base, &h_sock, IPPROTO_IPV6,
-                              AMI_IPV6_UNICAST_HOPS_BSD, &value,
+                              IPV6_UNICAST_HOPS, &value,
                               (socklen_t)sizeof(value)) == 0);
     CHECK(h_sock.as_Ttl == 42);
     value = 0;
     CHECK(bsd_getsockopt_ipv6(&h_base, &h_sock, IPPROTO_IPV6,
-                              AMI_IPV6_UNICAST_HOPS_BSD, &value, &len) == 0);
+                              IPV6_UNICAST_HOPS, &value, &len) == 0);
     CHECK(value == 42);
 
     printf("RESULT in6_option_level checks=%d failures=%d\n",

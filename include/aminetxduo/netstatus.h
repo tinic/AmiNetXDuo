@@ -46,7 +46,8 @@ extern "C" {
    it again rather than pulling that one in. */
 #define NETSTATUS_FILE_LEN      128
 
-/* Callers MUST check lib_Revision >= this before any netstatus call: an older
+/* Callers MUST establish AmiNetXDuo identity before checking this revision;
+   see AMI_SOCKET_HAS_NETSTATUS in <aminetxduo/capabilities.h>. An older
    library has no such vector and the jump lands past the table terminator.
    Bump when a netstatus vector is added or AMI_NETSTATUS_VERSION moves. */
 #define AMI_NETSTATUS_MIN_REVISION  10
