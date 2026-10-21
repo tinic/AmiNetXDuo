@@ -45,17 +45,4 @@ Latin-1 headers: `LC_ALL=C grep -a`, or a negative result means nothing.
 | `sendmsg()` on a stream socket takes no `IPV6_PKTINFO` and no `IPV6_HOPLIMIT`, permanently | | A stream's source is fixed when the SYN goes out, so there is nothing per-write to name. Naming the source at `connect()` is `nxd_tcp_client_socket_source_connect()` in the fork, reached by binding before connecting |
 | `AI_V4MAPPED` is not defined and `AI_ADDRCONFIG` is 0 | `include/aminetxduo/in6.h:357` | `getaddrinfo()` refuses any bit outside the NDK's `AI_MASK` with `EAI_BADFLAGS` and this library never synthesises `::ffff:a.b.c.d`, so leaving `AI_V4MAPPED` undefined makes it a compile error rather than a silent lie. `AI_ADDRCONFIG`'s behaviour is unconditional here, so 0 is a truthful no-op |
 | IPv6 uses the BSD length/family prefix from ABI 4.11 | `developer/netinclude/netinet/in.h`, `developer/netinclude/sys/socket.h` | IPv4 is unchanged. IPv6 stays 28 bytes, with length at 0 and family at 1. `sockaddr_storage.ss_family` shares that offset. Rebuild pre-release IPv6 applications; there is no legacy layout mode |
-| The standard socket headers have one source-controlled overlay | `developer/netinclude/` | The stack and shipped applications compile against the same files staged into `Developer/include`. Put that directory before NDK/netinclude. The compiler cache is never modified. The overlay can move upstream without changing the application include paths |
-
-## Common socket headers
-
-`developer/netinclude/ReadMe` records the exact AmigaPorts baseline and the
-small ABI changes. The original license notices and Latin-1 encoding remain.
-`tools/stage-developer.sh` ships these headers alongside the addenda.
-`tests/toolchain/check_ipv6_sdk.py` compiles the staged SDK with C and C++,
-libnix/newlib/clib2, 68000/68020, and both standard-first and addendum-first
-include orders. The cross build runs it as `check_ipv6_sdk`.
-
-The in-library assertions in `src/bsdsocket/in6.c` pin the address layouts.
-The guest `ipv6_socket_test` verifies both input and returned addresses,
-including `sockaddr_storage`, truncated buffers, and the IPv4 control case.
+| The standard socket headers have one source-controlled overlay | `developer/netinclude/` | The stack and shipped applications compile against the same files staged into `Developer/include`; put that directory before NDK/netinclude. The baseline and changes are in its `ReadMe`. `tests/toolchain/check_ipv6_sdk.py` compiles them for every runtime, CPU and include order; `src/bsdsocket/in6.c` pins the layouts; `tests/ipv6/ipv6_socket_test.c` checks them at run time |
