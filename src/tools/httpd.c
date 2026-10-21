@@ -5833,6 +5833,7 @@ int main(int argc, char **argv)
     if (rda == NULL)
     {
         tool_fault(IoErr());
+        httpd_note_exit("bad arguments", NULL);
         tool_usage("[<drawer>] [PORT <port>] [-v] [TRACE] [-T [PAGE <file>]] "
                    "[-C [CONSOLEPAGE <file>]] [-F [FILEPAGE <file>]]",
                    "Serve volumes or a drawer over HTTP/WebDAV. -T /shell, "
@@ -5848,6 +5849,7 @@ int main(int argc, char **argv)
                         sizeof(httpd_root_buf)))
     {
         tool_error("drawer path too long");
+        httpd_note_exit("drawer path too long", NULL);
         FreeArgs(rda);
         return RETURN_ERROR;
     }
@@ -5870,6 +5872,7 @@ int main(int argc, char **argv)
         if (value <= 0 || value > 65535)
         {
             tool_error("PORT %ld out of range 1 to 65535", value);
+            httpd_note_exit("PORT out of range", NULL);
             FreeArgs(rda);
             return RETURN_ERROR;
         }
@@ -5884,6 +5887,7 @@ int main(int argc, char **argv)
         {
             tool_error("CONNECTIONS must be between 1 and %ld",
                        (LONG)HTTPD_CONN_MAX);
+            httpd_note_exit("CONNECTIONS out of range", NULL);
             FreeArgs(rda);
             return RETURN_ERROR;
         }
@@ -5897,6 +5901,7 @@ int main(int argc, char **argv)
         if (value < 0)
         {
             tool_error("TIMEOUT cannot be negative");
+            httpd_note_exit("TIMEOUT cannot be negative", NULL);
             FreeArgs(rda);
             return RETURN_ERROR;
         }
@@ -5914,6 +5919,7 @@ int main(int argc, char **argv)
         {
             tool_error("there is no \"%s\" to serve", (LONG)httpd_root);
             tool_fault(IoErr());
+            httpd_note_exit("no drawer to serve", httpd_root);
             FreeArgs(rda);
             return RETURN_ERROR;
         }
@@ -5925,6 +5931,7 @@ int main(int argc, char **argv)
     if (args[ARG_PAGE] != 0 && args[ARG_TERMINAL] == 0)
     {
         tool_error("PAGE requires -T");
+        httpd_note_exit("PAGE requires -T", NULL);
         FreeArgs(rda);
         return RETURN_ERROR;
     }
@@ -5932,6 +5939,7 @@ int main(int argc, char **argv)
     if (args[ARG_CONSOLEPAGE] != 0 && args[ARG_CONSOLE] == 0)
     {
         tool_error("CONSOLEPAGE requires -C");
+        httpd_note_exit("CONSOLEPAGE requires -C", NULL);
         FreeArgs(rda);
         return RETURN_ERROR;
     }
@@ -5939,6 +5947,7 @@ int main(int argc, char **argv)
     if (args[ARG_FILEPAGE] != 0 && args[ARG_FILES] == 0)
     {
         tool_error("FILEPAGE requires -F");
+        httpd_note_exit("FILEPAGE requires -F", NULL);
         FreeArgs(rda);
         return RETURN_ERROR;
     }
@@ -5956,6 +5965,7 @@ int main(int argc, char **argv)
                                  httpd_term_page, sizeof(httpd_term_page),
                                  httpd_term_gz, sizeof(httpd_term_gz)))
         {
+            httpd_note_exit("no -T page", NULL);
             FreeArgs(rda);
             return RETURN_ERROR;
         }
@@ -5974,6 +5984,7 @@ int main(int argc, char **argv)
                                  sizeof(httpd_console_page), httpd_console_gz,
                                  sizeof(httpd_console_gz)))
         {
+            httpd_note_exit("no -C page", NULL);
             FreeArgs(rda);
             return RETURN_ERROR;
         }
@@ -5992,6 +6003,7 @@ int main(int argc, char **argv)
                                  sizeof(httpd_files_page), httpd_files_gz,
                                  sizeof(httpd_files_gz)))
         {
+            httpd_note_exit("no -F page", NULL);
             FreeArgs(rda);
             return RETURN_ERROR;
         }
@@ -6004,6 +6016,7 @@ int main(int argc, char **argv)
     httpd_sb = tool_socket_open();
     if (httpd_sb == NULL)
     {
+        httpd_note_exit("no bsdsocket.library", NULL);
         FreeArgs(rda);
         return RETURN_FAIL;
     }
@@ -6012,6 +6025,8 @@ int main(int argc, char **argv)
         !tool_sock_resolve_af(httpd_sb, (const char *)args[ARG_ADDRESS],
                               TOOL_AF_UNSPEC, &address))
     {
+        httpd_note_exit("ADDRESS did not resolve",
+                        (const char *)args[ARG_ADDRESS]);
         CloseLibrary(httpd_sb);
         FreeArgs(rda);
         return RETURN_ERROR;
@@ -6036,6 +6051,7 @@ int main(int argc, char **argv)
     if (httpd_conn == NULL)
     {
         tool_error("not enough memory for %lu connections", httpd_conns);
+        httpd_note_exit("not enough memory", NULL);
         CloseLibrary(httpd_sb);
         FreeArgs(rda);
         return RETURN_FAIL;
@@ -6064,6 +6080,7 @@ int main(int argc, char **argv)
         if (httpd_conn[i].fib == NULL)
         {
             tool_error("not enough memory for %lu connections", httpd_conns);
+            httpd_note_exit("not enough memory", NULL);
             while (i-- > 0UL)
                 ami_free(httpd_conn[i].fib);
             ami_free(httpd_conn);
@@ -6083,6 +6100,7 @@ int main(int argc, char **argv)
     if (httpd_fib2 == NULL || httpd_info == NULL)
     {
         tool_error("not enough memory to start");
+        httpd_note_exit("not enough memory", NULL);
         ami_free(httpd_info);
         ami_free(httpd_fib2);
         for (i = 0; i < httpd_conns; i++)
@@ -6101,6 +6119,10 @@ int main(int argc, char **argv)
     lsock = httpd_listen(&address, port);
     if (lsock < 0)
     {
+        /* httpd_listen() closed the socket, and a close that succeeds
+           leaves errno as the bind or listen set it. */
+        httpd_note_exit("cannot listen",
+                        tool_sock_errstr(tool_sock_errno(httpd_sb)));
         ami_free(httpd_info);
         ami_free(httpd_fib2);
         for (i = 0; i < httpd_conns; i++)
@@ -6149,6 +6171,7 @@ int main(int argc, char **argv)
 
         if (!http_term_init())
         {
+            httpd_note_exit("-T cannot start a terminal", NULL);
             (VOID)tool_sock_close(httpd_sb, lsock);
             ami_free(httpd_info);
             ami_free(httpd_fib2);
@@ -6173,6 +6196,7 @@ int main(int argc, char **argv)
         if (!http_fb_open())
         {
             tool_error("-C cannot serve a screen: %s", (LONG)http_fb_fault());
+            httpd_note_exit("-C cannot serve a screen", http_fb_fault());
             http_term_shutdown();
             (VOID)tool_sock_close(httpd_sb, lsock);
             ami_free(httpd_info);
