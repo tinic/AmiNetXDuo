@@ -351,6 +351,10 @@ BOOL netstack_ipv6_source_find(const ULONG dest[4], LONG interface_index,
                                ULONG addr_out[4], UINT *address_index_out);
 BOOL netstack_ipv6_source_for(const ULONG dest[4], LONG interface_index,
                               ULONG addr_out[4]);
+/* The find form with the route choosing, plus the selected entry's
+   NX_IPV6_ADDR_STATE_*, read under the same lock.  Needs the bracket. */
+BOOL netstack_ipv6_source_state(const ULONG dest[4], ULONG addr_out[4],
+                                ULONG *state_out);
 
 /* AAAA lookup, as netstack_resolve() including the search list, except that
    DEVS:Internet/hosts is not consulted: the netdb store holds no IPv6. */

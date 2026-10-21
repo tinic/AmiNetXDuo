@@ -100,7 +100,9 @@ struct bpf_version {
 
 /* struct ifreq is 32 bytes with a 16-byte name (net/if.h); only its size
    enters the ioctl encoding. */
+#ifndef IFNAMSIZ
 #define IFNAMSIZ            16
+#endif
 #define AMI_BPF_IFREQ_SIZE  32
 
 #define BIOCGBLEN           _IOC(IOC_OUT,   'B', 102, 4)

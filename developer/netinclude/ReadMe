@@ -70,6 +70,9 @@ non-loopback addresses count, IPv6 ULA and link-local included (RFC 3493
 6.1); tentative and unknown ones do not. Without the flag,
 AF_UNSPEC hostname lookups query AAAA only when a 2000::/3 address exists;
 AF_INET6 asks regardless. AI_V4MAPPED is undefined.
+An AAAA and an A answer are ordered by RFC 6724 section 6 rules 1, 2, 3, 5,
+6, 8 and 10, from the sources the stack would select; rules 4, 7 and 9 are
+not applied. An IPv6 destination with no usable source or route follows IPv4.
 
 To detect AmiNetXDuo, query SBTC_RELEASESTRPTR through SocketBaseTagList and
 require success and an AmiNetXDuo release string, then check revision and

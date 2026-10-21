@@ -789,8 +789,9 @@ UINT netstack_ipv6_route_delete(const ULONG dest[4], ULONG prefix_len,
 }
 
 /* Keep NetX's private RFC 6724 selector behind the netstack boundary. */
-BOOL netstack_ipv6_source_find(const ULONG dest[4], LONG interface_index,
-                               ULONG addr_out[4], UINT *address_index_out)
+static BOOL ami_ns6_source_find(const ULONG dest[4], LONG interface_index,
+                                ULONG addr_out[4], UINT *address_index_out,
+                                ULONG *state_out)
 {
     AmiNetStack      *ns = ami_netstack_raw();
     NXD_IPV6_ADDRESS *source = NX_NULL;
@@ -799,7 +800,7 @@ BOOL netstack_ipv6_source_find(const ULONG dest[4], LONG interface_index,
     UINT              status;
 
     if (ns == NULL || !ns->ns_IpCreated || !ns->ns_Ipv6Enabled ||
-        dest == NULL || (addr_out == NULL && address_index_out == NULL) ||
+        dest == NULL ||
         interface_index < -1 ||
         interface_index >= (LONG)NX_MAX_IP_INTERFACES)
         return FALSE;
@@ -831,11 +832,31 @@ BOOL netstack_ipv6_source_find(const ULONG dest[4], LONG interface_index,
         }
         if (address_index_out != NULL)
             *address_index_out = (UINT)source->nxd_ipv6_address_index;
+        /* The selected entry's own state: the same address may sit on two
+           interfaces in different states. */
+        if (state_out != NULL)
+            *state_out = (ULONG)source->nxd_ipv6_address_state;
     }
 
     tx_mutex_put(&ns->ns_Ip.nx_ip_protection);
 
     return (status == NX_SUCCESS && source != NX_NULL) ? TRUE : FALSE;
+}
+
+BOOL netstack_ipv6_source_find(const ULONG dest[4], LONG interface_index,
+                               ULONG addr_out[4], UINT *address_index_out)
+{
+    if (addr_out == NULL && address_index_out == NULL)
+        return FALSE;
+
+    return ami_ns6_source_find(dest, interface_index, addr_out,
+                               address_index_out, NULL);
+}
+
+BOOL netstack_ipv6_source_state(const ULONG dest[4], ULONG addr_out[4],
+                                ULONG *state_out)
+{
+    return ami_ns6_source_find(dest, -1L, addr_out, NULL, state_out);
 }
 
 BOOL netstack_ipv6_source_for(const ULONG dest[4], LONG interface_index,

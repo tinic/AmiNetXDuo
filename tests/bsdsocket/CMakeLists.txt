@@ -33,7 +33,8 @@ if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
     # answers: default IPv4 LAN lookups must neither query nor return IPv6.
     add_executable(test_addrinfo_dns host/test_addrinfo_dns_host.c
         "${CMAKE_SOURCE_DIR}/src/config/config_text.c"
-        "${CMAKE_SOURCE_DIR}/src/config/config_text6.c")
+        "${CMAKE_SOURCE_DIR}/src/config/config_text6.c"
+        "${CMAKE_SOURCE_DIR}/src/ipv6/ipv6_srcsel.c")
     target_include_directories(test_addrinfo_dns PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/host/shim"
         "${CMAKE_SOURCE_DIR}/src/bsdsocket"
