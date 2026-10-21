@@ -102,6 +102,33 @@ def main():
                 subprocess.run(command + ["-x", lang, str(source),
                     str(sdk / "support/in6_addr.c"), "-o", str(work / "constants")],
                     check=True, capture_output=True)
+        # The if_* prototypes follow the stub convention of the rest of the
+        # netinclude: __stdargs, so -mregparm cannot move their arguments
+        # into registers, and absent under __NO_NET_API, so a program can
+        # declare its own.
+        probes = {
+            "callconv": "#include <exec/types.h>\n#include <net/if.h>\n"
+                        "typedef __ULONG (__stdargs *index_fn)(const char *);\n"
+                        "index_fn probe = &if_nametoindex;\n",
+            "no_net_api": "#define __NO_NET_API\n#include <exec/types.h>\n"
+                          "#include <net/if.h>\n"
+                          "LONG if_nametoindex(STRPTR name);\n"
+                          "LONG if_freenameindex(APTR list);\n",
+        }
+        for name, text in probes.items():
+            for lang, compiler in (("c", "gcc"), ("c++", "g++")):
+                source = work / f"{name}.c"
+                source.write_text(text)
+                result = subprocess.run([
+                    str(toolchain / "bin" / f"m68k-amigaos-{compiler}"),
+                    "-x", lang, "-m68000", "-mregparm=2", "-Os",
+                    "-Wall", "-Werror", "-I" + str(sdk / "include"),
+                    "-I" + str(toolchain / "m68k-amigaos/ndk-include"),
+                    "-c", str(source), "-o", str(work / f"{name}.o")],
+                    text=True, capture_output=True)
+                if result.returncode:
+                    raise SystemExit(f"net/if.h {name}/{lang}:\n"
+                                     + result.stdout + result.stderr)
         # Including an addendum after the installed, old headers must not
         # quietly produce an application with the previous IPv6 layout.
         old_header = toolchain / "m68k-amigaos/ndk-include/netinet/in.h"
@@ -116,7 +143,8 @@ def main():
                 text=True, capture_output=True)
             if result.returncode == 0 or "Use the AmiNetXDuo Developer/include" not in result.stderr:
                 raise SystemExit("old IPv6 SDK did not fail with the migration diagnostic")
-        print(f"IPv6 SDK: {count} ABI/include-order compile checks and 6 constant-symbol links passed")
+        print(f"IPv6 SDK: {count} ABI/include-order compile checks, 6 constant-symbol "
+              "links and 4 net/if.h convention probes passed")
 
 
 if __name__ == "__main__":
