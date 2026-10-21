@@ -85,6 +85,7 @@ done < <(cd "$ROOT/developer/include" && find . -type f ! -name '.*')
 stage "$ROOT/developer/sfd/aminetxduo_lib.sfd" "$DEST/sfd/aminetxduo_lib.sfd"
 stage "$ROOT/developer/sfd/tls_lib.sfd"        "$DEST/sfd/tls_lib.sfd"
 stage "$ROOT/developer/ReadMe"                 "$DEST/ReadMe"
+stage "$ROOT/developer/netinclude/ReadMe"      "$DEST/netinclude-ReadMe"
 stage "$ROOT/developer/examples/IfNames.c"     "$DEST/examples/IfNames.c"
 stage "$ROOT/developer/examples/V6Only.c"      "$DEST/examples/V6Only.c"
 stage "$ROOT/developer/examples/TLSInfo.c"     "$DEST/examples/TLSInfo.c"

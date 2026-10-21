@@ -327,9 +327,8 @@ struct if_nameindex
 };
 
 /*
- * if_nametoindex() returns 0 and sets no errno.  if_indextoname()'s `ifname`
- * needs room for IF_NAMESIZE bytes; NULL + ENXIO for an unknown index, ENOMEM
- * on a system error.  Loopback is in all three, "lo0", numbered last.
+ * if_nametoindex() returns 0 for an unknown name.  if_indextoname()'s `ifname`
+ * needs room for IF_NAMESIZE bytes; it returns NULL on failure.
  */
 __ULONG                if_nametoindex(const char *ifname);
 char                *if_indextoname(__ULONG ifindex, char *ifname);

@@ -42,8 +42,8 @@ extern "C" {
 #define IPV6_ADD_MEMBERSHIP    IPV6_JOIN_GROUP
 #define IPV6_DROP_MEMBERSHIP   IPV6_LEAVE_GROUP
 
-#ifndef AMINETXDUO_HAVE_IPV6_MREQ
-#define AMINETXDUO_HAVE_IPV6_MREQ
+#ifndef _STRUCT_IPV6_MREQ_DECLARED
+#define _STRUCT_IPV6_MREQ_DECLARED
 struct ipv6_mreq {
     struct in6_addr ipv6mr_multiaddr;
     unsigned int ipv6mr_interface;

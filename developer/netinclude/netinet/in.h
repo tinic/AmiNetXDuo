@@ -274,8 +274,8 @@ struct ip_mreq {
  * options. The Linux value 8 is already IP_RETOPTS and must not be reused.
  */
 #define IP_PKTINFO 26
-#ifndef AMINETXDUO_HAVE_IN_PKTINFO
-#define AMINETXDUO_HAVE_IN_PKTINFO
+#ifndef _STRUCT_IN_PKTINFO_DECLARED
+#define _STRUCT_IN_PKTINFO_DECLARED
 struct in_pktinfo {
     unsigned int ipi_ifindex;
     struct in_addr ipi_spec_dst;

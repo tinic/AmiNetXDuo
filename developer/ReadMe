@@ -31,9 +31,9 @@ Put include/ on the compiler's include path and include one header:
 
     #include <proto/aminetxduo.h>
 
-That brings in the prototypes, the types, and the inline glue.  It does not
-replace or shadow any NDK header, so it can be included beside
-<proto/bsdsocket.h> in any order.
+That brings in the prototypes, the types, and the inline glue.  It shadows
+no NDK header, so it can be included beside <proto/bsdsocket.h> in any order.
+The standard socket headers in include/ (below) do replace the NDK's.
 
 The glue jumps through SocketBase, the same base variable bsdsocket.library
 already uses.  There is no second library to open and no link library to add:
@@ -48,7 +48,8 @@ Standard IPv6 declarations are in <sys/socket.h>, <netinet/in.h>,
 <netinet/icmp6.h>, <net/if.h> and <netdb.h>. Put this drawer's include directory
 before the installed netinclude directory. The aminetxduo/in6.h, cmsg.h and
 ifindex.h paths remain compatibility includes; extension vector glue stays
-in proto/aminetxduo.h.
+in proto/aminetxduo.h.  netinclude-ReadMe records their baseline, the AROS
+alignment and its exceptions.
 
 Checking that the vectors are there
 -----------------------------------
@@ -85,6 +86,9 @@ Four new library vectors, from revision 3:
 
 Indices start at 1 and are the same numbers GetRouteInfo() reports in
 rtm_index, so a route can be matched to an interface by comparing them.
+Loopback is in all three lists as "lo0", numbered last.  if_nametoindex()
+returns 0 and sets no errno; if_indextoname() returns NULL with ENXIO for an
+unknown index and ENOMEM on a system error.
 
 The AF_INET6 names the NDK leaves out, in <aminetxduo/in6.h>.  No vectors --
 the calls are setsockopt(), getsockopt(), socket() and getaddrinfo(), which
@@ -133,7 +137,7 @@ headers. It supplies the corrected netinet/in.h and sys/socket.h used by the
 library itself. These are a small overlay of the common AmigaPorts SDK;
 the remaining OS headers still come from your compiler. Including in6.h with
 the old target headers reports an error instead of silently selecting the
-wrong ABI. Provenance is recorded in the source tree's developer/netinclude.
+wrong ABI. Provenance is recorded in netinclude-ReadMe.
 
 Use ss_family (or sockaddr.sa_family) to inspect a returned address; do not
 infer its family from the returned length. Still check that the returned
