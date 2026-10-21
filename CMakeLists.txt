@@ -1365,6 +1365,11 @@ set(AMINETXDUO_CORE_INCLUDES
     "${CMAKE_BINARY_DIR}/include")
 
 if(AMIGA_NDK_INCLUDE)
+    # One public socket ABI for the stack and every application we build.
+    # These two headers are staged unchanged into the Developer drawer;
+    # never modify the shared compiler cache to select a different ABI.
+    list(APPEND AMINETXDUO_CORE_INCLUDES
+        "${CMAKE_CURRENT_SOURCE_DIR}/developer/netinclude")
     list(APPEND AMINETXDUO_CORE_INCLUDES "${AMIGA_NDK_INCLUDE}")
 endif()
 

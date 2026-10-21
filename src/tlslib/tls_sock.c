@@ -282,8 +282,7 @@ BOOL tls_sock_have_lvo(APTR base, ULONG lvo)
 
 BOOL tls_sock_is_connected_tcp(APTR base, LONG fd, UWORD *port, UWORD *family)
 {
-    /* Big enough for a sockaddr_in6 in either spelling; nothing here reads
-       past the first four bytes plus, for AF_INET6, none at all. */
+    /* Enough for sockaddr_in6; family and port share IPv4's BSD offsets. */
     UBYTE sa[32];
     LONG  length;
     LONG  type = 0;
@@ -311,16 +310,14 @@ BOOL tls_sock_is_connected_tcp(APTR base, LONG fd, UWORD *port, UWORD *family)
         return FALSE;
 
     /*
-     * Two spellings of the same sixteen bytes.  A 4.4BSD sockaddr leads with
-     * sa_len and then sa_family; this NDK's sockaddr_in6 has no length byte
-     * and leads with the family.  A sockaddr_in's byte 0 is 16 and never 2 or
-     * 23, so the family is whichever of the first two bytes is one of those.
+     * Both current address families use the BSD length/family prefix.
+     * Retain the older IPv4-only spelling for other bsdsocket implementations.
      */
     if (family != NULL || port != NULL)
     {
         UWORD fam = sa[1];
 
-        if (sa[0] == TLS_SOCK_AF_INET || sa[0] == TLS_SOCK_AF_INET6)
+        if (sa[0] == TLS_SOCK_AF_INET)
             fam = sa[0];
 
         if (family != NULL)

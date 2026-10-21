@@ -83,8 +83,8 @@ LONG bsd_mcast6_getopt(struct AmiSocketBase *base, AmiSocket *sock,
 }
 #endif
 
-/* This host shim has Linux socket layouts; the target ABI assertions are
-   covered by the m68k build, while this test exercises the option logic. */
+/* The host shim supplies the target IPv6 prefix, but the host's AF constants
+   and IPv4 layout differ. The m68k build checks the full ABI. */
 #define _Static_assert(condition, message)
 #include "in6.c"
 #undef _Static_assert

@@ -13,14 +13,15 @@ _Static_assert(AF_INET6 == 23, "AF_INET6 is not the Roadshow NDK's 23");
 _Static_assert(sizeof(struct in6_addr) == 16, "in6_addr is not 16 bytes");
 
 /*
- * 28 bytes: family(1) + pad(1) + port(2) + flowinfo(4) + addr(16) + scope(4).
- * The pad at offset 1 is not a length byte, see the header comment.
+ * 28 bytes: length(1) + family(1) + port(2) + flowinfo(4) + addr(16) + scope(4).
+ * Only the first two bytes changed at the pre-1.0 ABI correction.
  */
 _Static_assert(sizeof(struct sockaddr_in6) == 28,
-               "sockaddr_in6 is not the 28-byte no-sin6_len shape");
-_Static_assert(offsetof(struct sockaddr_in6, sin6_family)   ==  0,
-               "sin6_family moved, is this NDK's sockaddr_in6 4.4BSD after "
-               "all, with a sin6_len at offset 0?");
+               "sockaddr_in6 must stay 28 bytes");
+_Static_assert(offsetof(struct sockaddr_in6, sin6_len) == 0,
+               "sin6_len must be the first byte");
+_Static_assert(offsetof(struct sockaddr_in6, sin6_family) == 1,
+               "sin6_family must match sockaddr.sa_family");
 _Static_assert(offsetof(struct sockaddr_in6, sin6_port)     ==  2,
                "sin6_port moved");
 _Static_assert(offsetof(struct sockaddr_in6, sin6_flowinfo) ==  4,
@@ -42,6 +43,13 @@ _Static_assert(sizeof(((struct sockaddr_in6 *)0)->sin6_scope_id) == 4,
 _Static_assert(sizeof(struct sockaddr_in) == 16, "sockaddr_in is not 16 bytes");
 _Static_assert(offsetof(struct sockaddr_in, sin_len)    == 0, "sin_len moved");
 _Static_assert(offsetof(struct sockaddr_in, sin_family) == 1, "sin_family moved");
+_Static_assert(sizeof(struct sockaddr_storage) == 128, "sockaddr_storage size");
+_Static_assert(offsetof(struct sockaddr_storage, ss_family) ==
+               offsetof(struct sockaddr, sa_family), "storage family offset");
+_Static_assert(_Alignof(struct sockaddr_storage) >= _Alignof(struct sockaddr_in6),
+               "storage must align an IPv6 address");
+_Static_assert(_Alignof(struct sockaddr_storage) >= _Alignof(struct sockaddr_in),
+               "storage must align an IPv4 address");
 
 _Static_assert(sizeof(((NXD_ADDRESS *)0)->nxd_ip_address.v6) == 16,
                "NXD_ADDRESS.v6 is not four ULONGs");

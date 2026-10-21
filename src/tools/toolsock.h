@@ -41,17 +41,11 @@ typedef struct ToolSockAddr
     UBYTE   sin_zero[8];
 } ToolSockAddr;
 
-/*
- * The AF_INET6 shape, as this NDK spells it: no sin6_len, so byte 0 is the
- * family. src/bsdsocket/in6.c pins every offset with _Static_assert and
- * bsd_sa_family() reads byte 0 plus the declared length, which is why the two
- * structs can share the union below without ambiguity. A sockaddr_in's byte 0
- * is its length, 16, and never 23.
- */
+/* RFC 3493 BSD layout: the length/family prefix is shared with IPv4. */
 typedef struct ToolSockAddr6
 {
+    UBYTE   sin6_len;
     UBYTE   sin6_family;
-    UBYTE   sin6_pad;
     UWORD   sin6_port;
     ULONG   sin6_flowinfo;
     UBYTE   sin6_addr[16];

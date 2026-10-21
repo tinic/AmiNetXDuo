@@ -69,6 +69,7 @@ add_executable(ipv6_socket_test
 # vectors, so the header is the only thing this program takes from us.  Having
 # it on the path here is also the check that it compiles standalone.
 target_include_directories(ipv6_socket_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/developer/netinclude"
     "${CMAKE_SOURCE_DIR}/include"
     "${CMAKE_SOURCE_DIR}/tests/tcpdrill"
     "${CMAKE_SOURCE_DIR}/src/sana2")

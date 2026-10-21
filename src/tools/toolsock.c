@@ -70,11 +70,7 @@ LONG tool_sock_socket(struct Library *base, LONG domain, LONG type, LONG proto)
     return res;
 }
 
-/*
- * A sockaddr_in starts with its own length, 16.  This NDK's sockaddr_in6 has
- * no length byte and starts with the family, 23.  So byte 0 tells the two
- * apart and there is no third case to get wrong.
- */
+/* Both families share the family byte at offset 1. */
 static LONG tool_sock_len(const ToolSockAddrAny *sa)
 {
     return (sa->in6.sin6_family == (UBYTE)TOOL_AF_INET6)
@@ -579,7 +575,7 @@ LONG tool_sock_addr(ToolSockAddrAny *sa, const ToolAddr *addr, UWORD port)
     if (TOOL_ADDR_IS6(addr))
     {
         sa->in6.sin6_family   = (UBYTE)TOOL_AF_INET6;
-        sa->in6.sin6_pad      = 0;
+        sa->in6.sin6_len      = (UBYTE)sizeof(ToolSockAddr6);
         sa->in6.sin6_port     = port;   /* big-endian host: already network */
         sa->in6.sin6_flowinfo = 0;
         sa->in6.sin6_scope_id = addr->ta_ScopeId;

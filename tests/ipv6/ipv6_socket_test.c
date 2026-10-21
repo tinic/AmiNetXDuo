@@ -101,8 +101,8 @@ struct t_in6_addr
 
 struct t_sockaddr_in6
 {
-    UBYTE               sin6_family;    /* offset  0, not a length byte */
-    UBYTE               sin6_pad;       /* offset  1, compiler padding  */
+    UBYTE               sin6_len;       /* offset  0 */
+    UBYTE               sin6_family;    /* offset  1, shared with IPv4 */
     UWORD               sin6_port;      /* offset  2 */
     ULONG               sin6_flowinfo;  /* offset  4 */
     struct t_in6_addr   sin6_addr;      /* offset  8 */
@@ -117,6 +117,12 @@ struct t_sockaddr_in
     ULONG   sin_addr;
     UBYTE   sin_zero[8];
 };
+
+_Static_assert(sizeof(struct t_sockaddr_in6) == sizeof(struct sockaddr_in6),
+               "test and published IPv6 sizes must agree");
+_Static_assert(offsetof(struct t_sockaddr_in6, sin6_family) ==
+               offsetof(struct sockaddr_storage, ss_family),
+               "test and published address families must agree");
 
 struct t_addrinfo
 {
@@ -734,6 +740,7 @@ static BOOL t_streq(const char *a, const char *b)
 static VOID t_make_loopback6(struct t_sockaddr_in6 *sa, UWORD port)
 {
     t_bzero(sa, sizeof(*sa));
+    sa->sin6_len = (UBYTE)sizeof(*sa);
     sa->sin6_family        = T_AF_INET6;
     sa->sin6_port          = port;      /* m68k is network order */
     sa->sin6_addr.s6_addr[15] = 1;
@@ -742,6 +749,7 @@ static VOID t_make_loopback6(struct t_sockaddr_in6 *sa, UWORD port)
 static VOID t_make_any6(struct t_sockaddr_in6 *sa, UWORD port)
 {
     t_bzero(sa, sizeof(*sa));
+    sa->sin6_len = (UBYTE)sizeof(*sa);
     sa->sin6_family = T_AF_INET6;
     sa->sin6_port   = port;
 }
@@ -886,6 +894,8 @@ LONG                value;
 ULONG               len;
 struct t_sockaddr_in6 sa;
 struct t_sockaddr_in  sa4;
+struct sockaddr_storage storage;
+UBYTE               short_addr[4];
 
     t_log("AF_INET6 socket basics");
 
@@ -928,19 +938,45 @@ struct t_sockaddr_in  sa4;
                   bsd_Errno());
 
     t_make_any6(&sa, T_PORT + 1);
+    /* Old beta programs put the family at byte 0. No compatibility mode is
+       part of the 1.0 ABI; a failed bind must leave this socket usable. */
+    sa.sin6_len = T_AF_INET6;
+    sa.sin6_family = 0;
+    rc = bsd_bind(fd, &sa, sizeof(sa));
+    (VOID)t_check((BOOL)(rc < 0 && bsd_Errno() == T_EAFNOSUPPORT),
+                  "old beta IPv6 prefix is rejected", bsd_Errno());
+    t_make_any6(&sa, T_PORT + 1);
+    rc = bsd_bind(fd, &sa, sizeof(sa) - 1);
+    (VOID)t_check((BOOL)(rc < 0), "truncated IPv6 address is rejected", rc);
     rc = bsd_bind(fd, &sa, sizeof(sa));
     (VOID)t_check((BOOL)(rc == 0), "bind(::, port)", bsd_Errno());
 
-    /* getsockname must hand back a sockaddr_in6, 28 bytes, family at 0. */
+    /* getsockname must hand back a sockaddr_in6, 28 bytes, family at 1. */
     t_bzero(&sa, sizeof(sa));
     len = sizeof(sa);
     rc  = bsd_getsockname(fd, &sa, &len);
     (VOID)t_check((BOOL)(rc == 0), "getsockname", bsd_Errno());
     (VOID)t_check((BOOL)(len == 28), "getsockname reports 28 bytes", (LONG)len);
+    (VOID)t_check((BOOL)(sa.sin6_len == sizeof(sa)),
+                  "getsockname sets sin6_len", (LONG)sa.sin6_len);
     (VOID)t_check((BOOL)(sa.sin6_family == T_AF_INET6),
-                  "sin6_family is at offset 0", (LONG)sa.sin6_family);
+                  "sin6_family is at offset 1", (LONG)sa.sin6_family);
     (VOID)t_check((BOOL)(sa.sin6_port == T_PORT + 1),
                   "getsockname reports the bound port", (LONG)sa.sin6_port);
+
+    t_bzero(&storage, sizeof(storage));
+    len = sizeof(storage);
+    rc = bsd_getsockname(fd, &storage, &len);
+    (VOID)t_check((BOOL)(rc == 0 && storage.ss_family == T_AF_INET6 &&
+                         storage.ss_len == 28 && len == 28),
+                  "sockaddr_storage exposes the IPv6 family", rc);
+    short_addr[0] = short_addr[1] = short_addr[2] = short_addr[3] = 0xa5;
+    len = 2;
+    rc = bsd_getsockname(fd, short_addr, &len);
+    (VOID)t_check((BOOL)(rc == 0 && len == 28 && short_addr[0] == 28 &&
+                         short_addr[1] == T_AF_INET6 &&
+                         short_addr[2] == 0xa5 && short_addr[3] == 0xa5),
+                  "short address output preserves the canary", rc);
 
     (VOID)bsd_CloseSocket(fd);
 
@@ -948,6 +984,18 @@ struct t_sockaddr_in  sa4;
     (VOID)t_check((BOOL)(fd >= 0), "socket(AF_INET6, SOCK_DGRAM)", bsd_Errno());
     if (fd >= 0)
     {
+        (VOID)bsd_CloseSocket(fd);
+    }
+
+    fd = bsd_socket(T_AF_INET, T_SOCK_DGRAM, 0);
+    if (t_check((BOOL)(fd >= 0), "IPv4 storage control socket", bsd_Errno()))
+    {
+        t_bzero(&storage, sizeof(storage));
+        len = sizeof(storage);
+        rc = bsd_getsockname(fd, &storage, &len);
+        (VOID)t_check((BOOL)(rc == 0 && storage.ss_family == T_AF_INET &&
+                             storage.ss_len == 16 && len == 16),
+                      "sockaddr_storage exposes the unchanged IPv4 family", rc);
         (VOID)bsd_CloseSocket(fd);
     }
 }
@@ -1010,7 +1058,7 @@ char                    buffer[64];
         return;
     }
 
-    (VOID)t_check((BOOL)(sa.sin6_family == T_AF_INET6),
+    (VOID)t_check((BOOL)(sa.sin6_family == T_AF_INET6 && sa.sin6_len == 28),
                   "accept filled in a sockaddr_in6", (LONG)sa.sin6_family);
     (VOID)t_check((BOOL)(len == 28), "accept reports 28 bytes", (LONG)len);
     (VOID)t_check((BOOL)(sa.sin6_addr.s6_addr[15] == 1),
@@ -1020,7 +1068,7 @@ char                    buffer[64];
     t_bzero(&sa, sizeof(sa));
     len = sizeof(sa);
     rc  = bsd_getpeername(client, &sa, &len);
-    (VOID)t_check((BOOL)(rc == 0 && sa.sin6_family == T_AF_INET6 &&
+    (VOID)t_check((BOOL)(rc == 0 && sa.sin6_family == T_AF_INET6 && sa.sin6_len == 28 &&
                          sa.sin6_port == T_PORT),
                   "getpeername reports ::1 port 9099", bsd_Errno());
 
@@ -1329,7 +1377,7 @@ char                    buffer[64];
     rc  = bsd_recvfrom(server, buffer, sizeof(buffer), 0, &sa, &len);
     (VOID)t_check((BOOL)(rc == (LONG)sizeof(datagram)), "recvfrom", rc);
     (VOID)t_check(t_streq(buffer, datagram), "datagram survived", 0);
-    (VOID)t_check((BOOL)(sa.sin6_family == T_AF_INET6 && len == 28 &&
+    (VOID)t_check((BOOL)(sa.sin6_family == T_AF_INET6 && sa.sin6_len == 28 && len == 28 &&
                          sa.sin6_addr.s6_addr[15] == 1),
                   "recvfrom reported the ::1 source as sockaddr_in6",
                   (LONG)sa.sin6_family);
@@ -3059,7 +3107,8 @@ APTR                p;
                       "ai_family is AF_INET6", res->ai_family);
         (VOID)t_check((BOOL)(res->ai_addrlen == 28),
                       "ai_addrlen is 28", (LONG)res->ai_addrlen);
-        (VOID)t_check((BOOL)(sa->sin6_family == T_AF_INET6 &&
+        (VOID)t_check((BOOL)(sa->sin6_family == T_AF_INET6 && sa->sin6_len == 28 &&
+                             ((struct sockaddr *)res->ai_addr)->sa_family == T_AF_INET6 &&
                              sa->sin6_port == 80 &&
                              sa->sin6_addr.s6_addr[0] == 0x20),
                       "ai_addr is a filled-in sockaddr_in6",
@@ -3180,6 +3229,7 @@ APTR                p;
         ULONG                 scope;
 
         t_bzero(&sa, sizeof(sa));
+        sa.sin6_len = (UBYTE)sizeof(sa);
         sa.sin6_family = T_AF_INET6;
         sa.sin6_addr.s6_addr[0]  = 0xfe;
         sa.sin6_addr.s6_addr[1]  = 0x80;

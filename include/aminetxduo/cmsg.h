@@ -16,7 +16,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 
-/* IPPROTO_IPV6 and the sockaddr_in6 warning live there; one copy of each. */
+/* IPPROTO_IPV6 and the remaining IPv6 additions live there. */
 #include "aminetxduo/in6.h"
 
 #ifdef __cplusplus

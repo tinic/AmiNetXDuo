@@ -46,7 +46,7 @@ esac
 # outside the CMake tree, so the tree's include directory has to be named here
 # too -- without it the client build stops with "aminetxduo/asm_abi.h: No such
 # file or directory", which is what the archive's ssh client did.
-AMIGA_CLIENT_CFLAGS="$AMIGA_CLIENT_ARCH $AMIGA_CLIENT_OPT -fomit-frame-pointer -fno-strict-aliasing -D__USE_NEW_TIMEVAL__ -D_SYS_MBUF_H -include sys/types.h -I$AMIGA_CLIENT_ROOT/clients/compat -I$AMIGA_CLIENT_ROOT/include -include amiga_compat.h"
+AMIGA_CLIENT_CFLAGS="$AMIGA_CLIENT_ARCH $AMIGA_CLIENT_OPT -fomit-frame-pointer -fno-strict-aliasing -D__USE_NEW_TIMEVAL__ -D_SYS_MBUF_H -include sys/types.h -I$AMIGA_CLIENT_ROOT/clients/compat -I$AMIGA_CLIENT_ROOT/developer/netinclude -I$AMIGA_CLIENT_ROOT/include -include amiga_compat.h"
 
 # Applied to OUR shim sources only, never to a client's own.  Every function a
 # shim defines is an entry point somebody else calls: libc symbols the port

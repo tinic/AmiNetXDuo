@@ -23,8 +23,8 @@ typedef struct ProbeAddr
 
 typedef struct ProbeAddr6
 {
+    UBYTE   sin6_len;
     UBYTE   sin6_family;
-    UBYTE   sin6_pad;
     UWORD   sin6_port;
     ULONG   sin6_flowinfo;
     UBYTE   sin6_addr[16];
@@ -473,7 +473,7 @@ static VOID p_probe_v6(struct Library *sb)
     Printf((CONST_STRPTR)"membership:\n");
 
     group.sin6_family   = P_AF_INET6;
-    group.sin6_pad      = 0;
+    group.sin6_len      = (UBYTE)sizeof(group);
     group.sin6_port     = P_SSDP_PORT;
     group.sin6_flowinfo = 0UL;
     group.sin6_scope_id = 0UL;
