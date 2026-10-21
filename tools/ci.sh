@@ -513,7 +513,9 @@ host_test_targets() { # builddir
 #      and its per-launch Workbench log name.
 #      573 with dhcp_request_restart_regression (#306): REQUESTING gives up
 #      after the retransmission window and starts again with a new XID.
-HOST_TESTS_EXPECTED=573
+#      574 with soak_orphan_baton_identity: reject retained or invalid baton
+#      ownership without mistaking a valid recycled pool slot for the orphan.
+HOST_TESTS_EXPECTED=574
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,
@@ -535,7 +537,7 @@ case "$(uname -m)" in
     *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 30)) ;;
 esac
 # The conflict-drain fixture uses Linux's MAP_32BIT, not merely x86_64.
-# Darwin arm64 registers 527; Darwin x86_64 registers 557 on this tree.
+# Darwin arm64 registers 543; Darwin x86_64 registers 573 on this tree.
 case "$(uname -s):$(uname -m)" in
     Linux:x86_64|Linux:amd64) ;;
     *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 1)) ;;
