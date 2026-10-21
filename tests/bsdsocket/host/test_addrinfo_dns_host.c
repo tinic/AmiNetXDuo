@@ -25,8 +25,8 @@
 #define AI_NUMERICHOST 4
 #define AI_EXT 8
 #define AI_NUMERICSERV 16
-#define AI_ADDRCONFIG 0x0400
-#define AI_MASK (AI_PASSIVE | AI_CANONNAME | AI_NUMERICHOST | AI_NUMERICSERV | AI_ADDRCONFIG)
+#include "aminetxduo/addrinfo.h"
+#define AI_MASK (AI_PASSIVE | AI_CANONNAME | AI_NUMERICHOST | AI_NUMERICSERV)
 /* Linux lacks these BSD errors; no host resolver consumes these values. */
 #ifndef EAI_BADHINTS
 #define EAI_BADHINTS (-1001)

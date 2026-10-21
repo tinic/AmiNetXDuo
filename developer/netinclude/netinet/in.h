@@ -270,18 +270,6 @@ struct ip_mreq {
 #define	HTONL(x) (x)
 #define	HTONS(x) (x)
 
-/* IPv4 ancillary extension: Darwin's allocation, outside the legacy BSD
- * options. The Linux value 8 is already IP_RETOPTS and must not be reused.
- */
-#define IP_PKTINFO 26
-#ifndef _STRUCT_IN_PKTINFO_DECLARED
-#define _STRUCT_IN_PKTINFO_DECLARED
-struct in_pktinfo {
-    unsigned int ipi_ifindex;
-    struct in_addr ipi_spec_dst;
-    struct in_addr ipi_addr;
-};
-#endif
 #include <netinet6/in6.h>
 
 /****************************************************************************/

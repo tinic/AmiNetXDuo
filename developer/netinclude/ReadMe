@@ -35,7 +35,6 @@ binary compatibility; no AROS code or LGPL header is copied.
   IPV6_RECVPKTINFO         61
   IPV6_PKTINFO, HOPLIMIT,  46, 47, 37
   RECVHOPLIMIT
-  AI_ADDRCONFIG            0x0400
   if_nameindex             32-bit unsigned index and pointer
 
 
@@ -47,16 +46,25 @@ DELIBERATE EXCEPTIONS (need upstream agreement)
   Resolver ABI       AI_NUMERICSERV stays 16 and EAI_* stay negative
                      (Roadshow/AmiTCP); 8 is already AI_EXT. AROS uses 8 and
                      positive values. Changing them would break IPv4 programs.
-  IP_PKTINFO = 26    Darwin's number, same 12-byte payload (ifindex, local
-                     address, destination). IP_RETOPTS stays 8, unsupported.
-                     IPv4 users of the pre-release IP_PKTINFO must rebuild.
 
 
 HEADERS AND SYMBOLS
 
-Include <sys/socket.h>, <netinet/in.h>, <netinet/icmp6.h>, <net/if.h> and
-<netdb.h>. <aminetxduo/in6.h> and <aminetxduo/cmsg.h> remain as compatibility
-includes; netinet6/in6.h and sys/cmsg.h are reached through the standard ones.
+Include <sys/socket.h>, <netinet/in.h>, <net/if.h> and <netdb.h>.
+netinet6/in6.h and sys/cmsg.h are reached through the standard headers;
+<aminetxduo/in6.h> remains a compatibility include.
+
+AmiNetXDuo-specific opt-ins are separate from the common SDK:
+  <aminetxduo/addrinfo.h>  AI_ADDRCONFIG = 0x0400 (AROS's value).
+  <aminetxduo/cmsg.h>      IP_PKTINFO = 26, a 12-byte in_pktinfo payload
+                          (ifindex, local address, destination), plus buffer
+                          convenience macros. IP_RETOPTS stays 8.
+  <aminetxduo/icmp6.h>     ICMPv6 filter API only. A complete standard
+                          <netinet/icmp6.h> is outside this proposal.
+Require AmiNetXDuo bsdsocket.library 4.11 or later before using these opt-ins,
+or handle EAI_BADFLAGS / ENOPROTOOPT. Common netdb.h retains the stock flags
+and AI_MASK: merely rebuilding an IPv4 application must not activate a flag
+that Roadshow rejects. IPv4 users of pre-release IP_PKTINFO must rebuild.
 
 in6addr_any and in6addr_loopback have external linkage. When the runtime does
 not define them, compile Developer/support/in6_addr.c once into the program.
@@ -65,8 +73,9 @@ The shared library exports no data.
 
 RUNTIME BEHAVIOUR
 
-AI_ADDRCONFIG filters DNS, numeric and null-node results alike. Assigned
-non-loopback addresses count, IPv6 ULA and link-local included (RFC 3493
+The explicit AI_ADDRCONFIG addendum filters DNS, numeric and null-node
+results alike. Assigned non-loopback addresses count, IPv6 ULA and link-local
+included (RFC 3493
 6.1); tentative and unknown ones do not. Without the flag,
 AF_UNSPEC hostname lookups query AAAA only when a 2000::/3 address exists;
 AF_INET6 asks regardless. AI_V4MAPPED is undefined.
@@ -96,5 +105,5 @@ VERIFICATION
       query counts and result order against controlled A/AAAA answers
 
 Not tested: older GCC, VBCC and SAS/C executables. Open for upstream: the
-V6ONLY and IP_PKTINFO numbers, and whether in6addr_* belong in the C runtime
+V6ONLY allocation, and whether in6addr_* belong in the C runtime
 or the SDK.

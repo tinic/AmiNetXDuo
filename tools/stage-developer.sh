@@ -25,7 +25,9 @@ DEST="${1:?usage: stage-developer.sh <destdir>}"
 #
 #   ifindex.h  RFC 3493 section 4, the four LVOs at -0x372..-0x384.
 #   in6.h      compatibility include for the common IPv6 SDK declarations.
-#   cmsg.h     compatibility include and CMSG_BUFFER convenience macros.
+#   addrinfo.h AI_ADDRCONFIG, an explicit opt-in for AmiNetXDuo 4.11+.
+#   icmp6.h    ICMPv6 filter addendum, not a complete protocol header.
+#   cmsg.h     IPv4 IP_PKTINFO and CMSG_BUFFER convenience macros.
 #              Standard ancillary declarations come through sys/socket.h.
 #   capabilities.h  identity/revision/table-size checks for private vectors.
 #
@@ -48,7 +50,7 @@ DEST="${1:?usage: stage-developer.sh <destdir>}"
 #              the RX_FLAGS tag with the VERIFIED checksum verdict.  GRO is
 #              stack-side.  Tags and typedefs only, no vectors;
 #              published so any SANA-II driver can offer them, not just ours.
-PUBLIC_HEADERS=(capabilities.h ifindex.h in6.h cmsg.h netstatus.h tcp.h tlslib.h anxs2ext.h)
+PUBLIC_HEADERS=(capabilities.h ifindex.h in6.h addrinfo.h cmsg.h icmp6.h netstatus.h tcp.h tlslib.h anxs2ext.h)
 
 # Copy only when the bytes differ.  The CMake build re-runs this on EVERY
 # build (developer_drawer, tests/tools/CMakeLists.txt) so that editing a
@@ -71,7 +73,15 @@ done
 # The pre-1.0 socket ABI correction must reach consumers through the same
 # standard headers used to compile the library. This is a source-controlled
 # SDK overlay, not a mutation of the user's installed compiler headers.
-for h in netinet/in.h netinet6/in6.h netinet/icmp6.h sys/socket.h sys/cmsg.h netdb.h net/if.h; do
+# Retire the exact pre-1.0 filter-only header; preserve unrelated complete
+# protocol headers a caller may have installed here. POSIX cksum is available
+# on the supported build hosts and fingerprints the old 1580-byte file.
+obsolete="$DEST/include/netinet/icmp6.h"
+if [[ -f "$obsolete" && "$(cksum < "$obsolete")" == "378839421 1580" ]]; then
+    rm -- "$obsolete"
+fi
+
+for h in netinet/in.h netinet6/in6.h sys/socket.h sys/cmsg.h netdb.h net/if.h; do
     stage "$ROOT/developer/netinclude/$h" "$DEST/include/$h"
 done
 

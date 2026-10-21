@@ -21,6 +21,7 @@
 #include <sys/uio.h>
 #include <netinet/in.h>
 #include "aminetxduo/cmsg.h"
+#include "aminetxduo/addrinfo.h"
 #include "aminetxduo/capabilities.h"
 #include <bsdsocket/socketbasetags.h>
 

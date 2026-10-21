@@ -45,7 +45,7 @@ already uses.  There is no second library to open and no link library to add:
 A program that already opens bsdsocket.library has done all of it.
 
 Standard IPv6 declarations are in <sys/socket.h>, <netinet/in.h>,
-<netinet/icmp6.h>, <net/if.h> and <netdb.h>. Put this drawer's include directory
+<net/if.h> and <netdb.h>. Put this drawer's include directory
 before the installed netinclude directory. The aminetxduo/in6.h, cmsg.h and
 ifindex.h paths remain compatibility includes; extension vector glue stays
 in proto/aminetxduo.h.  netinclude-ReadMe records their baseline, the AROS
@@ -103,19 +103,27 @@ this build has IPv6 with socket(AF_INET6, SOCK_STREAM, 0).
     IN6ADDR_ANY_INIT  IN6ADDR_LOOPBACK_INIT
     IN6_IS_ADDR_UNSPECIFIED / LOOPBACK / MULTICAST / LINKLOCAL /
         SITELOCAL / V4MAPPED / V4COMPAT and the MC_ scopes
-    AI_ADDRCONFIG
 
 Use the SDK definitions rather than spelling numbers in application code.
 AF_INET6 is 28, matching AROS. IPv6 options use one namespace on every socket
 type; old Linux numeric aliases are rejected. V6ONLY is 27 because AROS's 26
-collides with CHECKSUM. AI_ADDRCONFIG is the real, opt-in flag 0x0400 and
+collides with CHECKSUM.
+
+<aminetxduo/addrinfo.h> explicitly opts into AI_ADDRCONFIG (0x0400), which
 counts assigned non-loopback IPv4/IPv6 addresses, including ULA/link-local.
+<aminetxduo/cmsg.h> adds IP_PKTINFO (26) and its in_pktinfo payload;
+<aminetxduo/icmp6.h> supplies the ICMPv6 filter API only. These addenda require
+AmiNetXDuo bsdsocket.library 4.11 or later; identify the stack first, or
+handle EAI_BADFLAGS / ENOPROTOOPT. The common headers do not advertise these
+opt-ins, so rebuilding an IPv4 program does not enable unsupported options
+on other stacks. No complete standard netinet/icmp6.h is shipped.
 
 AI_V4MAPPED is deliberately absent.  This library never synthesises
 ::ffff:a.b.c.d from an A record, so no value for it would be truthful.  Code
-that wants both families asks for AF_UNSPEC, which returns the IPv6 results
-first.  Leaving the name undefined makes that a compile error to fix rather
-than a silent difference in what gets connected to.
+that wants both families asks for AF_UNSPEC. Results are ordered using the
+source addresses and routes available to the stack; see netinclude-ReadMe.
+Leaving the name undefined makes that a compile error to fix rather than a
+silent difference in what gets connected to.
 
 
 IPv6 ABI before 1.0

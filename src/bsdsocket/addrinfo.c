@@ -6,6 +6,7 @@
 #include "bsdsocket_vectors.h"
 
 #include "aminetxduo/config.h"
+#include "aminetxduo/addrinfo.h"
 #include "interfaces.h"
 
 #include <proto/exec.h>
@@ -380,7 +381,7 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
         socktype = (LONG)hints->ai_socktype;
         protocol = (LONG)hints->ai_protocol;
 
-        if ((flags & ~(LONG)(AI_MASK | AI_EXT)) != 0)
+        if ((flags & ~(LONG)(AI_MASK | AI_EXT | AI_ADDRCONFIG)) != 0)
             return EAI_BADFLAGS;
 
         if (family != AF_UNSPEC && family != AF_INET

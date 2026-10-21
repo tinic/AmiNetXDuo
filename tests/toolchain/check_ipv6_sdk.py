@@ -17,15 +17,15 @@ PROBE = r"""#include <exec/types.h>
 #endif
 CHECK(AF_INET6 == 28 && AF_INET6 != AF_IPX && AF_MAX > AF_INET6);
 CHECK(PF_INET6 == AF_INET6);
-CHECK(IP_PKTINFO == 26 && IP_PKTINFO != IP_RETOPTS);
+#if defined(IP_PKTINFO) || defined(AI_ADDRCONFIG)
+#error Private extensions leaked into the common SDK
+#endif
 CHECK(IPV6_V6ONLY == 27 && IPV6_CHECKSUM == 26);
 CHECK(IPV6_TCLASS == 36 && IPV6_RECVPKTINFO == 61);
-CHECK(AI_ADDRCONFIG == 0x0400 && (AI_MASK & AI_ADDRCONFIG));
+CHECK(AI_MASK == (AI_PASSIVE | AI_CANONNAME | AI_NUMERICHOST | AI_NUMERICSERV));
 CHECK(AI_NUMERICSERV == 16 && EAI_NONAME == -2);
 CHECK(sizeof(struct in6_pktinfo) == 20);
-CHECK(sizeof(struct in_pktinfo) == 12);
 CHECK(sizeof(struct if_nameindex) == 8 && IF_NAMESIZE == 16);
-CHECK(sizeof(struct icmp6_filter) == 32);
 CHECK(sizeof(struct sockaddr_dl) <= sizeof(struct sockaddr_storage));
 CHECK(__alignof__(struct sockaddr_storage) >= __alignof__(struct sockaddr_dl));
 CHECK(CMSG_SPACE(1) == 16 && CMSG_LEN(1) == 13);
@@ -47,6 +47,20 @@ struct sockaddr_in6 probe = {28, AF_INET6, 0x1234, 0, IN6ADDR_LOOPBACK_INIT, 7};
 """
 
 
+PRIVATE_PROBE = r"""
+#include <aminetxduo/addrinfo.h>
+#include <aminetxduo/cmsg.h>
+#include <aminetxduo/icmp6.h>
+CHECK(AI_ADDRCONFIG == 0x0400 && !(AI_MASK & AI_ADDRCONFIG));
+CHECK(IP_PKTINFO == 26 && IP_PKTINFO != IP_RETOPTS);
+CHECK(sizeof(struct in_pktinfo) == 12);
+CHECK(OFF(in_pktinfo, ipi_ifindex) == 0);
+CHECK(OFF(in_pktinfo, ipi_spec_dst) == 4);
+CHECK(OFF(in_pktinfo, ipi_addr) == 8);
+CHECK(sizeof(struct icmp6_filter) == 32);
+"""
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--toolchain", required=True, type=Path)
@@ -57,6 +71,21 @@ def main():
         sdk = work / "Developer"
         subprocess.run(["bash", str(ROOT / "tools/stage-developer.sh"), str(sdk)],
                        check=True)
+        # Retire our exact historical filter-only header, while preserving
+        # unrelated complete protocol headers in a reused stage.
+        obsolete = sdk / "include/netinet/icmp6.h"
+        private = sdk / "include/aminetxduo/icmp6.h"
+        fixture = ROOT / "tests/toolchain/fixtures/icmp6-filter-only.h"
+        obsolete.write_bytes(fixture.read_bytes())
+        subprocess.run(["bash", str(ROOT / "tools/stage-developer.sh"), str(sdk)], check=True)
+        if obsolete.exists() or not private.exists():
+            raise SystemExit("obsolete filter-only header survived restaging")
+        foreign = "/* Unrelated complete user ICMPv6 header. */\n"
+        obsolete.write_text(foreign)
+        subprocess.run(["bash", str(ROOT / "tools/stage-developer.sh"), str(sdk)], check=True)
+        if obsolete.read_text() != foreign:
+            raise SystemExit("restaging overwrote an unrelated ICMPv6 header")
+        obsolete.unlink()
         count = 0
         for runtime in ("libnix", "newlib", "clib2"):
             for cpu in ("68000", "68020"):
@@ -66,12 +95,12 @@ def main():
                                                   ("c++", "gnu++17", "g++")):
                     for order in (0, 1):
                         headers = ["sys/socket.h", "netinet/in.h", "netdb.h",
-                                   "net/if.h", "net/if_dl.h", "netinet/icmp6.h"]
+                                   "net/if.h", "net/if_dl.h"]
                         if order:
                             headers.reverse()
                         source = work / "probe.c"
                         source.write_text(PROBE.replace("@HEADERS@", "\n".join(
-                            f"#include <{h}>" for h in headers)))
+                            f"#include <{h}>" for h in headers)) + PRIVATE_PROBE)
                         command = [str(toolchain / "bin" / f"m68k-amigaos-{compiler}"),
                                    "-x", lang, f"-std={standard}", f"-m{cpu}",
                                    "-Os", "-Wall", "-Wextra", "-Werror",
@@ -144,7 +173,7 @@ def main():
             if result.returncode == 0 or "Use the AmiNetXDuo Developer/include" not in result.stderr:
                 raise SystemExit("old IPv6 SDK did not fail with the migration diagnostic")
         print(f"IPv6 SDK: {count} ABI/include-order compile checks, 6 constant-symbol "
-              "links and 4 net/if.h convention probes passed")
+              "links, 4 net/if.h convention probes and stale-stage migration passed")
 
 
 if __name__ == "__main__":

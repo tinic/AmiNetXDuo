@@ -172,9 +172,8 @@ extern int h_errno;
 #define AI_NUMERICHOST	4	/* don't ever try hostname lookup */
 #define AI_EXT		8	/* enable non-portable extensions */
 #define AI_NUMERICSERV	16	/* don't ever try servname lookup */
-#define AI_ADDRCONFIG 0x0400 /* AROS: require a configured non-loopback address */
 /* valid flags for addrinfo */
-#define AI_MASK (AI_PASSIVE | AI_CANONNAME | AI_NUMERICHOST | AI_NUMERICSERV | AI_ADDRCONFIG)
+#define AI_MASK (AI_PASSIVE | AI_CANONNAME | AI_NUMERICHOST | AI_NUMERICSERV)
 
 #define NI_NUMERICHOST	1	/* return the host address, not the name */
 #define NI_NUMERICSERV	2	/* return the service address, not the name */

@@ -1,4 +1,4 @@
-/* Compatibility include and optional aligned-buffer convenience macros.
+/* IPv4 ancillary addendum and optional aligned-buffer convenience macros.
  * Standard declarations are supplied by the common SDK.
  * SPDX-License-Identifier: MIT */
 #ifndef AMINETXDUO_CMSG_H
@@ -9,9 +9,22 @@
 #include <sys/socket.h>
 #include <sys/cmsg.h>
 #include <aminetxduo/in6.h>
-#ifndef _NETINET_ICMP6_H
-#include <netinet/icmp6.h>
+#include <aminetxduo/icmp6.h>
+/* AmiNetXDuo bsdsocket.library 4.11 or later. Identify the stack before
+ * using IP_PKTINFO, or handle ENOPROTOOPT from setsockopt().
+ * IPv4 ancillary extension: Darwin's allocation, outside the legacy BSD
+ * options. The Linux value 8 is already IP_RETOPTS and must not be reused.
+ */
+#define IP_PKTINFO 26
+#ifndef _STRUCT_IN_PKTINFO_DECLARED
+#define _STRUCT_IN_PKTINFO_DECLARED
+struct in_pktinfo {
+    unsigned int ipi_ifindex;
+    struct in_addr ipi_spec_dst;
+    struct in_addr ipi_addr;
+};
 #endif
+
 /* ------------------------------------------------------------ the buffer,
  *
  * cmsg_len is a socklen_t and a 68000 faults on an odd 32-bit load; `char

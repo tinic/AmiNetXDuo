@@ -83,7 +83,7 @@ struct ami_sockaddr_in6 {
 
 /* Force the target supplemental API, not libc's different ICMP filter ABI. */
 #include "../../../../developer/netinclude/netinet6/in6.h"
-#include "../../../../developer/netinclude/netinet/icmp6.h"
+#include "aminetxduo/icmp6.h"
 #include "../../../../developer/netinclude/sys/cmsg.h"
 #define IP_PKTINFO 26
 #define IP_RECVDSTADDR 7
