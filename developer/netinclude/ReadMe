@@ -7,37 +7,88 @@ https://github.com/AmigaPorts/amiga-netinclude/pull/2
 
 The baseline netinet/in.h, sys/socket.h, netdb.h and net/if.h retain the
 upstream license notices and Latin-1 encoding; trailing spaces are removed.
-The baseline includes codewiz's self-contained-header fixes; no generated
-library vectors change.
+New supplemental headers and Developer/support/in6_addr.c are MIT and
+independently implemented. No generated library vectors change.
 
-Changes relative to that baseline:
-
-  BSD sockaddr_in6 length/family prefix and 128-byte sockaddr_storage.
-  AROS AF_INET6=28; AF_MAX=29 covers the highest defined family.
-  Standard IPv6 options/macros/payloads reachable from netinet/in.h.
-  Standard ancillary macros in sys/socket.h; ICMPv6 filters in netinet/icmp6.h.
-  Interface identification in net/if.h, real AI_ADDRCONFIG=0x0400 in netdb.h.
-  Optional external address constants in Developer/support/in6_addr.c.
-
-New supplemental headers are MIT-licensed, independently implemented.
-See docs/SDK-AROS-ABI.md in the source repository for the exact AROS reference,
-intentional exceptions (V6ONLY, legacy resolver ABI, IP_PKTINFO), symbol
-ownership and upstream decisions. Alignment is not blanket AROS binary
-compatibility or an assertion that upstream has accepted these allocations.
-
-The library, applications and staged Developer drawer use these same files.
 Put Developer/include before the compiler's NDK/netinclude directory. The
-remaining common headers come from that directory; no compiler cache is
-modified. This overlay can be replaced by an upstream pin when accepted.
+library, its applications and the Developer drawer use these same files; no
+compiler cache is modified. This overlay can be replaced by an upstream pin.
 
-The old pre-release IPv6 structure put its family byte at offset zero.
-All provided IPv6 applications must be rebuilt with the corrected headers
-and shipped with bsdsocket.library ABI 4.11 or later from AmiNetXDuo.
-Established IPv4 layouts, vectors and options are unchanged. The pre-release
-IP_PKTINFO extension moves from 8 to 26 so it no longer aliases IP_RETOPTS.
+All IPv6 applications built before 4.11 must be rebuilt. Established IPv4
+layouts, vectors and options are unchanged.
 
-Run the compile/layout gate with:
+
+AROS ALIGNMENT
+
+Constants and shapes follow AROS commit 43e2e698c4075f8b9c19b05702ceca17b1ff5442
+(workbench/network/common/include: netinet/in.h, sys/socket.h, netdb.h,
+net/if.h). This is source-level alignment on the classic m68k ABI, not AROS
+binary compatibility; no AROS code or LGPL header is copied.
+
+  AF_INET6, PF_INET6       28 (23 remains AF_IPX); AF_MAX 29
+  sockaddr_in6             28 bytes: len 0, family 1, port 2, flow 4,
+                           addr 8, scope 24
+  sockaddr_storage         128 bytes, len/family prefix, m68k-aligned
+  IPV6_UNICAST_HOPS ..     4, 9, 10, 11, 12, 13 (hops, multicast if/hops/
+  IPV6_LEAVE_GROUP         loop, join, leave)
+  IPV6_TCLASS              36
+  IPV6_RECVPKTINFO         61
+  IPV6_PKTINFO, HOPLIMIT,  46, 47, 37
+  RECVHOPLIMIT
+  AI_ADDRCONFIG            0x0400
+  if_nameindex             32-bit unsigned index and pointer
+
+
+DELIBERATE EXCEPTIONS (need upstream agreement)
+
+  IPV6_V6ONLY = 27   AROS assigns 26 to both V6ONLY and CHECKSUM. 26 stays
+                     IPV6_CHECKSUM (declared, ENOPROTOOPT). Old Linux numeric
+                     aliases are refused on every socket type.
+  Resolver ABI       AI_NUMERICSERV stays 16 and EAI_* stay negative
+                     (Roadshow/AmiTCP); 8 is already AI_EXT. AROS uses 8 and
+                     positive values. Changing them would break IPv4 programs.
+  IP_PKTINFO = 26    Darwin's number, same 12-byte payload (ifindex, local
+                     address, destination). IP_RETOPTS stays 8, unsupported.
+                     IPv4 users of the pre-release IP_PKTINFO must rebuild.
+
+
+HEADERS AND SYMBOLS
+
+Include <sys/socket.h>, <netinet/in.h>, <netinet/icmp6.h>, <net/if.h> and
+<netdb.h>. <aminetxduo/in6.h> and <aminetxduo/cmsg.h> remain as compatibility
+includes; netinet6/in6.h and sys/cmsg.h are reached through the standard ones.
+
+in6addr_any and in6addr_loopback have external linkage. When the runtime does
+not define them, compile Developer/support/in6_addr.c once into the program.
+The shared library exports no data.
+
+
+RUNTIME BEHAVIOUR
+
+AI_ADDRCONFIG filters DNS, numeric and null-node results alike. Only assigned
+global and ULA IPv6 addresses count; link-local, loopback, tentative and
+unknown ones do not, so an IPv4-only LAN gets no AAAA query. Without the flag,
+AF_UNSPEC hostname lookups query AAAA only when a 2000::/3 address exists;
+AF_INET6 asks regardless. AI_V4MAPPED is undefined.
+
+To detect AmiNetXDuo, query SBTC_RELEASESTRPTR through SocketBaseTagList and
+require success and an AmiNetXDuo release string, then check revision and
+vector-table size with aminetxduo/capabilities.h. Other stacks and failed
+queries disable private extensions. Developer/examples/IfNames.c shows the
+sequence. Probe IPv6 itself with socket(AF_INET6, ...).
+
+
+VERIFICATION
+
   python3 tests/toolchain/check_ipv6_sdk.py --toolchain /path/to/toolchain
+      C89/C11/C++98/C++17, libnix/newlib/clib2, 68000/68020, both include
+      orders, layouts, option collisions, in6addr_* linkage
+  tests/ipv6/run-socket.sh -b BUILD -a ipv4|ula|linklocal|ipv6
+      guest library calls, including AI_ADDRCONFIG before and after
+      interface configuration
+  addrinfo_dns_policy (host test)
+      query counts and result order against controlled A/AAAA answers
 
-Runtime coverage is in tests/ipv6/ipv6_socket_test.c and its run-socket.sh
-harness. Changes to the header ABI require updating both sides together.
+Not tested: older GCC, VBCC and SAS/C executables. Open for upstream: the
+V6ONLY and IP_PKTINFO numbers, and whether in6addr_* belong in the C runtime
+or the SDK.
