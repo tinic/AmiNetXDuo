@@ -601,7 +601,7 @@ int main(void)
         Printf((CONST_STRPTR)"set the default gateway: there is none to read\n");
     }
 
-    table = p_get_route_info(base, 23, 0);      /* AF_INET6 in this NDK */
+    table = p_get_route_info(base, 28, 0);      /* AF_INET6 in this NDK */
     Printf((CONST_STRPTR)"GetRouteInfo(AF_INET6): %s (errno %ld)%s\n",
            (LONG)((table == NULL) ? "NULL" : "a table"), p_errno(base),
            (LONG)((table == NULL) ? ", refused, correctly"

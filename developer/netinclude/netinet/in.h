@@ -270,6 +270,8 @@ struct ip_mreq {
 #define	HTONL(x) (x)
 #define	HTONS(x) (x)
 
+#include <netinet6/in6.h>
+
 /****************************************************************************/
 
 #ifdef __GNUC__

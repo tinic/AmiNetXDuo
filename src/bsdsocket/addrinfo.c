@@ -6,10 +6,15 @@
 #include "bsdsocket_vectors.h"
 
 #include "aminetxduo/config.h"
+#include "aminetxduo/addrinfo.h"
 #include "interfaces.h"
 
 #include <proto/exec.h>
 #include <stddef.h>
+
+#ifdef AMINETXDUO_IPV6
+#include "../ipv6/ipv6_srcsel.h"
+#endif
 
 #ifdef AMINETXDUO_ADDRINFO
 
@@ -145,14 +150,86 @@ static ULONG bsd_gai_zone_index(struct AmiSocketBase *base, const char *zone)
 }
 #endif
 
+#ifdef AMINETXDUO_IPV6
 /*
- * Build one node. `canon` is copied into it when non-NULL. Otherwise the node
- * carries no name and ai_canonname is set to `inherit`, which points into an
- * earlier node's block, see the memory note at the top.
+ * RFC 6724 6 destination ordering, for the one AAAA and one A a lookup can
+ * return. Rules 1, 2, 3, 5, 6 and 8 are packed into one key, most significant
+ * first, and IPv4 moves ahead only on a strictly greater key, so a tie keeps
+ * IPv6 first (rule 10). Not implemented: rule 4 (no Mobile IPv6) and rule 7
+ * (no tunnels to tell apart); rule 9 only compares within one family. The
+ * sources are the ones connect() would use (src/ipv6/ipv6_srcsel.c, IPv4
+ * route lookup), and a destination with none (no address, or off-link with
+ * no router) fails rule 1. Both failing is a tie.
+ */
+static ULONG bsd_gai_key(const ULONG d[4], const ULONG s[4], BOOL deprecated)
+{
+    UINT dscope = anx6_scope(d);
+    UINT prec;
+    UINT dlabel;
+    UINT slabel;
+
+    (VOID)anx6_policy_lookup(d, &prec, &dlabel);
+    (VOID)anx6_policy_lookup(s, NULL, &slabel);
+
+    return 0x8000UL |                                           /* rule 1 */
+           ((anx6_scope(s) == dscope) ? 0x4000UL : 0UL) |       /* rule 2 */
+           (deprecated ? 0UL : 0x2000UL) |                      /* rule 3 */
+           ((slabel == dlabel) ? 0x1000UL : 0UL) |              /* rule 5 */
+           ((ULONG)prec << 4) |                                 /* rule 6 */
+           (ULONG)(15U - (dscope & 15U));                       /* rule 8 */
+}
+
+/* Swap an AAAA-then-A list when the A answer orders first. Each node owns
+   its canonical name, so the swap moves nothing else. */
+static VOID bsd_gai_order(struct AmiSocketBase *base, struct addrinfo **head)
+{
+    BsdAddrInfoNode *n6 = (BsdAddrInfoNode *)*head;
+    BsdAddrInfoNode *n4 = (BsdAddrInfoNode *)n6->ai.ai_next;
+    ULONG            d6[4] = { 0, 0, 0, 0 };
+    ULONG            s6[4];
+    ULONG            d4[4] = { 0, 0, 0xFFFFUL, 0 };
+    ULONG            s4[4] = { 0, 0, 0xFFFFUL, 0 };
+    ULONG            state = 0;
+    ULONG            k6 = 0;
+    ULONG            k4 = 0;
+    UWORD            i;
+
+    if (n4 == NULL || n6->ai.ai_family != AF_INET6 ||
+        n4->ai.ai_family != AF_INET)
+        return;
+
+    for (i = 0; i < 16; i++)
+        d6[i >> 2] = (d6[i >> 2] << 8) | n6->addr.sin6.sin6_addr.s6_addr[i];
+    d4[3] = BSD_NTOHL(n4->addr.sin.sin_addr.s_addr);
+
+    if (bsd_nx_enter(base) != 0)
+        return;
+
+    if (netstack_ipv6_source_state(d6, s6, &state))
+        k6 = bsd_gai_key(d6, s6,
+                         state == (ULONG)NX_IPV6_ADDR_STATE_DEPRECATED);
+    if (netstack_ipv4_route(d4[3], -1L, NULL, NULL, &s4[3]) && s4[3] != 0UL)
+        k4 = bsd_gai_key(d4, s4, FALSE);
+
+    bsd_nx_leave(base);
+
+    if (k4 > k6)
+    {
+        n4->ai.ai_next = &n6->ai;
+        n6->ai.ai_next = NULL;
+        *head          = &n4->ai;
+    }
+}
+#endif
+
+/*
+ * Build one node. `canon` is copied into it when non-NULL. Every node owns
+ * its copy, so a sublist the caller detaches and frees takes no other node's
+ * name with it (RFC 3493 6.1).
  */
 static BsdAddrInfoNode *bsd_gai_node(LONG family, LONG socktype, LONG protocol,
                                      const NXD_ADDRESS *addr, UINT port,
-                                     const char *canon, char *inherit)
+                                     const char *canon)
 {
     BsdAddrInfoNode *node;
     ULONG            namelen = (canon != NULL) ? bsd_strlen(canon) + 1 : 0;
@@ -197,10 +274,6 @@ static BsdAddrInfoNode *bsd_gai_node(LONG family, LONG socktype, LONG protocol,
     {
         bsd_strncpy(node->name, canon, namelen);
         node->ai.ai_canonname = node->name;
-    }
-    else
-    {
-        node->ai.ai_canonname = inherit;
     }
 
     return node;
@@ -279,9 +352,12 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
     LONG             flags    = 0;
     LONG             verdict  = EAI_NONAME;
     BOOL             aborted  = FALSE;
+    BOOL             allow4 = TRUE;
+#ifdef AMINETXDUO_IPV6
+    BOOL             allow6 = TRUE;
+#endif
     LONG             status;
     UINT             port = 0;
-    char            *canon = NULL;
     BsdAddrInfoNode *node;
     NXD_ADDRESS      addr;
 
@@ -305,7 +381,7 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
         socktype = (LONG)hints->ai_socktype;
         protocol = (LONG)hints->ai_protocol;
 
-        if ((flags & ~(LONG)(AI_MASK | AI_EXT)) != 0)
+        if ((flags & ~(LONG)(AI_MASK | AI_EXT | AI_ADDRCONFIG)) != 0)
             return EAI_BADFLAGS;
 
         if (family != AF_UNSPEC && family != AF_INET
@@ -339,6 +415,16 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
     if (protocol == 0)
         protocol = (socktype == SOCK_DGRAM) ? IPPROTO_UDP : IPPROTO_TCP;
 
+    /* Explicit AI_ADDRCONFIG filtering includes ULA and link-local addresses.
+       The legacy AF_UNSPEC hostname policy is applied separately below. */
+    if ((flags & AI_ADDRCONFIG) != 0)
+    {
+        allow4 = netstack_ipv4_configured();
+#ifdef AMINETXDUO_IPV6
+        allow6 = netstack_ipv6_configured();
+#endif
+    }
+
     if (nodename == NULL || *nodename == '\0')
     {
         /*
@@ -348,7 +434,7 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
          */
 #ifdef AMINETXDUO_IPV6
         if ((family == AF_UNSPEC || family == AF_INET6) &&
-            netstack_ipv6_enabled())
+            allow6 && netstack_ipv6_enabled())
         {
             addr.nxd_ip_version       = NX_IP_VERSION_V6;
             addr.nxd_ip_address.v6[0] = 0UL;
@@ -357,20 +443,20 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
             addr.nxd_ip_address.v6[3] = ((flags & AI_PASSIVE) != 0) ? 0UL : 1UL;
 
             node = bsd_gai_node(AF_INET6, socktype, protocol, &addr, port,
-                                NULL, NULL);
+                                NULL);
             if (node == NULL)
                 return EAI_MEMORY;
 
             bsd_gai_append(&head, &tail, node);
         }
 #endif
-        if (family == AF_UNSPEC || family == AF_INET)
+        if (allow4 && (family == AF_UNSPEC || family == AF_INET))
         {
             bsd_addr_from_v4(&addr, ((flags & AI_PASSIVE) != 0)
                                         ? 0UL : 0x7F000001UL);
 
             node = bsd_gai_node(AF_INET, socktype, protocol, &addr, port,
-                                NULL, NULL);
+                                NULL);
             if (node == NULL)
             {
                 bsd_freeaddrinfo(head, SocketBase);
@@ -400,7 +486,7 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
         {
             ULONG scope;
 
-            if (family == AF_INET)
+            if (family == AF_INET || !allow6)
                 return EAI_ADDRFAMILY;
 
             scope = bsd_gai_zone_index(SocketBase, zone);
@@ -415,8 +501,7 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
 
             node = bsd_gai_node(AF_INET6, socktype, protocol, &addr, port,
                                 ((flags & AI_CANONNAME) != 0)
-                                    ? (const char *)nodename : NULL,
-                                NULL);
+                                    ? (const char *)nodename : NULL);
             if (node == NULL)
                 return EAI_MEMORY;
 
@@ -435,7 +520,7 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
 
         if (ami_config_parse_ip((const char *)nodename, &v4))
         {
-            if (family == AF_INET6)
+            if (family == AF_INET6 || !allow4)
             {
                 return EAI_ADDRFAMILY;
             }
@@ -444,8 +529,7 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
 
             node = bsd_gai_node(AF_INET, socktype, protocol, &addr, port,
                                 ((flags & AI_CANONNAME) != 0)
-                                    ? (const char *)nodename : NULL,
-                                NULL);
+                                    ? (const char *)nodename : NULL);
             if (node == NULL)
                 return EAI_MEMORY;
 
@@ -462,8 +546,14 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
     verdict = EAI_NONAME;
 
 #ifdef AMINETXDUO_IPV6
-    if ((family == AF_INET6 && netstack_ipv6_enabled()) ||
-        (family == AF_UNSPEC && netstack_ipv6_have_global()))
+    /* Preserve unflagged AF_UNSPEC lookups on IPv4-only LANs: merely enabling
+       IPv6 (and assigning a link-local address) must not add an AAAA query or
+       put an unreachable IPv6 result ahead of IPv4. Explicit AF_INET6 and
+       AI_ADDRCONFIG requests retain their own semantics, including ULA use. */
+    if (allow6 && netstack_ipv6_enabled() &&
+        (family == AF_INET6 ||
+         (family == AF_UNSPEC &&
+          ((flags & AI_ADDRCONFIG) != 0 || netstack_ipv6_have_global()))))
     {
         ULONG words[4];
 
@@ -480,16 +570,12 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
 
             node = bsd_gai_node(AF_INET6, socktype, protocol, &addr, port,
                                 ((flags & AI_CANONNAME) != 0)
-                                    ? (const char *)nodename : NULL,
-                                NULL);
+                                    ? (const char *)nodename : NULL);
             if (node == NULL)
             {
                 bsd_freeaddrinfo(head, SocketBase);
                 return EAI_MEMORY;
             }
-
-            if ((flags & AI_CANONNAME) != 0)
-                canon = node->name;
 
             bsd_gai_append(&head, &tail, node);
         }
@@ -503,7 +589,7 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
     }
 #endif
 
-    if ((family == AF_UNSPEC || family == AF_INET) && !aborted)
+    if (allow4 && (family == AF_UNSPEC || family == AF_INET) && !aborted)
     {
         ULONG v4 = 0;
 
@@ -515,9 +601,8 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
             bsd_addr_from_v4(&addr, v4);
 
             node = bsd_gai_node(AF_INET, socktype, protocol, &addr, port,
-                                ((flags & AI_CANONNAME) != 0 && canon == NULL)
-                                    ? (const char *)nodename : NULL,
-                                canon);
+                                ((flags & AI_CANONNAME) != 0)
+                                    ? (const char *)nodename : NULL);
             if (node == NULL)
             {
                 bsd_freeaddrinfo(head, SocketBase);
@@ -537,6 +622,9 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
 
     if (head != NULL)
     {
+#ifdef AMINETXDUO_IPV6
+        bsd_gai_order(SocketBase, &head);
+#endif
         *res = head;
         return 0;
     }
@@ -565,8 +653,8 @@ VOID bsd_freeaddrinfo(register struct addrinfo *ai __asm("a0"),
         struct addrinfo *next = ai->ai_next;
 
         /*
-         * ai_canonname is never freed separately: it is either inside this
-         * node's own block or inside the first node's, and both go with the
+         * ai_canonname is never freed separately: it is inside this node's
+         * own block.
          */
         ami_free(ai);
 

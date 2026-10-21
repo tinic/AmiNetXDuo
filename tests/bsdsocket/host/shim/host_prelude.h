@@ -71,15 +71,22 @@ struct ami_sockaddr_in6 {
 /* AmiTCP-only SOL_SOCKET option; NDK 3.2 netinclude/sys/socket.h:152. */
 #define SO_EVENTMASK 0x2001
 
-#define AMINETXDUO_HAVE_IPV6_MREQ        1
+#define _STRUCT_IPV6_MREQ_DECLARED       1
 #define AMINETXDUO_HAVE_SOCKADDR_STORAGE 1
-#define AMINETXDUO_HAVE_IN_PKTINFO       1
+#define _STRUCT_IN_PKTINFO_DECLARED      1
 
 /* macOS publishes this tag unconditionally; rename cmsg.h's Amiga-shaped tag
  * after the host headers are parsed, as with timeval below. */
 #if defined(__APPLE__)
 #define in6_pktinfo ami_in6_pktinfo
 #endif
+
+/* Force the target supplemental API, not libc's different ICMP filter ABI. */
+#include "../../../../developer/netinclude/netinet6/in6.h"
+#include "aminetxduo/icmp6.h"
+#include "../../../../developer/netinclude/sys/cmsg.h"
+#define IP_PKTINFO 26
+#define IP_RECVDSTADDR 7
 
 /* Named in bsdsocket_vectors.h prototypes; declared here so the prototype
  * does not introduce a type scoped to itself (-Werror). */

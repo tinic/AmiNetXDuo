@@ -19,7 +19,8 @@
 * a third-party netstat or ifconfig needs: ShowNetStatus, netstat and arp are
 * built on nothing else.  Published means frozen, NetStatusHeader and every
 * NETCTRL_* request structure in netstatus.h are part of the ABI from here on,
-* and a caller checks lib_Revision against AMI_NETSTATUS_MIN_REVISION first.
+* callers first verify AmiNetXDuo identity, revision and vector-table size.
+* See aminetxduo/capabilities.h and examples/IfNames.c.
 LONG NetStackQuery(ULONG magic, ULONG what, APTR buffer, ULONG size) (d0,d1,a0,d2)
 LONG NetStackControl(ULONG magic, ULONG op, APTR arg, ULONG size) (d0,d1,a0,d2)
 * RFC 3493 section 4, interface identification.  bsdsocket.library revision

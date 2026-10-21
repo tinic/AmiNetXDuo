@@ -110,7 +110,7 @@ typedef struct ToolAddrInfo
 
 #define TOOL_AF_UNSPEC      0
 #define TOOL_AF_INET        2
-#define TOOL_AF_INET6      23
+#define TOOL_AF_INET6      28
 #define TOOL_SOCK_STREAM    1
 #define TOOL_SOCK_DGRAM     2
 #define TOOL_SOCK_RAW       3
@@ -159,7 +159,7 @@ typedef struct ToolAddrInfo
 #define TOOL_IPPROTO_IPV6       41
 /* Both numberings are accepted by this library.  See bsdsocket_internal.h. */
 #define TOOL_IPV6_UNICAST_HOPS   4
-#define TOOL_IPV6_TCLASS        61
+#define TOOL_IPV6_TCLASS        36
 
 /* What a stack without SOCK_RAW answers socket(AF_INET, SOCK_RAW, ...) with. */
 #define TOOL_EPROTONOSUPPORT 43

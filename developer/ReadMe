@@ -31,9 +31,9 @@ Put include/ on the compiler's include path and include one header:
 
     #include <proto/aminetxduo.h>
 
-That brings in the prototypes, the types, and the inline glue.  It does not
-replace or shadow any NDK header, so it can be included beside
-<proto/bsdsocket.h> in any order.
+That brings in the prototypes, the types, and the inline glue.  It shadows
+no NDK header, so it can be included beside <proto/bsdsocket.h> in any order.
+The standard socket headers in include/ (below) do replace the NDK's.
 
 The glue jumps through SocketBase, the same base variable bsdsocket.library
 already uses.  There is no second library to open and no link library to add:
@@ -44,31 +44,33 @@ already uses.  There is no second library to open and no link library to add:
 
 A program that already opens bsdsocket.library has done all of it.
 
-Standard spellings are deliberately not used.  RFC 3493 puts
-if_nametoindex() in <net/if.h>, and shipping a <net/if.h> would mean include
-order decides silently, per source file, whether the NDK's header or ours
-wins.  The path is <aminetxduo/ifindex.h> instead, and <proto/aminetxduo.h>
-finds it.
-
+Standard IPv6 declarations are in <sys/socket.h>, <netinet/in.h>,
+<net/if.h> and <netdb.h>. Put this drawer's include directory
+before the installed netinclude directory. The aminetxduo/in6.h, cmsg.h and
+ifindex.h paths remain compatibility includes; extension vector glue stays
+in proto/aminetxduo.h.  netinclude-ReadMe records their baseline, the AROS
+alignment and its exceptions.
 
 Checking that the vectors are there
 -----------------------------------
 
-A header cannot tell whether the library in memory has them.  Only
-lib_Revision can:
+Revision numbers are implementation-specific. Query SBTC_RELEASESTRPTR using
+the existing SocketBaseTagList call, require success, then use
+AMI_SOCKET_HAS_IFINDEX or AMI_SOCKET_HAS_NETSTATUS from
+<aminetxduo/capabilities.h>. These check AmiNetXDuo identity, revision and the
+negative vector-table size. See examples/IfNames.c for the full sequence.
+A failed query or unknown identity must disable these private vectors.
 
-    SocketBase = OpenLibrary("bsdsocket.library", 4);
-    if (SocketBase != NULL && SocketBase->lib_Revision >= AMI_IFINDEX_MIN_REVISION)
-        ... if_nametoindex() and friends are safe to call ...
+IPv6 itself adds no vector: probe socket(AF_INET6, ...) to test support.
+IPv4-only and IPv6 builds can have the same library revision.
 
-Every added VECTOR carries the revision that introduced it, as an
-AMI_*_MIN_REVISION constant next to it.  Do this check.  They are past the end
-of every published table, so an older bsdsocket.library has MakeLibrary()'s
-terminator in the slot and calling one is a guru, not a failure code.
+Standard constant data
+----------------------
 
-Definitions that are only types and constants -- everything in
-<aminetxduo/in6.h> -- need no such check: they name calls the NDK already
-declares, and nothing was added to the vector table for them.
+in6addr_any and in6addr_loopback are declared by <netinet/in.h>. If your C
+runtime does not define them, compile support/in6_addr.c once into your
+application (or into a support archive). Do not add duplicate definitions
+when the runtime supplies these symbols. No second shared library is needed.
 
 
 What it covers
@@ -84,6 +86,9 @@ Four new library vectors, from revision 3:
 
 Indices start at 1 and are the same numbers GetRouteInfo() reports in
 rtm_index, so a route can be matched to an interface by comparing them.
+Loopback is in all three lists as "lo0", numbered last.  if_nametoindex()
+returns 0 and sets no errno; if_indextoname() returns NULL with ENXIO for an
+unknown index and ENOMEM on a system error.
 
 The AF_INET6 names the NDK leaves out, in <aminetxduo/in6.h>.  No vectors --
 the calls are setsockopt(), getsockopt(), socket() and getaddrinfo(), which
@@ -98,18 +103,27 @@ this build has IPv6 with socket(AF_INET6, SOCK_STREAM, 0).
     IN6ADDR_ANY_INIT  IN6ADDR_LOOPBACK_INIT
     IN6_IS_ADDR_UNSPECIFIED / LOOPBACK / MULTICAST / LINKLOCAL /
         SITELOCAL / V4MAPPED / V4COMPAT and the MC_ scopes
-    AI_ADDRCONFIG
 
-Every one of them is #ifndef-guarded, because a program written against this
-NDK could not name them and will have spelled the numbers out for itself.
-Two of the option numbers have a second value in the Linux lineage; the
-library accepts both, and the header says which is which.
+Use the SDK definitions rather than spelling numbers in application code.
+AF_INET6 is 28, matching AROS. IPv6 options use one namespace on every socket
+type; old Linux numeric aliases are rejected. V6ONLY is 27 because AROS's 26
+collides with CHECKSUM.
+
+<aminetxduo/addrinfo.h> explicitly opts into AI_ADDRCONFIG (0x0400), which
+counts assigned non-loopback IPv4/IPv6 addresses, including ULA/link-local.
+<aminetxduo/cmsg.h> adds IP_PKTINFO (26) and its in_pktinfo payload;
+<aminetxduo/icmp6.h> supplies the ICMPv6 filter API only. These addenda require
+AmiNetXDuo bsdsocket.library 4.11 or later; identify the stack first, or
+handle EAI_BADFLAGS / ENOPROTOOPT. The common headers do not advertise these
+opt-ins, so rebuilding an IPv4 program does not enable unsupported options
+on other stacks. No complete standard netinet/icmp6.h is shipped.
 
 AI_V4MAPPED is deliberately absent.  This library never synthesises
 ::ffff:a.b.c.d from an A record, so no value for it would be truthful.  Code
-that wants both families asks for AF_UNSPEC, which returns the IPv6 results
-first.  Leaving the name undefined makes that a compile error to fix rather
-than a silent difference in what gets connected to.
+that wants both families asks for AF_UNSPEC. Results are ordered using the
+source addresses and routes available to the stack; see netinclude-ReadMe.
+Leaving the name undefined makes that a compile error to fix rather than a
+silent difference in what gets connected to.
 
 
 IPv6 ABI before 1.0
@@ -131,7 +145,7 @@ headers. It supplies the corrected netinet/in.h and sys/socket.h used by the
 library itself. These are a small overlay of the common AmigaPorts SDK;
 the remaining OS headers still come from your compiler. Including in6.h with
 the old target headers reports an error instead of silently selecting the
-wrong ABI. Provenance is recorded in the source tree's developer/netinclude.
+wrong ABI. Provenance is recorded in netinclude-ReadMe.
 
 Use ss_family (or sockaddr.sa_family) to inspect a returned address; do not
 infer its family from the returned length. Still check that the returned

@@ -49,7 +49,7 @@ extern "C" {
 #define TLS_SOCK_SOCK_STREAM        1
 
 #define TLS_SOCK_AF_INET            2
-#define TLS_SOCK_AF_INET6           23
+#define TLS_SOCK_AF_INET6           28
 
 /* WaitSelect()'s struct timeval.  Two LONGs, and nothing else has ever been
    passed through this vector. */

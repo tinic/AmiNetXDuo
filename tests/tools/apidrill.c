@@ -59,7 +59,7 @@ enum
    definition with the library it is testing. */
 #define P_AF_UNSPEC     0
 #define P_AF_INET       2
-#define P_AF_INET6      23
+#define P_AF_INET6      28
 #define P_SOCK_STREAM   1
 #define P_SOCK_DGRAM    2
 #define P_IPPROTO_TCP   6

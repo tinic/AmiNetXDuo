@@ -305,6 +305,33 @@ ULONG dest[4];
 }
 
 
+/*
+ * The same address on two interfaces in different states: the answer is the
+ * entry, so its state is the selected one's.  getaddrinfo() reads rule 3's
+ * state from it (netstack_ipv6_source_state()); a scan by value finds eth0's.
+ */
+static void test_rule3_same_address_twice(void)
+{
+ULONG dest[4];
+int   slot;
+
+    h_reset();
+    h_addr(H_SLOT0, H_ETH0, 0x20010DB8UL, 0x00000001UL, 0, 1, 64,
+           NX_IPV6_ADDR_STATE_DEPRECATED);
+    h_addr(H_SLOT1, H_ETH1, 0x20010DB8UL, 0x00000001UL, 0, 1, 64,
+           NX_IPV6_ADDR_STATE_VALID);
+    h_router(H_ETH1);
+
+    h_set(dest, 0x20010DB8UL, 0x00020000UL, 0, 0x99);
+
+    slot = h_select(dest, NX_NULL);
+    h_check(slot == H_SLOT1 &&
+            h_ip.nx_ipv6_address[H_SLOT1].nxd_ipv6_address_state ==
+                NX_IPV6_ADDR_STATE_VALID,
+            "Rule 3: the selected entry carries its own state");
+}
+
+
 /* ------------------------------------------------------------ §5, Rule 5 -- */
 
 static void test_rule5_outgoing_interface(void)
@@ -627,6 +654,7 @@ int main(void)
     test_rule1_same_address();
     test_rule2_scope();
     test_rule3_deprecated();
+    test_rule3_same_address_twice();
     test_rule5_outgoing_interface();
     test_interface_priority();
     test_rule6_label();

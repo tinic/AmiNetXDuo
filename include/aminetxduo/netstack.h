@@ -194,6 +194,7 @@ VOID netstack_pool_sample(VOID);
 
 /* Interface handles.  Index 0..count-1 in configuration order; the loopback
    interface is always present and is not counted here. */
+BOOL    netstack_ipv4_configured(VOID);
 UWORD   netstack_interface_count(VOID);
 LONG    netstack_interface_up(UWORD index);
 /* Down and offline are two states, not one: down stops the stack, offline also
@@ -338,6 +339,7 @@ BOOL netstack_ipv6_address_origin(UWORD interface_index, UWORD slot,
    netstack_ipv6_enabled() is weaker and is not a substitute: every interface
    gets a link-local whether or not a router has ever spoken to it. */
 BOOL netstack_ipv6_have_global(VOID);
+BOOL netstack_ipv6_configured(VOID);
 
 /* Select the best source for talking to `dest`.  interface_index is a
    zero-based NetX interface, or -1 to let the route choose.  The find form
@@ -349,6 +351,10 @@ BOOL netstack_ipv6_source_find(const ULONG dest[4], LONG interface_index,
                                ULONG addr_out[4], UINT *address_index_out);
 BOOL netstack_ipv6_source_for(const ULONG dest[4], LONG interface_index,
                               ULONG addr_out[4]);
+/* The find form with the route choosing, plus the selected entry's
+   NX_IPV6_ADDR_STATE_*, read under the same lock.  Needs the bracket. */
+BOOL netstack_ipv6_source_state(const ULONG dest[4], ULONG addr_out[4],
+                                ULONG *state_out);
 
 /* AAAA lookup, as netstack_resolve() including the search list, except that
    DEVS:Internet/hosts is not consulted: the netdb store holds no IPv6. */

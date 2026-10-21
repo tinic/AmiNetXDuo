@@ -1,6 +1,6 @@
 /*
  * Every IPv6 option number the tree claims, read out of the headers and
- * checked against the BSD/KAME numbering, so a Linux alias cannot silently
+ * checked against the AROS numbering with a distinct BSD V6ONLY, so a Linux alias cannot silently
  * land on a number some other option already owns.
  *
  * SPDX-License-Identifier: MIT
@@ -28,7 +28,7 @@ static const OptName bsd_ipv6[] =
     { 24, "IPV6_PORTRANGE"         },
     { 26, "IPV6_CHECKSUM"          },
     { 27, "IPV6_V6ONLY"            },
-    { 36, "IPV6_RECVPKTINFO"       },
+    { 61, "IPV6_RECVPKTINFO"       },
     { 37, "IPV6_RECVHOPLIMIT"      },
     { 38, "IPV6_RECVRTHDR"         },
     { 39, "IPV6_RECVHOPOPTS"       },
@@ -46,21 +46,8 @@ static const OptName bsd_ipv6[] =
     { 53, "IPV6_RTHDRDSTOPTS"      },
     { 57, "IPV6_RECVTCLASS"        },
     { 59, "IPV6_AUTOFLOWLABEL"     },
-    { 61, "IPV6_TCLASS"            },
+    { 36, "IPV6_TCLASS"            },
     { 62, "IPV6_DONTFRAG"          }
-};
-
-typedef struct
-{
-    int         number;
-    const char *ours;
-    const char *why;
-} Exemption;
-
-static const Exemption exempt[] =
-{
-    { 26, "AMI_IPV6_V6ONLY_LINUX",
-      "IPV6_CHECKSUM is raw-only and in6.c withdraws the Linux numbering there" }
 };
 
 typedef struct
@@ -72,36 +59,21 @@ typedef struct
 
 static const Claim claims[] =
 {
-    { "include/aminetxduo/in6.h",  "IPV6_V6ONLY",          "IPV6_V6ONLY"       },
-    { "include/aminetxduo/in6.h",  "IPV6_UNICAST_HOPS",    "IPV6_UNICAST_HOPS" },
-    { "include/aminetxduo/in6.h",  "IPV6_TCLASS",          "IPV6_TCLASS"       },
-    { "include/aminetxduo/in6.h",  "IPV6_MULTICAST_IF",    "IPV6_MULTICAST_IF" },
-    { "include/aminetxduo/in6.h",  "IPV6_MULTICAST_HOPS",  "IPV6_MULTICAST_HOPS" },
-    { "include/aminetxduo/in6.h",  "IPV6_MULTICAST_LOOP",  "IPV6_MULTICAST_LOOP" },
-    { "include/aminetxduo/in6.h",  "IPV6_JOIN_GROUP",      "IPV6_JOIN_GROUP"   },
-    { "include/aminetxduo/in6.h",  "IPV6_LEAVE_GROUP",     "IPV6_LEAVE_GROUP"  },
+    { "developer/netinclude/netinet6/in6.h",  "IPV6_V6ONLY",          "IPV6_V6ONLY"       },
+    { "developer/netinclude/netinet6/in6.h",  "IPV6_UNICAST_HOPS",    "IPV6_UNICAST_HOPS" },
+    { "developer/netinclude/netinet6/in6.h",  "IPV6_TCLASS",          "IPV6_TCLASS"       },
+    { "developer/netinclude/netinet6/in6.h",  "IPV6_MULTICAST_IF",    "IPV6_MULTICAST_IF" },
+    { "developer/netinclude/netinet6/in6.h",  "IPV6_MULTICAST_HOPS",  "IPV6_MULTICAST_HOPS" },
+    { "developer/netinclude/netinet6/in6.h",  "IPV6_MULTICAST_LOOP",  "IPV6_MULTICAST_LOOP" },
+    { "developer/netinclude/netinet6/in6.h",  "IPV6_JOIN_GROUP",      "IPV6_JOIN_GROUP"   },
+    { "developer/netinclude/netinet6/in6.h",  "IPV6_LEAVE_GROUP",     "IPV6_LEAVE_GROUP"  },
 
-    { "include/aminetxduo/cmsg.h", "IPV6_RECVPKTINFO",     "IPV6_RECVPKTINFO"  },
-    { "include/aminetxduo/cmsg.h", "IPV6_PKTINFO",         "IPV6_PKTINFO"      },
-    { "include/aminetxduo/cmsg.h", "IPV6_RECVHOPLIMIT",    "IPV6_RECVHOPLIMIT" },
-    { "include/aminetxduo/cmsg.h", "IPV6_HOPLIMIT",        "IPV6_HOPLIMIT"     },
+    { "developer/netinclude/netinet6/in6.h", "IPV6_RECVPKTINFO",     "IPV6_RECVPKTINFO"  },
+    { "developer/netinclude/netinet6/in6.h", "IPV6_PKTINFO",         "IPV6_PKTINFO"      },
+    { "developer/netinclude/netinet6/in6.h", "IPV6_RECVHOPLIMIT",    "IPV6_RECVHOPLIMIT" },
+    { "developer/netinclude/netinet6/in6.h", "IPV6_HOPLIMIT",        "IPV6_HOPLIMIT"     },
 
-    { "src/bsdsocket/bsdsocket_internal.h", "AMI_IPV6_V6ONLY_LINUX",
-      "IPV6_V6ONLY"         },
-    { "src/bsdsocket/bsdsocket_internal.h", "AMI_IPV6_UNICAST_HOPS_LINUX",
-      "IPV6_UNICAST_HOPS"   },
-    { "src/bsdsocket/bsdsocket_internal.h", "AMI_IPV6_TCLASS_LINUX",
-      "IPV6_TCLASS"         },
-    { "src/bsdsocket/bsdsocket_internal.h", "AMI_IPV6_MULTICAST_IF_LINUX",
-      "IPV6_MULTICAST_IF"   },
-    { "src/bsdsocket/bsdsocket_internal.h", "AMI_IPV6_MULTICAST_HOPS_LINUX",
-      "IPV6_MULTICAST_HOPS" },
-    { "src/bsdsocket/bsdsocket_internal.h", "AMI_IPV6_MULTICAST_LOOP_LINUX",
-      "IPV6_MULTICAST_LOOP" },
-    { "src/bsdsocket/bsdsocket_internal.h", "AMI_IPV6_JOIN_GROUP_LINUX",
-      "IPV6_JOIN_GROUP"     },
-    { "src/bsdsocket/bsdsocket_internal.h", "AMI_IPV6_LEAVE_GROUP_LINUX",
-      "IPV6_LEAVE_GROUP"    }
+
 };
 
 static int failures;
@@ -190,26 +162,12 @@ static const char *bsd_name_of(int number)
     return NULL;
 }
 
-static const Exemption *exemption_of(int number, const char *define)
-{
-    size_t i;
-
-    for (i = 0; i < sizeof(exempt) / sizeof(exempt[0]); i++)
-    {
-        if (exempt[i].number == number &&
-            strcmp(exempt[i].ours, define) == 0)
-            return &exempt[i];
-    }
-
-    return NULL;
-}
-
 int main(void)
 {
     const char *root = AMINETXDUO_SOURCE_DIR;
     size_t      i;
 
-    printf("bsdsocket, IPv6 option numbers against the BSD numbering\n");
+    printf("bsdsocket, IPv6 option numbers against the published AROS-aligned allocation\n");
 
     for (i = 0; i < sizeof(claims) / sizeof(claims[0]); i++)
     {
@@ -242,24 +200,16 @@ int main(void)
 
         if (strcmp(bsd, c->treated_as) == 0)
         {
-            snprintf(what, sizeof(what), "%s = %d is BSD's %s",
+            snprintf(what, sizeof(what), "%s = %d is the SDK's %s",
                      c->define, number, bsd);
             check(1, what, "");
             continue;
         }
 
         {
-            const Exemption *e = exemption_of(number, c->define);
 
-            snprintf(what, sizeof(what), "%s = %d collides with BSD's %s",
+            snprintf(what, sizeof(what), "%s = %d collides with the SDK's %s",
                      c->define, number, bsd);
-
-            if (e != NULL)
-            {
-                printf("  ok   %s, allowed: %s\n", what, e->why);
-                checks++;
-                continue;
-            }
 
             snprintf(detail, sizeof(detail),
                      "handled as %s, so a caller spelling %s is misread",

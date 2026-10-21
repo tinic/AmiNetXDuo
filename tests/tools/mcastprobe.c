@@ -54,7 +54,7 @@ typedef struct ProbeMreq6
 #define P_IP_ADD_MEMBERSHIP 12
 #define P_IP_DROP_MEMBERSHIP 13
 
-#define P_AF_INET6          23
+#define P_AF_INET6          28
 #define P_IPPROTO_IPV6      41
 #define P_IPV6_MULTICAST_IF   9
 #define P_IPV6_MULTICAST_HOPS 10
