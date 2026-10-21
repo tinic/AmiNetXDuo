@@ -215,6 +215,63 @@ else
 fi
 wait "$HOLD"
 
+# A TERM exit must wait for the log capper's EOF tail too. Otherwise the
+# caller can grade a deliberately crashed child before its exception arrives.
+mv "$S/D/tools/logcap.sh" "$S/D/tools/logcap-real.sh"
+cat > "$S/D/tools/logcap.sh" <<'SH'
+#!/usr/bin/env bash
+"$(dirname "$0")/logcap-real.sh"
+sleep 1
+echo LOGCAP_EOF_TAIL
+SH
+chmod +x "$S/D/tools/logcap.sh"
+: > "$EV"
+run D terminated ens18 STUB_SECS=60 &
+TERM_RUN=$!
+for _ in $(seq 1 50); do grep -q '^start terminated' "$EV" && break; sleep 0.2; done
+TERM_WRAP=$(pgrep -f "^[^ ]*bash $S/D/tools/amiberry-run.sh" | head -1)
+if [ -n "$TERM_WRAP" ]; then kill -TERM "$TERM_WRAP"; fi
+wait "$TERM_RUN"
+if [ -n "$TERM_WRAP" ] && [ "$(cat "$S/terminated.rc")" = 143 ] &&
+   grep -q '^LOGCAP_EOF_TAIL$' "$S/D/build/amiberry-ifsurvive.log"; then
+    kv terminated_log_flush ok
+else
+    kv terminated_log_flush "wrong:wrapper=${TERM_WRAP:-none}:rc=$(cat "$S/terminated.rc")"
+fi
+mv "$S/D/tools/logcap-real.sh" "$S/D/tools/logcap.sh"
+
+# Cancel after starting the FIFO reader but before launching its writer.
+# The small injected launch delay makes that signal window deterministic.
+cp "$S/D/tools/amiberry-run.sh" "$S/D/tools/amiberry-run-saved.sh"
+python3 - "$S/D/tools/amiberry-run.sh" <<'PY'
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+s = p.read_text()
+needle = '    LOGCAP_PID=$!\n'
+assert s.count(needle) == 1
+p.write_text(s.replace(needle, needle +
+    '    echo "$LOGCAP_PID" > "$ROOT/build/capper-starting"\n    sleep 1\n'))
+PY
+run D starting ens18 STUB_SECS=60 &
+START_RUN=$!
+for _ in $(seq 1 50); do [ -e "$S/D/build/capper-starting" ] && break; sleep 0.1; done
+START_WRAP=$(pgrep -f "^[^ ]*bash $S/D/tools/amiberry-run.sh" | head -1)
+if [ -n "$START_WRAP" ]; then kill -TERM "$START_WRAP"; fi
+for _ in $(seq 1 50); do [ -e "$S/starting.rc" ] && break; sleep 0.1; done
+if [ ! -e "$S/starting.rc" ]; then
+    [ -z "$START_WRAP" ] || kill -KILL "$START_WRAP" 2>/dev/null || true
+    kill -TERM "$(cat "$S/D/build/capper-starting")" 2>/dev/null || true
+fi
+wait "$START_RUN"
+if [ -n "$START_WRAP" ] && [ "$(cat "$S/starting.rc")" = 143 ] &&
+   ! grep -q '^start starting' "$EV"; then
+    kv startup_log_cancel ok
+else
+    kv startup_log_cancel "wrong:wrapper=${START_WRAP:-none}:rc=$(cat "$S/starting.rc")"
+fi
+mv "$S/D/tools/amiberry-run-saved.sh" "$S/D/tools/amiberry-run.sh"
+
 # ------------------- the wrapper is killed with -9 while its guest is running
 : > "$EV"
 run A doomed ens18 STUB_SECS=60 STUB_LIFE=5 &

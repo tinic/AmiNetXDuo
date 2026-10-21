@@ -18,6 +18,18 @@ sys.dont_write_bytecode = True
 
 ROOT = matrix.ROOT
 FATAL = re.compile(r'Guru Meditation|Software Failure|\bGURU\b|Illegal instruction:|Address Error|Bus Error', re.I)
+ILLEGAL = re.compile(r'Illegal instruction:\s*[0-9a-f]+\s+at\s+([0-9a-f]+)', re.I)
+
+
+def guest_fault(text):
+    """Kickstart's handled CPU probes are not guest-program exceptions."""
+    for line in text.splitlines():
+        match = ILLEGAL.search(line)
+        if match and 0x00F00000 <= int(match[1], 16) <= 0x00FFFFFF:
+            continue
+        if FATAL.search(line):
+            return True
+    return False
 
 
 def digest(path):
@@ -217,10 +229,22 @@ def batch(ns, rows, paths, state, ordinal):
     saved = ns.output / ('%s-%04d.tsv' % (state, ordinal))
     saved.write_text(text)
     logtext = logfile.read_text(errors='replace')
+    # The wrapper's normal assertions do not run after SIGTERM. A parked
+    # crashed child is reaped that way, so observe the emulator log itself;
+    # amiberry-run's cleanup has already waited for the capper to flush it.
+    emulator_path = ROOT / 'build' / ('amiberry-' + tag + '.log')
+    emulator_text = emulator_path.read_text(errors='replace') if emulator_path.exists() else ''
     results = verdict(rows, text, proc.returncode if not watchdog else 124,
-                      bool(FATAL.search(logtext)), rebooted=rebooted)
+                      guest_fault(logtext) or guest_fault(emulator_text), rebooted=rebooted)
+    retained = None
+    if emulator_path.exists() and any(not r['passed'] for r in results):
+        retained = ns.output / ('%s-%04d-emulator.log' % (state, ordinal))
+        shutil.copy2(emulator_path, retained)
+        retained_sha256 = digest(retained)
     for r in results:
         r.update(state=state, batch=ordinal, log=logfile.name, journal=saved.name)
+        if retained:
+            r.update(emulator_log=retained.name, emulator_sha256=retained_sha256)
     # Retain bounded final output alongside the failure transcript.
     last_output = hd / 'cli-output.txt'
     if last_output.is_file():

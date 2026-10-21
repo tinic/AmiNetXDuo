@@ -128,6 +128,16 @@ class VerdictTests(unittest.TestCase):
         text = self.good.replace('END\t0\t4096\t0', 'END\t0\t4096\t1')
         self.assertTrue(run.verdict(self.rows, text, 0)[0]['passed'])
 
+    def test_emulator_fault_and_rom_probe(self):
+        probe = 'Illegal instruction: 4e7a at 00F80100 -> 00F80AD2\n'
+        fault = 'Illegal instruction: 4afc at 0022E84A -> 00F80AD2\n'
+        self.assertFalse(run.guest_fault(probe))
+        self.assertFalse(run.guest_fault('child reached TIMEOUT\n'))
+        self.assertTrue(run.guest_fault(probe + fault))
+        self.assertTrue(run.guest_fault(fault.lower()))
+        for message in ('Guru Meditation', 'Software Failure', 'Address Error', 'Bus Error'):
+            self.assertTrue(run.guest_fault(message))
+
     def test_crash_in_middle_preserves_completed_prefix(self):
         rows = [dict(self.rows[0], id=name) for name in ('first', 'crash', 'last')]
         text = ('first\tSTART\t0\t4096\t0\nfirst\tEND\t0\t4096\t0\n'
@@ -159,6 +169,43 @@ class VerdictTests(unittest.TestCase):
 
 
 class OrchestrationTests(unittest.TestCase):
+    def test_batch_reads_and_retains_emulator_fault_after_wrapper_exit(self):
+        from types import SimpleNamespace
+        fault = 'Illegal instruction: 4afc at 0022E84A -> 00F80AD2\n'
+        rows = [dict(id='case', tool='CliControl', arguments='CRASH', stack=4096,
+                     mode='exit', allowed=[0])]
+        with tempfile.TemporaryDirectory(dir=matrix.ROOT / 'build') as directory:
+            root = Path(directory)
+            (root / 'tests/netstack/devs/NetInterfaces').mkdir(parents=True)
+            output = root / 'output'
+            (output / 'bin').mkdir(parents=True)
+            control = output / 'bin/CliControl'
+            control.write_bytes(b'fixture')
+            ns = SimpleNamespace(output=output, token='fixture', model='A600')
+            tag = 'clicrash-fixture-control-0000'
+
+            class ExitedWrapper:
+                returncode = 143
+
+                def __init__(self, *args, **kwargs):
+                    hd = root / 'build' / ('amiberry-testhd-' + tag)
+                    hd.mkdir(parents=True)
+                    (hd / 'cli-results.tsv').write_text(
+                        'case\tSTART\t0\t4096\t0\ncase\tTIMEOUT\t0\t0\t0\n')
+                    (root / 'build' / ('amiberry-' + tag + '.log')).write_text(fault)
+                    kwargs['stdout'].write('wrapper terminated before final assertions\n')
+
+                def poll(self):
+                    return self.returncode
+
+            with patch.object(run, 'ROOT', root), patch.object(run.subprocess, 'Popen', ExitedWrapper):
+                result = run.batch(ns, rows, {'CliControl': control}, 'control', 0)[0]
+            self.assertFalse(result['passed'])
+            self.assertEqual(result['reason'], 'fatal emulator/guest exception in batch')
+            retained = output / result['emulator_log']
+            self.assertEqual(retained.read_text(), fault)
+            self.assertEqual(result['emulator_sha256'], run.digest(retained))
+
     def test_only_unstarted_suffix_is_retried(self):
         from types import SimpleNamespace
         rows = [dict(id=name, stack=4096, mode='exit', allowed=[0]) for name in ('first', 'crash', 'last')]
