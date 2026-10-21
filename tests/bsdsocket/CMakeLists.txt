@@ -29,6 +29,32 @@ endif()
 # shim's own exec/types.h collides with it outright.  A test that cannot agree
 # with the target about the width of a LONG is not measuring the target.
 if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+    # Real resolver control flow with counted A/AAAA queries and dual-stack
+    # answers: default IPv4 LAN lookups must neither query nor return IPv6.
+    add_executable(test_addrinfo_dns host/test_addrinfo_dns_host.c
+        "${CMAKE_SOURCE_DIR}/src/config/config_text.c"
+        "${CMAKE_SOURCE_DIR}/src/config/config_text6.c")
+    target_include_directories(test_addrinfo_dns PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/host/shim"
+        "${CMAKE_SOURCE_DIR}/src/bsdsocket"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${AMINETXDUO_THREADX}/common/inc"
+        "${AMINETXDUO_THREADX}/ports/linux/gnu/inc"
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc")
+    target_compile_options(test_addrinfo_dns PRIVATE
+        -include "${CMAKE_CURRENT_SOURCE_DIR}/host/shim/host_prelude.h"
+        -ffunction-sections -fdata-sections)
+    target_compile_definitions(test_addrinfo_dns PRIVATE
+        AMINETXDUO_ADDRINFO AMINETXDUO_IPV6 NX_INCLUDE_USER_DEFINE_FILE)
+    if(APPLE)
+        target_link_options(test_addrinfo_dns PRIVATE -Wl,-dead_strip)
+    else()
+        target_link_options(test_addrinfo_dns PRIVATE -Wl,--gc-sections)
+    endif()
+    add_test(NAME addrinfo_dns_policy COMMAND test_addrinfo_dns)
+
     # Sender-side multicast loopback is selected per socket, not by whichever
     # receiver first joined the group.
     add_executable(test_mcast_loop host/test_mcast_loop_host.c)

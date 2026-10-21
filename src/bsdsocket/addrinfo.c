@@ -343,8 +343,8 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
     if (protocol == 0)
         protocol = (socktype == SOCK_DGRAM) ? IPPROTO_UDP : IPPROTO_TCP;
 
-    /* RFC 3493: filtering is opt-in. ULA and link-local are configured
-       IPv6 addresses too; a global route is not an API prerequisite. */
+    /* Explicit AI_ADDRCONFIG filtering includes ULA and link-local addresses.
+       The legacy AF_UNSPEC hostname policy is applied separately below. */
     if ((flags & AI_ADDRCONFIG) != 0)
     {
         allow4 = netstack_ipv4_configured();
@@ -476,8 +476,14 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
     verdict = EAI_NONAME;
 
 #ifdef AMINETXDUO_IPV6
-    if (allow6 && (family == AF_INET6 || family == AF_UNSPEC) &&
-        netstack_ipv6_enabled())
+    /* Preserve unflagged AF_UNSPEC lookups on IPv4-only LANs: merely enabling
+       IPv6 (and assigning a link-local address) must not add an AAAA query or
+       put an unreachable IPv6 result ahead of IPv4. Explicit AF_INET6 and
+       AI_ADDRCONFIG requests retain their own semantics, including ULA use. */
+    if (allow6 && netstack_ipv6_enabled() &&
+        (family == AF_INET6 ||
+         (family == AF_UNSPEC &&
+          ((flags & AI_ADDRCONFIG) != 0 || netstack_ipv6_have_global()))))
     {
         ULONG words[4];
 

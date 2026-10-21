@@ -73,9 +73,14 @@ extension glue; upstream maintainers do not need to adopt the latter.
 `AI_ADDRCONFIG` filters DNS queries, numeric addresses and null-node results
 symmetrically. Only assigned non-loopback unicast addresses count; IPv6 ULA
 and link-local addresses qualify, tentative/unknown addresses do not. Without
-the flag, AF_UNSPEC no longer suppresses AAAA lookups just because the machine
-lacks a 2000::/3 address. Address configuration is a snapshot, not a promise
-that a destination is reachable. `AI_V4MAPPED` remains undefined/unsupported.
+the flag, AF_UNSPEC hostname lookups preserve the existing policy: query AAAA
+only when the machine has a 2000::/3 address. This avoids extra DNS queries
+and IPv6-first results on IPv4-only LANs with automatic link-local IPv6.
+Explicit AF_INET6 requests can still resolve names on ULA-only networks;
+explicit AI_ADDRCONFIG uses configured families instead of that legacy gate.
+Numeric and null-node requests retain their existing unflagged behavior.
+Address configuration is a snapshot, not a promise that a destination is
+reachable. `AI_V4MAPPED` remains undefined/unsupported.
 
 No revision number identifies a stack. Query `SBTC_RELEASESTRPTR` through the
 existing `SocketBaseTagList` vector, require success and an AmiNetXDuo release
@@ -94,6 +99,9 @@ calls, including old-family and option rejection, ancillary delivery, safe
 extension discovery and ADDRCONFIG before/after interface configuration. The committed Amiberry harness can
 select these modes with `tests/ipv6/run-socket.sh -b BUILD -a ipv4`, `-a ula`,
 `-a linklocal`, or `-a ipv6` (the IPv6-only resolver test).
+The `addrinfo_dns_policy` host test runs the real resolver against controlled
+A/AAAA answers and checks query counts and result order, including unflagged
+IPv4 LAN lookups with automatic link-local IPv6 and explicit family/flag use.
 Language-mode checks on GCC 16 are not evidence of testing an old GCC, VBCC
 or SAS/C executable; those compilers still need downstream validation.
 
