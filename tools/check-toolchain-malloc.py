@@ -40,14 +40,18 @@ EXPECTED_MALLOC_SHA256 = {
 # AmigaPorts GCC 16.2.1b / newlib e07bea74: eight multilibs. The custom
 # allocator moved to mallocr.cpp; libc_a-malloc.o is only a public wrapper
 # around _malloc_r and must never stand in for the allocator in this gate.
-AMIGAPORTS_MALLOC_SHA256 = {'libb': '8c7f05d2f0797840a85e0558631f4252f43232696be98803b2ce84c3c1d22dfc',
- 'libb/libm020': '844d6107c440008eae78c139da5ab2fa747fadd0f414181c394e3fe14c6b2dbb',
- 'libb/libm020/libm881': '844d6107c440008eae78c139da5ab2fa747fadd0f414181c394e3fe14c6b2dbb',
- 'libb32/libm020': '99a4b73ee31ed218e3b1a9b324ad2f9c97f8c951ea05c2ec6ea58c2a9315ff93',
- 'libb32/libm020/libm881': '99a4b73ee31ed218e3b1a9b324ad2f9c97f8c951ea05c2ec6ea58c2a9315ff93',
- '': 'ab3e4f26097acfeca5f630eaf297397d87e0e2bed93338186d998abfb56793a7',
- 'libm020': '33fb458d92179450e1da66a2f438531f71530dac93e0a88f3c7cc9bc2d5761cb',
- 'libm020/libm881': '33fb458d92179450e1da66a2f438531f71530dac93e0a88f3c7cc9bc2d5761cb'}
+# GCC c99b02bd (16.2.1b-anx.3): both host builds produce identical bytes,
+# each verified against the final newlib sys/amigaos build object.
+AMIGAPORTS_MALLOC_SHA256 = {
+    '': '74163964a0e1bddac3630b89efa5347259d4ee3253af51cf8ecd948caa577b83',
+    'libb': 'ee53f725f4f230f54dc2f37522d24b15e6f05523fa7f35d48a8573f40a0a015b',
+    'libm020': 'cd9aa41b22b47366cd0ede8b537c2da9568eaa78e7ccc4b81e59878084504148',
+    'libm020/libm881': 'cd9aa41b22b47366cd0ede8b537c2da9568eaa78e7ccc4b81e59878084504148',
+    'libb/libm020': '0ee10df3e8129ae6a69d4a57a49fc5919c97499b60c8405f09d24491fb98ea0e',
+    'libb/libm020/libm881': '0ee10df3e8129ae6a69d4a57a49fc5919c97499b60c8405f09d24491fb98ea0e',
+    'libb32/libm020': 'fdbc123efb7195a9aa82c0513655a1709e62109d73ff75bfb554c7a32623ece1',
+    'libb32/libm020/libm881': 'fdbc123efb7195a9aa82c0513655a1709e62109d73ff75bfb554c7a32623ece1',
+}
 
 
 def main() -> int:
