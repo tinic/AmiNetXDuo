@@ -469,14 +469,10 @@ static BOOL ami_ns6_configured(BOOL global_only)
             if (global_only && (addr[0] & 0xE0000000UL) != 0x20000000UL)
                 continue;
 
-            /* AI_ADDRCONFIG counts global and ULA, but not ::, ::1,
-               multicast or fe80::/10: every IPv6 interface makes up a
-               link-local, so an IPv4-only LAN would answer AAAA first
-               (glibc skips it for the same reason). Physical interfaces
-               exclude the loopback device. */
+            /* AI_ADDRCONFIG includes ULA and link-local, but not ::, ::1
+               or multicast. Physical interfaces exclude the loopback device. */
             if ((addr[0] == 0 && addr[1] == 0 && addr[2] == 0 &&
-                 addr[3] <= 1) || (addr[0] >> 24) == 0xff ||
-                (addr[0] & 0xFFC00000UL) == 0xFE800000UL)
+                 addr[3] <= 1) || (addr[0] >> 24) == 0xff)
                 continue;
 
             /* RFC 4862 5.4: TENTATIVE is still under duplicate address

@@ -343,8 +343,8 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
     if (protocol == 0)
         protocol = (socktype == SOCK_DGRAM) ? IPPROTO_UDP : IPPROTO_TCP;
 
-    /* Explicit AI_ADDRCONFIG filtering counts global and ULA addresses, not
-       link-local. The legacy AF_UNSPEC hostname policy is applied below. */
+    /* Explicit AI_ADDRCONFIG filtering includes ULA and link-local addresses.
+       The legacy AF_UNSPEC hostname policy is applied separately below. */
     if ((flags & AI_ADDRCONFIG) != 0)
     {
         allow4 = netstack_ipv4_configured();

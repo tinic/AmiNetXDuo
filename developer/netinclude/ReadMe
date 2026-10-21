@@ -65,9 +65,9 @@ The shared library exports no data.
 
 RUNTIME BEHAVIOUR
 
-AI_ADDRCONFIG filters DNS, numeric and null-node results alike. Only assigned
-global and ULA IPv6 addresses count; link-local, loopback, tentative and
-unknown ones do not, so an IPv4-only LAN gets no AAAA query. Without the flag,
+AI_ADDRCONFIG filters DNS, numeric and null-node results alike. Assigned
+non-loopback addresses count, IPv6 ULA and link-local included (RFC 3493
+6.1); tentative and unknown ones do not. Without the flag,
 AF_UNSPEC hostname lookups query AAAA only when a 2000::/3 address exists;
 AF_INET6 asks regardless. AI_V4MAPPED is undefined.
 

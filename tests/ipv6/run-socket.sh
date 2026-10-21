@@ -50,9 +50,8 @@ case "$ADDRCONFIG" in
         printf '\nCONFIGURE6=STATIC\nADDRESS6=fd00::10/64\n' >> "$STAGE/devs/NetInterfaces/tap0"
         GUEST_ARG=addrconfig6 ;;
     linklocal)
-        # A link-local address alone does not count for AI_ADDRCONFIG.
         echo 'CONFIGURE6=LINKLOCAL' >> "$STAGE/devs/NetInterfaces/tap0"
-        GUEST_ARG=addrconfig4 ;;
+        GUEST_ARG=addrconfig6 ;;
     ipv6)
         cat > "$STAGE/devs/NetInterfaces/tap0" <<'IFACE'
 DEVICE=tcpdrill.device
