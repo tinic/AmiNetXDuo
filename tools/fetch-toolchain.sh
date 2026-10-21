@@ -43,11 +43,11 @@ ARCH=$(uname -m)
 case "$OS/$ARCH" in
     Linux/x86_64|Linux/amd64)
         TC_PLATFORM="linux-x86_64"
-        TC_SHA256="8529a742091a28f23c03c4bbfbd9148eaeb15a9c362fb200c79ed818e5390369"
+        TC_SHA256="fe7a5ee684429635ed0baa2e64d5e1656bc0c61a71b174fd286aa78ded90462a"
         ;;
     Darwin/arm64|Darwin/aarch64)
         TC_PLATFORM="darwin-arm64"
-        TC_SHA256="b3b4bac39a02b57b0d463e064df0780f80b397e5200ae38bb393034054a375b7"
+        TC_SHA256="f6d318f2dd88a91efd4951d375085b1ac1c21a69aa8706b93a22306ff0e8bcf9"
         ;;
     *)
         TC_PLATFORM=""
