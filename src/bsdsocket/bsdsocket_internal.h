@@ -44,6 +44,12 @@
 #include <sys/socket.h>
 #include <sys/uio.h>
 #include <sys/ioctl.h>
+/* The NetX port and the OS SDK both publish these macros. Select the SDK
+ * spelling at this boundary, including when it is a non-system include. */
+#undef ntohl
+#undef ntohs
+#undef htonl
+#undef htons
 #include <netinet/in.h>
 #include <netdb.h>
 #include <libraries/bsdsocket.h>
@@ -141,7 +147,8 @@
  * changes. lib_Revision identifies which of our builds this is, so a command
  * can tell a library that has the netstatus vectors from one that does not.
  */
-#define BSD_LIB_REVISION    10
+/* Revision 11 corrects the pre-release IPv6 sockaddr prefix to 4.4BSD. */
+#define BSD_LIB_REVISION    11
 
 /* SBTC_LOGFACILITY's documented default. The NDK's <sys/syslog.h> ships the
    priority codes only, so the BSD facility value is spelled out here. */

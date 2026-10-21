@@ -138,7 +138,7 @@ echo "  CC amiga_dropbear.c"
 # into every build now rather than out of the default one; it is its own
 # translation unit for exactly this reason, so tls.library and this client can
 # take the diagnostic without taking compat.c's timer and memory halves twice.
-AMI_CFLAGS="$REPRO_CFLAGS $AMIGA_CLIENT_ARCH $AMIGA_CLIENT_OPT -fomit-frame-pointer -I$ROOT/include -I$AMIGA_NDK"
+AMI_CFLAGS="$REPRO_CFLAGS $AMIGA_CLIENT_ARCH $AMIGA_CLIENT_OPT -fomit-frame-pointer -I$ROOT/include -I$ROOT/developer/netinclude -I$AMIGA_NDK"
 SHIM_OBJS=("$SHIM_O")
 for c in "$ROOT/src/common/ami_random.c" "$ROOT/src/common/compat.c" \
          "$ROOT/src/common/ami_diag.c" "$ROOT/clients/dropbear/sshcs.c" \

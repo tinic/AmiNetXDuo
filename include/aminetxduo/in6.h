@@ -1,7 +1,6 @@
 /*
- * The AF_INET6 names the Roadshow NDK does not define.  Its sockaddr_in6 is
- * Linux's: no sin6_len, family at offset 0 not 1.  Decide family by length --
- * 16 = sockaddr_in, 28 = sockaddr_in6 -- and never write a length byte in one.
+ * IPv6 additions to the common Amiga socket SDK. The pre-1.0 ABI correction
+ * gives sockaddr_in6 the same length/family prefix as sockaddr_in.
  * SPDX-License-Identifier: MIT
  */
 
@@ -14,6 +13,10 @@
 #include <stddef.h>
 #include <sys/types.h>
 #include <netinet/in.h>
+
+#if defined(__amigaos__) && !defined(SIN6_LEN)
+#error "Use the AmiNetXDuo Developer/include headers before the old netinclude headers"
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -214,21 +217,8 @@ struct ipv6_mreq
     (IN6_IS_ADDR_MULTICAST(a) && ((a)->s6_addr[1] & 0x0F) == 0x0E)
 #endif
 
-/* ---------------------------------------------------------------- storage
- *
- * 128 bytes, 4-byte aligned, and without ss_family on purpose: the family byte
- * is at offset 1 for AF_INET and offset 0 for AF_INET6, so read it from the
- * length the call returned and then from that offset.
- */
-#ifndef AMINETXDUO_HAVE_SOCKADDR_STORAGE
-#define AMINETXDUO_HAVE_SOCKADDR_STORAGE
-
-struct sockaddr_storage
-{
-    ULONG   ss_align[32];       /* 128 bytes, 4-byte aligned  */
-};
-
-#endif
+/* sockaddr_storage is declared by the common <sys/socket.h>, including its
+   ss_family member. Do not redeclare a standard type in this addendum. */
 
 /* ------------------------------------------------------------- getaddrinfo
  *

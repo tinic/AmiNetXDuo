@@ -17,6 +17,22 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <netdb.h>
+#include <stdint.h>
+
+/* Exercise the target's IPv6 prefix even when libc is Linux's. The rest of
+ * the layout is identical; no real host socket API consumes this test type.
+ * macOS already provides the BSD layout. */
+#if !defined(__APPLE__)
+#define sockaddr_in6 ami_sockaddr_in6
+struct ami_sockaddr_in6 {
+    uint8_t sin6_len;
+    uint8_t sin6_family;
+    in_port_t sin6_port;
+    uint32_t sin6_flowinfo;
+    struct in6_addr sin6_addr;
+    uint32_t sin6_scope_id;
+};
+#endif
 
 #undef htonl
 #undef htons

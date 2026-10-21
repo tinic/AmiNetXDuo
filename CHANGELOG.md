@@ -7,6 +7,10 @@ are history.
 
 ## Unreleased
 
+- IPv6 socket addresses now use the BSD length/family prefix, matching IPv4.
+  `sockaddr_storage` exposes `ss_family` for either family. Rebuild pre-release
+  IPv6 applications with the supplied Developer headers and install them with
+  AmiNetXDuo's bsdsocket.library 4.11 or later. The IPv4 ABI is unchanged.
 - The toolchain is GCC 16.2.1b-anx.3, with the tested CMA cost model and
   68000 size optimizations. Compiler regression tests accompany the changes.
 - anxnet.device sets up the X-Surf ISA bridge with interrupts off, so an

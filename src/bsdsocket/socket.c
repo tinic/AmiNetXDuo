@@ -1538,23 +1538,20 @@ VOID bsd_addr_from_v4(NXD_ADDRESS *addr, ULONG v4)
 }
 
 /*
- * Work out a sockaddr's family. Cannot be done by reading a struct member: the
- * two structs this NDK offers do not agree on where the family lives.
+ * Both address families use the BSD length/family prefix. Inspect bytes only
+ * after checking the supplied buffer size; reject the former beta IPv6 ABI.
  */
 LONG bsd_sa_family(const struct sockaddr *sa, socklen_t len)
 {
     const UBYTE *b = (const UBYTE *)sa;
 
-    if (sa == NULL)
+    if (sa == NULL || len < (socklen_t)sizeof(struct sockaddr_in))
         return -1;
 
 #ifdef AMINETXDUO_IPV6
-    if (len >= (socklen_t)sizeof(struct sockaddr_in6) && b[0] == AF_INET6)
-        return AF_INET6;
+    if (b[1] == AF_INET6)
+        return (len >= (socklen_t)sizeof(struct sockaddr_in6)) ? AF_INET6 : -1;
 #endif
-
-    if (len < (socklen_t)sizeof(struct sockaddr_in))
-        return -1;
 
     if (b[1] == AF_INET)
         return AF_INET;
@@ -1636,8 +1633,7 @@ VOID bsd_sockaddr_put(const AmiSocket *sock, struct sockaddr *sa,
         }
 
         bsd_bzero(&sin6, sizeof(sin6));
-        /* No sin6_len field in this NDK's sockaddr_in6, see the note in
-           bsdsocket_internal.h. Setting one would corrupt sin6_family. */
+        sin6.sin6_len    = (UBYTE)sizeof(sin6);
         sin6.sin6_family = AF_INET6;
         sin6.sin6_port   = (in_port_t)BSD_HTONS((UWORD)port);
         bsd_words_to_in6(use->nxd_ip_address.v6, sin6.sin6_addr.s6_addr);

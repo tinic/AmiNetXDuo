@@ -24,13 +24,11 @@ typedef struct ProbeAddr
     UBYTE   sin_zero[8];
 } ProbeAddr;
 
-/* struct sockaddr_in6, open-coded the same way.  The NDK's is the Linux one:
-   no sin6_len, the family at offset 0 and a byte of padding after it.  28
-   bytes. */
+/* RFC 3493 BSD sockaddr_in6: 28 bytes with the IPv4 length/family prefix. */
 typedef struct ProbeAddr6
 {
+    UBYTE   sin6_len;
     UBYTE   sin6_family;
-    UBYTE   sin6_pad;
     UWORD   sin6_port;
     ULONG   sin6_flowinfo;
     UBYTE   sin6_addr[16];
@@ -323,7 +321,7 @@ static VOID p_addr6(ProbeAddr6 *sa, ULONG w0, ULONG w1, ULONG w2, ULONG w3,
     word[3] = w3;
 
     sa->sin6_family   = P_AF_INET6;
-    sa->sin6_pad      = 0;
+    sa->sin6_len      = (UBYTE)sizeof(*sa);
     sa->sin6_port     = port;
     sa->sin6_flowinfo = 0;
     sa->sin6_scope_id = 0;

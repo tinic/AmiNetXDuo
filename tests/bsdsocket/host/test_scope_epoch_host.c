@@ -287,7 +287,8 @@ static void case_bind(void)
     bsd_words_to_in6(h_ll_local, sin6.sin6_addr.s6_addr);
     sin6.sin6_port     = 1234;
     sin6.sin6_scope_id = ZONE;
-    ((UBYTE *)&sin6)[0] = AF_INET6;
+    sin6.sin6_len = (UBYTE)sizeof(sin6);
+    sin6.sin6_family = AF_INET6;
 
     CHECK(bsd_bind(0, (struct sockaddr *)&sin6, sizeof(sin6), &h_base) == 0,
           "bind fe80::5%2");

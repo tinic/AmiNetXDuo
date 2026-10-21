@@ -25,7 +25,7 @@ DEST="${1:?usage: stage-developer.sh <destdir>}"
 #
 #   ifindex.h  RFC 3493 section 4, the four LVOs at -0x372..-0x384.
 #   in6.h      the AF_INET6 names the NDK does not define.  No vectors: it is
-#              option numbers, address macros and the sockaddr_in6 warning.
+#              option numbers and address macros; standard layouts are in netinclude/.
 #   cmsg.h     RFC 3542 ancillary data.  No vectors either: it rides
 #              sendmsg/recvmsg.  Two of the NDK's own CMSG_* macros are
 #              replaced here, so a caller wants it AFTER <sys/socket.h>.
@@ -68,6 +68,13 @@ mkdir -p "$DEST/include/aminetxduo" "$DEST/sfd" "$DEST/examples"
 
 for h in "${PUBLIC_HEADERS[@]}"; do
     stage "$ROOT/include/aminetxduo/$h" "$DEST/include/aminetxduo/$h"
+done
+
+# The pre-1.0 socket ABI correction must reach consumers through the same
+# standard headers used to compile the library. This is a source-controlled
+# SDK overlay, not a mutation of the user's installed compiler headers.
+for h in netinet/in.h sys/socket.h; do
+    stage "$ROOT/developer/netinclude/$h" "$DEST/include/$h"
 done
 
 # The generated glue is committed, so staging never needs sfdc.  Walked rather

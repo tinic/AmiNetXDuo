@@ -66,11 +66,9 @@ int main(void)
         rc = RETURN_ERROR;
     }
 
-    /*
-     * sin6_family goes at offset 0 and there is no sin6_len to fill in: on
-     * this NDK that byte is the family.  aminetxduo/in6.h has the warning.
-     */
+    /* The BSD prefix is shared with sockaddr_in and sockaddr_storage. */
     memset(&sin6, 0, sizeof(sin6));
+    sin6.sin6_len    = sizeof(sin6);
     sin6.sin6_family = AF_INET6;
     sin6.sin6_port   = 0;
     sin6.sin6_addr   = loopback;
@@ -85,7 +83,8 @@ int main(void)
     if (getsockname(sock, (struct sockaddr *)&ss, &len) < 0) {
         Printf((CONST_STRPTR)"V6Only: getsockname failed\n");
         rc = RETURN_ERROR;
-    } else if (len == (socklen_t)sizeof(struct sockaddr_in6)) {
+    } else if (ss.ss_family == AF_INET6 &&
+               len == (socklen_t)sizeof(struct sockaddr_in6)) {
         const struct sockaddr_in6 *bound = (const struct sockaddr_in6 *)&ss;
 
         if (inet_ntop(AF_INET6, (APTR)&bound->sin6_addr,

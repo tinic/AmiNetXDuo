@@ -87,9 +87,9 @@ rtm_index, so a route can be matched to an interface by comparing them.
 
 The AF_INET6 names the NDK leaves out, in <aminetxduo/in6.h>.  No vectors --
 the calls are setsockopt(), getsockopt(), socket() and getaddrinfo(), which
-the NDK already declares -- so lib_Revision has nothing to say about them.
-What a program wants to know is whether this build has IPv6 at all, and that
-is whether socket(AF_INET6, SOCK_STREAM, 0) succeeds.
+the NDK already declares. The address layout changed before 1.0 as described
+below; use the matching headers and library. Within that ABI, test whether
+this build has IPv6 with socket(AF_INET6, SOCK_STREAM, 0).
 
     IPPROTO_IPV6  PF_INET6  INET6_ADDRSTRLEN
     IPV6_V6ONLY  IPV6_UNICAST_HOPS  IPV6_TCLASS
@@ -98,7 +98,6 @@ is whether socket(AF_INET6, SOCK_STREAM, 0) succeeds.
     IN6ADDR_ANY_INIT  IN6ADDR_LOOPBACK_INIT
     IN6_IS_ADDR_UNSPECIFIED / LOOPBACK / MULTICAST / LINKLOCAL /
         SITELOCAL / V4MAPPED / V4COMPAT and the MC_ scopes
-    struct sockaddr_storage
     AI_ADDRCONFIG
 
 Every one of them is #ifndef-guarded, because a program written against this
@@ -113,31 +112,31 @@ first.  Leaving the name undefined makes that a compile error to fix rather
 than a silent difference in what gets connected to.
 
 
-THE sockaddr_in6 TRAP
----------------------
+IPv6 ABI before 1.0
+------------------
 
-Worth reading before writing any IPv6 code against this NDK.
+bsdsocket.library ABI 4.11 uses the RFC 3493 BSD layout for IPv6.
+Both sockaddr_in and sockaddr_in6 start with a length byte at offset 0 and
+an address-family byte at offset 1. sockaddr_storage is 128 bytes, has the
+same ss_len/ss_family prefix, and is aligned for either address structure.
+SIN6_LEN is defined. Set sin6_len to sizeof(struct sockaddr_in6).
 
-Its `struct sockaddr_in` is 4.4BSD's: sin_len at offset 0, sin_family at
-offset 1.  The `struct sockaddr_in6` immediately below it in the same header
-is the LINUX one, pasted in verbatim -- sin6_family at offset 0, and no
-sin6_len at all.  So:
+The IPv6 structure remains 28 bytes. The port, flowinfo, address and scope
+fields remain at offsets 2, 4, 8 and 24. Only the first two bytes changed.
+The IPv4 ABI is unchanged. Programs built with the old IPv6 headers must be
+rebuilt along with the library; there is no legacy IPv6 layout mode.
 
-    ((struct sockaddr *)&sin6)->sa_family      /* reads the PADDING byte */
+Put this drawer's include directory BEFORE the compiler's NDK/netinclude
+headers. It supplies the corrected netinet/in.h and sys/socket.h used by the
+library itself. These are a small overlay of the common AmigaPorts SDK;
+the remaining OS headers still come from your compiler. Including in6.h with
+the old target headers reports an error instead of silently selecting the
+wrong ABI. Provenance is recorded in the source tree's developer/netinclude.
 
-sa_family lives at offset 1, and that is where sockaddr_in6 has the pad in
-front of sin6_port.  Decide the family from the length instead: 16 bytes is a
-sockaddr_in with its family at offset 1, 28 bytes is a sockaddr_in6 with its
-family at offset 0.  bsdsocket.library does exactly that.
+Use ss_family (or sockaddr.sa_family) to inspect a returned address; do not
+infer its family from the returned length. Still check that the returned
+length is large enough before accessing the protocol-specific fields.
 
-Never write a length byte into a sockaddr_in6.  On this NDK that byte is
-sin6_family.
-
-struct sockaddr_storage here has no ss_family for the same reason: there is
-no offset at which such a member would be right for both families, and one
-that is right for only one is the trap wearing a struct member's name.  It is
-128 aligned bytes to receive an address into, and the length says what
-arrived.
 
 
 What it does not cover

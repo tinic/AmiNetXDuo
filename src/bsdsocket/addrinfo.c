@@ -174,7 +174,7 @@ static BsdAddrInfoNode *bsd_gai_node(LONG family, LONG socktype, LONG protocol,
 #ifdef AMINETXDUO_IPV6
     if (family == AF_INET6)
     {
-        /* No sin6_len on this NDK, see src/bsdsocket/in6.c. */
+        node->addr.sin6.sin6_len = (UBYTE)sizeof(struct sockaddr_in6);
         node->addr.sin6.sin6_family = AF_INET6;
         node->addr.sin6.sin6_port   = (in_port_t)BSD_HTONS((UWORD)port);
         bsd_words_to_in6(addr->nxd_ip_address.v6,
