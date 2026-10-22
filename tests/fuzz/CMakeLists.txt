@@ -248,6 +248,7 @@ target_link_options(fuzz_dns PRIVATE ${_fuzz_san})
 add_executable(fuzz_dhcp
     fuzz_dhcp.c
     fuzz_txstub.c
+    "${AMINETXDUO_NETXDUO}/common/src/nx_arp_probe_send.c"
     "${AMINETXDUO_NETXDUO}/common/src/nxd_udp_socket_send.c"
     "${AMINETXDUO_NETXDUO}/common/src/nx_udp_socket_create.c"
     "${AMINETXDUO_NETXDUO}/common/src/nx_udp_socket_delete.c"

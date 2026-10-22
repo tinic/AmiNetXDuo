@@ -2,25 +2,12 @@
  * Audit N-038: _nxd_ipv6_address_delete and the TCP connections using the
  * address it deletes.
  *
- * A socket keeps its local IPv6 address as a pointer into nx_ipv6_address[]
- * (nx_tcp_socket_ipv6_addr).  The delete zeroes that entry; the socket's next
- * ACK, FIN, RST or retransmission then reaches NX_ASSERT(if_ptr) in
- * _nx_ipv6_packet_send, which on the target sleeps forever holding
- * nx_ip_protection.  The delete must reset every such connection first.
- *
- * resets:     ESTABLISHED (with a blocked sender, a blocked receiver and a
- *             disconnect callback), SYN_SENT (with a blocked connect) and
- *             TIME_WAIT sockets on the deleted address are reset by the real
- *             _nx_tcp_socket_connection_reset, before the entry is zeroed:
- *             their states after, the waiters woken with the statuses the
- *             real cleanups assign, the sender's packet still the sender's.
- *             An ESTABLISHED socket on another address is untouched.
- * exclusions: a LISTEN socket and a CLOSED socket still pointing at the
- *             deleted entry are untouched, and so is a socket now connected
- *             over IPv4 that still holds the pointer from an earlier IPv6
- *             connection (the pointer is never cleared).
- * selfdelete: a disconnect callback that deletes its own socket does not
- *             derail the walk: the next socket on the address is still reset.
+ * Upstream #490 guards control and retransmission sends while the source
+ * entry is invalid. Address deletion therefore leaves TCP connections and
+ * their waiters intact; restoring the source lets the same connection resume.
+ * This replaces the fork's reset-on-delete workaround. The upstream native
+ * address-delete and IPv6-disable tests exercise actual packet transmission;
+ * this fixture checks deletion, socket/waiter ownership and callback safety.
  *
  * Linked for real: nxd_ipv6_address_delete.c, nx_tcp_socket_connection_reset.c,
  * nx_tcp_socket_block_cleanup.c, nx_tcp_transmit_cleanup.c,
@@ -194,7 +181,7 @@ static UINT delete_slot1(void)
     return status;
 }
 
-static void arm_resets(void)
+static void arm_survives(void)
 {
     setup();
     /* 0 ESTABLISHED client on slot 1, a sender and a receiver blocked.  */
@@ -226,27 +213,31 @@ static void arm_resets(void)
     printf("     states after: ESTABLISHED->%u, SYN_SENT->%u, TIMED_WAIT->%u, other address %u\n",
            sock[0].nx_tcp_socket_state, sock[1].nx_tcp_socket_state,
            sock[2].nx_tcp_socket_state, sock[3].nx_tcp_socket_state);
-    check("ESTABLISHED on the address is reset to CLOSED",
-          sock[0].nx_tcp_socket_state == NX_TCP_CLOSED && sock[0].nx_tcp_socket_connect_port == 0);
-    check("its disconnect callback ran once, before the entry was zeroed",
-          cb_calls[0] == 1 && cb_entry_intact[0] == 1);
-    check("its blocked sender woke with NX_NOT_CONNECTED (nx_tcp_transmit_cleanup.c)",
-          t_tx.tx_thread_suspend_status == NX_NOT_CONNECTED &&
-          sock[0].nx_tcp_socket_transmit_suspension_list == NX_NULL);
-    check("and its packet is still the sender's (not released by the stack)",
+    check("ESTABLISHED survives source deletion with its port intact",
+          sock[0].nx_tcp_socket_state == NX_TCP_ESTABLISHED && sock[0].nx_tcp_socket_connect_port == 1000);
+    check("source deletion does not report a disconnect",
+          cb_calls[0] == 0 && cb_entry_intact[0] == 0);
+    check("the blocked sender and its cleanup remain owned by the socket",
+          sock[0].nx_tcp_socket_transmit_suspension_list == &t_tx &&
+          sock[0].nx_tcp_socket_transmit_suspended_count == 1 &&
+          t_tx.tx_thread_suspend_control_block == &sock[0] &&
+          t_tx.tx_thread_suspend_cleanup == _nx_tcp_transmit_cleanup);
+    check("the blocked sender retains its unreleased packet",
           t_tx.tx_thread_additional_suspend_info == &tx_pkt && released == 0);
-    check("its blocked receiver woke with NX_NOT_CONNECTED (nx_tcp_receive_cleanup.c)",
-          t_rx.tx_thread_suspend_status == NX_NOT_CONNECTED &&
-          sock[0].nx_tcp_socket_receive_suspension_list == NX_NULL);
-    check("SYN_SENT on the address is reset to CLOSED, its connect woken NX_NOT_CONNECTED (nx_tcp_connect_cleanup.c)",
-          sock[1].nx_tcp_socket_state == NX_TCP_CLOSED &&
-          t_conn.tx_thread_suspend_status == NX_NOT_CONNECTED &&
-          sock[1].nx_tcp_socket_connect_suspended_thread == NX_NULL);
-    check("TIME_WAIT on the address is reset (server side: back to LISTEN)",
-          sock[2].nx_tcp_socket_state == NX_TCP_LISTEN_STATE && sock[2].nx_tcp_socket_connect_port == 0);
-    check("callbacks only for the socket that was ESTABLISHED",
+    check("the blocked receiver and its cleanup remain owned by the socket",
+          sock[0].nx_tcp_socket_receive_suspension_list == &t_rx &&
+          sock[0].nx_tcp_socket_receive_suspended_count == 1 &&
+          t_rx.tx_thread_suspend_control_block == &sock[0] &&
+          t_rx.tx_thread_suspend_cleanup == _nx_tcp_receive_cleanup);
+    check("SYN_SENT and its blocked connect survive source deletion",
+          sock[1].nx_tcp_socket_state == NX_TCP_SYN_SENT &&
+          sock[1].nx_tcp_socket_connect_suspended_thread == &t_conn &&
+          t_conn.tx_thread_suspend_cleanup == _nx_tcp_connect_cleanup);
+    check("TIME_WAIT stays TIME_WAIT with its peer port intact",
+          sock[2].nx_tcp_socket_state == NX_TCP_TIMED_WAIT && sock[2].nx_tcp_socket_connect_port == 1002);
+    check("neither pending nor timed-wait sockets report a disconnect",
           cb_calls[1] == 0 && cb_calls[2] == 0);
-    check("three waiters resumed", resumed == 3);
+    check("no waiter is spuriously resumed", resumed == 0);
     check("the connection on the other address is untouched",
           sock[3].nx_tcp_socket_state == NX_TCP_ESTABLISHED && sock[3].nx_tcp_socket_connect_port == 1003 &&
           cb_calls[3] == 0);
@@ -281,7 +272,7 @@ static void arm_exclusions(void)
     check("nothing woken", resumed == 0);
 }
 
-static void arm_selfdelete(void)
+static void arm_callbacks(void)
 {
     setup();
     sock[0].nx_tcp_socket_state    = NX_TCP_ESTABLISHED;
@@ -294,31 +285,33 @@ static void arm_selfdelete(void)
 
     delete_slot1();
 
-    check("the socket whose callback deleted it was reset first",
-          cb_calls[0] == 1 && sock[0].nx_tcp_socket_id == 0);
-    check("the walk went on: the next socket on the address is reset, once",
-          sock[1].nx_tcp_socket_state == NX_TCP_CLOSED && cb_calls[1] == 1);
+    check("source deletion does not invoke a self-deleting disconnect callback",
+          cb_calls[0] == 0 && sock[0].nx_tcp_socket_id == NX_TCP_ID &&
+          sock[0].nx_tcp_socket_state == NX_TCP_ESTABLISHED);
+    check("the next connection on the same address also survives",
+          sock[1].nx_tcp_socket_state == NX_TCP_ESTABLISHED && cb_calls[1] == 0);
     check("the other address is untouched",
           sock[2].nx_tcp_socket_state == NX_TCP_ESTABLISHED && cb_calls[2] == 0);
-    check("the ring is intact without the deleted socket",
-          ip.nx_ip_tcp_created_sockets_count == NSOCK - 1 &&
+    check("the complete socket ring remains intact",
+          ip.nx_ip_tcp_created_sockets_count == NSOCK &&
           ip.nx_ip_tcp_created_sockets_ptr -> nx_tcp_socket_created_previous -> nx_tcp_socket_created_next ==
               ip.nx_ip_tcp_created_sockets_ptr);
+
 }
 
 int main(int argc, char **argv)
 {
     if (argc != 2)
     {
-        fprintf(stderr, "usage: %s resets|exclusions|selfdelete\n", argv[0]);
+        fprintf(stderr, "usage: %s survives|exclusions|callbacks\n", argv[0]);
         return 2;
     }
-    if (strcmp(argv[1], "resets") == 0)
-        arm_resets();
+    if (strcmp(argv[1], "survives") == 0)
+        arm_survives();
     else if (strcmp(argv[1], "exclusions") == 0)
         arm_exclusions();
-    else if (strcmp(argv[1], "selfdelete") == 0)
-        arm_selfdelete();
+    else if (strcmp(argv[1], "callbacks") == 0)
+        arm_callbacks();
     else
         return 2;
     printf("%s\n", bad ? "FAIL" : "PASS");
