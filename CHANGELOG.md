@@ -7,6 +7,10 @@ are history.
 
 ## Unreleased
 
+- Updated NetX Duo with upstream protocol and TLS fixes.
+- TCP connections survive temporary loss of their local IPv6 address and
+  can resume when that address is restored.
+
 ## 1.0.0-rc2
 
 - The installer needs 2 MB of memory; the stacks still run in 1 MB.

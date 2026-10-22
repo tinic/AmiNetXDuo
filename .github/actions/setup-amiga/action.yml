@@ -43,6 +43,13 @@ runs:
         restore-keys: |
           aminetxduo-ccache-v1-${{ runner.os }}-${{ inputs.cache-profile }}-${{ steps.pin.outputs.sha }}-
 
+    # The pinned NetX Duo setup handles hosted Ubuntu mirror-list URIs and
+    # bounds stalled APT requests. Keep package installation before the build.
+    - name: Prepare Ubuntu package downloads
+      if: runner.os == 'Linux'
+      shell: bash
+      run: bash third_party/netxduo/scripts/ci/prepare_apt.sh
+
     - name: Enable compiler cache
       shell: bash
       run: |

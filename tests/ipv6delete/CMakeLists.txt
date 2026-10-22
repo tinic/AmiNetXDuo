@@ -1,7 +1,8 @@
 # _nxd_ipv6_address_delete and the TCP connections using the address
-# (audit N-038).  The delete, the connection reset and the four suspension
-# cleanups it runs are the shipped files; ThreadX, the packet release, the
-# multicast leave and the SYN-cache flush are stubbed in the test.  Same
+# (audit N-038, upstream #490). Deletion must preserve TCP state and waiters.
+# The delete and linked suspension-cleanup functions are shipped files;
+# ThreadX, packet release, multicast leave and the SYN-cache flush are
+# stubbed in the test. Same
 # include order and definitions as tests/syncache.
 #
 # SPDX-License-Identifier: MIT
@@ -39,6 +40,6 @@ target_compile_options(test_ipv6_delete_tcp PRIVATE -Wall -Wextra)
 set_target_properties(test_ipv6_delete_tcp PROPERTIES C_STANDARD 11)
 
 include(CTest)
-foreach(arm IN ITEMS resets exclusions selfdelete)
+foreach(arm IN ITEMS survives exclusions callbacks)
     add_test(NAME ipv6_delete_tcp_${arm} COMMAND test_ipv6_delete_tcp ${arm})
 endforeach()

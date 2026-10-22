@@ -292,7 +292,8 @@ static const Case cases[] =
     { "v3 with a 4-byte issuerUniqueID parses whole", V_UID_SMALL,     NX_SECURE_X509_SUCCESS },
     { "v3 with a 600-byte issuerUniqueID parses whole", V_UID_LARGE,   NX_SECURE_X509_SUCCESS },
     { "empty EC public key",                          V_EC_EMPTY_KEY,  NX_SECURE_X509_ASN1_LENGTH_TOO_LONG },
-    { "empty signature bit string",                   V_EMPTY_SIG,     NX_SECURE_X509_ASN1_LENGTH_TOO_LONG },
+    /* Upstream rejects an empty signature before skipping its padding octet. */
+    { "empty signature bit string",                   V_EMPTY_SIG,     NX_SECURE_X509_INVALID_CERTIFICATE },
     { "empty version",                                V_EMPTY_VERSION, NX_SECURE_X509_INVALID_VERSION },
 };
 
