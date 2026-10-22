@@ -31,8 +31,8 @@ configured for one.
 
 ## Requirements
 
-Any 68000 or better, AmigaOS 2.04 (Kickstart 37) or newer, 1 MB of RAM, and a
-SANA-II network card. One binary serves every 68k: the library picks the code
+Any 68000 or better, AmigaOS 2.04 (Kickstart 37) or newer, 1 MB of RAM (the
+installer needs 2 MB), and a SANA-II network card. One binary serves every 68k: the library picks the code
 for the processor when it opens, and nothing has to match the machine. The fat
 stack is the exception and needs a 68020 or better.
 
