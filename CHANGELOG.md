@@ -11,10 +11,11 @@ are history.
 
 - The trust store is Mozilla's root set of 20 October 2026, which drops the
   eMudhra emSign roots after their CA keys were found to be computable.
-- IPv6 socket addresses now use the BSD length/family prefix, matching IPv4.
-  `sockaddr_storage` exposes `ss_family` for either family. Rebuild pre-release
-  IPv6 applications with the supplied Developer headers and install them with
-  AmiNetXDuo's bsdsocket.library 4.11 or later. The IPv4 ABI is unchanged.
+- IPv6 socket addresses use the BSD length/family prefix, as IPv4 does, and
+  `sockaddr_storage` has `ss_family`. `AF_INET6` is 28, as in AROS.
+- getaddrinfo() puts an IPv6 answer the Amiga has no route to after a
+  usable IPv4 one (RFC 6724).
+- getaddrinfo() accepts `AI_ADDRCONFIG` (0x0400, `<aminetxduo/addrinfo.h>`).
 - The toolchain is GCC 16.2.1b-anx.3, with the tested CMA cost model and
   68000 size optimizations. Compiler regression tests accompany the changes.
 - anxnet.device sets up the X-Surf ISA bridge with interrupts off, so an
