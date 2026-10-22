@@ -17,8 +17,6 @@ are history.
 - getaddrinfo() puts an IPv6 answer the Amiga has no route to after a
   usable IPv4 one (RFC 6724).
 - getaddrinfo() accepts `AI_ADDRCONFIG` (0x0400, `<aminetxduo/addrinfo.h>`).
-- The toolchain is GCC 16.2.1b-anx.3, with the tested CMA cost model and
-  68000 size optimizations. Compiler regression tests accompany the changes.
 - anxnet.device sets up the X-Surf ISA bridge with interrupts off, so an
   IDE interrupt no longer disturbs the shared $7E register.
 - CreateAmiNetXDuoStatusReport ADDRESSES records the server identifier bytes
