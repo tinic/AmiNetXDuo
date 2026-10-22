@@ -29,8 +29,8 @@ This machine needs:
      connections work on every processor, the 68000 included, but a first
      handshake there takes a minute or two.  A resumed one takes under a
      second.
-  *  1 MB of memory.  The archive holds four stacks, and the installer
-     asks which one to put on:
+  *  1 MB of memory, 2 MB to run the installer.  The archive holds four
+     stacks, and the installer asks which one to put on:
 
         Stack     Leaves out                                    RAM while up
         Full      nothing                                          442 KB
