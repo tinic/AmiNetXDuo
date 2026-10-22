@@ -33,7 +33,7 @@ binutils|https://github.com/AmigaPorts/binutils-gdb|15f4b0aa860f74022c6aff7ace15
 clib2|https://github.com/AmigaPorts/clib2|78e05e255495382bbf880d0d37d20763d129f01e|master
 fd2pragma|https://github.com/AmigaPorts/fd2pragma|bcffac5c89295baf1db033addc984312b4b4a722|master
 fd2sfd|https://github.com/AmigaPorts/fd2sfd|a0ae60d140fdfd30f889810faea07cc6968d1fd0|master
-gcc|https://github.com/tinic/gcc|c99b02bd168e1272c98de83e765c438ec28eca0b|amiga16.2
+gcc|https://github.com/tinic/gcc|8dc8d8365a3825b74dfba58f8e80545b052e0cd5|amiga16.2
 ira|https://github.com/AmigaPorts/ira|bb7c11384a32c409341fdb0d16d715b7959a0290|master
 ixemul|https://github.com/AmigaPorts/ixemul|f0dd997994263c6ac783b563222a9f53a00c013c|master
 lha|https://github.com/AmigaPorts/lha|979815dc8699a9c5018de067946737c83ec6f697|master
@@ -47,8 +47,7 @@ vlink|https://github.com/AmigaPorts/vlink|ce46ccfda0e30eda5b12b9a5d0259d8eaefdef
 aros-stuff|https://github.com/AmigaPorts/aros-stuff|9e09fb0f9f5150058c788fb42787927907b28a46|master
 "
 
-# Shared upstream compiler objects can also be fetched from the fork network.
-# The optimization merge itself is served by tinic/gcc.
+# The compiler commit is also present in the upstream fork network.
 # shellcheck disable=SC2034 # Resolved dynamically as MIRROR_<module>.
 MIRROR_gcc="https://github.com/AmigaPorts/gcc"
 
@@ -305,9 +304,7 @@ echo "==> make $MAKE_TARGETS"
 # These are the remaining package steps in codewiz's toolchain.yml.
 ( cd "$SRC" && "$MAKE_TOOL" PREFIX="$PREFIX" -j4 all-sdk )
 ( cd "$SRC" && "$MAKE_TOOL" PREFIX="$PREFIX" -j"$JOBS" vbcc vlink )
-# zlib otherwise runs the host ranlib, which silently empties HUNK archives
-# on macOS. Override it for these target libraries and their recursive makes.
-( cd "$SRC" && "$MAKE_TOOL" PREFIX="$PREFIX" -j"$JOBS" zlib libpng RANLIB=m68k-amigaos-ranlib )
+( cd "$SRC" && "$MAKE_TOOL" PREFIX="$PREFIX" -j"$JOBS" zlib libpng )
 
 # Catch the precise stale allocator that escaped the 16.2.2 packages even
 # though their source checkout carried the fix.  This checks the *installed*
