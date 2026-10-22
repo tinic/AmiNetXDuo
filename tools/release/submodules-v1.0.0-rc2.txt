@@ -1,0 +1,36 @@
+# Rc1 -> rc2 submodule review: netxduo +8, wifipi +4; no additions or removals.
+# ThreadX, bsdsocktest, dropbear, libcodesets, shelltools and zz9000-sdk did not move.
+# The named reviews cover the stated scopes. Product exact-SHA CI and emulator are separate release gates, not claims made by this manifest.
+# Agent attribution comes from AgentNet evidence and PR records, never git author.
+# reviewer=independent-review: a fresh agent with no part in these PRs read the full diff and the touched
+# functions in context (source only, nothing run), 2026-10-21; verdict and scope per range below.
+
+# Fast-forward by eight commits (tinic/netxduo #22-#24, master, first-parent merges).
+# DHCP client diagnostics and the REQUESTING restart for AmiNetXDuo #306.
+# Fork PRs #22-#24 and parent PRs #325, #330 and #335 record CI (42/42 each) and author tests.
+# Independent review GO-with-notes, no blocker: scope nxd_dhcp_client.c/.h diff, _nx_dhcp_thread_entry,
+# _nx_dhcp_packet_process, _nx_dhcp_timeout_process, _nx_dhcp_interface_reinitialize, request builders.
+# Notes: request_retrans is UCHAR (MAX_REQUEST_RETRANS > 255 wraps); opt54 8-byte copy unbounded but
+# inside the >= 548-byte buffer; diagnostic status fields truncated to UCHAR.
+third_party/netxduo 8d13473471e24dd4ae2a4a32027a71d155c44a82..2c53ee850261b65f20b4d2cbfe245eab98f9d879
++f60d294cc5e33ba5627fcfa0d83141fa412def8b reviewer=independent-review netxduo #22 DHCP client reply counters and last discard reason; additive interface record fields, no behaviour change; fork CI green (NetXDuo64 641, Web 165, PTP 21); parent #325
++b329adf61940c820aaf855e4a15fa74a77e3382c reviewer=independent-review merge of netxduo #22; no source change beyond f60d294c
++151fe0a405479c4839e1957e360a9bd2ba63ed4f reviewer=independent-review netxduo #23 REQUESTING returns to INIT with a new xid after NX_DHCP_MAX_REQUEST_RETRANS (4) unanswered retransmissions (RFC 2131 4.4.1); RENEWING, REBINDING and BOOTP unchanged; new interface record fields; parent #330
++af9c9d3b0c0313726d7f79c0f39d256bf4312134 reviewer=independent-review netxduo #23 tests only: netx_dhcp_request_restart_test, fails on the old client (PR-recorded); ctest -R dhcp 68/68 (author-reported)
++bafa4a576d4714a6b30367555d1a043497d82658 reviewer=independent-review merge of netxduo #23; no source change beyond its two commits
++a9df667424f83c818f1ebd86b6879871765281a1 reviewer=independent-review netxduo #24 records the last REQUEST's option 54 index and bytes in the interface record; stored only, no behaviour change; parent #335
++302f398edaa81c0903cbf44a7c2d58676ab64789 reviewer=independent-review netxduo #24 tests only: netx_dhcp_request_option_bytes_test, record bytes equal the wire (author-reported)
++2c53ee850261b65f20b4d2cbfe245eab98f9d879 reviewer=independent-review merge of netxduo #24; no source change beyond its two commits
+
+# Fast-forward by four commits (WiFiPi.device #24 and #25, maint/beta4, first-parent merges).
+# Fork PRs #24, #25 and parent PRs #303, #304 record build and A1200 evidence.
+# Independent review GO-with-notes, no blocker: scope full diff, WiFi_Expunge, OnPort/Queued, UnitTask,
+# PacketPoller/PacketReceiver exit, PacketCtrlShutdown, sdio_int_*, init.c mailbox calls, and a disassembly
+# of Emu68 mailbox.resource 1.1 MB_RawCommand (own semaphore, byte swap, CachePre/PostDMA).
+# Notes: MB_RawCommand result unchecked (as the raw path); packet.c:1220 NULL check outside Forbid,
+# safe while Expunge stops the receiver first; StopTask wait unbounded (pre-existing).
+third_party/wifipi 44857695ebeb50d00db90a183631cd775f7a4d3e..74334c01c187b7031e9e2587b6f25cb68916879b
++56679192785fc1cdd4eb0121d43cd3b9ad067cdd reviewer=independent-review WiFiPi #24 mailbox property requests go through Emu68's mailbox.resource (MB_RawCommand) when present; without it the direct-register path is unchanged; parent #303 records the pinned-toolchain build and check-image PASS
++931a5a2555d6216f9d941cbfa800704fb64ff549 reviewer=independent-review merge of WiFiPi #24; no source change beyond 56679192
++77d137de2422775be636f759745d6feb71b2951a reviewer=independent-review WiFiPi #25 Expunge stops the receiver before the unit task; tasks clear their pointer under Forbid as the last act; PR records the A1200 PiStorm32 reset before and Avail FLUSH 642 ms, DHCP and 5/5 ping after; no Expunge test exists
++74334c01c187b7031e9e2587b6f25cb68916879b reviewer=independent-review merge of WiFiPi #25; no source change beyond 77d137de
