@@ -2507,7 +2507,7 @@ BOOL http_fb_open(VOID)
     struct Screen *sc;
     ULONG          ilock = 0;
     BOOL           pub;
-    BOOL           ok;
+    int            what = FB_GEOM_NO;
 
     fb_why[0] = '\0';
     fb_open_screenless = FALSE;
@@ -2543,10 +2543,9 @@ BOOL http_fb_open(VOID)
     if (!pub)
         ilock = LockIBase(0);
 
-    ok = (BOOL)(pub || fb_listed(sc));
-    if (ok)
-        ok = (BOOL)(fb_geometry_of(sc->RastPort.BitMap, &sc->ViewPort,
-                                   &fb_open_geom, pub) == FB_GEOM_OK);
+    if (pub || fb_listed(sc))
+        what = fb_geometry_of(sc->RastPort.BitMap, &sc->ViewPort,
+                              &fb_open_geom, pub);
     else
         fb_say("front screen closed");
 
@@ -2555,7 +2554,18 @@ BOOL http_fb_open(VOID)
     else
         UnlockPubScreen(NULL, sc);
 
-    if (!ok)
+    /* Unsure is not no either.  The boot-time screen before LoadWB can be
+       neither public nor planar, so this comes up screenless, as above, and
+       each session asks again. */
+    if (what == FB_GEOM_UNSURE)
+    {
+        fb_why[0] = '\0';
+        fb_open_screenless = TRUE;
+        fb_open_geom.width  = 0;
+        fb_open_geom.height = 0;
+        fb_open_geom.depth  = 0;
+    }
+    else if (what != FB_GEOM_OK)
     {
         fb_close_libraries();
         return FALSE;
