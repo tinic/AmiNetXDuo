@@ -64,18 +64,18 @@
  * run at 0.
  *
  *   20  input.device
- *   19  AmiNetXDuo tick (TX_AMIGA_TIMER_PRIORITY, tx_port.h)
- *   15  card.resource
- *   10+ filesystem handlers, scsi.device and other disk drivers
+ *   10+ filesystem handlers, scsi.device and other disk drivers,
+ *       Poseidon and AHI tasks (10-19)
+ *    9  AmiNetXDuo tick (TX_AMIGA_TIMER_PRIORITY, tx_port.h)
  *    6  ehide.device (seen on the A3000)
  *    5  console.device, trackdisk.device, TCP: handler and its sessions
  *  1-2  ThreadX band (TX_AMIGA_TASK_PRIORITY, TX_AMIGA_HANDOFF_PRIORITY)
  *    0  normal programs
  *
- * The tick sits above the handlers and disk drivers so a busy disk cannot
- * starve the wheel; one service holds the machine for about
- * TX_AMIGA_TIMER_BUDGET_MS, one Forbid() per tick, and a tick costs whatever
- * the timer callbacks cost. The TCP: processes share 5 with
+ * The tick may sit above console.device, trackdisk.device and IDE drivers
+ * because one service holds the machine for about TX_AMIGA_TIMER_BUDGET_MS, one
+ * Forbid() per tick; a tick costs whatever the timer callbacks cost. Anything
+ * at 10+ waits at most one tick. The TCP: processes share 5 with
  * console.device and round-robin with it. SANA-II driver tasks (anxwifipi
  * unit 10, receiver 5) are hardware drivers and are not on this ladder.
  */
@@ -127,11 +127,11 @@
 #error "the TCP: processes must outrank normal programs"
 #endif
 #if defined(TX_AMIGA_TIMER_PRIORITY)
-#if TX_AMIGA_TIMER_PRIORITY >= AMI_EXEC_INPUT_PRIORITY
-#error "the tick must stay below input.device"
+#if TX_AMIGA_TIMER_PRIORITY >= AMI_EXEC_HANDLER_PRIORITY
+#error "the tick must stay below the filesystem handlers and input.device"
 #endif
-#if TX_AMIGA_TIMER_PRIORITY <= AMI_EXEC_HANDLER_PRIORITY
-#error "the tick must outrank the filesystem handlers and disk drivers"
+#if TX_AMIGA_TIMER_PRIORITY <= AMI_EXEC_TCP_PRIORITY
+#error "the tick must outrank the TCP: processes"
 #endif
 #if TX_AMIGA_HANDOFF_PRIORITY >= AMI_EXEC_TCP_PRIORITY
 #error "the ThreadX band must stay below the TCP: processes"
