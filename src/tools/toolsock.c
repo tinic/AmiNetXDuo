@@ -1427,6 +1427,7 @@ const char *tool_sock_errstr(LONG err)
         case TOOL_EPIPE:         return "broken pipe";
         case TOOL_EWOULDBLOCK:   return "would block";
         case TOOL_EINPROGRESS:   return "in progress";
+        case TOOL_EAFNOSUPPORT:  return "address family not supported";
         case TOOL_EADDRINUSE:    return "address already in use";
         case TOOL_ENETUNREACH:   return "network unreachable";
         case TOOL_ECONNRESET:    return "connection reset by peer";
