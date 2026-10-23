@@ -418,17 +418,19 @@ void    _tx_amiga_start_interrupts(void);
 #endif
 #endif
 
-/* Exec priority of the periodic tick Task: 19, one below input.device and
-   above the filesystem handlers, disk drivers (10) and card.resource (15).
-   It must outrank every ThreadX task so that it preempts the baton holder,
-   and a busy handler or disk driver must not starve the wheel.  Strictly
-   below input.device, so input preempts it between ticks: Exec does not
-   preempt for an equal priority.  One service holds the machine for about
-   TX_AMIGA_TIMER_BUDGET_MS, one Forbid() per tick.  Ladder asserted in
-   src/thread_priorities.h.  */
+/* Exec priority of the periodic tick Task.  Above every ThreadX task, so that
+   it preempts the baton holder; below the filesystem handlers and disk
+   drivers (10) and input.device (20), so a tick burst never delays a pointer
+   move or a disk request, and below Poseidon and AHI (10-19): with the
+   tick at 19, USB audio playback hangs on start (#353).  It may outrank
+   console.device, trackdisk.device and IDE drivers (5-6): one service
+   holds the machine for about TX_AMIGA_TIMER_BUDGET_MS.  Each tick is its
+   own Forbid(), so a task above the tick waits at most one tick; measured
+   ticks cost 20-170 us, but timer callbacks set the real cost.  Ladder
+   asserted in src/thread_priorities.h.  */
 
 #ifndef TX_AMIGA_TIMER_PRIORITY
-#define TX_AMIGA_TIMER_PRIORITY                 19
+#define TX_AMIGA_TIMER_PRIORITY                 9
 #endif
 
 /* ----------------------------------------------------------- the tick ---- */
