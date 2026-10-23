@@ -569,24 +569,32 @@ static VOID ami_sana2_tx_pad(AmiSana2If *iface, AmiTxSlot *slot,
     slot->pad_len                 = (UWORD)pad;
 }
 
+/*
+ * A slot and the launcher flag, or NULL when the write must queue: writes are
+ * waiting, another task is launching, or the ring is full.  One Forbid()
+ * section, so no direct launch overtakes a write the kick has dequeued and not
+ * yet started (#354: the reader's reap kicks outside nx_ip_protection).
+ * Reachable from the IP thread, the reader and any thread inside
+ * nx_tcp_socket_send.  Forbid() rather than Disable(): long Disable() regions
+ * break serial, floppy and audio.
+ */
 static AmiTxSlot *ami_sana2_tx_claim(AmiSana2If *iface)
 {
     AmiTxSlot *slot = NULL;
     UWORD      i;
 
-    /*
-     * Reachable from the IP thread and from any thread inside
-     * nx_tcp_socket_send.  Forbid() rather than Disable(): long Disable()
-     * regions break serial, floppy and audio.
-     */
     Forbid();
-    for (i = 0; i < iface->tx_slots; i++)
+    if (!iface->tx_kicking && iface->tx_pend_count == 0)
     {
-        if (!iface->tx[i].busy)
+        for (i = 0; i < iface->tx_slots; i++)
         {
-            iface->tx[i].busy = TRUE;
-            slot = &iface->tx[i];
-            break;
+            if (!iface->tx[i].busy)
+            {
+                iface->tx[i].busy = TRUE;
+                iface->tx_kicking = TRUE;
+                slot = &iface->tx[i];
+                break;
+            }
         }
     }
     Permit();
@@ -838,6 +846,7 @@ UINT ami_sana2_tx_send_now(AmiSana2If *iface, NX_PACKET *packet,
                            UWORD ether_type, ULONG dst_msw, ULONG dst_lsw)
 {
     AmiTxSlot *slot;
+    UINT       rc;
 #ifdef AMINETXDUO_RXPROBE
     ULONG probe_t0 = ami_budget_clock();
     ULONG probe_t1;
@@ -873,11 +882,7 @@ UINT ami_sana2_tx_send_now(AmiSana2If *iface, NX_PACKET *packet,
      * full too: the write waits its turn and the completion that frees a
      * slot launches it.
      */
-    if (iface->tx_pend_count != 0)
-        slot = NULL;
-    else
-        slot = ami_sana2_tx_claim(iface);
-
+    slot = ami_sana2_tx_claim(iface);
     if (slot == NULL)
     {
         if (!ami_sana2_tx_enqueue(iface, packet, ether_type, dst_msw, dst_lsw))
@@ -893,8 +898,16 @@ UINT ami_sana2_tx_send_now(AmiSana2If *iface, NX_PACKET *packet,
         return NX_SUCCESS;
     }
 
-    return ami_sana2_tx_launch(iface, slot, packet, ether_type, dst_msw,
-                               dst_lsw);
+    rc = ami_sana2_tx_launch(iface, slot, packet, ether_type, dst_msw,
+                             dst_lsw);
+
+    /* A write that queued behind this launch found the flag held and left
+       its kick to the holder. */
+    iface->tx_kicking = FALSE;
+    if (iface->tx_pend_count != 0)
+        ami_sana2_tx_kick(iface);
+
+    return rc;
 }
 
 #ifdef AMINETXDUO_BPF
