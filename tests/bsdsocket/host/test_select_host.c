@@ -384,6 +384,13 @@ UINT _nxe_udp_socket_icmp_error_notify(NX_UDP_SOCKET *socket_ptr,
     (VOID)socket_ptr; (VOID)fn; h.notifies++; return NX_SUCCESS;
 }
 
+/* The connect() wake: no socket here has a waiter, so never reached. */
+UINT _txe_thread_wait_abort(TX_THREAD *thread_ptr)
+{
+    (void)thread_ptr;
+    abort();
+}
+
 UINT _nxe_tcp_server_socket_accept(NX_TCP_SOCKET *socket_ptr, ULONG wait_option)
 {
     (VOID)socket_ptr; (VOID)wait_option;
