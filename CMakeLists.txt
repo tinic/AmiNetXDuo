@@ -1880,6 +1880,10 @@ add_subdirectory(src/rfb)
 # above a 68020 has a usable cycle model.  tools/profiler/CMakeLists.txt.
 add_subdirectory(tools/profiler)
 
+# forbidrec, every Forbid()/Disable() hold on a running machine, with its
+# workload.  Instruments, not shipped.  tools/forbidrec/CMakeLists.txt.
+add_subdirectory(tools/forbidrec)
+
 if(CMAKE_CROSSCOMPILING)
     # The archive needs substantially less than the default ALL target, which
     # also compiles every on-Amiga harness and benchmark.  Keep the payload

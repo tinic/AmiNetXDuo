@@ -161,6 +161,13 @@ UINT _nxe_tcp_socket_state_wait(NX_TCP_SOCKET *s, UINT state, ULONG wait)
 { (VOID)s; (VOID)state; (VOID)wait; abort(); }
 UINT _nxe_packet_release(NX_PACKET **p) { (VOID)p; abort(); }
 ULONG ami_millis(VOID) { return 0; }
+/* connect()'s ephemeral port: linked, never reached. */
+UINT _nxe_tcp_free_port_find(NX_IP *ip, UINT port, UINT *free_port)
+{ (VOID)ip; (VOID)port; (VOID)free_port; abort(); }
+ULONG _nx_tcp_syncache_hash(ULONG *key, ULONG *words, UINT word_count)
+{ (VOID)key; (VOID)words; (VOID)word_count; abort(); }
+VOID ami_random_bytes(APTR buffer, ULONG length) { (VOID)buffer; (VOID)length; abort(); }
+ULONG ami_random_ulong(VOID) { abort(); }
 UINT bsd_wait_sliced(struct AmiSocketBase *base, ULONG wait,
                      BsdSlicedCall call, VOID *arg, BOOL *aborted)
 { (VOID)base; (VOID)wait; (VOID)call; (VOID)arg; (VOID)aborted; abort(); }

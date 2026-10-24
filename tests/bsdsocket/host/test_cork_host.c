@@ -376,6 +376,13 @@ UINT _tx_thread_sleep(ULONG timer_ticks)
     return TX_SUCCESS;
 }
 
+/* The connect() wake (select.c): nothing here connects, so never reached. */
+UINT _txe_thread_wait_abort(TX_THREAD *thread_ptr)
+{
+    (void)thread_ptr;
+    abort();
+}
+
 UINT _txe_timer_create(TX_TIMER *timer_ptr, CHAR *name_ptr,
                        VOID (*expiration_function)(ULONG input),
                        ULONG expiration_input, ULONG initial_ticks,
