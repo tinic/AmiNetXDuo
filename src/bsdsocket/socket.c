@@ -2498,11 +2498,27 @@ static UINT bsd_connect_once(VOID *arg, ULONG wait)
     BsdConnectArgs *a    = (BsdConnectArgs *)arg;
     AmiSocket      *sock = a->sock;
 
-    /* Judged by nx_tcp_socket_state and ASF_CONNECTED, tested immediately
-       below: the wait returning NX_NOT_CONNECTED and the state not being
-       ESTABLISHED are the same fact, and the state is the one that decides. */
-    AMI_NX_BY_OUTPUT(nx_tcp_socket_state_wait(&sock->as_Nx.tcp,
-                                              NX_TCP_ESTABLISHED, wait));
+    /* Asleep until the establish or disconnect notify wakes it
+       (bsd_connect_wake), not nx_tcp_socket_state_wait(): that polls a tick
+       at a time, and waits for ESTABLISHED exactly, so a peer that closes at
+       once has the socket in CLOSE_WAIT before it looks and the whole slice
+       ran out, 200 ms and more per connect().  The baton holds the IP thread
+       off between the test and the sleep, so no wake falls in that gap.  A
+       slice is a second at most, so a wake that never comes costs one. */
+    while (wait != NX_NO_WAIT &&
+           (sock->as_Flags & (ASF_CONNECTED | ASF_CONNECTING)) == ASF_CONNECTING)
+    {
+        ULONG slice = (wait < NX_IP_PERIODIC_RATE) ? wait : NX_IP_PERIODIC_RATE;
+
+        sock->as_ConnectWaiter = tx_thread_identify();
+        /* TX_SUCCESS, the slice ran out, or TX_WAIT_ABORTED, a notify woke
+           it: the flags tested by the loop say which. */
+        AMI_NX_EITHER_WAY(tx_thread_sleep(slice));
+        sock->as_ConnectWaiter = TX_NULL;
+
+        if (wait != NX_WAIT_FOREVER)
+            wait -= slice;
+    }
 
     if ((sock->as_Flags & ASF_CONNECTED) != 0 ||
         sock->as_Nx.tcp.nx_tcp_socket_state == NX_TCP_ESTABLISHED)
@@ -3115,6 +3131,58 @@ static LONG bsd_tcp_source_check(struct AmiSocketBase *SocketBase,
     return 0;
 }
 
+/*
+ * connect()'s ephemeral port: RFC 6056 3.3.3, Algorithm 3, a keyed offset
+ * per destination plus one counter, so a destination sees a port again only
+ * after the whole range has gone by.  NetX picks one at random, and at tens
+ * of connections a second a random port lands every few dozen connects on
+ * one the peer still holds in TIME_WAIT: Linux answers that SYN with an ACK,
+ * the stack resets, and connect() waits out the one-second SYN retransmit.
+ * The key is HalfSipHash's, the SYN cache's hash.  NX_ANY_PORT when nothing
+ * in the range is free, which leaves the failure to the bind.
+ */
+static UINT bsd_tcp_ephemeral_port(NX_IP *ip, const NXD_ADDRESS *addr,
+                                   UINT port)
+{
+    static ULONG key[2];
+    static ULONG next;
+    ULONG        words[5];
+    UINT         words_n = 0;
+    UINT         found;
+
+    if (ip == NULL)
+        return NX_ANY_PORT;
+
+    if (key[0] == 0 && key[1] == 0)
+    {
+        ami_random_bytes(key, sizeof(key));
+        next = ami_random_ulong();
+    }
+
+#ifdef AMINETXDUO_IPV6
+    if (addr->nxd_ip_version == NX_IP_VERSION_V6)
+    {
+        words[0] = addr->nxd_ip_address.v6[0];
+        words[1] = addr->nxd_ip_address.v6[1];
+        words[2] = addr->nxd_ip_address.v6[2];
+        words[3] = addr->nxd_ip_address.v6[3];
+        words_n  = 4;
+    }
+    else
+#endif
+        words[words_n++] = addr->nxd_ip_address.v4;
+    words[words_n++] = (ULONG)port;
+
+    found = NX_SEARCH_PORT_START +
+            (UINT)((_nx_tcp_syncache_hash(key, words, words_n) + next++) %
+                   ((NX_MAX_PORT + 1) - NX_SEARCH_PORT_START));
+
+    if (nx_tcp_free_port_find(ip, found, &found) != NX_SUCCESS)
+        return NX_ANY_PORT;
+
+    return found;
+}
+
 /* The body of connect(), run inside a ThreadX context bracket. */
 static LONG bsd_connect_locked(struct AmiSocketBase *SocketBase,
                                AmiSocket *sock, const NXD_ADDRESS *addr,
@@ -3196,7 +3264,9 @@ static LONG bsd_connect_locked(struct AmiSocketBase *SocketBase,
     {
         status = nx_tcp_client_socket_bind(
             &sock->as_Nx.tcp,
-            (sock->as_LocalPort != 0) ? sock->as_LocalPort : NX_ANY_PORT,
+            (sock->as_LocalPort != 0)
+                ? sock->as_LocalPort
+                : bsd_tcp_ephemeral_port(bsd_stack_ip(SocketBase), addr, port),
             NX_NO_WAIT);
         if (status != NX_SUCCESS)
             return bsd_fail(SocketBase, bsd_errno_from_nx(status));

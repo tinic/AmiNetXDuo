@@ -6,6 +6,7 @@
 
 #include "bsdsocket_vectors.h"
 #include "aminetxduo/budget.h"
+#include "aminetxduo/nxstatus.h"
 #include "connfail.h"
 
 #include <proto/exec.h>
@@ -116,6 +117,18 @@ VOID bsd_tcp_disconnect_callback(NX_TCP_SOCKET *socket_ptr)
 }
 
 /*
+ * A blocking connect() asleep in bsd_connect_once() is told the flags moved.
+ * Runs on the IP thread, which holds the baton, so the waiter is asleep.
+ */
+static VOID bsd_connect_wake(AmiSocket *sock)
+{
+    if (sock->as_ConnectWaiter != TX_NULL)
+        /* TX_SUCCESS, or TX_WAIT_ABORT_ERROR if the slice ended first:
+           either way it is awake. */
+        AMI_NX_EITHER_WAY(tx_thread_wait_abort(sock->as_ConnectWaiter));
+}
+
+/*
  * The three-way handshake finished.
  */
 static VOID bsd_tcp_establish_notify(NX_TCP_SOCKET *socket_ptr)
@@ -127,6 +140,7 @@ static VOID bsd_tcp_establish_notify(NX_TCP_SOCKET *socket_ptr)
 
     sock->as_Flags &= ~ASF_CONNECTING;
     sock->as_Flags |= ASF_CONNECTED;
+    bsd_connect_wake(sock);
 
     /* A socket still parked on a listen port belongs to its listener. The
        application selects on the listener, not on the parked socket.  Its
@@ -176,6 +190,7 @@ static VOID bsd_tcp_disconnect_complete_notify(NX_TCP_SOCKET *socket_ptr)
           : bsd_connect_ladder_spent(&sock->as_Nx.tcp)
                 ? AMI_ETIMEDOUT
                 : AMI_ECONNREFUSED;
+        bsd_connect_wake(sock);
         bsd_event_post(sock, FD_CONNECT | FD_ERROR | FD_WRITE);
         return;
     }

@@ -499,6 +499,7 @@ typedef struct AmiSocket
     ULONG                   as_EventMask;   /* SO_EVENTMASK                  */
     LONG                    as_SoError;     /* SO_ERROR, cleared when read   */
     ULONG                   as_ConnectMillis; /* ami_millis() at the SYN     */
+    TX_THREAD              *as_ConnectWaiter; /* asleep in connect()         */
     /* What the window settle chose before the card bounded it, and the
        round trip it chose for: kept so a change in what the card holds can
        be applied to the live connection (socket.c, bsd_tcp_window_recap).
