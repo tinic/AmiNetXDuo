@@ -1001,6 +1001,30 @@ static UINT cache_case(void)
     eq("unlisten empties the queue", cache -> nx_tcp_syncache_accept_count, 0);
     eq("and resets every peer waiting on it", (unsigned long) stub_rsts, 7);
 
+#ifdef NX_TCP_SYNCACHE_DEFERRED_MAXIMUM
+    /* More clients than the backlog and no socket parked: the SYNs are held
+       up to NX_TCP_SYNCACHE_DEFERRED_MAXIMUM rather than pushed out at the
+       backlog, and a socket parked later goes to the oldest whose client is
+       still repeating its SYN, not to one that has gone quiet.  */
+    rig_reset();
+    for (i = 0; i < 20; i++)
+    {
+        (void) rig_syn(5000 + i, 0x8000 + i);
+    }
+    eq("twenty SYNs held past a backlog of eight", cache -> nx_tcp_syncache_count, 20);
+    eq("and none answered", (unsigned long) stub_synacks, 0);
+
+    host_now += 2 * NX_IP_PERIODIC_RATE;
+    (void) rig_syn(5007, 0x8007);
+    eq("a repeated SYN takes no entry of its own", cache -> nx_tcp_syncache_count, 20);
+
+    rig_listen.nx_tcp_listen_socket_ptr = &rig_socket;
+    _nx_tcp_syncache_answer_deferred(&rig_ip, &rig_listen);
+    eq("a parked socket answers one", (unsigned long) stub_synacks, 1);
+    ok("the client still trying, not the oldest",
+       rig_ack(5007, 0x8007, stub_last_seq) == NX_TRUE && rig_awaiting_accept(&rig_socket, 5007));
+#endif /* NX_TCP_SYNCACHE_DEFERRED_MAXIMUM */
+
     rig_reset();
     rig_listen.nx_tcp_listen_rx_window = 65536 * 4;      /* needs a scale */
 

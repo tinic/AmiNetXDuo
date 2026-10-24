@@ -71,13 +71,17 @@ BUDGETS=(
     # +152 default and fat / +76 minimal / +40 micro on 2026-10-19 (#306):
     # 38 bytes per NX_DHCP interface record for the last REQUEST's option 54
     # checkpoints, its two indexes, 8 bytes as written and 24 before the send.
-    "default:69148"
+    # +20,384 default and fat on 2026-10-24: the SYN cache at 256 entries
+    # (CMakeLists.txt, AMINETXDUO_TCP_SYNCACHE), 23,376 bytes against 2,992
+    # at 32, so a listening port can hold SYNs past its backlog without
+    # filling it.  Minimal and micro keep 32.
+    "default:89532"
     "minimal:18092"
     # First budgeted as a shipping profile at 0.28.9: 15,716 bytes, with
     # headroom to the next KiB boundary.
     "micro:16480"
     # The full stack's options, so the full stack's budget.
-    "fat:69148"
+    "fat:89532"
 )
 
 budget=""

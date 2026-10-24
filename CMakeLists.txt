@@ -437,40 +437,32 @@ set(AMINETXDUO_DNS_PACKETS "4" CACHE STRING
 add_compile_definitions(
     "NX_DNS_PACKET_POOL_SIZE=(${AMINETXDUO_DNS_PACKETS}*(NX_DNS_PACKET_PAYLOAD+sizeof(NX_PACKET)))")
 
-# Half-open connections held with their options recorded exactly.
+# Half-open connections held with their options recorded exactly, and the
+# SYNs a listening port holds unanswered while every parked socket is taken
+# (NX_TCP_SYNCACHE_DEFERRED_MAXIMUM, half of this, port/netxduo-amiga/inc/
+# nx_user.h).  Past the cache the SYN cookie takes over and rebuilds the
+# connection from the sequence number it echoes, carrying the MSS, window
+# scale, SACK and timestamp options with it (nx_api.h says so at length).
 #
-# NetX Duo's own number is 512, chosen against the four megabytes this project
-# targets, and it is 37,376 of the 37,612 bytes an NX_IP instance occupies --
-# 99 per cent of it.  The minimal drawer is what the Installer offers a ONE
-# megabyte machine, and 37 KB of half-open connection slots on a machine that
-# will never see eight at once is the wrong shape entirely.
-#
-# It is not a limit on connections.  Past the cache the SYN cookie takes over
-# and rebuilds the connection from the sequence number it echoes, carrying the
-# MSS, window scale, SACK and timestamp options with it (nx_api.h says so at
-# length).  A smaller cache costs option fidelity under a flood and nothing
-# else.
+# The held SYNs are why the size is more than option fidelity.  A cookie is
+# answered whether or not a socket is parked, so a cache full of held SYNs
+# answers every new one, finishes it into a full accept queue and resets it:
+# 128 held SYNs in 32 entries had 64 clients on an Amiberry A1200 driving 170
+# handshakes a second while the server accepted 2.
 #
 # Buckets are a quarter of the entries, which is NetX Duo's own ratio.
 #
-# 32 rather than NetX Duo's 512.  Measured sizeof(NX_IP.nx_ip_tcp_syncache),
-# and what each costs in the one AmiNetStack allocation:
+# Measured sizeof(NX_IP.nx_ip_tcp_syncache), 2026-10-24:
 #
-#     entries   syncache   AmiNetStack
-#         512     37,376        83,460
-#         128     10,192        56,276
-#          64      5,136        51,220
-#          32      2,608        48,692     <- ships
-#          16      1,344        47,428
+#     entries   syncache
+#         256      23,376     <- ships
+#          32       2,992
 #
-# 512 sizes itself against four megabytes in NetX Duo's own comment; the
-# smallest machine measured here is a 2 MB A1200 with 1.2 MB free.  Overflow
-# is not a ceiling -- past the cache the cookie takes over, and a smaller
-# cache costs option fidelity under a flood and nothing else.  Both drawers
-# ship 32.  tests/syncache/ inherits this define, so it always runs against
-# whatever ships; it was checked by hand at 32, 128 and 512.
-set(AMINETXDUO_TCP_SYNCACHE "32" CACHE STRING
-    "Half-open connections cached with exact options (32 ships)")
+# The minimal and micro presets pin 32 (CMakePresets.json), which holds 16
+# SYNs.  tests/syncache/ inherits this define, so it always runs against
+# whatever ships.
+set(AMINETXDUO_TCP_SYNCACHE "256" CACHE STRING
+    "Half-open connections cached with exact options (256 ships)")
 if(NOT AMINETXDUO_TCP_SYNCACHE EQUAL 512)
     math(EXPR _anxd_syncache_buckets "${AMINETXDUO_TCP_SYNCACHE} / 4")
     if(_anxd_syncache_buckets LESS 1)
