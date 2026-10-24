@@ -99,7 +99,9 @@ int main(void)
 
         if (mode[0] == 'd')
         {
-            sprintf(name, "fr%08lx%lu.example.com", (ULONG)FindTask(NULL) ^ d1.ds_Tick, n);
+            sprintf(name, "fr%08lx%lu.example.com",
+                    (unsigned long)((ULONG)FindTask(NULL) ^ (ULONG)d1.ds_Tick),
+                    (unsigned long)n);
             if (gethostbyname((STRPTR)name)) ok++; else fail++;
         }
         else if (mode[0] == 'u')

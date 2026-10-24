@@ -689,7 +689,7 @@ static void scan_list(struct List *l)
                 tg = (ULONG)(e + 1) + (LONG)(WORD)e[1];
             else
                 continue;
-            if (tg >= (ULONG)blob && tg < (ULONG)blob + (fr_blob_end - fr_blob_start))
+            if (tg >= (ULONG)blob && tg < (ULONG)blob + ((ULONG)fr_blob_end - (ULONG)fr_blob_start))
                 continue;
             lvo[nlvo].target = tg;
             lvo[nlvo].mod    = m;
@@ -763,7 +763,7 @@ static void scan_libs(void)
     nrng = keep;
     nlibrng = 0;
     nlvo = 0;
-    add_rng((ULONG)blob, (ULONG)blob + (fr_blob_end - fr_blob_start),
+    add_rng((ULONG)blob, (ULONG)blob + ((ULONG)fr_blob_end - (ULONG)fr_blob_start),
             mod_id("forbidrec.stub"), 0, RK_STUB);
     /* Kickstart modules by their romtags: an LVO near a ROM PC can belong
        to a module whose jump table points somewhere else entirely. */
@@ -1102,7 +1102,7 @@ static const struct Patch patches[] = {
 
 static ULONG entry(const UBYTE *stub)
 {
-    return (ULONG)blob + (stub - fr_blob_start);
+    return (ULONG)blob + ((ULONG)stub - (ULONG)fr_blob_start);
 }
 
 int main(void)
@@ -1114,7 +1114,7 @@ int main(void)
     ULONG         secs = 0, thr_us = 2000, rate = 4700, ehz, phase = 1, ge = 0, t_start, i;
     BOOL          sampler, st_ok = TRUE, chained = FALSE;
     const char   *serr = NULL;
-    ULONG         blobsize = fr_blob_end - fr_blob_start;
+    ULONG         blobsize = (ULONG)fr_blob_end - (ULONG)fr_blob_start;
     int           rc = 0;
 
     rd = ReadArgs((CONST_STRPTR)template, args, NULL);
@@ -1188,7 +1188,7 @@ int main(void)
         return 20;
     }
     CopyMem(fr_blob_start, blob, blobsize);
-    bdata = (volatile ULONG *)(blob + (fr_data - fr_blob_start));
+    bdata = (volatile ULONG *)(blob + ((ULONG)fr_data - (ULONG)fr_blob_start));
     bdata[D_CF] = (ULONG)fr_cf;    bdata[D_CP] = (ULONG)fr_cp;
     bdata[D_CD] = (ULONG)fr_cd;    bdata[D_CE] = (ULONG)fr_ce;
     bdata[D_CWPRE] = (ULONG)fr_wpre; bdata[D_CWPOST] = (ULONG)fr_wpost;

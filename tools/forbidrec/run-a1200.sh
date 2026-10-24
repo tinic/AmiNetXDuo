@@ -96,13 +96,13 @@ peer() { ssh -o BatchMode=yes "$PEER" "$@"; }
 
 ph_base()    { :; }
 ph_tcp_in()  { peer "$LH churn $AMIGA 80 $SECS 64" & peer "$LH churn $AMIGA 80 $SECS 4 get" & }
-ph_tcp_out() { peer "cd $RDIR/www && timeout $((SECS + 15)) python3 -m http.server 47002 >/dev/null 2>&1" &
-               peer "$LH acceptclose 47001 $((SECS + 10))" &
+ph_tcp_out() { peer "cd $RDIR/www && timeout $((SECS + 15)) python3 -m http.server --bind $PEERADDR 47002 >/dev/null 2>&1" &
+               peer "$LH acceptclose $PEERADDR 47001 $((SECS + 10))" &
                sleep 2
                amiga "run >NIL: RAM:frload MODE=connect HOST=$PEERADDR PORT=47001 SECS=$SECS TO=RAM:fr-conn1.log"
                amiga "run >NIL: RAM:frload MODE=connect HOST=$PEERADDR PORT=47001 SECS=$SECS TO=RAM:fr-conn2.log"
                amiga "run >NIL: execute RAM:fr-fetch.scr"; }
-ph_udp()     { peer "$LH udpecho 47100 200 $((SECS + 10))" & peer "$LH udpin $AMIGA $SECS" &
+ph_udp()     { peer "$LH udpecho $PEERADDR 47100 200 $((SECS + 10))" & peer "$LH udpin $AMIGA $SECS" &
                sleep 2
                amiga "run >NIL: RAM:frload MODE=udp HOST=$PEERADDR PORT=47100 COUNT=200 SECS=$SECS TO=RAM:fr-udp.log"; }
 ph_dns()     { amiga "run >NIL: RAM:frload MODE=dns SECS=$SECS TO=RAM:fr-dns1.log"
