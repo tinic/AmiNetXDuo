@@ -136,6 +136,15 @@ extern struct TX_THREAD_STRUCT *_nx_ip_input_thread;
 ULONG _nx_amiga_handshake_millis(VOID);
 #define NX_TCP_SYNCACHE_CLOCK()                 _nx_amiga_handshake_millis()
 
+/* Unanswered SYNs a listening port holds while every parked socket is taken
+   (nx_tcp_syncache.c).  Bounded by the listen backlog, bsdsocket's eight,
+   the ninth client's SYN pushed the oldest out and that client waited out
+   its 1 s and 3 s retransmits: 64 clients on httpd ran 61 connections a
+   second with 512 connect timeouts a minute.  Half the cache, so held SYNs
+   leave room for the handshakes in flight; a cache they filled would answer
+   every new SYN with a cookie (CMakeLists.txt, AMINETXDUO_TCP_SYNCACHE).  */
+#define NX_TCP_SYNCACHE_DEFERRED_MAXIMUM        (NX_TCP_SYNCACHE_SIZE / 2)
+
 /* Compiles the per-socket receive-queue cap; src/bsdsocket/socket.c must size
    nx_tcp_socket_receive_queue_maximum from each socket's window or a sub-MSS
    peer pins the whole pool.  The pool-wide low watermark half stays inert. */
