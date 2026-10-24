@@ -10,6 +10,7 @@
  *   connect  TCP connect() to HOST:PORT and close, over and over
  *   sock     socket()/bind()/listen()/CloseSocket(), TCP and UDP in turn
  *   arp      one datagram each to NET.FIRST .. NET.FIRST+COUNT-1, port 9
+ *   accept   listen on PORT with a backlog of COUNT; accept and close
  *
  * One key=value line at the end; exit 0 when anything succeeded.
  *
@@ -21,6 +22,8 @@
 #include <proto/exec.h>
 #include <proto/dos.h>
 #include <proto/bsdsocket.h>
+#include <proto/timer.h>
+#include <devices/timer.h>
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <netinet/in.h>
@@ -33,6 +36,23 @@ static FILE *out;
 #include <string.h>
 
 struct Library *SocketBase;
+struct Device  *TimerBase;
+static struct timerequest tr;
+
+/* Microseconds on the E-clock, for the connect and close split; 0 without
+   timer.device. */
+static ULONG usec(void)
+{
+    static ULONG       freq;
+    struct EClockVal   e;
+    unsigned long long t;
+
+    if (!TimerBase)
+        return 0;
+    freq = ReadEClock(&e);
+    t    = ((unsigned long long)e.ev_hi << 32) | e.ev_lo;
+    return (ULONG)(t * 1000000ULL / freq);
+}
 
 static ULONG ip4(const char *s)
 {
@@ -64,6 +84,7 @@ int main(void)
     const char    *mode;
     ULONG          secs = 30, port = 9, first = 200, count = 50, host = 0, net = 0;
     ULONG          ok = 0, fail = 0, replies = 0, n = 0;
+    ULONG          conn_us = 0, close_us = 0, conn_max = 0;
     struct DateStamp d0, d1;
     LONG           el;
     char           name[64];
@@ -86,6 +107,9 @@ int main(void)
 
     SocketBase = OpenLibrary((CONST_STRPTR)"bsdsocket.library", 4);
     if (!SocketBase) { printf("frload result=no_bsdsocket\n"); FreeArgs(rd); return 20; }
+
+    if (OpenDevice((CONST_STRPTR)TIMERNAME, UNIT_ECLOCK, (struct IORequest *)&tr, 0) == 0)
+        TimerBase = tr.tr_node.io_Device;
 
     DateStamp(&d0);
     for (;;)
@@ -136,10 +160,17 @@ int main(void)
             struct sockaddr_in a;
             LONG               s = socket(AF_INET, SOCK_STREAM, 0);
 
+            ULONG              t0, t1;
+
             if (s < 0) { fail++; continue; }
             sin_set(&a, host, (UWORD)port);
+            t0 = usec();
             if (connect(s, (struct sockaddr *)&a, sizeof(a)) == 0) ok++; else fail++;
+            t1 = usec();
             CloseSocket(s);
+            close_us += usec() - t1;
+            conn_us  += t1 - t0;
+            if (t1 - t0 > conn_max) conn_max = t1 - t0;
         }
         else if (mode[0] == 's')
         {
@@ -154,6 +185,40 @@ int main(void)
             else
                 fail++;
             CloseSocket(s);
+        }
+        else if (mode[0] == 'a' && mode[1] == 'c')
+        {
+            static LONG        ls = -1;
+            struct sockaddr_in a;
+            socklen_t          alen = sizeof(a);
+            fd_set             r;
+            struct timeval     tv;
+            ULONG              sig = SIGBREAKF_CTRL_C;
+            LONG               c;
+
+            if (ls < 0)
+            {
+                LONG one = 1;
+
+                if ((ls = socket(AF_INET, SOCK_STREAM, 0)) < 0) { fail++; break; }
+                setsockopt(ls, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+                sin_set(&a, 0, (UWORD)port);
+                if (bind(ls, (struct sockaddr *)&a, sizeof(a)) != 0 ||
+                    listen(ls, (LONG)count) != 0)
+                {
+                    fail++;
+                    break;
+                }
+            }
+            tv.tv_sec  = 1;
+            tv.tv_usec = 0;
+            FD_ZERO(&r);
+            FD_SET(ls, &r);
+            if (WaitSelect(ls + 1, &r, NULL, NULL, &tv, &sig) <= 0)
+                continue;
+            replies++;  /* wakes */
+            c = accept(ls, (struct sockaddr *)&a, &alen);
+            if (c >= 0) { ok++; CloseSocket(c); } else fail++;
         }
         else if (mode[0] == 'a')
         {
@@ -174,8 +239,14 @@ int main(void)
             break;
         }
     }
-    printf("frload mode=%s secs=%ld ops=%lu ok=%lu fail=%lu replies=%lu per_s=%lu\n", mode,
+    printf("frload mode=%s secs=%ld ops=%lu ok=%lu fail=%lu replies=%lu per_s=%lu", mode,
            el, n, ok, fail, replies, el ? (ok + fail) / (ULONG)el : 0);
+    if (mode[0] == 'c' && n)
+        printf(" connect_us_avg=%lu connect_us_max=%lu close_us_avg=%lu", conn_us / n,
+               conn_max, close_us / n);
+    printf("\n");
+    if (TimerBase)
+        CloseDevice((struct IORequest *)&tr);
     CloseLibrary(SocketBase);
     FreeArgs(rd);
     if (out)
