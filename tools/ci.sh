@@ -517,7 +517,8 @@ host_test_targets() { # builddir
 #      ownership without mistaking a valid recycled pool slot for the orphan.
 #      575 with addrinfo_dns_policy: default IPv4 LAN DNS query policy and
 #      source-aware ordering of A/AAAA answers (x86_64 shim only).
-HOST_TESTS_EXPECTED=575
+#      576 with rx_assist_ownership: optional receive stack lifetime (x86_64).
+HOST_TESTS_EXPECTED=576
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,
@@ -530,17 +531,17 @@ case "$(uname -m)" in
     # test_unbracketed_close (F-059), test_raw_hdrincl6 (F-061),
     # test_deferred_release (F-059), test_hostsource (F-088),
     # test_raw_v6_lock (N-036), test_netstatus_order (N-077), and
-    # test_addrinfo_dns, all
+    # test_addrinfo_dns and test_rx_assist, all
     # x86_64-only for
     # the reason in
     # tests/bsdsocket/CMakeLists.txt:
     # elsewhere the host's LONG is eight bytes and no structure in them has
     # the target's shape.
     # Subtract the x86_64-only bsdsocket fixtures here.
-    *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 31)) ;;
+    *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 32)) ;;
 esac
 # The conflict-drain fixture uses Linux's MAP_32BIT, not merely x86_64.
-# Darwin arm64 registers 543; Darwin x86_64 registers 574 on this tree.
+# Darwin arm64 registers 543; Darwin x86_64 registers 575 on this tree.
 case "$(uname -s):$(uname -m)" in
     Linux:x86_64|Linux:amd64) ;;
     *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 1)) ;;

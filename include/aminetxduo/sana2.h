@@ -125,6 +125,13 @@ UWORD       ami_sana2_retained_sweep(BOOL release_packets);
 /* Register with an NX_IP as interface `index`. Sets additional_link_info. */
 LONG        ami_sana2_attach(AmiSana2If *iface, NX_IP *ip, UINT index);
 
+/* Optional caller service: already in ThreadX, on a reader-sized stack.
+   Never waits for the IP mutex or device I/O. The budget is shared across
+   interfaces and capped at 32; one indivisible batch may exceed it by at
+   most 31 frames. This bounds work, not elapsed time. */
+UWORD       ami_sana2_rx_assist(NX_IP *ip, UWORD budget);
+ULONG       ami_sana2_rx_assist_stack_size(VOID);
+
 /* Hardware facts, valid after ami_sana2_open(). */
 VOID        ami_sana2_get_mac(const AmiSana2If *iface, UCHAR mac[AMI_ETH_ADDR_SIZE]);
 ULONG       ami_sana2_get_mtu(const AmiSana2If *iface);

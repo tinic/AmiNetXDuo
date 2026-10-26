@@ -491,6 +491,15 @@ if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
 
     add_test(NAME select_readiness COMMAND test_select)
 
+    add_executable(test_rx_assist host/test_rx_assist_host.c)
+    get_target_property(_rx_assist_inc test_select INCLUDE_DIRECTORIES)
+    target_include_directories(test_rx_assist PRIVATE ${_rx_assist_inc})
+    target_compile_options(test_rx_assist PRIVATE
+        -include "${CMAKE_CURRENT_SOURCE_DIR}/host/shim/host_prelude.h")
+    target_compile_definitions(test_rx_assist PRIVATE NX_INCLUDE_USER_DEFINE_FILE)
+    add_test(NAME rx_assist_ownership COMMAND test_rx_assist)
+
+
     # rxdirect.c, the completer that runs inside the TCP receive notify.  It
     # is compiled unconditionally here even though the shipping default is
     # -DAMINETXDUO_RX_DIRECT_COMPLETE=OFF: an option nothing builds is an

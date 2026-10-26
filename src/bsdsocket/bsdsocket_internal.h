@@ -287,6 +287,7 @@ struct AmiSocketBase
     BsdFdSets               sb_SelReady;   /* and its result sets    */
     LONG                    sb_NxNest;      /* bracket depth, 0 == outside   */
     struct Task            *sb_NxTask;      /* who holds it; NULL == outside */
+    struct BsdRxAssist      *sb_RxAssist;    /* lazy, private receive stack   */
 
 
 #ifdef AMINETXDUO_NXCENSUS
@@ -751,6 +752,9 @@ VOID  bsd_nx_leave(struct AmiSocketBase *base);
 /* Drop the base's cached ThreadX registration. Teardown only, no bracket open.
    See netx_call.c for what is cached and why. */
 VOID  bsd_nx_release(struct AmiSocketBase *base);
+/* Optional queued receive work inside the owning outer ThreadX bracket. */
+UWORD bsd_rx_assist(struct AmiSocketBase *base);
+VOID  bsd_rx_assist_release(struct AmiSocketBase *base);
 
 
 /*

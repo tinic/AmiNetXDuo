@@ -715,10 +715,11 @@ static VOID bsd_timer_arm(struct AmiSocketBase *base, ULONG secs, ULONG micro,
  */
 static LONG bsd_poll_sets(struct AmiSocketBase *base, LONG nfds,
                           const ULONG *in_read, const ULONG *in_write,
-                          const ULONG *in_except, BsdFdSets *out)
+                          const ULONG *in_except, BsdFdSets *out, BOOL assist)
 {
     LONG fd, count = 0;
     LONG words = (nfds + BSD_FD_BITS - 1) / BSD_FD_BITS;
+    BOOL watched = FALSE;
 
     if (words > BSD_FD_WORDS)
         words = BSD_FD_WORDS;
@@ -733,6 +734,7 @@ static LONG bsd_poll_sets(struct AmiSocketBase *base, LONG nfds,
     if (bsd_nx_enter(base) != 0)
         return -1;
 
+scan:
     for (fd = 0; fd < nfds; fd++)
     {
         AmiSocket *sock;
@@ -767,6 +769,7 @@ static LONG bsd_poll_sets(struct AmiSocketBase *base, LONG nfds,
 
         if (!want_read && !want_write && !want_except)
             continue;
+        watched = TRUE;
 
         sock = bsd_lookup(base, fd);
         if (sock == NULL)
@@ -796,6 +799,15 @@ static LONG bsd_poll_sets(struct AmiSocketBase *base, LONG nfds,
             out->except[word] |= mask;
             count++;
         }
+    }
+
+    /* Retry before leaving the existing bracket or publishing a result.
+       One optional pass only, and never for a blocking wait or its timeout. */
+    if (count == 0 && watched && assist)
+    {
+        assist = FALSE;
+        if (bsd_rx_assist(base) != 0)
+            goto scan;
     }
 
     bsd_nx_leave(base);
@@ -964,7 +976,7 @@ LONG bsd_WaitSelect(register LONG nfds                __asm("d0"),
         SetSignal(0, SocketBase->sb_EventSigMask);
 
         count = bsd_poll_sets(SocketBase, nfds, in_read, in_write, in_except,
-                              ready);
+                              ready, (BOOL)(poll_only && got_signals == 0));
         if (count < 0)
         {
             if (terminal_wait && SocketBase->sb_TimerArmed)
@@ -1129,7 +1141,7 @@ LONG bsd_WaitSelect(register LONG nfds                __asm("d0"),
 
             SetSignal(0, SocketBase->sb_EventSigMask);
             count = bsd_poll_sets(SocketBase, nfds, in_read, in_write,
-                                  in_except, ready);
+                                  in_except, ready, FALSE);
 
             if (count < 0)
                 return bsd_waitselect_fail(SocketBase, signals, got_signals,

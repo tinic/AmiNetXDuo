@@ -58,6 +58,9 @@ static struct
     LONG         nx_enter_result;   /* 0 succeeds, -1 is "kernel is down"    */
     ULONG        nx_enters;
     ULONG        nx_leaves;
+    ULONG        assists;
+    UWORD        assist_result;
+    AmiSocket   *assist_ready;
 
     ULONG        tcp_bytes_available;
     AmiSocket   *incoming_ready;    /* what bsd_incoming_first_ready() finds */
@@ -289,6 +292,18 @@ LONG bsd_nx_enter(struct AmiSocketBase *base)
 }
 
 VOID bsd_nx_leave(struct AmiSocketBase *base) { (VOID)base; h.nx_leaves++; }
+
+UWORD bsd_rx_assist(struct AmiSocketBase *base)
+{
+    (VOID)base;
+    h.assists++;
+    CHECK(h.nx_enters == h.nx_leaves + 1,
+          "optional readiness service stays inside the existing bracket");
+    if (h.assist_ready != NULL)
+        h.assist_ready->as_RxPending = &h_pkt[0];
+    return h.assist_result;
+}
+
 
 AmiSocket *bsd_incoming_first_ready(const AmiSocket *listener)
 {
@@ -649,6 +664,61 @@ static void t_exception(void)
     s->as_Events = FD_ERROR;
     CHECK(bsd_exception(s) == FALSE,
           "the FD_ERROR latch alone is not an exceptional condition");
+}
+
+static void t_waitselect_assist(void)
+{
+    HSets s;
+    ULONG signals;
+
+    h_reset();
+    h.assist_ready = h_tcp(0, NX_TCP_ESTABLISHED);
+    h.assist_result = 1;
+    memset(&s, 0, sizeof(s));
+    h_set(s.read, 0);
+    CHECK(bsd_WaitSelect(1, s.read, NULL, NULL, &h_poll, NULL, &h_base) == 1 &&
+          h_isset(s.read, 0), "queued service makes an empty poll readable");
+    CHECK(h.assists == 1 && h.nx_enters == 1 && h.nx_leaves == 1 &&
+          h.wait_calls == 0, "poll rescans once without another bracket or wait");
+
+    h_reset();
+    (void)h_tcp(0, NX_TCP_ESTABLISHED);
+    h.assist_result = 1; /* work for another socket, no readiness here */
+    memset(&s, 0, sizeof(s));
+    h_set(s.read, 0);
+    CHECK(bsd_WaitSelect(1, s.read, NULL, NULL, &h_poll, NULL, &h_base) == 0 &&
+          h.assists == 1 && h.wait_calls == 0,
+          "irrelevant completions do not cause repeated service or waiting");
+
+    h_reset();
+    h_tcp(0, NX_TCP_ESTABLISHED)->as_RxPending = &h_pkt[0];
+    memset(&s, 0, sizeof(s));
+    h_set(s.read, 0);
+    CHECK(bsd_WaitSelect(1, s.read, NULL, NULL, &h_poll, NULL, &h_base) == 1 &&
+          h.assists == 0, "ready polls avoid optional service");
+
+    h_reset();
+    CHECK(bsd_WaitSelect(0, NULL, NULL, NULL, &h_poll, NULL, &h_base) == 0 &&
+          h.assists == 0, "a poll watching no descriptors does no network work");
+
+    h_reset();
+    (void)h_tcp(0, NX_TCP_ESTABLISHED);
+    h.signals = signals = H_USER_SIG;
+    memset(&s, 0, sizeof(s));
+    h_set(s.read, 0);
+    CHECK(bsd_WaitSelect(1, s.read, NULL, NULL, &h_poll, &signals, &h_base) == 0 &&
+          signals == H_USER_SIG && h.assists == 0,
+          "a caller signal returns without optional service");
+
+    h_reset();
+    (void)h_tcp(0, NX_TCP_ESTABLISHED);
+    h.wait_plan[0] = H_BREAK_SIG;
+    h.wait_planned = 1;
+    memset(&s, 0, sizeof(s));
+    h_set(s.read, 0);
+    CHECK(bsd_WaitSelect(1, s.read, NULL, NULL, NULL, NULL, &h_base) == -1 &&
+          h_base.sb_Errno == AMI_EINTR && h.assists == 0,
+          "blocking readiness waits keep their normal signal path");
 }
 
 static void t_waitselect_count(void)
@@ -1485,6 +1555,7 @@ int main(void)
     t_tcp_readability();
     t_writability();
     t_exception();
+    t_waitselect_assist();
     t_waitselect_count();
     t_waitselect_refusals();
     t_waitselect_foreign_task();

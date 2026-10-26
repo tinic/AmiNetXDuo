@@ -269,6 +269,9 @@ static void h_record(NX_PACKET *packet, Destination where)
 static int h_ip_locked;
 static int h_ip_seated;
 static int h_lock_depth;
+static unsigned assist_lock_calls, assist_fail_locks, assist_pass_begin, assist_pass_end;
+static ULONG assist_last_wait;
+static AmiSana2Reader *assist_stop_during_lock;
 
 TX_THREAD *_nx_ip_input_thread;
 TX_THREAD *_tx_thread_current_ptr;
@@ -285,7 +288,15 @@ TX_THREAD *_tx_thread_identify(VOID)
 UINT _tx_mutex_get(TX_MUTEX *mutex_ptr, ULONG wait_option)
 {
     (VOID)mutex_ptr;
-    (VOID)wait_option;
+    assist_lock_calls++;
+    assist_last_wait = wait_option;
+    if (assist_stop_during_lock != NULL)
+        assist_stop_during_lock->stop = TRUE;
+    if (assist_fail_locks != 0)
+    {
+        assist_fail_locks--;
+        return TX_NOT_AVAILABLE;
+    }
     h_lock_depth++;
     return TX_SUCCESS;
 }
@@ -417,8 +428,8 @@ VOID ami_sana2_poll_overruns(AmiSana2If *iface) { (VOID)iface; }
 VOID ami_sana2_capacity_changed(AmiSana2If *iface) { (VOID)iface; }
 /* The receive pass the drain brackets (nx_tcp_receive_pass_*.c), which this
    target does not link: no TCP here. */
-VOID _nx_tcp_receive_pass_begin(NX_IP *ip_ptr) { (VOID)ip_ptr; }
-VOID _nx_tcp_receive_pass_complete(NX_IP *ip_ptr) { (VOID)ip_ptr; }
+VOID _nx_tcp_receive_pass_begin(NX_IP *ip_ptr) { (VOID)ip_ptr; assist_pass_begin++; }
+VOID _nx_tcp_receive_pass_complete(NX_IP *ip_ptr) { (VOID)ip_ptr; assist_pass_end++; }
 ULONG _tx_time_get(VOID) { return 0; }
 UWORD ami_sana2_bound_count(VOID) { return 1; }
 VOID ami_sana2_block_enter(VOID) { }
@@ -2620,8 +2631,155 @@ static void test_poll_teardown_and_late_reply(void)
     h_free_watch = NULL;
 }
 
+/* Real RX-drain contract tests. Error completions make queue consumption observable without needing
+ * a live driver. The existing suite separately covers frame delivery. */
+
+static AmiSana2Reader assist_reader;
+static struct MsgPort assist_port;
+static AmiRxSlot assist_slots[3];
+static TX_THREAD assist_outer;
+
+static void assist_drain_setup(void)
+{
+    unsigned i;
+    fixture_init();
+    memset(&assist_reader, 0, sizeof(assist_reader));
+    memset(&assist_port, 0, sizeof(assist_port));
+    memset(assist_slots, 0, sizeof(assist_slots));
+    NewList(&assist_port.mp_MsgList);
+    assist_reader.iface = &iface;
+    assist_reader.port = &assist_port;
+    iface.rx[0].iface = &iface;
+    iface.rx[0].reader = &assist_reader;
+    iface.rx[0].slot = assist_slots;
+    iface.rx[0].depth = 3;
+    for (i = 0; i < 3; i++)
+    {
+        assist_slots[i].owner = &iface.rx[0];
+        assist_slots[i].posted = TRUE;
+        assist_slots[i].req.ios2_Req.io_Error = IOERR_ABORTED;
+        AddTail(&assist_port.mp_MsgList,
+                &assist_slots[i].req.ios2_Req.io_Message.mn_Node);
+    }
+    h_getmsg_real = TRUE;
+    _nx_ip_input_thread = &assist_outer;
+    assist_lock_calls = assist_fail_locks = assist_pass_begin = assist_pass_end = 0;
+    assist_last_wait = 999;
+    assist_stop_during_lock = NULL;
+}
+
+static unsigned assist_queue_length(void)
+{
+    struct Node *n;
+    unsigned count = 0;
+    for (n = assist_port.mp_MsgList.lh_Head; n->ln_Succ != NULL; n = n->ln_Succ)
+        count++;
+    return count;
+}
+
+static void test_optional_drain_contract(void)
+{
+    UWORD took;
+    puts("sana2: real receive drain, optional vs reader lock policy");
+    assist_drain_setup();
+    assist_fail_locks = 1;
+    took = ami_sana2_rx_drain_wait(&assist_reader, 2, TX_NO_WAIT);
+    h_check(took == 0, "busy optional drain consumes no completions");
+    h_check(assist_lock_calls == 1 && assist_last_wait == TX_NO_WAIT,
+            "optional drain tries the mutex exactly once without waiting");
+    h_check(assist_queue_length() == 3 && assist_slots[0].posted,
+            "busy optional drain leaves all queued completion ownership intact");
+    h_check(assist_pass_begin == 0 && assist_pass_end == 0 &&
+            h_lock_depth == 0 && _nx_ip_input_thread == &assist_outer,
+            "busy optional drain leaves IP lock, input seat and TCP pass alone");
+
+    assist_drain_setup();
+    took = ami_sana2_rx_drain_wait(&assist_reader, 2, TX_NO_WAIT);
+    h_check(took == 2 && assist_queue_length() == 1,
+            "available optional drain respects the single-completion budget");
+    h_check(assist_lock_calls == 1 && assist_last_wait == TX_NO_WAIT,
+            "successful optional drain still uses a nonblocking mutex request");
+    h_check(!assist_slots[0].posted && !assist_slots[1].posted && assist_slots[2].posted,
+            "only consumed slots change completion ownership");
+    h_check(assist_pass_begin == 1 && assist_pass_end == 1 && h_lock_depth == 0 &&
+            _nx_ip_input_thread == &assist_outer,
+            "optional drain balances TCP pass and restores nested input seat");
+    h_check(!ami_sana2_rx_should_block(&assist_reader, 2),
+            "budget exhaustion with queued data does not request a packet wait");
+
+    assist_drain_setup();
+    assist_fail_locks = 1;
+    took = ami_sana2_rx_drain_wait(&assist_reader, 2, AMI_SANA2_RX_LOCK_TICKS);
+    h_check(took == 2 && assist_lock_calls == 2 &&
+            assist_last_wait == AMI_SANA2_RX_LOCK_TICKS,
+            "normal reader retains its bounded timed-lock retry");
+
+    assist_drain_setup();
+    assist_fail_locks = 1;
+    assist_stop_during_lock = &assist_reader;
+    took = ami_sana2_rx_drain_wait(&assist_reader, 2, AMI_SANA2_RX_LOCK_TICKS);
+    h_check(took == 0 && assist_lock_calls == 1 && assist_queue_length() == 3 &&
+            assist_pass_begin == 0 && h_lock_depth == 0,
+            "reader stop during failed lock avoids retry and packet consumption");
+
+    assist_drain_setup();
+    assist_stop_during_lock = &assist_reader;
+    took = ami_sana2_rx_drain_wait(&assist_reader, 2, TX_NO_WAIT);
+    h_check(took == 0 && assist_queue_length() == 3 &&
+            assist_pass_begin == 0 && assist_pass_end == 0 && h_lock_depth == 0 &&
+            _nx_ip_input_thread == &assist_outer,
+            "stop racing successful mutex acquisition releases it without draining");
+    assist_stop_during_lock = NULL;
+    h_getmsg_real = FALSE;
+    _nx_ip_input_thread = TX_NULL;
+}
+
+static void test_assist_reader_eligibility(void)
+{
+    assist_drain_setup();
+    assist_reader.running = TRUE;
+    h_check(ami_sana2_rx_assist_reader(&assist_reader, 2) == 0 &&
+            assist_lock_calls == 0 && assist_queue_length() == 3,
+            "assistant cannot enter a running reader pass");
+    assist_reader.parked = TRUE;
+    assist_reader.running = FALSE;
+    h_check(ami_sana2_rx_assist_reader(&assist_reader, 2) == 0 && assist_lock_calls == 0,
+            "assistant skips a reader that has exited");
+    assist_reader.running = TRUE;
+    assist_reader.stop = TRUE;
+    h_check(ami_sana2_rx_assist_reader(&assist_reader, 2) == 0 && assist_lock_calls == 0,
+            "assistant skips a stopping reader");
+    assist_reader.stop = FALSE;
+    iface.detaching = TRUE;
+    h_check(ami_sana2_rx_assist_reader(&assist_reader, 2) == 0 && assist_lock_calls == 0,
+            "assistant skips an interface published for detach");
+    iface.detaching = FALSE;
+    h_check(ami_sana2_rx_assist_reader(&assist_reader, 0) == 0 && assist_lock_calls == 0,
+            "exhausted aggregate allowance consumes nothing");
+    assist_reader.port = NULL;
+    h_check(ami_sana2_rx_assist_reader(&assist_reader, 2) == 0 && assist_lock_calls == 0,
+            "assistant skips a missing reply port");
+    assist_reader.port = &assist_port;
+    NewList(&assist_port.mp_MsgList);
+    h_check(ami_sana2_rx_assist_reader(&assist_reader, 2) == 0 && assist_lock_calls == 0,
+            "empty completion queue never waits for an arriving packet");
+
+    assist_drain_setup();
+    assist_reader.parked = assist_reader.running = TRUE;
+    /* Avoid submitting these deliberately malformed error-only fixture
+       buffers; post has its own real-buffer tests elsewhere in this suite. */
+    iface.rx[0].depth = 0;
+    h_check(ami_sana2_rx_assist_reader(&assist_reader, 2) == 2 &&
+            assist_queue_length() == 1 && assist_last_wait == TX_NO_WAIT,
+            "parked reader allows one nonblocking completion pass");
+    h_getmsg_real = FALSE;
+    _nx_ip_input_thread = TX_NULL;
+}
+
 int main(void)
 {
+    test_assist_reader_eligibility();
+    test_optional_drain_contract();
     test_poll_quick_and_async_replies();
     test_poll_teardown_and_late_reply();
     test_flush_is_bounded();

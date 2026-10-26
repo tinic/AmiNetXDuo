@@ -846,6 +846,8 @@ LONG bsd_wait_errno(ULONG wait, UINT status)
     return bsd_errno_from_nx(status);
 }
 
+UWORD bsd_rx_assist(struct AmiSocketBase *base) { (VOID)base; return 0; }
+
 LONG bsd_nx_enter(struct AmiSocketBase *base)
 {
     (VOID)base;

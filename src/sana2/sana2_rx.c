@@ -1830,7 +1830,8 @@ static BOOL ami_sana2_rx_poll_reply(AmiSana2Reader *rd, struct Message *msg)
     return TRUE;
 }
 
-AMI_SANA2_BATCH_LINKAGE UWORD ami_sana2_rx_drain(AmiSana2Reader *rd, UWORD budget)
+AMI_SANA2_BATCH_LINKAGE UWORD ami_sana2_rx_drain_wait(AmiSana2Reader *rd,
+                                                     UWORD budget, ULONG wait)
 {
     AmiSana2If     *iface = rd->iface;
     NX_IP          *ip = iface->ip;
@@ -1927,10 +1928,9 @@ AMI_SANA2_BATCH_LINKAGE UWORD ami_sana2_rx_drain(AmiSana2Reader *rd, UWORD budge
      * thing this run has nothing left to do for -- the loop below drops every
      * message on rd->stop anyway -- so give the mutex up and let the loop end.
      */
-    while (tx_mutex_get(&ip->nx_ip_protection,
-                        AMI_SANA2_RX_LOCK_TICKS) != TX_SUCCESS)
+    while (tx_mutex_get(&ip->nx_ip_protection, wait) != TX_SUCCESS)
     {
-        if (rd->stop)
+        if (wait == TX_NO_WAIT || rd->stop)
             return took;
     }
 
@@ -2070,6 +2070,11 @@ AMI_SANA2_BATCH_LINKAGE UWORD ami_sana2_rx_drain(AmiSana2Reader *rd, UWORD budge
     return took;
 }
 
+AMI_SANA2_BATCH_LINKAGE UWORD ami_sana2_rx_drain(AmiSana2Reader *rd, UWORD budget)
+{
+    return ami_sana2_rx_drain_wait(rd, budget, AMI_SANA2_RX_LOCK_TICKS);
+}
+
 /*
  * Is a completion already queued?  One pointer read of the port's list, and a
  * miss costs nothing that matters: a reply landing right after it sets the
@@ -2103,6 +2108,33 @@ BOOL ami_sana2_rx_should_block(const AmiSana2Reader *rd, UWORD taken)
     (VOID)taken;
 
     return (BOOL)(!ami_sana2_rx_queued(rd));
+}
+
+ULONG ami_sana2_rx_assist_stack_size(VOID)
+{
+    /* The whole reader's stack floor, plus the caller-service wrapper. */
+    return (ULONG)AMI_SANA2_RX_STACK_SIZE + 1024UL;
+}
+
+UWORD ami_sana2_rx_assist_reader(AmiSana2Reader *rd, UWORD budget)
+{
+    UWORD took, r;
+
+    if (budget == 0 || !rd->parked || !rd->running || rd->stop ||
+        rd->port == NULL || rd->iface->detaching ||
+        ami_sana2_rx_should_block(rd, 0))
+        return 0;
+
+    /* The outer IP lock held by ami_sana2_rx_assist protects the interface
+       through these last accesses. The drain's recursive lock put cannot
+       let detach free rd between draining and reposting. */
+    took = ami_sana2_rx_drain_wait(rd, budget, TX_NO_WAIT);
+    if (took == 0)
+        return 0;
+    for (r = 0; r < (UWORD)AMI_SANA2_RX_READERS; r++)
+        (VOID)ami_sana2_rx_post(&rd->iface->rx[r]);
+    ami_sana2_rx_poll(rd);
+    return took;
 }
 
 /* --------------------------------------------------------------- shutdown */
@@ -2581,6 +2613,7 @@ static VOID ami_sana2_rx_thread(ULONG argument)
          */
         if (ami_sana2_rx_should_block(rd, AMI_SANA2_RX_RUN_MAX))
         {
+            rd->parked = TRUE;
             ami_sana2_reader_wait_enter();
             Wait(rd->wake_mask | rd->reap_mask | rd->ack_mask);
 #ifdef AMINETXDUO_RXPROBE
@@ -2601,6 +2634,7 @@ static VOID ami_sana2_rx_thread(ULONG argument)
 #else
             ami_sana2_block_leave();
 #endif
+            rd->parked = FALSE;
         }
 
         (VOID)ami_sana2_rx_drain(rd, (UWORD)AMI_SANA2_RX_RUN_MAX);
@@ -3030,6 +3064,7 @@ LONG ami_sana2_rx_start(AmiSana2If *iface)
         rd->stop        = FALSE;
         rd->failed      = FALSE;
         rd->running     = FALSE;
+        rd->parked      = FALSE;
         rd->started     = FALSE;
         rd->reap_sigbit = -1;
         rd->reap_mask   = 0;

@@ -101,6 +101,10 @@ static struct
 
     LONG        nx_enter_result;
     ULONG       nx_enters, nx_leaves;
+    ULONG       assists;
+    UWORD       assist_result;
+    BOOL        assist_packet;
+    UINT        recv_error;
 
     BOOL        no_pool;            /* legacy stub state, see no-pool case   */
 
@@ -171,7 +175,7 @@ static struct
 
     /* A scripted TCP receive: `rx_packets` packets of `rx_len` bytes, which
        the extract then really copies, then NX_NO_PACKET. */
-    unsigned    rx_packets, recvs;
+    unsigned    rx_packets, recvs, udp_recvs, raw_recvs;
     ULONG       rx_len;
     BOOL        extract_real;
 } h;
@@ -270,6 +274,17 @@ VOID bsd_nx_leave(struct AmiSocketBase *base)
     (VOID)base;
 
     h.nx_leaves++;
+}
+
+UWORD bsd_rx_assist(struct AmiSocketBase *base)
+{
+    (VOID)base;
+    h.assists++;
+    CHECK(h.nx_enters == h.nx_leaves + 1 && h.fails == 0,
+          "optional receive service runs before errno and inside its bracket");
+    if (h.assist_packet)
+        h.rx_packets = 1;
+    return h.assist_result;
 }
 
 /*
@@ -480,6 +495,7 @@ BOOL bsd_oob_take(AmiSocket *sock, UBYTE *out)
 
 NX_PACKET *bsd_raw_receive(AmiSocket *sock, ULONG wait, UINT *why)
 {
+    h.raw_recvs++;
     (VOID)sock;
     (VOID)wait;
 
@@ -807,6 +823,8 @@ UINT _nx_tcp_socket_receive(NX_TCP_SOCKET *socket_ptr, NX_PACKET **packet_ptr,
     h.recvs++;
     h_spend(wait_option);
 
+    if (h.recv_error != NX_SUCCESS)
+        return h.recv_error;
     if (h.rx_packets == 0)
         return NX_NO_PACKET;
 
@@ -835,6 +853,7 @@ UINT _nxe_tcp_socket_receive(NX_TCP_SOCKET *socket_ptr, NX_PACKET **packet_ptr,
 UINT _nxe_udp_socket_receive(NX_UDP_SOCKET *socket_ptr, NX_PACKET **packet_ptr,
                              ULONG wait_option)
 {
+    h.udp_recvs++;
     (VOID)socket_ptr;
     (VOID)packet_ptr;
     (VOID)wait_option;
@@ -1979,10 +1998,82 @@ static void t_immediate_send_break(void)
           "a pending break does not interrupt a non-blocking send");
 }
 
+static void t_receive_assist(void)
+{
+    UBYTE buf[8];
+
+    h_reset();
+    h_tcp(0)->as_Flags |= ASF_NONBLOCK;
+    h.assist_result = 1;
+    h.assist_packet = TRUE;
+    h.rx_len = sizeof(buf);
+    CHECK(bsd_recv(0, buf, sizeof(buf), 0, &h_base) == sizeof(buf) &&
+          h.assists == 1 && h.recvs == 2 && h.fails == 0,
+          "empty nonblocking TCP receive retries newly serviced data before errno");
+    CHECK(h.nx_enters == 1 && h.nx_leaves == 1 &&
+          h.recv_waits[0] == NX_NO_WAIT && h.recv_waits[1] == NX_NO_WAIT,
+          "assisted receive uses one bracket and never waits for a packet");
+
+    h_reset();
+    h_tcp(0);
+    h.assist_result = 1;
+    CHECK(bsd_recv(0, buf, sizeof(buf), MSG_DONTWAIT, &h_base) == -1 &&
+          h.errno_value == AMI_EWOULDBLOCK && h.assists == 1 &&
+          h.recvs == 2 && h.fails == 1,
+          "unrelated completions permit exactly one retry and one errno hook");
+
+    h_reset();
+    h_tcp(0)->as_Flags |= ASF_NONBLOCK;
+    CHECK(bsd_recv(0, buf, sizeof(buf), 0, &h_base) == -1 &&
+          h.assists == 1 && h.recvs == 1,
+          "skipped service does not repeat an empty receive");
+
+    h_reset();
+    h_tcp(0)->as_Flags |= ASF_NONBLOCK;
+    h.recv_error = NX_PTR_ERROR;
+    CHECK(bsd_recv(0, buf, sizeof(buf), 0, &h_base) == -1 &&
+          h.assists == 0 && h.recvs == 1,
+          "a terminal receive failure never triggers optional service");
+
+    h_reset();
+    h_tcp(0);
+    CHECK(bsd_recv(0, buf, sizeof(buf), 0, &h_base) == -1 &&
+          h.assists == 0 && h.errno_value == AMI_ETIMEDOUT,
+          "blocking receive timeout is not retried as optional service");
+
+    h_reset();
+    h_udp(1)->as_Flags |= ASF_NONBLOCK;
+    h.assist_result = 1;
+    CHECK(bsd_recvfrom(1, buf, sizeof(buf), 0, NULL, NULL, &h_base) == -1 &&
+          h.assists == 1 && h.udp_recvs == 2 && h.fails == 1 &&
+          h.errno_value == AMI_EWOULDBLOCK,
+          "UDP recvfrom services once and retries once before errno");
+
+    h_reset();
+    h_udp(1)->as_Flags = ASF_RAW | ASF_NONBLOCK;
+    h.assist_result = 1;
+    CHECK(bsd_recv(1, buf, sizeof(buf), 0, &h_base) == -1 &&
+          h.assists == 1 && h.raw_recvs == 2 && h.fails == 1,
+          "raw receive services once and retries once before errno");
+
+    h_reset();
+    h_udp(1)->as_Flags |= ASF_NONBLOCK;
+    CHECK(bsd_recv(1, buf, 0, 0, &h_base) == 0 && h.assists == 0,
+          "empty zero-length datagram receive performs no service");
+
+    h_reset();
+    h_tcp(0)->as_Flags |= ASF_NONBLOCK;
+    h.rx_packets = 1;
+    h.rx_len = 3;
+    CHECK(bsd_recv(0, buf, sizeof(buf), MSG_WAITALL, &h_base) == 3 &&
+          h.assists == 0, "a positive partial receive is not expanded by service");
+}
+
 int main(void)
 {
     printf("transfer.c host checks\n\n");
 
+    t_receive_assist();
     t_call_budget();
     t_immediate_send_break();
     t_abi();

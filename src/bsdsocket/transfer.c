@@ -1590,6 +1590,7 @@ static LONG bsd_recv_tcp(struct AmiSocketBase *base, AmiSocket *sock,
     ULONG         wait   = bsd_wait_option(sock, sock->as_RcvTimeout, flags);
     BOOL          peek   = ((flags & MSG_PEEK) != 0);
     BOOL          first  = TRUE;
+    BOOL          assisted = FALSE;
     BsdWaitBudget tb;
 
     /* MSG_WAITALL waits once per packet: one budget for all of them (F-060). */
@@ -1678,6 +1679,14 @@ static LONG bsd_recv_tcp(struct AmiSocketBase *base, AmiSocket *sock,
                      */
                     status  = _nx_tcp_socket_receive(&sock->as_Nx.tcp,
                                                      &packet, NX_NO_WAIT);
+                    if (status == NX_NO_PACKET && wait == NX_NO_WAIT &&
+                        copied == 0 && !assisted)
+                    {
+                        assisted = TRUE;
+                        if (bsd_rx_assist(base) != 0)
+                            status = _nx_tcp_socket_receive(&sock->as_Nx.tcp,
+                                                           &packet, NX_NO_WAIT);
+                    }
                     aborted = FALSE;
                 }
                 else
@@ -1809,6 +1818,7 @@ static LONG bsd_recv_udp(struct AmiSocketBase *base, AmiSocket *sock,
                                                     flags);
         BsdRecvUdpArgs args;
         BOOL           aborted;
+        BOOL           assisted = FALSE;
 
         args.udp    = &sock->as_Nx.udp;
         args.packet = &packet;
@@ -1819,6 +1829,13 @@ static LONG bsd_recv_udp(struct AmiSocketBase *base, AmiSocket *sock,
                                      &aborted);
             if (aborted)
                 return bsd_fail(base, AMI_EINTR);
+            if (status == NX_NO_PACKET && wait == NX_NO_WAIT &&
+                len > 0 && !assisted)
+            {
+                assisted = TRUE;
+                if (bsd_rx_assist(base) != 0)
+                    continue;
+            }
             if (status != NX_SUCCESS)
             {
                 if (len == 0 && (status == NX_NO_PACKET ||
@@ -1936,6 +1953,9 @@ static LONG bsd_recv_raw(struct AmiSocketBase *base, AmiSocket *sock,
         (VOID)bsd_wait_sliced(base, wait, bsd_recv_raw_once, &args, &aborted);
         if (aborted)
             return bsd_fail(base, AMI_EINTR);
+        if (packet == NX_NULL && args.why == NX_NO_PACKET &&
+            wait == NX_NO_WAIT && len > 0 && bsd_rx_assist(base) != 0)
+            (VOID)bsd_recv_raw_once(&args, NX_NO_WAIT);
         if (packet == NX_NULL && len == 0 && args.why == NX_NO_PACKET)
             return 0;
         if (packet == NX_NULL)

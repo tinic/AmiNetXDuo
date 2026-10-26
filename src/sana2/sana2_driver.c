@@ -130,6 +130,43 @@ VOID ami_sana2_unbind(AmiSana2If *iface)
     Permit();
 }
 
+UWORD ami_sana2_rx_assist(NX_IP *ip, UWORD budget)
+{
+    static UWORD next;
+    UWORD i, slot, took = 0;
+
+    if (ip == NULL || budget == 0 ||
+        tx_mutex_get(&ip->nx_ip_protection, TX_NO_WAIT) != TX_SUCCESS)
+        return 0;
+    if (budget > 32)
+        budget = 32;
+
+    /* Detach first takes this same IP lock to publish detaching. Holding it
+       through the scan, drain, repost and poll keeps every selected binding
+       alive even if ThreadX hands the baton off inside packet processing.
+       No pointer from this table survives the final unlock. */
+    slot = next;
+    for (i = 0; i < AMI_CFG_MAX_ATTACHED && took < budget; i++)
+    {
+        AmiSana2If *iface;
+
+        /* Other IP instances have their own lock. Snapshot both members
+           before deciding that this is one protected by ours. */
+        Forbid();
+        iface = (ami_sana2_bindings[slot].ip == ip)
+                    ? ami_sana2_bindings[slot].iface : NULL;
+        Permit();
+        slot = (UWORD)((slot + 1U) % AMI_CFG_MAX_ATTACHED);
+        next = slot;
+        if (iface != NULL && !iface->detaching)
+            took += ami_sana2_rx_assist_reader(&iface->reader,
+                                              (UWORD)(budget - took));
+    }
+
+    tx_mutex_put(&ip->nx_ip_protection);
+    return took;
+}
+
 static AmiSana2If *ami_sana2_lookup(NX_IP_DRIVER *req)
 {
     NX_INTERFACE *interface_ptr = req->nx_ip_driver_interface;

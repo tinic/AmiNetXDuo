@@ -246,6 +246,7 @@ static VOID bsd_task_sweep(VOID)
         child->sb_NxTask     = NULL;
         child->sb_ErrPending = 0;   /* its task is gone: nobody to call */
         ami_netstack_release(&child->sb_NxCaller);
+        bsd_rx_assist_release(child);
 
         if (!bsd_nx_orphan(child))
             continue;
@@ -546,6 +547,7 @@ static struct AmiSocketBase *bsd_child_create(struct AmiSocketBase *master)
     bsd_bzero(&child->sb_NxCaller, sizeof(child->sb_NxCaller));
     child->sb_NxNest = 0;
     child->sb_NxTask = NULL;
+    child->sb_RxAssist = NULL;
 
     child->sb_Table     = NULL;
     child->sb_TableSize = 0;
@@ -684,6 +686,7 @@ static VOID bsd_child_destroy(struct AmiSocketBase *child)
        cached ThreadX registration. This is the one place that runs on the
        base's own task with every socket already closed (netx_call.c). */
     bsd_nx_release(child);
+    bsd_rx_assist_release(child);
 
     ObtainSemaphore(&master->sb_Lock);
     Remove((struct Node *)&child->sb_Node);

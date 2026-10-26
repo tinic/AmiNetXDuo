@@ -690,6 +690,7 @@ typedef struct AmiSana2Reader
 
     volatile BOOL       started;    /* tx_thread_create succeeded          */
     volatile BOOL       running;
+    BOOL                parked;     /* inside the empty-port raw wait      */
     volatile BOOL       stop;
     volatile BOOL       failed;
     /* `exited` has been taken: the thread no longer runs this module's code,
@@ -1152,6 +1153,9 @@ VOID ami_sana2_rx_stop(AmiSana2If *iface);
 /* The retained sweep's receive half: never waits.  TRUE when neither the
    device nor the reader thread can touch the interface any more. */
 BOOL ami_sana2_rx_reclaim(AmiSana2If *iface, BOOL release_packets);
+/* Caller holds the interface IP mutex across this call, including the
+   post-drain repost/poll. That prevents detach from retiring the reader. */
+UWORD ami_sana2_rx_assist_reader(AmiSana2Reader *rd, UWORD budget);
 ULONG ami_sana2_rx_frame_length(const AmiSana2If *iface, ULONG payload);
 BOOL ami_sana2_rx_resolve_length(AmiRxSlot *slot, ULONG *length);
 
@@ -1184,6 +1188,7 @@ VOID  ami_sana2_rx_abort_outstanding(AmiSana2Reader *rd);
 VOID  ami_sana2_rx_flush(AmiSana2Reader *rd);
 VOID  ami_sana2_rx_poll(AmiSana2Reader *rd);
 UWORD ami_sana2_rx_drain(AmiSana2Reader *rd, UWORD budget);
+UWORD ami_sana2_rx_drain_wait(AmiSana2Reader *rd, UWORD budget, ULONG wait);
 VOID  ami_sana2_rx_teardown(AmiSana2Reader *rd);
 #endif
 

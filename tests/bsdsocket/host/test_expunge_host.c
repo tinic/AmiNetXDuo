@@ -534,6 +534,7 @@ VOID bsd_nx_leave(struct AmiSocketBase *b) { (VOID)b; h_nx_leaves++; h_in_bracke
 VOID ami_netstack_health_set_sblock(APTR sem) { (VOID)sem; }
 VOID bsd_handoff_init(struct AmiSocketBase *b) { (VOID)b; h_unreachable("bsd_handoff_init"); }
 VOID bsd_nx_release(struct AmiSocketBase *b) { (VOID)b; }
+VOID bsd_rx_assist_release(struct AmiSocketBase *b) { (VOID)b; }
 BOOL bsd_runtime_open(VOID) { h_unreachable("bsd_runtime_open"); return FALSE; }
 VOID bsd_tcp_handler_start(struct AmiSocketBase *m) { (VOID)m; h_unreachable("bsd_tcp_handler_start"); }
 LONG netstack_startup(VOID) { h.startup_calls++; return h.startup_result; }

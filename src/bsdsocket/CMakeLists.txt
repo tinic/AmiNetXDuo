@@ -16,6 +16,7 @@ set(BSDSOCKET_SOURCES
     oob.c                   # MSG_OOB / SIOCATMARK: TCP urgent data
     transfer.c
     rxdirect.c
+    rx_assist.c             # bounded receive work on an opener-owned stack
     udp_queue.c             # queued UDP header layout, host-regression tested
     cmsg.c                  # RFC 3542 ancillary data: PKTINFO, HOPLIMIT,
                             # ICMP6_FILTER, and the IPv4 half of the same
@@ -44,6 +45,10 @@ set(BSDSOCKET_SOURCES
                             # udpstat/icmpstat over NetX Duo's counters
     netx_call.c             # ThreadX context bracket for NetX Duo calls
     library_runtime.c)      # DOSBase, rand(): no crt0 in a shared library
+
+if(CMAKE_CROSSCOMPILING)
+    list(APPEND BSDSOCKET_SOURCES rx_assist_stack.S)
+endif()
 
 # in6.c is the AF_INET6 ABI: the _Static_asserts that pin sockaddr_in6, the
 # address conversions and the IPPROTO_IPV6 options. It has no IPv4 content at

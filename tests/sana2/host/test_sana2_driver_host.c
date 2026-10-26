@@ -153,6 +153,41 @@ VOID ami_sana2_rx_stop(AmiSana2If *iface)
     h_note("rx_stop");
 }
 
+static UINT h_assist_mutex_status = TX_SUCCESS;
+static unsigned h_assist_locks, h_assist_calls;
+static int h_assist_depth;
+static ULONG h_assist_wait;
+static AmiSana2If *h_assist_seen[4];
+static UWORD h_assist_budget[4], h_assist_cost = 6;
+
+UINT _tx_mutex_get(TX_MUTEX *mutex, ULONG wait)
+{
+    (VOID)mutex;
+    h_assist_locks++;
+    h_assist_wait = wait;
+    if (h_assist_mutex_status == TX_SUCCESS)
+        h_assist_depth++;
+    return h_assist_mutex_status;
+}
+UINT _txe_mutex_get(TX_MUTEX *mutex, ULONG wait)
+{ return _tx_mutex_get(mutex, wait); }
+UINT _tx_mutex_put(TX_MUTEX *mutex)
+{ (VOID)mutex; h_assist_depth--; return TX_SUCCESS; }
+UINT _txe_mutex_put(TX_MUTEX *mutex)
+{ return _tx_mutex_put(mutex); }
+
+UWORD ami_sana2_rx_assist_reader(AmiSana2Reader *rd, UWORD budget)
+{
+    h_check(h_assist_depth == 1, "assist: outer IP mutex protects the whole callback");
+    if (h_assist_calls < 4)
+    {
+        h_assist_seen[h_assist_calls] = rd->iface;
+        h_assist_budget[h_assist_calls] = budget;
+    }
+    h_assist_calls++;
+    return h_assist_cost;
+}
+
 VOID ami_sana2_tx_drain(AmiSana2If *iface)
 {
     (VOID)iface;
@@ -1185,8 +1220,59 @@ static void test_set_physical_address(void)
     ami_sana2_unbind(&iface);
 }
 
+static void test_optional_receive_service(void)
+{
+    static AmiSana2If a[3];
+    static NX_IP other_ip;
+    unsigned i;
+
+    fixture_init(AMI_ETH_ADDR_SIZE);
+    memset(a, 0, sizeof(a));
+    for (i = 0; i < 3; i++)
+    {
+        a[i].reader.iface = &a[i];
+        h_check(ami_sana2_attach(&a[i], &ip, i) == AMI_NET_OK,
+                "assist: attach a real binding");
+    }
+    h_assist_calls = h_assist_locks = 0;
+    h_assist_mutex_status = TX_NOT_AVAILABLE;
+    h_check(ami_sana2_rx_assist(&ip, 10) == 0 && h_assist_calls == 0 &&
+            h_assist_locks == 1 && h_assist_wait == TX_NO_WAIT,
+            "assist: busy outer mutex skips without waiting or touching a reader");
+    h_assist_mutex_status = TX_SUCCESS;
+    h_check(ami_sana2_rx_assist(&ip, 10) == 12 && h_assist_calls == 2 &&
+            h_assist_budget[0] == 10 && h_assist_budget[1] == 4,
+            "assist: one allowance covers all interfaces, including batch overshoot");
+    h_check(h_assist_seen[0] == &a[0] && h_assist_seen[1] == &a[1] &&
+            h_assist_depth == 0,
+            "assist: exhausted allowance stops before the third interface and unlocks");
+    h_assist_calls = 0;
+    h_check(ami_sana2_rx_assist(&ip, 10) == 12 && h_assist_seen[0] == &a[2],
+            "assist: next call starts after the last serviced interface");
+
+    ami_sana2_unbind(&a[0]);
+    a[1].detaching = TRUE;
+    h_check(ami_sana2_attach(&a[2], &other_ip, 0) == AMI_NET_OK,
+            "assist: move the remaining binding to another IP");
+    h_assist_calls = 0;
+    h_check(ami_sana2_rx_assist(&ip, 32) == 0 && h_assist_calls == 0,
+            "assist: unbound, detaching and foreign-IP readers are skipped");
+    h_assist_cost = 32;
+    h_check(ami_sana2_rx_assist(&other_ip, 65535) == 32 &&
+            h_assist_calls == 1 && h_assist_budget[0] == 32,
+            "assist: callers cannot exceed the fixed maximum allowance");
+    h_assist_cost = 6;
+    h_assist_calls = h_assist_locks = 0;
+    h_check(ami_sana2_rx_assist(NULL, 32) == 0 &&
+            ami_sana2_rx_assist(&ip, 0) == 0 && h_assist_locks == 0,
+            "assist: no IP or no allowance performs no work");
+    for (i = 0; i < 3; i++)
+        ami_sana2_unbind(&a[i]);
+}
+
 int main(void)
 {
+    test_optional_receive_service();
     test_lookup_and_memoise();
     test_lookup_discriminates();
     test_reattach_updates_existing_binding();
