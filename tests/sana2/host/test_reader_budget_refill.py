@@ -8,8 +8,10 @@ Usage: python3 test_reader_budget_refill.py BUILD_DIR [--sanitize]
 """
 from pathlib import Path
 import hashlib
+import shlex
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -96,6 +98,9 @@ for name, functions in [("serialized", start + stop),
     exe = build / name
     c.write_text(text)
     command = [os.environ.get("CC", "clang"), "-std=c11", "-Wall", "-Wextra", "-Werror", "-O1", "-g"]
+    command += shlex.split(os.environ.get("CFLAGS", ""))
+    if "--ubsan" in sys.argv:
+        command += ["-fsanitize=undefined", "-fno-sanitize-recover=all"]
     if "--sanitize" in sys.argv:
         command += ["-fsanitize=address,undefined", "-fno-sanitize-recover=all"]
     subprocess.run(command + [str(c), "-o", str(exe)], check=True)
@@ -103,6 +108,8 @@ for name, functions in [("serialized", start + stop),
     (build / (name + ".log")).write_text(run.stdout + run.stderr)
     print(name, run.stdout, run.stderr)
     assert run.returncode == (0 if name == "serialized" else 1)
+    summary = re.search(r"(\d+) checks, (\d+) failures", run.stdout)
+    assert summary and int(summary[1]) >= 17 and int(summary[2]) == (0 if name == "serialized" else 5)
     results[name] = {"exit": run.returncode, "source_sha256": hashlib.sha256(text.encode()).hexdigest(),
                      "output": run.stdout}
 (build / "results.json").write_text(json.dumps(results, indent=2) + "\n")

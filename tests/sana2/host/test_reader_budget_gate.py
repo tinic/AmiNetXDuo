@@ -3,7 +3,7 @@
 Usage: python3 test_reader_budget_gate.py BUILD_DIR [--sanitize]
 """
 from pathlib import Path
-import ast, hashlib, json, os, subprocess, sys
+import ast, hashlib, json, os, re, shlex, subprocess, sys
 root = Path(__file__).resolve().parents[3]
 build = Path(sys.argv[1]).resolve()
 build.mkdir(parents=True, exist_ok=True)
@@ -29,11 +29,15 @@ for name,body in [('fixed',busy),('missing-busy-gate-negative',busy.replace('   
     text=prefix+fixture+functions+'static VOID busy_boundary(VOID){VOID*rd=0;\n'+body+'}\n'+main
     c=build/(name+'.c'); exe=build/name; c.write_text(text)
     cmd=[os.environ.get('CC','clang'),'-std=c11','-Wall','-Wextra','-Werror','-O1','-g']
+    cmd += shlex.split(os.environ.get('CFLAGS', ''))
+    if '--ubsan' in sys.argv: cmd+=['-fsanitize=undefined','-fno-sanitize-recover=all']
     if '--sanitize' in sys.argv: cmd+=['-fsanitize=address,undefined','-fno-sanitize-recover=all']
     subprocess.run(cmd+[str(c),'-o',str(exe)],check=True)
     run=subprocess.run([str(exe)],text=True,capture_output=True)
     (build/(name+'.log')).write_text(run.stdout+run.stderr)
     print(name,run.returncode,run.stdout,run.stderr)
     assert run.returncode==(0 if name=='fixed' else 1)
+    summary=re.search(r'gate-integration checks=(\d+) failures=(\d+)',run.stdout)
+    assert summary and int(summary[1])>=9 and int(summary[2])==(0 if name=='fixed' else 5)
     results[name]={'exit':run.returncode,'source_sha256':hashlib.sha256(text.encode()).hexdigest(),'output':run.stdout}
 (build/'results.json').write_text(json.dumps(results,indent=2)+'\n')

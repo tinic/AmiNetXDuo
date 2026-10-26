@@ -572,7 +572,9 @@ ULONG   section =  (ULONG) (t1 - t0);
 
 
 /* Bench hook (#353 V6b): called by every tick service, inside its Forbid(). */
+#if defined(V6_TIME_US) || defined(V6_FRAMES)
 VOID (*_tx_amiga_tick_hook)(VOID) = (VOID (*)(VOID)) 0;
+#endif
 
 VOID _tx_amiga_tick_deliver(UINT from_realm)
 {
@@ -596,8 +598,10 @@ ULONG                       svc_i;
 
     Forbid();
 
+#if defined(V6_TIME_US) || defined(V6_FRAMES)
     if (_tx_amiga_tick_hook != (VOID (*)(VOID)) 0)
         _tx_amiga_tick_hook();
+#endif
 
     if (r -> tr_live == ((UINT) TX_FALSE))
     {

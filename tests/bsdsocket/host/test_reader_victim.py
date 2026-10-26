@@ -7,8 +7,10 @@ the shared scan limit. These are source regressions, not timing measurements.
 """
 from pathlib import Path
 import hashlib
+import shlex
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -46,6 +48,9 @@ for name, text in variants.items():
     cmd = [os.environ.get('CC', 'clang'), '-std=c11', '-Wall', '-Wextra', '-Werror', '-O1', '-g',
            '-DV6_GATED=1', '-DAMINETXDUO_READER_VICTIM_HOST',
            '-I' + str(root / 'tests/bsdsocket/host')]
+    cmd += shlex.split(os.environ.get('CFLAGS', ''))
+    if '--ubsan' in sys.argv:
+        cmd += ['-fsanitize=undefined', '-fno-sanitize-recover=all']
     if '--sanitize' in sys.argv:
         cmd += ['-fsanitize=address,undefined', '-fno-sanitize-recover=all']
     subprocess.run(cmd + [str(root / 'tests/bsdsocket/host/test_reader_victim.c'),
@@ -54,6 +59,10 @@ for name, text in variants.items():
     (build / (name + '.log')).write_text(run.stdout + run.stderr)
     print(name, run.returncode, run.stdout, run.stderr)
     assert run.returncode == (0 if name == 'fixed' else 1)
+    summary = re.search(r'reader-victim checks=(\d+) failures=(\d+)', run.stdout)
+    expected_failures = {'fixed': 0, 'caller-hides-decoder-negative': 2,
+                         'early-root-negative': 1, 'missing-shared-limit-negative': 2}
+    assert summary and int(summary[1]) >= 57 and int(summary[2]) == expected_failures[name]
     results[name] = {'exit': run.returncode, 'source_sha256': hashlib.sha256(text.encode()).hexdigest(),
                      'marker_sha256': hashlib.sha256(helper.encode()).hexdigest(), 'output': run.stdout}
 (build / 'results.json').write_text(json.dumps(results, indent=2) + '\n')

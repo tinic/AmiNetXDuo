@@ -40,7 +40,12 @@
 
 VOID ami_sana2_block_enter(VOID);
 
+#if defined(V6_GATED) && !defined(V6_TIME_US) && !defined(V6_FRAMES)
+#error V6_GATED requires an explicit diagnostic reader budget
+#endif
+
 /* ---- #353 V6b sporadic server, bench only (one wired interface) ---- */
+#if defined(V6_TIME_US) || defined(V6_FRAMES)
 extern VOID (*_tx_amiga_tick_hook)(VOID);
 static struct
 {
@@ -200,6 +205,14 @@ static VOID ami_v6_unbind(struct Task *me)
     }
     Permit();
 }
+#else
+#define ami_v6_bind(task) ((void)0)
+#define ami_v6_unbind(task) ((void)0)
+#define ami_v6_charge_start() ((void)0)
+#define ami_v6_charge_stop() ((void)0)
+#define ami_v6_settle(overrun) ((void)0)
+#endif
+
 VOID ami_sana2_reader_wait_enter(VOID);
 VOID ami_sana2_block_leave(VOID);
 
@@ -2726,6 +2739,7 @@ static VOID ami_sana2_rx_thread(ULONG argument)
 #else
         (VOID)ami_sana2_rx_drain(rd, (UWORD)AMI_SANA2_RX_RUN_MAX);
 #endif
+#if defined(V6_TIME_US) || defined(V6_FRAMES)
         /* A busy reader that overran its budget without waiting stands
            aside through a release/reacquire, never holding the baton. */
         /* Charge checkpoint: the run so far counts before the budget test. */
@@ -2744,6 +2758,7 @@ static VOID ami_sana2_rx_thread(ULONG argument)
             ami_sana2_block_leave();
             ami_v6_charge_start();
         }
+#endif
 
         /*
          * THE POLL, AFTER THE DRAIN AND BEFORE THE SLEEP.  Every slot this

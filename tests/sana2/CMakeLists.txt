@@ -314,3 +314,28 @@ if(AMINETXDUO_RX_VERIFY)
 endif()
 
 add_test(NAME sana2_device COMMAND test_sana2_device)
+
+# #353 diagnostic source regressions. The scripts compile the exact production
+# functions and meaningful negative controls, using this host tier's compiler
+# and word size. No m68k/physical timing claim is made by these models.
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+set(_reader_sanitize)
+if(AMINETXDUO_SANITIZE)
+    if(AMINETXDUO_SANITIZE_ASAN)
+        set(_reader_sanitize --sanitize)
+    else()
+        set(_reader_sanitize --ubsan)
+    endif()
+endif()
+foreach(_reader_case IN ITEMS budget_refill budget_gate victim)
+    if(_reader_case STREQUAL "victim")
+        set(_reader_script "${CMAKE_SOURCE_DIR}/tests/bsdsocket/host/test_reader_victim.py")
+    else()
+        set(_reader_script "${CMAKE_CURRENT_SOURCE_DIR}/host/test_reader_${_reader_case}.py")
+    endif()
+    add_test(NAME reader_${_reader_case}
+        COMMAND "${CMAKE_COMMAND}" -E env "CC=${CMAKE_C_COMPILER}"
+                "CFLAGS=${CMAKE_C_FLAGS}" "${Python3_EXECUTABLE}"
+                "${_reader_script}" "${CMAKE_CURRENT_BINARY_DIR}/reader_${_reader_case}"
+                ${_reader_sanitize})
+endforeach()
