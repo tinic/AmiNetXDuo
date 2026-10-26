@@ -70,6 +70,9 @@ static VOID ami_v6_charge_start(VOID)
 
     if (me != ami_v6.task)
         return;
+    /* The refill hook runs on the tick task.  Keep its reset of used/t0
+       outside this interval's clock/state update. */
+    Forbid();
     /* The park restores the priority it saw on the way in; the tick may
        have promoted the reader since.  The level wins. */
     if (ami_v6.level != 0 && me->tc_Node.ln_Pri == 0)
@@ -78,17 +81,22 @@ static VOID ami_v6_charge_start(VOID)
     ami_v6.t0 = ami_v6_clock();
     ami_v6.charging = TRUE;
 #endif
+    Permit();
 }
 
 static VOID ami_v6_charge_stop(VOID)
 {
     if (FindTask(NULL) != ami_v6.task)
         return;
+    /* A refill between clock() and the t0 load would subtract the NEW
+       period start from the OLD timestamp and exhaust a fresh budget. */
+    Forbid();
 #if !defined(V6_FRAMES)
     if (ami_v6.charging)
         ami_v6.used += ami_v6_clock() - ami_v6.t0;
     ami_v6.charging = FALSE;
 #endif
+    Permit();
 }
 
 /* The tick: refill, and put a low reader back to 1 wherever it is. */
