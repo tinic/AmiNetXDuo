@@ -216,6 +216,19 @@ static VOID ami_v6_unbind(struct Task *me)
 VOID ami_sana2_reader_wait_enter(VOID);
 VOID ami_sana2_block_leave(VOID);
 
+static VOID ami_sana2_rx_wait_begin(VOID)
+{
+#if defined(V6_TIME_US) || defined(V6_FRAMES)
+    ami_sana2_block_enter();
+    ami_v6_charge_stop();
+    ami_v6_settle(FALSE);
+#else
+    /* The ordinary reader keeps its wake boost. The diagnostic owns its
+       priority separately and must use the generic release above. */
+    ami_sana2_reader_wait_enter();
+#endif
+}
+
 /* --------------------------------------------------------- receive probe */
 
 #ifdef AMINETXDUO_RXPROBE
@@ -2704,9 +2717,7 @@ static VOID ami_sana2_rx_thread(ULONG argument)
          */
         if (ami_sana2_rx_should_block(rd, AMI_SANA2_RX_RUN_MAX))
         {
-            ami_sana2_block_enter();
-            ami_v6_charge_stop();
-            ami_v6_settle(FALSE);
+            ami_sana2_rx_wait_begin();
             Wait(rd->wake_mask | rd->reap_mask | rd->ack_mask);
 #ifdef AMINETXDUO_RXPROBE
             {
