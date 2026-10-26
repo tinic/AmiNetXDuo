@@ -520,7 +520,8 @@ host_test_targets() { # builddir
 #      579 with four #353 reader-budget/source-routing regressions.
 #      580 with the native-clock lifetime, conversion and fail-open regression.
 #      583 with two sparse native strides and versioned clock snapshots.
-HOST_TESTS_EXPECTED=583
+#      584 with the pool-empty diagnostic accounting regression.
+HOST_TESTS_EXPECTED=584
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,
@@ -543,7 +544,7 @@ case "$(uname -m)" in
     *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 31)) ;;
 esac
 # The conflict-drain fixture uses Linux's MAP_32BIT, not merely x86_64.
-# Darwin arm64 registers 551; Darwin x86_64 registers 582 on this tree.
+# Darwin arm64 registers 552; Darwin x86_64 registers 583 on this tree.
 case "$(uname -s):$(uname -m)" in
     Linux:x86_64|Linux:amd64) ;;
     *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 1)) ;;

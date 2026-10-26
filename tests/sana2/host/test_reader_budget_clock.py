@@ -200,6 +200,65 @@ int main(void){
  printf("native-clock checks=%u failures=%u\n",checks,failures);return failures?1:0;
 }
 '''
+if '--idle' in sys.argv:
+    loop=source[source.index('    while (!rd->stop)',source.index('    ami_v6_bind(FindTask(NULL));')):]
+    actual=function(loop,'        if (live == 0)')
+    idle_fixture=r'''
+static ULONG sleep_advance;
+static unsigned sleep_tick,sleep_calls,active_in_sleep,active_at_refill;
+static UINT tx_thread_sleep(ULONG ticks){
+ if(ticks!=2)return 1;
+ sleep_calls++;active_in_sleep+=(ami_v6.running||ami_v6.charging);
+ clock_now+=sleep_advance;
+ if(sleep_tick&&_tx_amiga_tick_hook){h_tick();active_at_refill+=(ami_v6.running||ami_v6.charging);}
+ return 0;
+}
+static VOID run_pool_empty(VOID){do {ULONG live=0;
+'''
+    idle_main=main[:main.index('int main(void)')]+r'''
+int main(void){
+ reset();bind();clock_now=10;ami_v6_charge_start();clock_now=20;
+ sleep_advance=1000;run_pool_empty();
+ check(sleep_calls==1&&!active_in_sleep,"pool sleep parks with accounting stopped");
+ check(ami_v6.used==10&&ami_v6.running&&ami_v6.charging&&ami_v6.t0==1020,"pool sleep excludes parked interval and restarts at wake");
+ clock_now=1030;ami_v6_charge_stop();check(ami_v6.used==20,"pool sleep retains earlier credit across wake");
+ reset();bind();clock_now=10;ami_v6_charge_start();clock_now=20;ami_v6_charge_checkpoint(1);
+ check(!ami_v6.used&&ami_v6.charging,"pool fixture begins with a pending sparse interval");
+ clock_now=30;sleep_advance=100;run_pool_empty();
+ check(ami_v6.used==20&&ami_v6.t0==130&&ami_v6.charging,"pool sleep fully debits pending sparse work");
+ reset();bind();clock_now=10;ami_v6_charge_start();clock_now=20;sleep_advance=13459;sleep_tick=1;run_pool_empty();
+ check(!active_at_refill&&!ami_v6.used&&ami_v6.t0==13479&&ami_v6.charging,"pool refill cannot restart a parked interval");
+ clock_now=13484;ami_v6_charge_stop();check(ami_v6.used==5,"pool refill charges only work after wake");
+ ami_v6_unbind(&task);unsigned old_reads=reads;run_pool_empty();
+ check(reads==old_reads&&!ports&&!_tx_amiga_tick_hook,"unbound pool accounting leaves clock untouched");
+ check(!forbid_depth&&!pending&&!unsafe_reads,"pool accounting exclusion remains balanced");
+ printf("idle-clock checks=%u failures=%u\n",checks,failures);return failures?1:0;
+}
+'''
+    selected={s:b for s,b in functions.items() if s not in ['static BOOL ami_v6_has_victim(VOID)','static VOID ami_v6_settle(BOOL overrun)']}
+    results={}
+    for name in ['fixed','stop-missing-negative','start-missing-negative','early-start-negative']:
+        block=actual
+        if name=='stop-missing-negative':block=block.replace('            ami_v6_charge_stop();\n','')
+        if name=='start-missing-negative':block=block.replace('            ami_v6_charge_start();\n','')
+        if name=='early-start-negative':block=block.replace('            tx_thread_sleep(2);\n            ami_v6_charge_start();','            ami_v6_charge_start();\n            tx_thread_sleep(2);')
+        text=prelude+config+provider+data+macros+''.join(selected.values())+idle_fixture+block+'\n} while(0);}\n'+idle_main
+        c=build/(name+'.c');exe=build/name;c.write_text(text)
+        cmd=[os.environ.get('CC','clang'),'-std=c11','-Wall','-Wextra','-Werror','-O1','-g','-DV6_ECLOCK_STRIDE=4']+shlex.split(os.environ.get('CFLAGS',''))
+        if '--sanitize' in sys.argv:cmd+=['-fsanitize=address,undefined','-fno-sanitize-recover=all']
+        elif '--ubsan' in sys.argv:cmd+=['-fsanitize=undefined','-fno-sanitize-recover=all']
+        subprocess.run(cmd+[str(c),'-o',str(exe)],check=True)
+        run=subprocess.run([str(exe)],capture_output=True,text=True);(build/(name+'.log')).write_text(run.stdout+run.stderr)
+        summary=re.search(r'idle-clock checks=(\d+) failures=(\d+)',run.stdout)
+        assert summary and int(summary[1])==9 and run.returncode==(0 if name=='fixed' else 1),(name,run.stdout,run.stderr)
+        assert (int(summary[2])==0)==(name=='fixed'),(name,run.stdout)
+        if name=='stop-missing-negative':assert 'FAIL pool sleep parks with accounting stopped' in run.stdout
+        if name=='start-missing-negative':assert 'FAIL pool sleep excludes parked interval and restarts at wake' in run.stdout
+        if name=='early-start-negative':assert 'FAIL pool refill cannot restart a parked interval' in run.stdout
+        results[name]={'checks':int(summary[1]),'failures':int(summary[2]),'exit':run.returncode,'source_sha256':hashlib.sha256(text.encode()).hexdigest(),'output':run.stdout};print(name,run.stdout)
+    (build/'results.json').write_text(json.dumps(results,indent=2)+'\n')
+    raise SystemExit(0)
+
 if '--sparse' in sys.argv:
     native_start=source.index('#elif defined(V6_ECLOCK) && defined(V6_TIME_US)\n        {')
     native_end=source.index('\n#else',native_start)

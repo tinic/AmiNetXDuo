@@ -37,7 +37,12 @@ typedef void (*AmiSana2BlockHook)(VOID);
 #define FALSE 0
 static AmiSana2BlockHook ami_block_enter, ami_block_leave, ami_reader_wait;
 static int priority, released, charged, settled, bad_order, boosted;
-VOID ami_netstack_baton_release(VOID) { released++; }
+VOID ami_netstack_baton_release(VOID) {
+#if defined(V6_TIME_US) || defined(V6_FRAMES)
+    if (!charged) bad_order++;
+#endif
+    released++;
+}
 VOID ami_netstack_baton_acquire(VOID) { }
 VOID ami_netstack_baton_release_reader(VOID) { released++; boosted++; priority=TX_AMIGA_HANDOFF_PRIORITY; }
 VOID ami_v6_charge_stop(VOID) { charged++; }
@@ -74,6 +79,9 @@ for name, flags, actual, priority_source, hook_source, failures in [
      priorities.replace('#define TX_AMIGA_TASK_PRIORITY                  1', '#define TX_AMIGA_TASK_PRIORITY                  0'), registration, 2),
     ('ordinary-boost-leak-negative', ['-DEXPECT_BASE=1'], body, priorities,
      registration.replace(' && TX_AMIGA_TASK_PRIORITY == 0', ''), 2),
+    ('released-before-charge-negative', ['-DEXPECT_BASE=0', '-DV6_TIME_US=6000'],
+     body.replace('    ami_v6_charge_stop();\n    ami_sana2_block_enter();',
+                  '    ami_sana2_block_enter();\n    ami_v6_charge_stop();'), priorities, registration, 1),
 ]:
     text = priority_source + prefix + hooks + 'static VOID initialize_hooks(VOID) {\n' + hook_source + '}\n' + actual + main
     c = build / (name + '.c')

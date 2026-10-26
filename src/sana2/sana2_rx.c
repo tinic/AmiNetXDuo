@@ -517,8 +517,10 @@ VOID ami_sana2_block_leave(VOID);
 static VOID ami_sana2_rx_wait_begin(VOID)
 {
 #if defined(V6_TIME_US) || defined(V6_FRAMES)
-    ami_sana2_block_enter();
+    /* Stop before releasing the baton: its wake can dispatch another task
+       before this reader returns, which is outside this reader's interval. */
     ami_v6_charge_stop();
+    ami_sana2_block_enter();
     ami_v6_settle(FALSE);
 #else
     /* The ordinary reader keeps its wake boost. The diagnostic owns its
@@ -2983,7 +2985,12 @@ static VOID ami_sana2_rx_thread(ULONG argument)
         {
             /* Either the pool is empty or the interface is down. Back off
                rather than spin. ami_sana2_rx_stop() signals out of this. */
+            /* This ThreadX sleep releases the baton without going through
+               rx_wait_begin. Keep its parked interval outside the reader's
+               diagnostic charge, including a refill delivered while asleep. */
+            ami_v6_charge_stop();
             tx_thread_sleep(2);
+            ami_v6_charge_start();
             continue;
         }
 
