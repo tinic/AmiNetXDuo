@@ -1,15 +1,21 @@
 /* SPDX-License-Identifier: MIT */
 
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 
 import { endpoint, getFile, markerLine, putFile, runCommand, screenshot } from "./remote-control.mjs";
 import { encodeFrame, makeGeometry, palette, synth } from "./console-host.mjs";
+
+const execFileAsync = promisify(execFile);
+const cli = fileURLToPath(new URL("./remote-control.mjs", import.meta.url));
 
 function sendFrame(socket, op, data) {
   const payload = Buffer.isBuffer(data) ? data : Buffer.from(data);
@@ -126,6 +132,36 @@ test("origin/path checks and marker parsing", () => {
   assert.deepEqual(markerLine("\x0f5.Workbench:> ANXD123 RC=7\n", "ANXD123", "end"),
                    { start: 0, end: 28, rc: 7 });
   assert.equal(markerLine('Echo "ANXD123 RC=$RC"\n', "ANXD123", "end"), null);
+});
+
+test("CLI GET publishes failures on stderr and completed downloads on stdout", async () => {
+  const f = await fixture();
+  const dir = mkdtempSync(join(tmpdir(), "anxd-remote-cli-"));
+  try {
+    const remote = "/Ram%20Disk/job.done";
+    const local = join(dir, "job.done");
+    writeFileSync(local, "stale\n");
+    const args = [cli, "--url", f.base, "--timeout", "3", "get", remote, local];
+    // A detached job can remain pending for several polls. The process status
+    // and stderr carry each 404; stdout must not masquerade as a success.
+    for (let poll = 0; poll < 2; poll++) {
+      await assert.rejects(() => execFileAsync(process.execPath, args, { timeout: 5000 }), (error) => {
+        assert.equal(error.code, 2);
+        assert.equal(error.stdout, "");
+        assert.deepEqual(JSON.parse(error.stderr), { error: `GET ${remote}: HTTP 404` });
+        return true;
+      });
+      assert.equal(readFileSync(local, "utf8"), "stale\n");
+    }
+    f.files.set(remote, Buffer.from("txjob_rc=0\n"));
+    const result = await execFileAsync(process.execPath, args, { timeout: 5000 });
+    assert.equal(result.stderr, "");
+    assert.deepEqual(JSON.parse(result.stdout), { remote, local, bytes: 11, status: 200 });
+    assert.equal(readFileSync(local, "utf8"), "txjob_rc=0\n");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    await f.close();
+  }
 });
 
 test("graphical action never returns a stale pre-action screenshot", async () => {

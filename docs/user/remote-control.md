@@ -22,7 +22,15 @@ node tools/web/remote-control.mjs click 120 42 ./after-click.png
 node tools/web/remote-control.mjs key Enter ./after-enter.png
 ```
 
-Every successful call prints one JSON object. `run` returns `exitCode`,
+Successful calls write one JSON object to stdout and exit with status 0.
+Adapter errors, including a failed HTTP request, write `{"error":"..."}` to
+stderr and exit with status 2; stdout is empty. For example, a missing download
+produces `{"error":"GET /DH0/report.txt: HTTP 404"}` on stderr. Automation
+must capture the appropriate stream and check the process status before using
+any existing local file. A failed HTTP GET leaves that file unchanged; a
+transfer interrupted while writing it can leave a partial file.
+
+`run` returns `exitCode`,
 `output` and `durationMs`; its process exit status is 1 when the Amiga command
 returned nonzero, 2 on a transport or adapter error. `output` is the Shell's
 terminal stream, not separated stdout/stderr. The adapter removes ordinary
