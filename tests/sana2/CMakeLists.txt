@@ -241,10 +241,15 @@ endif()
 # sana2_copy.c comes along for ami_sana2_copy_bytes(), which
 # NX_LINK_SET_PHYSICAL_ADDRESS uses; the six SANA-II entry points and the four
 # nx_ip_interface_* setters are defined by the test.
+# The wrapper runs that suite plus assist/detach interleavings, with NetX's
+# actual direct-command entry and host threads sharing a recursive IP mutex.
+find_package(Threads REQUIRED)
 add_executable(test_sana2_driver
-    host/test_sana2_driver_host.c
+    host/test_sana2_driver_threads_host.c
     "${CMAKE_SOURCE_DIR}/src/sana2/sana2_driver.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_ip_driver_interface_direct_command.c"
     "${CMAKE_SOURCE_DIR}/src/sana2/sana2_copy.c")
+target_link_libraries(test_sana2_driver PRIVATE Threads::Threads)
 
 target_compile_options(test_sana2_driver PRIVATE
     -include "${CMAKE_CURRENT_SOURCE_DIR}/host/shim/host_regargs.h")
@@ -280,6 +285,7 @@ if(AMINETXDUO_RX_VERIFY)
 endif()
 
 add_test(NAME sana2_driver COMMAND test_sana2_driver)
+set_tests_properties(sana2_driver PROPERTIES TIMEOUT 10)
 
 # The device lifecycle, sana2_device.c, against one fake SANA-II unit that
 # queues CMD_READs, ignores AbortIO() and CMD_FLUSH, and answers only
