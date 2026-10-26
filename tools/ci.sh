@@ -2044,6 +2044,18 @@ stage_web() {
         return 1
     fi
 
+    # Exercise the host adapter as well as the browser pages. In particular,
+    # HTTP failures are process status 2 with JSON on stderr; function-only
+    # tests cannot catch a CLI caller reading the wrong stream.
+    if node --test tools/web/remote-control.test.mjs \
+            > "$BUILD/web-remote-control.log" 2>&1; then
+        note "remote-control protocol and CLI tests passed"
+    else
+        cat "$BUILD/web-remote-control.log"
+        fail "web (remote-control protocol or CLI contract)"
+        return 1
+    fi
+
     # And every vendored drawer is meant to be upstream's, byte for byte.
     # Each carries its own PROVENANCE: a comment block and then a plain
     # sha256sum list, which is why the comments are stripped and the rest is

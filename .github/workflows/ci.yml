@@ -210,6 +210,11 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Set up Node for the host web protocol tests
+        uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+
       # Named before anything is built.  tools/version.sh reads the project()
       # line and the submodule headers, so a workflow can label its own output
       # without configuring cmake and without running an m68k binary -- and it
