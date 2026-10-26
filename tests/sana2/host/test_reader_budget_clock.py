@@ -176,6 +176,9 @@ int main(void){
  reset();bind();clock_now=10;ami_v6_charge_start();clock_now=110;old_reads=reads;ami_v6_charge_checkpoint();
  check(reads==old_reads+1&&ami_v6.used==100&&ami_v6.t0==110&&ami_v6.running&&ami_v6.charging,"checkpoint charges once and reuses one sample");
  clock_now=150;ami_v6_charge_stop();check(ami_v6.used==140&&!ami_v6.running&&!ami_v6.charging,"stop charges only time since checkpoint");
+ reset();bind();ami_v6_charge_start();task.tc_Node.ln_Pri=0;clock_now=10;ami_v6_charge_checkpoint();
+ check(task.tc_Node.ln_Pri==1,"checkpoint restores the current high level after park priority");
+ task.tc_Node.ln_Pri=5;clock_now=20;ami_v6_charge_checkpoint();check(task.tc_Node.ln_Pri==5,"checkpoint preserves externally raised priority");
  reset();bind();clock_now=1;ami_v6_charge_start();clock_now=10000;ami_v6_charge_checkpoint();old_reads=reads;
  check(ami_v6.used==ami_v6_clock_stats[1]&&ami_v6.running&&!ami_v6.charging,"checkpoint saturates while work remains active");
  for(unsigned i=0;i<20;i++){clock_now++;ami_v6_charge_checkpoint();}
@@ -198,7 +201,8 @@ int main(void){
 results={}
 for name in ['fixed','live-guard-negative','charge-lock-negative','startup-limit-negative',
              'spent-refill-negative','spent-live-negative','unbounded-debit-negative',
-             'checkpoint-debit-negative','checkpoint-reread-negative','checkpoint-lock-negative']:
+             'checkpoint-debit-negative','checkpoint-reread-negative','checkpoint-lock-negative',
+             'checkpoint-saturate-negative','checkpoint-priority-negative']:
     api=provider;body=functions.copy()
     if name=='live-guard-negative':
         api=api.replace('        _tx_amiga_tick_run.tr_live == (UINT) TX_FALSE ||\n','')
@@ -227,6 +231,10 @@ for name in ['fixed','live-guard-negative','charge-lock-negative','startup-limit
         body[checkpoint_key]=body[checkpoint_key].replace('ami_v6.t0 = now;', 'ami_v6.t0 = ami_v6_clock();')
     if name=='checkpoint-lock-negative':
         body[checkpoint_key]=re.sub(r'(?m)^[ \t]*(?:Forbid|Permit)\(\);\n','',body[checkpoint_key])
+    if name=='checkpoint-saturate-negative':
+        body[checkpoint_key]=body[checkpoint_key].replace('ami_v6.charging = (ami_v6.used < (ULONG)V6_BUDGET);', 'ami_v6.charging = TRUE;')
+    if name=='checkpoint-priority-negative':
+        body[checkpoint_key]=body[checkpoint_key].replace('(VOID)SetTaskPri(me, (LONG)TX_AMIGA_HANDOFF_PRIORITY);', '(VOID)me;')
     text=prelude+api+data+macros+fixture+''.join(body.values())+main
     c=build/(name+'.c');exe=build/name;c.write_text(text)
     cmd=[os.environ.get('CC','clang'),'-std=c11','-Wall','-Wextra','-Werror','-O1','-g']+shlex.split(os.environ.get('CFLAGS',''))
@@ -247,6 +255,8 @@ for name in ['fixed','live-guard-negative','charge-lock-negative','startup-limit
     if name=='checkpoint-debit-negative':assert 'FAIL checkpoint charges once' in run.stdout
     if name=='checkpoint-reread-negative':assert 'FAIL checkpoint charges once' in run.stdout
     if name=='checkpoint-lock-negative':assert 'FAIL checkpoint publishes before deferred refill' in run.stdout
+    if name=='checkpoint-saturate-negative':assert 'FAIL checkpoint saturates while work remains active' in run.stdout
+    if name=='checkpoint-priority-negative':assert 'FAIL checkpoint restores the current high level' in run.stdout
     results[name]={'exit':run.returncode,'checks':int(summary[1]),'failures':int(summary[2]),'source_sha256':hashlib.sha256(text.encode()).hexdigest(),'output':run.stdout}
 (build/'results.json').write_text(json.dumps(results,indent=2)+'\n')
 
