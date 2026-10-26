@@ -260,6 +260,41 @@ static VOID ami_v6_charge_stop(VOID)
     Permit();
 }
 
+#if defined(V6_ECLOCK) && !defined(V6_FRAMES)
+/* A drain checkpoint keeps the same active interval. Reuse its sample as
+   the next origin instead of stop/read then start/read. The outer Forbid
+   also holds a deferred refill until both debit and origin are published. */
+static VOID ami_v6_charge_checkpoint(VOID)
+{
+    struct Task *me = FindTask(NULL);
+
+    if (me != ami_v6.task)
+        return;
+    Forbid();
+    if (ami_v6.charging)
+    {
+        ULONG now = ami_v6_clock();
+
+        if (ami_v6_clock_valid)
+        {
+            ULONG elapsed = now - ami_v6.t0;
+            ULONG left = (ULONG)V6_BUDGET - ami_v6.used;
+
+            ami_v6.used += (elapsed >= left) ? left : elapsed;
+            ami_v6.t0 = now;
+            ami_v6.charging = (ami_v6.used < (ULONG)V6_BUDGET);
+            if (ami_v6.level != 0 && me->tc_Node.ln_Pri == 0)
+                (VOID)SetTaskPri(me, (LONG)TX_AMIGA_HANDOFF_PRIORITY);
+        }
+        else
+            ami_v6_clock_fail_open();
+    }
+    else
+        ami_v6_charge_start(); /* spent live probe, startup retry or fallback */
+    Permit();
+}
+#endif
+
 /* The tick: refill, and put a low reader back to 1 wherever it is. */
 static VOID ami_v6_tick(VOID)
 {
@@ -2966,8 +3001,12 @@ static VOID ami_sana2_rx_thread(ULONG argument)
         /* A busy reader that overran its budget without waiting stands
            aside through a release/reacquire, never holding the baton. */
         /* Charge checkpoint: the run so far counts before the budget test. */
+#if defined(V6_ECLOCK) && !defined(V6_FRAMES)
+        ami_v6_charge_checkpoint();
+#else
         ami_v6_charge_stop();
         ami_v6_charge_start();
+#endif
         if (FindTask(NULL) == ami_v6.task &&
             ami_v6.level != 0 && ami_v6.used >= (ULONG)V6_BUDGET &&
 #ifdef V6_GATED

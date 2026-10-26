@@ -65,9 +65,13 @@ provider=live_provider+function(port,'ULONG tx_amiga_eclock_read_locked(ULONG *l
 signatures=['static BOOL ami_v6_clock_try_init(VOID)',
  'static BOOL ami_v6_has_victim(VOID)','static ULONG ami_v6_clock(VOID)',
  'static VOID ami_v6_charge_start(VOID)','static VOID ami_v6_charge_stop(VOID)',
+ 'static VOID ami_v6_charge_checkpoint(VOID)',
  'static VOID ami_v6_tick(VOID)','static VOID ami_v6_settle(BOOL overrun)',
  'static VOID ami_v6_bind(struct Task *me)','static VOID ami_v6_unbind(struct Task *me)']
 functions={s:function(source,s) for s in signatures}
+checkpoint_key='static VOID ami_v6_charge_checkpoint(VOID)'
+# The frame arm charges frames; this time-only optimization is not compiled.
+functions[checkpoint_key]='#ifndef V6_FRAMES\n'+functions[checkpoint_key]+'#endif\n'
 fixture='static BOOL victim(VOID){return TRUE;}\nstatic BOOL (*ami_sana2_budget_victim_hook)(VOID)=victim;\n'
 main=r'''
 static unsigned checks,failures;
@@ -169,12 +173,32 @@ int main(void){
  ami_v6_unbind(&task);check(!ports&&!_tx_amiga_tick_hook,"failed rebind is fully unpublished on stop");
  old_reads=reads;ami_v6_charge_start();ami_v6_charge_stop();check(reads==old_reads,"unbound owner never reads device");
  check(!forbid_depth&&!pending&&!unsafe_reads,"all native clock reads protected and balanced");
+ reset();bind();clock_now=10;ami_v6_charge_start();clock_now=110;old_reads=reads;ami_v6_charge_checkpoint();
+ check(reads==old_reads+1&&ami_v6.used==100&&ami_v6.t0==110&&ami_v6.running&&ami_v6.charging,"checkpoint charges once and reuses one sample");
+ clock_now=150;ami_v6_charge_stop();check(ami_v6.used==140&&!ami_v6.running&&!ami_v6.charging,"stop charges only time since checkpoint");
+ reset();bind();clock_now=1;ami_v6_charge_start();clock_now=10000;ami_v6_charge_checkpoint();old_reads=reads;
+ check(ami_v6.used==ami_v6_clock_stats[1]&&ami_v6.running&&!ami_v6.charging,"checkpoint saturates while work remains active");
+ for(unsigned i=0;i<20;i++){clock_now++;ami_v6_charge_checkpoint();}
+ check(reads==old_reads&&ami_v6.used==ami_v6_clock_stats[1],"spent checkpoints retain quota without device reads");
+ clock_now=13479;h_tick();clock_now=13488;ami_v6_charge_checkpoint();
+ check(ami_v6.used==9&&ami_v6.t0==13488&&ami_v6.charging,"refill resumes busy checkpoint accounting");
+ reset();bind();clock_now=1000;ami_v6_charge_start();clock_now=13478;inject=1;ami_v6_charge_checkpoint();
+ check(ami_v6_refilled==13479&&!ami_v6.used&&ami_v6.charging&&ami_v6.t0==13479,"checkpoint publishes before deferred refill");
+ clock_now=13480;ami_v6_charge_stop();check(ami_v6.used==1,"checkpoint refill charges only new period");
+ reset();bind();ami_v6_charge_start();ami_v6.level=0;task.tc_Node.ln_Pri=0;rate=0;ami_v6_charge_checkpoint();
+ check(ami_v6_clock_stats[4]==1&&ami_v6_clock_stats[3]==1&&task.tc_Node.ln_Pri==1&&!ami_v6.running,"checkpoint clock loss restores progress");
+ reset();bind();ami_v6.used=ami_v6_clock_stats[1];ami_v6.level=0;task.tc_Node.ln_Pri=0;_tx_amiga_tick_run.tr_live=0;ami_v6_charge_checkpoint();
+ check(ami_v6_clock_stats[4]==1&&task.tc_Node.ln_Pri==1,"spent checkpoint detects retired clock");
+ reset();_tx_amiga_tick_run.tr_live=0;bind();ami_v6_charge_checkpoint();_tx_amiga_tick_run.tr_live=1;clock_now=10;ami_v6_charge_checkpoint();
+ check(!ami_v6_clock_stats[4]&&ami_v6.charging&&ami_v6.running&&ami_v6.t0==10,"checkpoint can activate delayed startup without waiting");
+ ami_v6_unbind(&task);old_reads=reads;ami_v6_charge_checkpoint();check(reads==old_reads&&!forbid_depth&&!unsafe_reads,"unbound checkpoint is inert and all exclusion balanced");
  printf("native-clock checks=%u failures=%u\n",checks,failures);return failures?1:0;
 }
 '''
 results={}
 for name in ['fixed','live-guard-negative','charge-lock-negative','startup-limit-negative',
-             'spent-refill-negative','spent-live-negative','unbounded-debit-negative']:
+             'spent-refill-negative','spent-live-negative','unbounded-debit-negative',
+             'checkpoint-debit-negative','checkpoint-reread-negative','checkpoint-lock-negative']:
     api=provider;body=functions.copy()
     if name=='live-guard-negative':
         api=api.replace('        _tx_amiga_tick_run.tr_live == (UINT) TX_FALSE ||\n','')
@@ -197,6 +221,12 @@ for name in ['fixed','live-guard-negative','charge-lock-negative','startup-limit
         old='(elapsed >= left) ? left : elapsed'
         assert old in body[key]
         body[key]=body[key].replace(old,'(elapsed >= left) ? elapsed : elapsed')
+    if name=='checkpoint-debit-negative':
+        body[checkpoint_key]=body[checkpoint_key].replace('ami_v6.used += (elapsed >= left) ? left : elapsed;', 'ami_v6.used += (elapsed >= left) ? 0 : 0;')
+    if name=='checkpoint-reread-negative':
+        body[checkpoint_key]=body[checkpoint_key].replace('ami_v6.t0 = now;', 'ami_v6.t0 = ami_v6_clock();')
+    if name=='checkpoint-lock-negative':
+        body[checkpoint_key]=re.sub(r'(?m)^[ \t]*(?:Forbid|Permit)\(\);\n','',body[checkpoint_key])
     text=prelude+api+data+macros+fixture+''.join(body.values())+main
     c=build/(name+'.c');exe=build/name;c.write_text(text)
     cmd=[os.environ.get('CC','clang'),'-std=c11','-Wall','-Wextra','-Werror','-O1','-g']+shlex.split(os.environ.get('CFLAGS',''))
@@ -214,6 +244,9 @@ for name in ['fixed','live-guard-negative','charge-lock-negative','startup-limit
     if name=='spent-refill-negative':assert 'FAIL refill restarts busy spent interval' in run.stdout
     if name=='spent-live-negative':assert 'FAIL spent credit detects retirement' in run.stdout
     if name=='unbounded-debit-negative':assert 'FAIL debit saturates at quota' in run.stdout
+    if name=='checkpoint-debit-negative':assert 'FAIL checkpoint charges once' in run.stdout
+    if name=='checkpoint-reread-negative':assert 'FAIL checkpoint charges once' in run.stdout
+    if name=='checkpoint-lock-negative':assert 'FAIL checkpoint publishes before deferred refill' in run.stdout
     results[name]={'exit':run.returncode,'checks':int(summary[1]),'failures':int(summary[2]),'source_sha256':hashlib.sha256(text.encode()).hexdigest(),'output':run.stdout}
 (build/'results.json').write_text(json.dumps(results,indent=2)+'\n')
 
