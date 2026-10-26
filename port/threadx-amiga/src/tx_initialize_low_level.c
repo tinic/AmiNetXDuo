@@ -572,6 +572,23 @@ ULONG   section =  (ULONG) (t1 - t0);
 
 
 /* Bench hook (#353 V6b): called by every tick service, inside its Forbid(). */
+#ifdef V6_ECLOCK
+ULONG tx_amiga_eclock_read_locked(ULONG *lo)
+{
+    struct EClockVal now;
+    ULONG hz;
+
+    if (lo == (ULONG *) 0 ||
+        _tx_amiga_tick_run.tr_live == (UINT) TX_FALSE ||
+        _tx_amiga_timer_base == (struct Device *) 0)
+        return 0UL;
+    hz = ReadEClock(&now);
+    if (hz != 0UL)
+        *lo = now.ev_lo;
+    return hz;
+}
+#endif
+
 #if defined(V6_TIME_US) || defined(V6_FRAMES)
 VOID (*_tx_amiga_tick_hook)(VOID) = (VOID (*)(VOID)) 0;
 #endif

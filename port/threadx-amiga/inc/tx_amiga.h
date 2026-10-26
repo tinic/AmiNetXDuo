@@ -87,6 +87,13 @@ typedef struct TX_AMIGA_TICK_STATS_STRUCT
 extern VOID (*_tx_amiga_tick_hook)(VOID);
 #endif
 
+#ifdef V6_ECLOCK
+/* Diagnostic clock: caller holds Forbid() or Disable() across this call.
+   Returns the measured Hz, or zero without touching *lo while the tick's
+   device base is unavailable. The live test also excludes startup fallback. */
+ULONG   tx_amiga_eclock_read_locked(ULONG *lo);
+#endif
+
 VOID    tx_amiga_tick_stats(TX_AMIGA_TICK_STATS *stats);
 
 /* The same counters where they live, for a debugger on a frozen machine or the

@@ -14,6 +14,12 @@
 #      host/test_sana2_copy_host.c ../../src/sana2/sana2_copy.c -o test_sana2_copy
 
 if(CMAKE_CROSSCOMPILING)
+    # Read-only #353 diagnostic helper; built explicitly, never packaged.
+    add_executable(gchildstat EXCLUDE_FROM_ALL gchildstat.c)
+    target_compile_options(gchildstat PRIVATE -Wall -Wextra -Werror)
+    if(AMIGA_NDK_INCLUDE)
+        target_include_directories(gchildstat PRIVATE "${AMIGA_NDK_INCLUDE}")
+    endif()
     return()
 endif()
 
@@ -327,7 +333,7 @@ if(AMINETXDUO_SANITIZE)
         set(_reader_sanitize --ubsan)
     endif()
 endif()
-foreach(_reader_case IN ITEMS budget_refill budget_gate victim wait_route)
+foreach(_reader_case IN ITEMS budget_refill budget_gate victim wait_route budget_clock)
     if(_reader_case STREQUAL "victim")
         set(_reader_script "${CMAKE_SOURCE_DIR}/tests/bsdsocket/host/test_reader_victim.py")
     else()

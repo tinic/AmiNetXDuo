@@ -43,19 +43,56 @@ VOID ami_sana2_block_enter(VOID);
 #if defined(V6_GATED) && !defined(V6_TIME_US) && !defined(V6_FRAMES)
 #error V6_GATED requires an explicit diagnostic reader budget
 #endif
+#if defined(V6_ECLOCK) && !defined(V6_TIME_US) && !defined(V6_FRAMES)
+#error V6_ECLOCK requires an explicit diagnostic reader budget
+#endif
+#if defined(V6_ECLOCK) && defined(V6_TIME_US)
+#if V6_TIME_US < 1000 || V6_TIME_US > 1000000 || V6_TIME_US % 1000 != 0
+#error V6_ECLOCK time budget must be whole milliseconds from 1 through 1000
+#endif
+#endif
 
 /* ---- #353 V6b sporadic server, bench only (one wired interface) ---- */
 #if defined(V6_TIME_US) || defined(V6_FRAMES)
 static struct
 {
     struct Task *task;
-    ULONG        used;      /* us or frames in this tick */
+    ULONG        used;      /* clock units or frames in this period */
     ULONG        t0;
     BYTE         level;     /* 1 or 0 */
     BOOL         charging;
     ULONG        stats[5];  /* ticks, exhaustions, overrun yields, ticks ending low, promotions by tick */
 } ami_v6;
 static struct MsgPort ami_v6_port;
+#ifdef V6_ECLOCK
+/* Hz, budget ticks (or frames), refill ticks, failures, disabled latch.
+   Keep the original five-counter port compatible with frozen tools. */
+static ULONG ami_v6_clock_stats[5];
+static struct MsgPort ami_v6_clock_port;
+static BOOL ami_v6_clock_valid;
+
+/* Exact ceiling without a wide divide or hz*milliseconds overflow.
+   The diagnostic accepts only 1..1000 ms; the refill is 19 ms. */
+static ULONG ami_v6_ticks(ULONG hz, ULONG milliseconds)
+{
+    return (hz / 1000UL) * milliseconds +
+           ((hz % 1000UL) * milliseconds + 999UL) / 1000UL;
+}
+
+/* Caller holds Forbid. A failed clock must not strand a low reader. Latch
+   this experiment off until rebind; the dedicated port makes failure visible. */
+static VOID ami_v6_clock_fail_open(VOID)
+{
+    if (ami_v6_clock_stats[4] == 0UL)
+        ami_v6_clock_stats[3]++;
+    ami_v6_clock_stats[4] = 1UL;
+    ami_v6.used = 0;
+    ami_v6.charging = FALSE;
+    ami_v6.level = 1;
+    if (ami_v6.task != NULL && ami_v6.task->tc_Node.ln_Pri == 0)
+        (VOID)SetTaskPri(ami_v6.task, (LONG)TX_AMIGA_HANDOFF_PRIORITY);
+}
+#endif
 #ifdef V6_GATED
 BOOL (*ami_sana2_budget_victim_hook)(VOID);
 
@@ -73,13 +110,29 @@ static BOOL ami_v6_has_victim(VOID)
 
 #if defined(V6_FRAMES)
 #define V6_BUDGET V6_FRAMES
+#elif defined(V6_ECLOCK)
+#define V6_BUDGET ami_v6_clock_stats[1]
 #else
 #define V6_BUDGET V6_TIME_US
+#endif
+#ifdef V6_ECLOCK
+#define V6_REFILL ami_v6_clock_stats[2]
+#else
+#define V6_REFILL 19000UL
 #endif
 
 static ULONG ami_v6_clock(VOID)
 {
+#ifdef V6_ECLOCK
+    ULONG now = 0;
+
+    /* Subtract low words modulo 2^32. Live periods are 19 ms minimum, far
+       below one E-Clock low-word wrap; no absolute-time conversion is used. */
+    ami_v6_clock_valid = (tx_amiga_eclock_read_locked(&now) != 0UL);
+    return now;
+#else
     return __builtin_bswap32(*(volatile ULONG *)0xf2003004UL);
+#endif
 }
 
 static VOID ami_v6_charge_start(VOID)
@@ -95,9 +148,20 @@ static VOID ami_v6_charge_start(VOID)
        have promoted the reader since.  The level wins. */
     if (ami_v6.level != 0 && me->tc_Node.ln_Pri == 0)
         (VOID)SetTaskPri(me, (LONG)TX_AMIGA_HANDOFF_PRIORITY);
+#ifdef V6_ECLOCK
+    if (ami_v6_clock_stats[4] != 0UL)
+    {
+        Permit();
+        return;
+    }
+#endif
 #if !defined(V6_FRAMES)
     ami_v6.t0 = ami_v6_clock();
     ami_v6.charging = TRUE;
+#ifdef V6_ECLOCK
+    if (!ami_v6_clock_valid)
+        ami_v6_clock_fail_open();
+#endif
 #endif
     Permit();
 }
@@ -111,7 +175,18 @@ static VOID ami_v6_charge_stop(VOID)
     Forbid();
 #if !defined(V6_FRAMES)
     if (ami_v6.charging)
+    {
+#ifdef V6_ECLOCK
+        ULONG now = ami_v6_clock();
+
+        if (ami_v6_clock_valid)
+            ami_v6.used += now - ami_v6.t0;
+        else
+            ami_v6_clock_fail_open();
+#else
         ami_v6.used += ami_v6_clock() - ami_v6.t0;
+#endif
+    }
     ami_v6.charging = FALSE;
 #endif
     Permit();
@@ -123,11 +198,24 @@ static ULONG ami_v6_refilled;
 static VOID ami_v6_tick(VOID)
 {
     struct Task *t = ami_v6.task;
-    ULONG        now = ami_v6_clock();
+    ULONG        now;
+
+#ifdef V6_ECLOCK
+    if (ami_v6_clock_stats[4] != 0UL)
+        return;
+#endif
+    now = ami_v6_clock();
+#ifdef V6_ECLOCK
+    if (!ami_v6_clock_valid)
+    {
+        ami_v6_clock_fail_open();
+        return;
+    }
+#endif
 
     /* A tick service can run without a tick having passed: refill only
        when a whole period has. */
-    if (now - ami_v6_refilled < 19000UL)
+    if (now - ami_v6_refilled < V6_REFILL)
         return;
     ami_v6_refilled = now;
     ami_v6.stats[0]++;
@@ -136,7 +224,16 @@ static VOID ami_v6_tick(VOID)
     ami_v6.used = 0;
 #if !defined(V6_FRAMES)
     if (ami_v6.charging)
+    {
         ami_v6.t0 = ami_v6_clock();
+#ifdef V6_ECLOCK
+        if (!ami_v6_clock_valid)
+        {
+            ami_v6_clock_fail_open();
+            return;
+        }
+#endif
+    }
 #endif
     if (t != NULL && ami_v6.level == 0)
     {
@@ -159,6 +256,10 @@ static VOID ami_v6_settle(BOOL overrun)
         return;
     Forbid();
     want = (ami_v6.used < (ULONG)V6_BUDGET) ? (BYTE)TX_AMIGA_HANDOFF_PRIORITY : (BYTE)0;
+#ifdef V6_ECLOCK
+    if (ami_v6_clock_stats[4] != 0UL)
+        want = (BYTE)TX_AMIGA_HANDOFF_PRIORITY;
+#endif
 #ifdef V6_GATED
     if (want == 0 && ami_v6.level != 0 && !ami_v6_has_victim())
         want = (BYTE)TX_AMIGA_HANDOFF_PRIORITY;
@@ -176,9 +277,34 @@ static VOID ami_v6_settle(BOOL overrun)
 
 static VOID ami_v6_bind(struct Task *me)
 {
-    if (ami_v6.task != NULL)
-        return;                     /* the first reader (the wired one) only */
     Forbid();
+    if (ami_v6.task != NULL)
+    {
+        Permit();
+        return;                     /* the first reader (the wired one) only */
+    }
+#ifdef V6_ECLOCK
+    {
+        ULONG now, hz = tx_amiga_eclock_read_locked(&now);
+
+        if (hz == 0UL)
+        {
+            Permit();
+            return;                 /* no timer.base call before it is live */
+        }
+        ami_v6_clock_stats[0] = hz;
+#ifdef V6_FRAMES
+        ami_v6_clock_stats[1] = (ULONG)V6_FRAMES;
+#else
+        ami_v6_clock_stats[1] = ami_v6_ticks(hz, (ULONG)V6_TIME_US / 1000UL);
+#endif
+        ami_v6_clock_stats[2] = ami_v6_ticks(hz, 19UL);
+        ami_v6_clock_stats[3] = ami_v6_clock_stats[4] = 0UL;
+        ami_v6_refilled = now;
+        ami_v6.used = 0;
+        ami_v6.charging = FALSE;
+    }
+#endif
     ami_v6.task  = me;
     ami_v6.level = 1;
     (VOID)SetTaskPri(me, (LONG)TX_AMIGA_HANDOFF_PRIORITY);
@@ -189,6 +315,16 @@ static VOID ami_v6_bind(struct Task *me)
     ami_v6_port.mp_MsgList.lh_Head     = (struct Node *)&ami_v6_port.mp_MsgList.lh_Tail;
     ami_v6_port.mp_MsgList.lh_TailPred = (struct Node *)&ami_v6_port.mp_MsgList.lh_Head;
     AddPort(&ami_v6_port);
+#ifdef V6_ECLOCK
+    ami_v6_clock_port = ami_v6_port;
+    ami_v6_clock_port.mp_Node.ln_Name = (char *)"AmiNetXDuo eclock";
+    ami_v6_clock_port.mp_SigTask = (struct Task *)ami_v6_clock_stats;
+    ami_v6_clock_port.mp_MsgList.lh_Head =
+        (struct Node *)&ami_v6_clock_port.mp_MsgList.lh_Tail;
+    ami_v6_clock_port.mp_MsgList.lh_TailPred =
+        (struct Node *)&ami_v6_clock_port.mp_MsgList.lh_Head;
+    AddPort(&ami_v6_clock_port);
+#endif
     _tx_amiga_tick_hook = ami_v6_tick;
     Permit();
 }
@@ -199,6 +335,9 @@ static VOID ami_v6_unbind(struct Task *me)
     if (ami_v6.task == me)
     {
         _tx_amiga_tick_hook = (VOID (*)(VOID)) 0;
+#ifdef V6_ECLOCK
+        RemPort(&ami_v6_clock_port);
+#endif
         RemPort(&ami_v6_port);
         ami_v6.task = NULL;
     }
@@ -2746,7 +2885,11 @@ static VOID ami_sana2_rx_thread(ULONG argument)
             /* Serialize the frame-mode charge with the same refill hook as
                the time-mode charge. Do not depend on one m68k RMW opcode. */
             Forbid();
-            if (FindTask(NULL) == ami_v6.task)
+            if (FindTask(NULL) == ami_v6.task
+#ifdef V6_ECLOCK
+                && ami_v6_clock_stats[4] == 0UL
+#endif
+               )
                 ami_v6.used += taken;
             Permit();
         }

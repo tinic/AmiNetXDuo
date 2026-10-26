@@ -518,7 +518,8 @@ host_test_targets() { # builddir
 #      575 with addrinfo_dns_policy: default IPv4 LAN DNS query policy and
 #      source-aware ordering of A/AAAA answers (x86_64 shim only).
 #      579 with four #353 reader-budget/source-routing regressions.
-HOST_TESTS_EXPECTED=579
+#      580 with the native-clock lifetime, conversion and fail-open regression.
+HOST_TESTS_EXPECTED=580
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,
@@ -541,7 +542,7 @@ case "$(uname -m)" in
     *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 31)) ;;
 esac
 # The conflict-drain fixture uses Linux's MAP_32BIT, not merely x86_64.
-# Darwin arm64 registers 547; Darwin x86_64 registers 578 on this tree.
+# Darwin arm64 registers 548; Darwin x86_64 registers 579 on this tree.
 case "$(uname -s):$(uname -m)" in
     Linux:x86_64|Linux:amd64) ;;
     *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 1)) ;;

@@ -38,6 +38,7 @@ typedef void VOID;typedef uint32_t ULONG;typedef int8_t BYTE;typedef int32_t LON
 #define FALSE 0
 #define TX_AMIGA_HANDOFF_PRIORITY 1
 #define V6_BUDGET 6000U
+#define V6_REFILL 19000U
 struct Task {struct {BYTE ln_Pri;}tc_Node;};
 static struct Task task;
 static struct {struct Task*task;ULONG used,t0;BYTE level;BOOL charging;ULONG stats[5];}ami_v6;
@@ -87,7 +88,8 @@ tick = function("static VOID ami_v6_tick(VOID)")
 settle = function("static VOID ami_v6_settle(BOOL overrun)")
 
 def unserialized(body):
-    assert body.count("    Forbid();\n") == body.count("    Permit();\n") == 1
+    assert body.count("    Forbid();\n") == 1
+    assert body.count("    Permit();\n") >= 1
     return body.replace("    Forbid();\n", "").replace("    Permit();\n", "")
 
 results = {}
