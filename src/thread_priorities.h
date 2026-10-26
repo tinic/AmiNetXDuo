@@ -69,8 +69,9 @@
  *   10+ filesystem handlers, scsi.device and other disk drivers
  *    6  ehide.device (seen on the A3000)
  *    5  console.device, trackdisk.device, TCP: handler and its sessions
- *    1  ThreadX wake handoff (TX_AMIGA_HANDOFF_PRIORITY)
- *    0  ThreadX protocol work and normal programs (TX_AMIGA_TASK_PRIORITY)
+ *  1-2  ordinary ThreadX band (TX_AMIGA_TASK_PRIORITY, TX_AMIGA_HANDOFF_PRIORITY)
+ *  0-1  explicit #353 budget experiment's ThreadX band
+ *    0  normal programs
  *
  * The tick sits above the handlers and disk drivers so a busy disk cannot
  * starve the wheel; one service holds the machine for about

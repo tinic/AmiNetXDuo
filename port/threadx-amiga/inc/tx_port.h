@@ -392,12 +392,15 @@ void    _tx_amiga_start_interrupts(void);
 /* Exec priority for Tasks that ThreadX creates.  ThreadX, not Exec, picks
    which of them runs, so they all share one priority; making it depend on the
    ThreadX priority would put Exec's scheduler in competition with ours.
-   Share priority zero with ordinary applications so continuous protocol work
-   cannot starve their CPU work.  Baton and I/O wakeups use the temporary
-   handoff priority below, restored before protocol processing resumes. */
+   The #353 budget experiment uses priority zero with temporary wakeups at
+   the handoff priority below. Ordinary builds retain the shipped band. */
 
 #ifndef TX_AMIGA_TASK_PRIORITY
+#if defined(V6_TIME_US) || defined(V6_FRAMES)
 #define TX_AMIGA_TASK_PRIORITY                  0
+#else
+#define TX_AMIGA_TASK_PRIORITY                  1
+#endif
 #endif
 
 /* Exec wake priority while parked for the baton or while a port-created Task

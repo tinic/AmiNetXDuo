@@ -1870,7 +1870,9 @@ static LONG ami_ns_bring_up(BOOL loopback_only)
      */
     ami_sana2_set_block_hooks(ami_netstack_baton_release,
                               ami_netstack_baton_acquire);
-#if !defined(V6_TIME_US) && !defined(V6_FRAMES)
+#if !defined(V6_TIME_US) && !defined(V6_FRAMES) && TX_AMIGA_TASK_PRIORITY == 0
+    /* Explicit band-zero builds need the prototype's extra I/O wake boost.
+       Preserve the shipped band-one reader's wait behavior by default. */
     ami_sana2_set_reader_wait_hook(ami_netstack_baton_release_reader);
 #endif
 
