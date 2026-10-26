@@ -39,6 +39,141 @@
 #include <inline/alib.h>
 
 VOID ami_sana2_block_enter(VOID);
+
+/* ---- #353 V6b sporadic server, bench only (one wired interface) ---- */
+extern VOID (*_tx_amiga_tick_hook)(VOID);
+static struct
+{
+    struct Task *task;
+    ULONG        used;      /* us or frames in this tick */
+    ULONG        t0;
+    BYTE         level;     /* 1 or 0 */
+    BOOL         charging;
+    ULONG        stats[5];  /* ticks, exhaustions, overrun yields, ticks ending low, promotions by tick */
+} ami_v6;
+static struct MsgPort ami_v6_port;
+
+#if defined(V6_FRAMES)
+#define V6_BUDGET V6_FRAMES
+#else
+#define V6_BUDGET V6_TIME_US
+#endif
+
+static ULONG ami_v6_clock(VOID)
+{
+    return __builtin_bswap32(*(volatile ULONG *)0xf2003004UL);
+}
+
+static VOID ami_v6_charge_start(VOID)
+{
+    struct Task *me = FindTask(NULL);
+
+    if (me != ami_v6.task)
+        return;
+    /* The park restores the priority it saw on the way in; the tick may
+       have promoted the reader since.  The level wins. */
+    if (ami_v6.level != 0 && me->tc_Node.ln_Pri == 0)
+        (VOID)SetTaskPri(me, (LONG)TX_AMIGA_HANDOFF_PRIORITY);
+#if !defined(V6_FRAMES)
+    ami_v6.t0 = ami_v6_clock();
+    ami_v6.charging = TRUE;
+#endif
+}
+
+static VOID ami_v6_charge_stop(VOID)
+{
+    if (FindTask(NULL) != ami_v6.task)
+        return;
+#if !defined(V6_FRAMES)
+    if (ami_v6.charging)
+        ami_v6.used += ami_v6_clock() - ami_v6.t0;
+    ami_v6.charging = FALSE;
+#endif
+}
+
+/* The tick: refill, and put a low reader back to 1 wherever it is. */
+static ULONG ami_v6_refilled;
+
+static VOID ami_v6_tick(VOID)
+{
+    struct Task *t = ami_v6.task;
+    ULONG        now = ami_v6_clock();
+
+    /* A tick service can run without a tick having passed: refill only
+       when a whole period has. */
+    if (now - ami_v6_refilled < 19000UL)
+        return;
+    ami_v6_refilled = now;
+    ami_v6.stats[0]++;
+    if (ami_v6.level == 0)
+        ami_v6.stats[3]++;
+    ami_v6.used = 0;
+#if !defined(V6_FRAMES)
+    if (ami_v6.charging)
+        ami_v6.t0 = ami_v6_clock();
+#endif
+    if (t != NULL && ami_v6.level == 0)
+    {
+        ami_v6.level = 1;
+        if (t->tc_Node.ln_Pri == 0)
+        {
+            (VOID)SetTaskPri(t, (LONG)TX_AMIGA_HANDOFF_PRIORITY);
+            ami_v6.stats[4]++;
+        }
+    }
+}
+
+/* Baton released: the safe point to move between the two levels. */
+static VOID ami_v6_settle(BOOL overrun)
+{
+    struct Task *me = FindTask(NULL);
+    BYTE         want;
+
+    if (me != ami_v6.task)
+        return;
+    Forbid();
+    want = (ami_v6.used < (ULONG)V6_BUDGET) ? (BYTE)TX_AMIGA_HANDOFF_PRIORITY : (BYTE)0;
+    if (want == 0 && ami_v6.level != 0)
+        ami_v6.stats[1]++;
+    if (overrun)
+        ami_v6.stats[2]++;
+    ami_v6.level = (want == 0) ? 0 : 1;
+    if (me->tc_Node.ln_Pri != want &&
+        (me->tc_Node.ln_Pri == 0 || me->tc_Node.ln_Pri == (BYTE)TX_AMIGA_HANDOFF_PRIORITY))
+        (VOID)SetTaskPri(me, (LONG)want);
+    Permit();
+}
+
+static VOID ami_v6_bind(struct Task *me)
+{
+    if (ami_v6.task != NULL)
+        return;                     /* the first reader (the wired one) only */
+    Forbid();
+    ami_v6.task  = me;
+    ami_v6.level = 1;
+    (VOID)SetTaskPri(me, (LONG)TX_AMIGA_HANDOFF_PRIORITY);
+    ami_v6_port.mp_Node.ln_Name = (char *)"AmiNetXDuo v6";
+    ami_v6_port.mp_Node.ln_Type = NT_MSGPORT;
+    ami_v6_port.mp_Flags        = PA_IGNORE;
+    ami_v6_port.mp_SigTask      = (struct Task *)ami_v6.stats;
+    ami_v6_port.mp_MsgList.lh_Head     = (struct Node *)&ami_v6_port.mp_MsgList.lh_Tail;
+    ami_v6_port.mp_MsgList.lh_TailPred = (struct Node *)&ami_v6_port.mp_MsgList.lh_Head;
+    AddPort(&ami_v6_port);
+    _tx_amiga_tick_hook = ami_v6_tick;
+    Permit();
+}
+
+static VOID ami_v6_unbind(struct Task *me)
+{
+    Forbid();
+    if (ami_v6.task == me)
+    {
+        _tx_amiga_tick_hook = (VOID (*)(VOID)) 0;
+        RemPort(&ami_v6_port);
+        ami_v6.task = NULL;
+    }
+    Permit();
+}
 VOID ami_sana2_reader_wait_enter(VOID);
 VOID ami_sana2_block_leave(VOID);
 
@@ -2416,6 +2551,8 @@ static VOID ami_sana2_rx_thread(ULONG argument)
     rd->running = TRUE;
     tx_semaphore_put(&rd->ready);
 
+    ami_v6_bind(FindTask(NULL));
+    ami_v6_charge_start();
     while (!rd->stop)
     {
         UWORD live = 0;
@@ -2528,7 +2665,9 @@ static VOID ami_sana2_rx_thread(ULONG argument)
          */
         if (ami_sana2_rx_should_block(rd, AMI_SANA2_RX_RUN_MAX))
         {
-            ami_sana2_reader_wait_enter();
+            ami_sana2_block_enter();
+            ami_v6_charge_stop();
+            ami_v6_settle(FALSE);
             Wait(rd->wake_mask | rd->reap_mask | rd->ack_mask);
 #ifdef AMINETXDUO_RXPROBE
             {
@@ -2548,9 +2687,34 @@ static VOID ami_sana2_rx_thread(ULONG argument)
 #else
             ami_sana2_block_leave();
 #endif
+            ami_v6_charge_start();
         }
 
+#if defined(V6_FRAMES)
+        {
+            UWORD taken = ami_sana2_rx_drain(rd, (UWORD)AMI_SANA2_RX_RUN_MAX);
+
+            if (FindTask(NULL) == ami_v6.task)
+                ami_v6.used += taken;
+        }
+#else
         (VOID)ami_sana2_rx_drain(rd, (UWORD)AMI_SANA2_RX_RUN_MAX);
+#endif
+        /* A busy reader that overran its budget without waiting stands
+           aside through a release/reacquire, never holding the baton. */
+        /* Charge checkpoint: the run so far counts before the budget test. */
+        ami_v6_charge_stop();
+        ami_v6_charge_start();
+        if (FindTask(NULL) == ami_v6.task &&
+            ami_v6.level != 0 && ami_v6.used >= (ULONG)V6_BUDGET &&
+            !ami_sana2_rx_should_block(rd, AMI_SANA2_RX_RUN_MAX))
+        {
+            ami_v6_charge_stop();
+            ami_sana2_block_enter();
+            ami_v6_settle(TRUE);
+            ami_sana2_block_leave();
+            ami_v6_charge_start();
+        }
 
         /*
          * THE POLL, AFTER THE DRAIN AND BEFORE THE SLEEP.  Every slot this
@@ -2608,6 +2772,7 @@ static VOID ami_sana2_rx_thread(ULONG argument)
 
     ami_sana2_rx_teardown(rd);
 
+    ami_v6_unbind(FindTask(NULL));
     rd->running = FALSE;
     tx_semaphore_put(&rd->exited);
 }
