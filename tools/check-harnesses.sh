@@ -176,6 +176,7 @@ rfbil               RFB interleave measurement
 rfbprof             RFB encode profile
 tcpprof             the sampling profiler itself, over _nx_ram_network_driver: the TCP/IP core only
 wireprof            the same sampler over a REAL transfer -- bsdsocket.library, the SANA-II reader and the card; the only instrument that can name a function on the driver path
+gchildstat          read-only #353 diagnostic counter snapshot, used by the external physical audio/load A/B harness; no pass/fail test verdict
 tls_bench           handshake and record timings
 test_ptrprobe       where an injected IECLASS_POINTERPOS lands, per display mode; a measured table
 test_ifnames        a Developer drawer example, staged by dist/make-dist.sh
