@@ -2743,8 +2743,12 @@ static VOID ami_sana2_rx_thread(ULONG argument)
         {
             UWORD taken = ami_sana2_rx_drain(rd, (UWORD)AMI_SANA2_RX_RUN_MAX);
 
+            /* Serialize the frame-mode charge with the same refill hook as
+               the time-mode charge. Do not depend on one m68k RMW opcode. */
+            Forbid();
             if (FindTask(NULL) == ami_v6.task)
                 ami_v6.used += taken;
+            Permit();
         }
 #else
         (VOID)ami_sana2_rx_drain(rd, (UWORD)AMI_SANA2_RX_RUN_MAX);

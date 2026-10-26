@@ -113,3 +113,58 @@ for name, functions in [("serialized", start + stop),
     results[name] = {"exit": run.returncode, "source_sha256": hashlib.sha256(text.encode()).hexdigest(),
                      "output": run.stdout}
 (build / "results.json").write_text(json.dumps(results, indent=2) + "\n")
+
+# Frame-count builds share the same refill writer. Check the actual drain
+# boundary's accesses under scheduling exclusion as well as its charge value.
+frame_start = source.index('            UWORD taken = ami_sana2_rx_drain')
+frame_start = source.rfind('        {', 0, frame_start)
+frame_end = source.index('\n        }', frame_start) + len('\n        }')
+frame = source[frame_start:frame_end]
+frame_prefix = prefix + r'''
+typedef uint16_t UWORD;
+#define AMI_SANA2_RX_RUN_MAX 128
+static unsigned unprotected;
+static UWORD ami_sana2_rx_drain(VOID *rd, UWORD max) {(void)rd;(void)max;return 7;}
+static __typeof__(ami_v6) *frame_state(VOID) {
+    if (!forbid_depth) unprotected++;
+    return &ami_v6;
+}
+#define ami_v6 (*frame_state())
+static VOID charge_frames(VOID) {VOID *rd=0;
+'''
+frame_main = r'''
+}
+#undef ami_v6
+static unsigned checks,failures;
+static void check(int ok,const char*s){checks++;if(!ok){failures++;printf("FAIL %s\n",s);}}
+int main(void) {
+ ami_v6.task=&task;ami_v6.used=10;charge_frames();
+ check(ami_v6.used==17,"seven drained frames charged");
+ check(forbid_depth==0,"frame charge balances exclusion");
+ ami_v6.task=0;charge_frames();
+ check(ami_v6.used==17,"other reader does not charge bound reader");
+ check(forbid_depth==0,"other reader balances exclusion");
+ check(unprotected==0,"frame task and debit accesses protected from refill");
+ printf("frame checks=%u failures=%u\n",checks,failures);return failures?1:0;
+}
+'''
+for name, body in [('frames', frame),
+                   ('frames-unprotected-negative', frame.replace('            Forbid();\n','').replace('            Permit();\n',''))]:
+    # Reuse the original model clock/tick definitions so compiler warnings
+    # still cover every extracted helper; only frame boundary is exercised.
+    text = prefix + start + stop + tick + settle
+    text += frame_prefix[len(prefix):] + body + frame_main
+    # The time helpers are not exercised by this separate frame executable.
+    text = text.replace('static VOID ami_v6_charge_start(VOID)', 'VOID ami_v6_charge_start(VOID)')
+    text = text.replace('static VOID ami_v6_charge_stop(VOID)', 'VOID ami_v6_charge_stop(VOID)')
+    text = text.replace('static VOID ami_v6_settle(BOOL overrun)', 'VOID ami_v6_settle(BOOL overrun)')
+    c=build/(name+'.c');exe=build/name;c.write_text(text)
+    subprocess.run(command+[str(c),'-o',str(exe)],check=True)
+    run=subprocess.run([str(exe)],text=True,capture_output=True)
+    (build/(name+'.log')).write_text(run.stdout+run.stderr)
+    negative=name.endswith('-negative')
+    assert run.returncode==int(negative)
+    assert f'frame checks=5 failures={int(negative)}' in run.stdout
+    results[name]={'exit':run.returncode,'source_sha256':hashlib.sha256(text.encode()).hexdigest(),'output':run.stdout}
+    print(name,run.stdout,run.stderr)
+(build/'results.json').write_text(json.dumps(results,indent=2)+'\n')
