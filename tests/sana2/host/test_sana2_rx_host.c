@@ -63,9 +63,19 @@ static BOOL h_poll_reply_now;
 static BYTE h_poll_error;
 static unsigned h_poll_begins;
 static unsigned h_wait_ios;
+static int h_lock_depth;
+static struct IORequest *h_begun[8];
+static int h_begin_lock[8];
+static unsigned h_begins;
 VOID BeginIO(struct IORequest *req)
 {
     h_last_begun = req;
+    if (h_begins < 8)
+    {
+        h_begun[h_begins] = req;
+        h_begin_lock[h_begins] = h_lock_depth;
+    }
+    h_begins++;
     if (req->io_Command == ANXD_CMD_RX_POLL)
     {
         h_poll_begins++;
@@ -268,7 +278,6 @@ static void h_record(NX_PACKET *packet, Destination where)
  */
 static int h_ip_locked;
 static int h_ip_seated;
-static int h_lock_depth;
 static unsigned assist_lock_calls, assist_fail_locks, assist_pass_begin, assist_pass_end;
 static ULONG assist_last_wait;
 static AmiSana2Reader *assist_stop_during_lock;
@@ -2638,6 +2647,8 @@ static AmiSana2Reader assist_reader;
 static struct MsgPort assist_port;
 static AmiRxSlot assist_slots[3];
 static TX_THREAD assist_outer;
+static NX_PACKET assist_packets[3];
+static UBYTE assist_buffers[3][128];
 
 static void assist_drain_setup(void)
 {
@@ -2776,8 +2787,68 @@ static void test_assist_reader_eligibility(void)
     _nx_ip_input_thread = TX_NULL;
 }
 
+static void test_assist_repost_and_poll(void)
+{
+    unsigned i;
+    AmiSana2Rx *rx = &iface.rx[0];
+
+    assist_drain_setup();
+    assist_reader.parked = assist_reader.running = TRUE;
+    iface.online = TRUE;
+    iface.rx_dst_off = AMI_ETH_HEADER_SIZE;
+    iface.rx_poll_ok = TRUE;
+    rx->packet_type = 0x0800;
+    memset(assist_packets, 0, sizeof(assist_packets));
+    for (i = 0; i < 3; i++)
+    {
+        assist_packets[i].nx_packet_data_start = assist_buffers[i];
+        assist_packets[i].nx_packet_data_end = assist_buffers[i] + sizeof(assist_buffers[i]);
+        assist_slots[i].packet = &assist_packets[i];
+        assist_slots[i].req.ios2_Req.io_Command = CMD_READ;
+        assist_slots[i].req.ios2_Req.io_Message.mn_ReplyPort = &assist_port;
+        assist_slots[i].req.ios2_Data = &assist_slots[i];
+    }
+    assist_reader.poll.ios2_Req.io_Command = ANXD_CMD_RX_POLL;
+    assist_reader.poll.ios2_Req.io_Message.mn_ReplyPort = &assist_port;
+    h_poll_async = h_poll_reply_now = TRUE;
+    h_poll_error = 0;
+    h_poll_begins = h_wait_ios = h_begins = 0;
+    /* The public assistant holds an outer lock; this helper's recursive
+       drain lock must leave that ownership intact through repost and poll. */
+    h_lock_depth = 1;
+    h_check(ami_sana2_rx_assist_reader(&assist_reader, 2) == 2 &&
+            assist_queue_length() == 2 && assist_last_wait == TX_NO_WAIT,
+            "assist bounds its drain before a poll can add a new reply");
+    h_check(h_begins == 3 && h_begun[0] == (struct IORequest *)&assist_slots[0].req &&
+            h_begun[1] == (struct IORequest *)&assist_slots[1].req &&
+            h_begun[2] == (struct IORequest *)&assist_reader.poll,
+            "assist reposts exactly the consumed reads before polling the device");
+    h_check(assist_slots[0].posted && assist_slots[1].posted &&
+            assist_slots[2].posted && rx->unposted == 0 &&
+            assist_slots[0].dst == assist_buffers[0] + AMI_SANA2_RX_PAD + AMI_ETH_HEADER_SIZE,
+            "assisted repost arms real buffers and balances ring ownership");
+    h_check(h_begin_lock[0] == 1 && h_begin_lock[1] == 1 && h_begin_lock[2] == 1 &&
+            h_lock_depth == 1 && _nx_ip_input_thread == &assist_outer,
+            "outer IP lock protects repost and poll after recursive drain unlock");
+    h_check(assist_reader.poll_pending && !iface.rx_poll_ok && h_wait_ios == 0,
+            "assist retains a non-quick poll without waiting or allowing reuse");
+    h_check(ami_sana2_rx_assist_reader(&assist_reader, 2) == 1 &&
+            assist_queue_length() == 0 && !assist_reader.poll_pending,
+            "next assist collects the control reply without counting it as a frame");
+    h_check(h_begins == 4 && h_begun[3] == (struct IORequest *)&assist_slots[2].req &&
+            h_begin_lock[3] == 1 && h_poll_begins == 1 && h_wait_ios == 0 &&
+            rx->unposted == 0 && h_lock_depth == 1,
+            "remaining read is reposted once and asynchronous polling stays disabled");
+    h_check(ami_sana2_rx_assist_reader(&assist_reader, 2) == 0 && h_begins == 4,
+            "empty assist does not submit or wait for new work");
+    h_lock_depth = 0;
+    h_poll_async = h_poll_reply_now = h_getmsg_real = FALSE;
+    _nx_ip_input_thread = TX_NULL;
+}
+
 int main(void)
 {
+    test_assist_repost_and_poll();
     test_assist_reader_eligibility();
     test_optional_drain_contract();
     test_poll_quick_and_async_replies();

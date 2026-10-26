@@ -1,7 +1,7 @@
 # The ThreadX/Exec adoption layer on its own, docs/RESEARCH.md 77.6's defect,
 # reduced to the layer it lived in.
 #
-# Links threadx_port and nothing else of the stack: no NetX Duo, no
+# Links threadx_port and the caller-assist stack trampoline: no NetX Duo, no
 # bsdsocket.library, no SANA-II driver, no interface. That is what lets this run
 # in public CI, where every harness that reaches the library through its LVOs
 # needs a2065.device and stays out.
@@ -21,6 +21,7 @@ endif()
 # code is linked.
 add_executable(bracket_invariants
     bracket_test.c
+    "${CMAKE_SOURCE_DIR}/src/bsdsocket/rx_assist_stack.S"
     "${CMAKE_SOURCE_DIR}/src/netstack/netstack_baton.c")
 
 target_link_libraries(bracket_invariants PRIVATE threadx_port aminetxduo_common)

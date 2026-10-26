@@ -2358,6 +2358,8 @@ static VOID bt_test_reader_wake(VOID)
     }
 }
 
+#include "assist_stack.inc"
+
 int main(int argc, char **argv)
 {
     struct Task *me = FindTask(NULL);
@@ -2386,6 +2388,7 @@ int main(int argc, char **argv)
 
     bt_test_interrupt_control_idempotent();
     bt_test_reader_wake();
+    bt_test_assist_stack();
 
     /* Green threads have no native Exec task to become a reaper zombie; this
        case specifically exhausts the native thread's handshake signals. */
