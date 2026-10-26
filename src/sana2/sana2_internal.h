@@ -690,7 +690,7 @@ typedef struct AmiSana2Reader
 
     volatile BOOL       started;    /* tx_thread_create succeeded          */
     volatile BOOL       running;
-    BOOL                parked;     /* inside the empty-port raw wait      */
+    volatile BOOL       parked;     /* inside the empty-port raw wait      */
     volatile BOOL       stop;
     volatile BOOL       failed;
     /* `exited` has been taken: the thread no longer runs this module's code,

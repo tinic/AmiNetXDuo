@@ -1840,6 +1840,54 @@ AMI_SANA2_BATCH_LINKAGE UWORD ami_sana2_rx_drain_wait(AmiSana2Reader *rd,
     UWORD           took = 0;
     UWORD           r;
 
+
+    /*
+     * One lock for the whole run, not one per frame.
+     *
+     * nx_ip_thread_entry.c holds nx_ip_protection across its entire event loop
+     * and gives it back only when it is about to wait, and this loop is the
+     * same shape: every frame it takes walks the same fragment list, the same
+     * ARP cache and the same counters, and taking and giving back the mutex
+     * between each of them buys nothing but the round trips.  The run is
+     * bounded by `budget` above, which is what stops the hold from becoming
+     * open-ended.
+     *
+     * Claiming the IP thread's seat goes with it: _nx_tcp_packet_receive()
+     * then processes each segment here instead of queueing it and waking a
+     * thread that is blocked on the mutex this one holds.  See
+     * NX_TCP_PACKET_RECEIVE_DIRECT in port/netxduo-amiga/inc/nx_user.h.  The
+     * saved outer value is not decoration: a loopback send from inside input
+     * re-enters, and the nested call must not give the seat up on its way out.
+     *
+     * What the reader must never do while holding this is block in exec, which
+     * would release the ThreadX baton with the IP mutex held.  Nothing on the
+     * path does: the only device call it reaches is BeginIO(), which queues
+     * and returns, and the packet allocation is NX_NO_WAIT.
+     */
+    /*
+     * NOT TX_WAIT_FOREVER.  ami_sana2_rx_stop() runs inside
+     * _nx_ip_driver_interface_direct_command(), which holds this same mutex
+     * across the whole NX_LINK_DISABLE and then waits seconds for this thread
+     * to put its "exited" semaphore.  A reader woken by that stop always
+     * reaches this line before it retests rd->stop, so waiting forever here IS
+     * the deadlock: the reader waits for the mutex, the stopper waits for the
+     * reader, and the interface comes back orphaned.  A stop is also the one
+     * thing this run has nothing left to do for -- the loop below drops every
+     * message on rd->stop anyway -- so give the mutex up and let the loop end.
+     */
+    while (tx_mutex_get(&ip->nx_ip_protection, wait) != TX_SUCCESS)
+    {
+        if (wait == TX_NO_WAIT || rd->stop)
+            return took;
+    }
+
+    /* Set while this was waiting: the same, minus the round trip below. */
+    if (rd->stop)
+    {
+        tx_mutex_put(&ip->nx_ip_protection);
+        return took;
+    }
+
 #ifdef AMINETXDUO_RXPROBE
     /* The pass-level figures (backlog, dry, baton) are the first ring's:
        one task drains every ring in one pass now. */
@@ -1893,53 +1941,6 @@ AMI_SANA2_BATCH_LINKAGE UWORD ami_sana2_rx_drain_wait(AmiSana2Reader *rd,
         iface->seq.avail = avail;
     }
 #endif
-
-    /*
-     * One lock for the whole run, not one per frame.
-     *
-     * nx_ip_thread_entry.c holds nx_ip_protection across its entire event loop
-     * and gives it back only when it is about to wait, and this loop is the
-     * same shape: every frame it takes walks the same fragment list, the same
-     * ARP cache and the same counters, and taking and giving back the mutex
-     * between each of them buys nothing but the round trips.  The run is
-     * bounded by `budget` above, which is what stops the hold from becoming
-     * open-ended.
-     *
-     * Claiming the IP thread's seat goes with it: _nx_tcp_packet_receive()
-     * then processes each segment here instead of queueing it and waking a
-     * thread that is blocked on the mutex this one holds.  See
-     * NX_TCP_PACKET_RECEIVE_DIRECT in port/netxduo-amiga/inc/nx_user.h.  The
-     * saved outer value is not decoration: a loopback send from inside input
-     * re-enters, and the nested call must not give the seat up on its way out.
-     *
-     * What the reader must never do while holding this is block in exec, which
-     * would release the ThreadX baton with the IP mutex held.  Nothing on the
-     * path does: the only device call it reaches is BeginIO(), which queues
-     * and returns, and the packet allocation is NX_NO_WAIT.
-     */
-    /*
-     * NOT TX_WAIT_FOREVER.  ami_sana2_rx_stop() runs inside
-     * _nx_ip_driver_interface_direct_command(), which holds this same mutex
-     * across the whole NX_LINK_DISABLE and then waits seconds for this thread
-     * to put its "exited" semaphore.  A reader woken by that stop always
-     * reaches this line before it retests rd->stop, so waiting forever here IS
-     * the deadlock: the reader waits for the mutex, the stopper waits for the
-     * reader, and the interface comes back orphaned.  A stop is also the one
-     * thing this run has nothing left to do for -- the loop below drops every
-     * message on rd->stop anyway -- so give the mutex up and let the loop end.
-     */
-    while (tx_mutex_get(&ip->nx_ip_protection, wait) != TX_SUCCESS)
-    {
-        if (wait == TX_NO_WAIT || rd->stop)
-            return took;
-    }
-
-    /* Set while this was waiting: the same, minus the round trip below. */
-    if (rd->stop)
-    {
-        tx_mutex_put(&ip->nx_ip_protection);
-        return took;
-    }
 
     outer = _nx_ip_input_thread;
     _nx_ip_input_thread = tx_thread_identify();
