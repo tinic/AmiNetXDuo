@@ -61,6 +61,9 @@ static struct
     ULONG        t0;
     BYTE         level;     /* 1 or 0 */
     BOOL         charging;
+#ifdef V6_ECLOCK
+    BOOL         running;   /* active work even after its credit is spent */
+#endif
     ULONG        stats[5];  /* ticks, exhaustions, overrun yields, ticks ending low, promotions by tick */
 } ami_v6;
 static struct MsgPort ami_v6_port;
@@ -68,7 +71,7 @@ static ULONG ami_v6_refilled;
 #ifdef V6_ECLOCK
 /* Hz, budget ticks (or frames), refill ticks, failures, mode, startup waits.
    Mode: 0 active, 1 failed until rebind, 2 waiting for the first valid clock.
-   Keep the original five-counter port compatible with frozen tools. */
+   The separate original "AmiNetXDuo v6" five-counter port is unchanged. */
 static ULONG ami_v6_clock_stats[6];
 static struct MsgPort ami_v6_clock_port;
 static BOOL ami_v6_clock_valid;
@@ -93,6 +96,7 @@ static VOID ami_v6_clock_fail_open(VOID)
     ami_v6_clock_stats[4] = 1UL;
     ami_v6.used = 0;
     ami_v6.charging = FALSE;
+    ami_v6.running = FALSE;
     ami_v6.level = 1;
     if (ami_v6.task != NULL && ami_v6.task->tc_Node.ln_Pri == 0)
         (VOID)SetTaskPri(ami_v6.task, (LONG)TX_AMIGA_HANDOFF_PRIORITY);
@@ -152,7 +156,12 @@ static BOOL ami_v6_clock_try_init(VOID)
     ami_v6_clock_stats[2] = ami_v6_ticks(hz, 19UL);
     ami_v6_refilled = now;
     ami_v6.used = 0;
+#ifdef V6_FRAMES
     ami_v6.charging = FALSE;
+#else
+    ami_v6.t0 = now;
+    ami_v6.charging = ami_v6.running;
+#endif
     ami_v6_clock_stats[4] = 0UL;
     return TRUE;
 }
@@ -186,10 +195,22 @@ static VOID ami_v6_charge_start(VOID)
     if (ami_v6.level != 0 && me->tc_Node.ln_Pri == 0)
         (VOID)SetTaskPri(me, (LONG)TX_AMIGA_HANDOFF_PRIORITY);
 #ifdef V6_ECLOCK
+    ami_v6.running = TRUE;
     if (ami_v6_clock_stats[4] == 2UL)
         (VOID)ami_v6_clock_try_init();
     if (ami_v6_clock_stats[4] != 0UL)
     {
+        Permit();
+        return;
+    }
+    /* Only the comparison with the quota matters once it is spent. Keep
+       that credit until refill; do not keep reading the device per drain.
+       The cheap probe still detects a retired timer without waiting. */
+    if (ami_v6.used >= (ULONG)V6_BUDGET)
+    {
+        ami_v6.charging = FALSE;
+        if (tx_amiga_eclock_live_locked() == (UINT)TX_FALSE)
+            ami_v6_clock_fail_open();
         Permit();
         return;
     }
@@ -219,7 +240,12 @@ static VOID ami_v6_charge_stop(VOID)
         ULONG now = ami_v6_clock();
 
         if (ami_v6_clock_valid)
-            ami_v6.used += now - ami_v6.t0;
+        {
+            ULONG elapsed = now - ami_v6.t0;
+            ULONG left = (ULONG)V6_BUDGET - ami_v6.used;
+
+            ami_v6.used += (elapsed >= left) ? left : elapsed;
+        }
         else
             ami_v6_clock_fail_open();
 #else
@@ -227,6 +253,9 @@ static VOID ami_v6_charge_stop(VOID)
 #endif
     }
     ami_v6.charging = FALSE;
+#endif
+#ifdef V6_ECLOCK
+    ami_v6.running = FALSE;
 #endif
     Permit();
 }
@@ -264,7 +293,13 @@ static VOID ami_v6_tick(VOID)
         ami_v6.stats[3]++;
     ami_v6.used = 0;
 #if !defined(V6_FRAMES)
+#ifdef V6_ECLOCK
+    /* Saturation stopped measuring, not running. Resume its new-period
+       interval here even when the reader has not handed off or waited. */
+    if (ami_v6.running)
+#else
     if (ami_v6.charging)
+#endif
     {
         ami_v6.t0 = ami_v6_clock();
 #ifdef V6_ECLOCK
@@ -273,6 +308,7 @@ static VOID ami_v6_tick(VOID)
             ami_v6_clock_fail_open();
             return;
         }
+        ami_v6.charging = TRUE;
 #endif
     }
 #endif
@@ -331,6 +367,7 @@ static VOID ami_v6_bind(struct Task *me)
     ami_v6_startup_left = AMI_V6_STARTUP_TRIES;
     ami_v6.used = 0;
     ami_v6.charging = FALSE;
+    ami_v6.running = FALSE;
     (VOID)ami_v6_clock_try_init();
 #endif
     ami_v6.task  = me;
@@ -365,6 +402,7 @@ static VOID ami_v6_unbind(struct Task *me)
         _tx_amiga_tick_hook = (VOID (*)(VOID)) 0;
 #ifdef V6_ECLOCK
         RemPort(&ami_v6_clock_port);
+        ami_v6.running = ami_v6.charging = FALSE;
 #endif
         RemPort(&ami_v6_port);
         ami_v6.task = NULL;

@@ -19,6 +19,7 @@ typedef void VOID;typedef uint32_t ULONG;typedef int32_t LONG;typedef int8_t BYT
 #define TRUE 1
 #define FALSE 0
 #define TX_FALSE 0U
+#define TX_TRUE 1U
 #define TX_AMIGA_HANDOFF_PRIORITY 1
 #define V6_ECLOCK 1
 #define V6_TIME_US 6000
@@ -59,7 +60,8 @@ data=source[start:end]  # Includes the actual native state, conversion and failu
 macro_start=source.index('#if defined(V6_FRAMES)',end)
 macro_end=source.index('#ifdef V6_ECLOCK\n/* Readers can start',macro_start)
 macros=source[macro_start:macro_end]
-provider=function(port,'ULONG tx_amiga_eclock_read_locked(ULONG *lo)')
+live_provider=function(port,'UINT tx_amiga_eclock_live_locked(VOID)')
+provider=live_provider+function(port,'ULONG tx_amiga_eclock_read_locked(ULONG *lo)')
 signatures=['static BOOL ami_v6_clock_try_init(VOID)',
  'static BOOL ami_v6_has_victim(VOID)','static ULONG ami_v6_clock(VOID)',
  'static VOID ami_v6_charge_start(VOID)','static VOID ami_v6_charge_stop(VOID)',
@@ -122,13 +124,28 @@ int main(void){
  check(ami_v6.used==100&&!ami_v6.charging&&!unsafe_reads,"raw elapsed debit protected");
  ami_v6.used=0;clock_now=0xfffffff0U;ami_v6_charge_start();clock_now=0x10;ami_v6_charge_stop();
  check(ami_v6.used==32,"low word rollover is modulo-safe for bounded intervals");
+ reset();bind();clock_now=1;ami_v6_charge_start();clock_now=10000;ami_v6_charge_stop();
+ check(ami_v6.used==ami_v6_clock_stats[1],"debit saturates at quota without wrapping");
+ unsigned spent_reads=reads;
+ ami_v6_settle(FALSE);
+ for(unsigned i=0;i<20;i++){ami_v6_charge_start();clock_now++;ami_v6_charge_stop();}
+ check(reads==spent_reads&&ami_v6.used==ami_v6_clock_stats[1],"spent credit survives handoffs without more device reads");
+ ami_v6_charge_start();clock_now=13479;h_tick();
+ check(ami_v6.running&&ami_v6.charging&&!ami_v6.used&&ami_v6.t0==13479,"refill restarts busy spent interval");
+ clock_now=13486;ami_v6_charge_stop();check(ami_v6.used==7,"new period after saturation is charged");
+ reset();bind();ami_v6.used=ami_v6_clock_stats[1];ami_v6_charge_start();ami_v6_charge_stop();spent_reads=reads;clock_now=13479;h_tick();
+ check(!ami_v6.running&&!ami_v6.charging&&!ami_v6.used&&reads==spent_reads+1,"parked spent reader does not charge idle time after refill");
+ reset();bind();ami_v6.used=ami_v6_clock_stats[1];Forbid();ami_v6_charge_start();clock_now=13478;pending=1;Permit();
+ check(ami_v6.charging&&!ami_v6.used&&ami_v6.t0==13479&&!forbid_depth&&!pending,"deferred refill at spent-start return arms the new period");
+ reset();bind();ami_v6.used=ami_v6_clock_stats[1];ami_v6.level=0;task.tc_Node.ln_Pri=0;_tx_amiga_tick_run.tr_live=0;spent_reads=reads;ami_v6_charge_start();
+ check(reads==spent_reads&&ami_v6_clock_stats[3]==1&&ami_v6_clock_stats[4]==1&&task.tc_Node.ln_Pri==1,"spent credit detects retirement and restores progress without clock read");
  reset();bind();clock_now=1000;ami_v6_charge_start();clock_now=13478;inject=1;ami_v6_charge_stop();
  check(ami_v6_refilled==13479&&ami_v6.used==0&&!ami_v6.charging,"new period not overcharged across native refill");
  check(!forbid_depth&&!pending&&!unsafe_reads,"refill path exclusion balanced");
  reset();bind();clock_now=13478;inject=1;ami_v6_charge_start();
  check(ami_v6_refilled==13479&&ami_v6.t0==13479,"start/refill uses new period origin");
  clock_now=13480;ami_v6_charge_stop();check(ami_v6.used==1,"one new-period raw tick charged");
- reset();bind();ami_v6.level=0;task.tc_Node.ln_Pri=0;ami_v6.used=5000;rate=0;ami_v6_charge_start();
+ reset();bind();ami_v6.level=0;task.tc_Node.ln_Pri=0;ami_v6.used=100;rate=0;ami_v6_charge_start();
  check(ami_v6_clock_stats[3]==1&&ami_v6_clock_stats[4]==1,"start failure counted and latched");
  check(ami_v6.level==1&&task.tc_Node.ln_Pri==1&&!ami_v6.used&&!ami_v6.charging,"start failure restores progress priority");
  unsigned old_reads=reads;task.tc_Node.ln_Pri=0;ami_v6_charge_start();ami_v6_charge_stop();h_tick();ami_v6_settle(FALSE);
@@ -156,18 +173,30 @@ int main(void){
 }
 '''
 results={}
-for name in ['fixed','live-guard-negative','charge-lock-negative','startup-limit-negative']:
+for name in ['fixed','live-guard-negative','charge-lock-negative','startup-limit-negative',
+             'spent-refill-negative','spent-live-negative','unbounded-debit-negative']:
     api=provider;body=functions.copy()
     if name=='live-guard-negative':
         api=api.replace('        _tx_amiga_tick_run.tr_live == (UINT) TX_FALSE ||\n','')
     if name=='charge-lock-negative':
         for key in ['static VOID ami_v6_charge_start(VOID)','static VOID ami_v6_charge_stop(VOID)']:
-            body[key]=body[key].replace('    Forbid();\n','').replace('    Permit();\n','')
+            body[key]=re.sub(r'(?m)^[ \t]*(?:Forbid|Permit)\(\);\n','',body[key])
     if name=='startup-limit-negative':
         key='static BOOL ami_v6_clock_try_init(VOID)'
         old='        if (ami_v6_startup_left == 0UL)\n            ami_v6_clock_fail_open();\n'
         assert old in body[key]
         body[key]=body[key].replace(old,'')
+    if name=='spent-refill-negative':
+        key='static VOID ami_v6_tick(VOID)'
+        assert '    if (ami_v6.running)\n' in body[key]
+        body[key]=body[key].replace('    if (ami_v6.running)\n','    if (ami_v6.charging)\n')
+    if name=='spent-live-negative':
+        api=api.replace(live_provider,'UINT tx_amiga_eclock_live_locked(VOID){return TX_TRUE;}\n')
+    if name=='unbounded-debit-negative':
+        key='static VOID ami_v6_charge_stop(VOID)'
+        old='(elapsed >= left) ? left : elapsed'
+        assert old in body[key]
+        body[key]=body[key].replace(old,'(elapsed >= left) ? elapsed : elapsed')
     text=prelude+api+data+macros+fixture+''.join(body.values())+main
     c=build/(name+'.c');exe=build/name;c.write_text(text)
     cmd=[os.environ.get('CC','clang'),'-std=c11','-Wall','-Wextra','-Werror','-O1','-g']+shlex.split(os.environ.get('CFLAGS',''))
@@ -182,6 +211,9 @@ for name in ['fixed','live-guard-negative','charge-lock-negative','startup-limit
     if name=='live-guard-negative':assert 'FAIL not-live base refused' in run.stdout
     if name=='charge-lock-negative':assert 'FAIL new period not overcharged' in run.stdout
     if name=='startup-limit-negative':assert 'FAIL startup retry exhaustion' in run.stdout
+    if name=='spent-refill-negative':assert 'FAIL refill restarts busy spent interval' in run.stdout
+    if name=='spent-live-negative':assert 'FAIL spent credit detects retirement' in run.stdout
+    if name=='unbounded-debit-negative':assert 'FAIL debit saturates at quota' in run.stdout
     results[name]={'exit':run.returncode,'checks':int(summary[1]),'failures':int(summary[2]),'source_sha256':hashlib.sha256(text.encode()).hexdigest(),'output':run.stdout}
 (build/'results.json').write_text(json.dumps(results,indent=2)+'\n')
 

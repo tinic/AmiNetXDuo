@@ -92,6 +92,8 @@ extern VOID (*_tx_amiga_tick_hook)(VOID);
    Returns the measured Hz, or zero without touching *lo while the tick's
    device base is unavailable. The live test also excludes startup fallback. */
 ULONG   tx_amiga_eclock_read_locked(ULONG *lo);
+/* Cheap lifecycle check for an already-exhausted diagnostic budget. */
+UINT    tx_amiga_eclock_live_locked(VOID);
 #endif
 
 VOID    tx_amiga_tick_stats(TX_AMIGA_TICK_STATS *stats);
