@@ -46,7 +46,6 @@ VOID ami_sana2_block_enter(VOID);
 
 /* ---- #353 V6b sporadic server, bench only (one wired interface) ---- */
 #if defined(V6_TIME_US) || defined(V6_FRAMES)
-extern VOID (*_tx_amiga_tick_hook)(VOID);
 static struct
 {
     struct Task *task;

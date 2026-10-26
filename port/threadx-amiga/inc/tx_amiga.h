@@ -82,6 +82,11 @@ typedef struct TX_AMIGA_TICK_STATS_STRUCT
     ULONG   tx_amiga_tick_skew_peak;
 } TX_AMIGA_TICK_STATS;
 
+#if defined(V6_TIME_US) || defined(V6_FRAMES)
+/* Bench-only void callback, delivered with task switching forbidden. */
+extern VOID (*_tx_amiga_tick_hook)(VOID);
+#endif
+
 VOID    tx_amiga_tick_stats(TX_AMIGA_TICK_STATS *stats);
 
 /* The same counters where they live, for a debugger on a frozen machine or the

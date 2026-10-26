@@ -32,12 +32,14 @@ cd "$ROOT" || exit 1
 
 void_list="$(mktemp)"; trap 'rm -f "$void_list"' EXIT
 
-grep -rhoE "^VOID[[:space:]]+_?(nx|tx)_[a-z0-9_]+" \
+# A declared VOID callback also has no status. Restrict this to explicit
+# function-pointer declarations; UINT callbacks must still be classified.
+grep -rhoE "^(extern[[:space:]]+)?VOID[[:space:]]+(\(\*[[:space:]]*)?_?(nx|tx)_[a-z0-9_]+" \
      third_party/threadx/common/inc/*.h \
      third_party/netxduo/common/inc/*.h \
      port/threadx-amiga/inc/*.h \
      port/threadx-amiga/src/tx_amiga_memory.h 2>/dev/null |
-    awk '{print $2}' | sort -u > "$void_list"
+    grep -oE '_?(nx|tx)_[a-z0-9_]+' | sort -u > "$void_list"
 
 {
     # Form 1: the cast.
