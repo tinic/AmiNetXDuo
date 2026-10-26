@@ -221,6 +221,19 @@ endif()
 
 add_test(NAME sana2_rx COMMAND test_sana2_rx)
 
+# The reader entry carries its pointer in ThreadX's ULONG argument. Run the
+# actual body only at the target pointer width; the ordinary delivery suite
+# remains available on both 32-bit and 64-bit hosts.
+if(CMAKE_SIZEOF_VOID_P EQUAL 4)
+    add_executable(test_sana2_reader_body host/test_sana2_reader_body_host.c)
+    foreach(prop INCLUDE_DIRECTORIES COMPILE_OPTIONS COMPILE_DEFINITIONS)
+        get_target_property(reader_property test_sana2_rx ${prop})
+        set_property(TARGET test_sana2_reader_body PROPERTY ${prop} "${reader_property}")
+    endforeach()
+    add_test(NAME sana2_reader_body COMMAND test_sana2_reader_body)
+endif()
+
+
 # The NX_IP driver entry, sana2_driver.c.
 #
 # Every NX_LINK_* command NetX Duo can issue, the binding table that resolves

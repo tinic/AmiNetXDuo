@@ -188,7 +188,7 @@ VOID ami_log(int level, const char *fmt, ...) { (VOID)level; (VOID)fmt; }
 
 VOID ami_random_arrival(VOID) { }
 
-UINT tx_amiga_stack_in_use(APTR base, ULONG size)
+UINT tx_amiga_stack_in_use(CONST_APTR base, ULONG size)
 {
     (VOID)base;
     (VOID)size;

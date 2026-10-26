@@ -1380,8 +1380,8 @@ ${rlwhy:+ -- }${rlwhy:-, see the log above}" ;;
 # the ones whose pointer round trips through 32-bit slots are load-bearing.
 HOST32_TEST_TARGETS=(fuzz_mdns fuzz_tls_crypto tls_rsa_key_regression test_tls_x509
                      test_tcp_handler test_transfer test_cork test_cork_fast
-                     test_oob_filter tls_rsa_bounds tls_rsa_modulus_parity)
-HOST32_TEST_REGEX='(fuzz_mdns|fuzz_tls_crypto)_(seeds|sweep(_[0-9]+)?)$|^tls_rsa_key_regression$|tls_x509_checks$|^tcp_handler_packets$|^transfer_scatter_gather$|^cork_small_writes(_fastpath)?$|^oob_filter_payload_guard$|^tls_rsa_bounds$|^tls_rsa_modulus_parity$'
+                     test_oob_filter tls_rsa_bounds tls_rsa_modulus_parity test_sana2_reader_body)
+HOST32_TEST_REGEX='(fuzz_mdns|fuzz_tls_crypto)_(seeds|sweep(_[0-9]+)?)$|^tls_rsa_key_regression$|tls_x509_checks$|^tcp_handler_packets$|^transfer_scatter_gather$|^cork_small_writes(_fastpath)?$|^oob_filter_payload_guard$|^tls_rsa_bounds$|^tls_rsa_modulus_parity$|^sana2_reader_body$'
 # 7 until fuzz_tls_crypto_sweep was split into four streams to get under the
 # ten-second budget; 10 then, 13 once fuzz_mdns_sweep followed it at 9.31 s of
 # that budget, and 21 when four streams each turned out to still be 8.14 s on
@@ -1396,7 +1396,8 @@ HOST32_TEST_REGEX='(fuzz_mdns|fuzz_tls_crypto)_(seeds|sweep(_[0-9]+)?)$|^tls_rsa
 # scratch bounds; 32-bit for tls_rsa_key_regression's reason.
 # 27 with tls_rsa_modulus_parity (N-171), ours refusing an even modulus
 # before any exponentiation; the same reason.
-HOST32_TESTS_EXPECTED=27
+# 28 with sana2_reader_body: actual reader entry uses an ULONG pointer argument.
+HOST32_TESTS_EXPECTED=28
 
 stage_host32() {
     hr "host tests (32-bit: mDNS, TLS crypto, X.509, TCP:, transfer)"
