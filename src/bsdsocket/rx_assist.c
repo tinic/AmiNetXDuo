@@ -93,13 +93,15 @@ VOID bsd_rx_assist_release(struct AmiSocketBase *base)
     Forbid();
     ctx = base->sb_RxAssist;
     base->sb_RxAssist = NULL;
-    if (ctx != NULL && ctx->busy &&
-        tx_amiga_exec_task_alive(ctx->owner) != TX_FALSE)
+    if (ctx != NULL && ctx->busy)
     {
-        /* A close during service cannot free the stack under its owner.
-           The returning owner releases it after switching back. */
-        ctx->retire = TRUE;
-        ctx = NULL;
+        if (tx_amiga_exec_task_alive(ctx->owner) != TX_FALSE)
+        {
+            /* A close during service cannot free the stack under its owner.
+               The returning owner releases it after switching back. */
+            ctx->retire = TRUE;
+            ctx = NULL;
+        }
     }
     Permit();
     ami_free(ctx);

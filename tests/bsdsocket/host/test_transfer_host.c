@@ -2007,9 +2007,13 @@ static void t_receive_assist(void)
     h.assist_result = 1;
     h.assist_packet = TRUE;
     h.rx_len = sizeof(buf);
+    h.extract_real = TRUE;
+    memset(buf, 0, sizeof(buf));
     CHECK(bsd_recv(0, buf, sizeof(buf), 0, &h_base) == sizeof(buf) &&
           h.assists == 1 && h.recvs == 2 && h.fails == 0,
           "empty nonblocking TCP receive retries newly serviced data before errno");
+    CHECK(memcmp(buf, "ZZZZZZZZ", sizeof(buf)) == 0,
+          "assisted receive copies the serviced payload");
     CHECK(h.nx_enters == 1 && h.nx_leaves == 1 &&
           h.recv_waits[0] == NX_NO_WAIT && h.recv_waits[1] == NX_NO_WAIT,
           "assisted receive uses one bracket and never waits for a packet");
@@ -2065,8 +2069,12 @@ static void t_receive_assist(void)
     h_tcp(0)->as_Flags |= ASF_NONBLOCK;
     h.rx_packets = 1;
     h.rx_len = 3;
+    h.extract_real = TRUE;
+    memset(buf, 0, sizeof(buf));
     CHECK(bsd_recv(0, buf, sizeof(buf), MSG_WAITALL, &h_base) == 3 &&
           h.assists == 0, "a positive partial receive is not expanded by service");
+    CHECK(memcmp(buf, "ZZZ\0\0\0\0\0", sizeof(buf)) == 0,
+          "partial receive copies only the available bytes");
 }
 
 int main(void)

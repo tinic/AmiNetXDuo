@@ -135,8 +135,9 @@ UWORD ami_sana2_rx_assist(NX_IP *ip, UWORD budget)
     static UWORD next;
     UWORD i, slot, took = 0;
 
-    if (ip == NULL || budget == 0 ||
-        tx_mutex_get(&ip->nx_ip_protection, TX_NO_WAIT) != TX_SUCCESS)
+    if (ip == NULL || budget == 0)
+        return 0;
+    if (tx_mutex_get(&ip->nx_ip_protection, TX_NO_WAIT) != TX_SUCCESS)
         return 0;
     if (budget > 32)
         budget = 32;
@@ -163,7 +164,9 @@ UWORD ami_sana2_rx_assist(NX_IP *ip, UWORD budget)
                                               (UWORD)(budget - took));
     }
 
-    tx_mutex_put(&ip->nx_ip_protection);
+    /* This caller owns the valid IP mutex acquired above, including across
+       recursive drain locks; only TX_SUCCESS is possible here. */
+    AMI_NX_ONLY_SUCCESS(tx_mutex_put(&ip->nx_ip_protection));
     return took;
 }
 
