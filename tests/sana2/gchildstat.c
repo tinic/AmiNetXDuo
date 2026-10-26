@@ -8,19 +8,23 @@ int main(void)
 {
     struct MsgPort *port;
     ULONG snapshot[6];
-    ULONG clock[5];
+    ULONG clock[6];
     BOOL found;
     BOOL clock_found;
+    BOOL clock_v2;
 
     Forbid();
     port = FindPort((CONST_STRPTR)"AmiNetXDuo gchild");
     found = (port != NULL);
     if (found)
         CopyMem(port->mp_SigTask, snapshot, sizeof(snapshot));
-    port = FindPort((CONST_STRPTR)"AmiNetXDuo eclock");
+    port = FindPort((CONST_STRPTR)"AmiNetXDuo eclock2");
+    clock_v2 = (port != NULL);
+    if (!clock_v2)
+        port = FindPort((CONST_STRPTR)"AmiNetXDuo eclock");
     clock_found = (port != NULL);
     if (clock_found)
-        CopyMem(port->mp_SigTask, clock, sizeof(clock));
+        CopyMem(port->mp_SigTask, clock, clock_v2 ? sizeof(clock) : 5UL * sizeof(ULONG));
     Permit();
     if (!found)
     {
@@ -39,5 +43,7 @@ int main(void)
                (unsigned long)clock[4]);
     else
         printf("gclockstat=none\n");
+    if (clock_v2)
+        printf("gclockwait startup_waits=%lu\n", (unsigned long)clock[5]);
     return 0;
 }

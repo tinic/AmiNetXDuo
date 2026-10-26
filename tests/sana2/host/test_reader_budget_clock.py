@@ -57,15 +57,16 @@ start=source.index('static struct\n{',source.index('/* ---- #353'))
 end=source.index('#ifdef V6_GATED',start)
 data=source[start:end]  # Includes the actual native state, conversion and failure handler.
 macro_start=source.index('#if defined(V6_FRAMES)',end)
-macro_end=source.index('static ULONG ami_v6_clock(VOID)',macro_start)
+macro_end=source.index('#ifdef V6_ECLOCK\n/* Readers can start',macro_start)
 macros=source[macro_start:macro_end]
 provider=function(port,'ULONG tx_amiga_eclock_read_locked(ULONG *lo)')
-signatures=['static BOOL ami_v6_has_victim(VOID)','static ULONG ami_v6_clock(VOID)',
+signatures=['static BOOL ami_v6_clock_try_init(VOID)',
+ 'static BOOL ami_v6_has_victim(VOID)','static ULONG ami_v6_clock(VOID)',
  'static VOID ami_v6_charge_start(VOID)','static VOID ami_v6_charge_stop(VOID)',
  'static VOID ami_v6_tick(VOID)','static VOID ami_v6_settle(BOOL overrun)',
  'static VOID ami_v6_bind(struct Task *me)','static VOID ami_v6_unbind(struct Task *me)']
 functions={s:function(source,s) for s in signatures}
-fixture='static ULONG ami_v6_refilled;\nstatic BOOL victim(VOID){return TRUE;}\nstatic BOOL (*ami_sana2_budget_victim_hook)(VOID)=victim;\n'
+fixture='static BOOL victim(VOID){return TRUE;}\nstatic BOOL (*ami_sana2_budget_victim_hook)(VOID)=victim;\n'
 main=r'''
 static unsigned checks,failures;
 static void check(int ok,const char *why){checks++;if(!ok){failures++;printf("FAIL %s\n",why);}}
@@ -100,10 +101,18 @@ int main(void){
  check(ami_v6_ticks(709379,6)==4257&&ami_v6_ticks(709379,19)==13479,"PAL thresholds");
  check(ami_v6_ticks(715909,6)==4296&&ami_v6_ticks(715909,19)==13603,"NTSC thresholds");
  reset();_tx_amiga_tick_run.tr_live=0;bind();
- check(ami_v6.task==&task&&ports==2&&_tx_amiga_tick_hook==ami_v6_tick&&task.tc_Node.ln_Pri==1&&ami_v6_clock_stats[3]==1&&ami_v6_clock_stats[4],"unavailable bind publishes fallback and preserves progress");
+ check(ami_v6.task==&task&&ports==2&&_tx_amiga_tick_hook==ami_v6_tick&&task.tc_Node.ln_Pri==1&&!ami_v6_clock_stats[3]&&ami_v6_clock_stats[4]==2&&ami_v6_clock_stats[5]==1,"unavailable bind publishes waiting and preserves progress");
  check(!forbid_depth,"unavailable bind balances exclusion");
+ _tx_amiga_tick_run.tr_live=1;clock_now=1234;h_tick();
+ check(!ami_v6_clock_stats[4]&&!ami_v6_clock_stats[3]&&ami_v6_clock_stats[5]==1&&ami_v6_refilled==1234&&ports==2,"first live tick activates startup-waiting clock");
+ reset();_tx_amiga_tick_run.tr_live=0;bind();_tx_amiga_tick_run.tr_live=1;clock_now=1234;ami_v6_charge_start();
+ check(!ami_v6_clock_stats[4]&&ami_v6.charging&&ami_v6.t0==1234&&ami_v6_refilled==1234,"charge start can activate waiting clock without blocking");
+ clock_now=1244;ami_v6_charge_stop();check(ami_v6.used==10,"post-startup charge uses valid new origin");
+ reset();_tx_amiga_tick_run.tr_live=0;bind();
+ for(unsigned i=1;i<AMI_V6_STARTUP_TRIES;i++)ami_v6_charge_start();
+ check(ami_v6_clock_stats[5]==AMI_V6_STARTUP_TRIES&&ami_v6_clock_stats[3]==1&&ami_v6_clock_stats[4]==1&&task.tc_Node.ln_Pri==1,"startup retry exhaustion latches visible high-priority fallback");
  reset();rate=0;bind();
- check(ami_v6.task==&task&&ports==2&&ami_v6_clock_stats[3]==1&&ami_v6_clock_stats[4]&&task.tc_Node.ln_Pri==1,"zero-rate bind also publishes high-priority fallback");
+ check(ami_v6.task==&task&&ports==2&&!ami_v6_clock_stats[3]&&ami_v6_clock_stats[4]==2&&ami_v6_clock_stats[5]==1&&task.tc_Node.ln_Pri==1,"zero-rate bind waits for first valid reading at high priority");
  reset();clock_now=100000;bind();
  check(ami_v6.task==&task&&ports==2&&_tx_amiga_tick_hook==ami_v6_tick,"bind publishes both protected ports and hook");
  check(ami_v6_clock_stats[0]==709379&&ami_v6_clock_stats[1]==4257&&ami_v6_clock_stats[2]==13479,"bind uses measured raw tick thresholds");
@@ -137,7 +146,9 @@ int main(void){
  rate=709379;bind();
  check(ports==2&&ami_v6_clock_stats[3]==1&&!ami_v6_clock_stats[4],"successful rebind preserves cumulative failure count");
  ami_v6_unbind(&task);rate=0;bind();
- check(ami_v6_clock_stats[3]==2&&ami_v6_clock_stats[4]&&task.tc_Node.ln_Pri==1,"another failed bind increments cumulative failure count");
+ check(ami_v6_clock_stats[3]==1&&ami_v6_clock_stats[4]==2&&ami_v6_clock_stats[5]==1&&task.tc_Node.ln_Pri==1,"not-ready rebind preserves past failure and records startup wait");
+ rate=709379;ami_v6_charge_start();rate=0;ami_v6_charge_stop();
+ check(ami_v6_clock_stats[3]==2&&ami_v6_clock_stats[4]==1,"another runtime fault increments cumulative failure count after startup retry");
  ami_v6_unbind(&task);check(!ports&&!_tx_amiga_tick_hook,"failed rebind is fully unpublished on stop");
  old_reads=reads;ami_v6_charge_start();ami_v6_charge_stop();check(reads==old_reads,"unbound owner never reads device");
  check(!forbid_depth&&!pending&&!unsafe_reads,"all native clock reads protected and balanced");
@@ -145,13 +156,18 @@ int main(void){
 }
 '''
 results={}
-for name in ['fixed','live-guard-negative','charge-lock-negative']:
+for name in ['fixed','live-guard-negative','charge-lock-negative','startup-limit-negative']:
     api=provider;body=functions.copy()
     if name=='live-guard-negative':
         api=api.replace('        _tx_amiga_tick_run.tr_live == (UINT) TX_FALSE ||\n','')
     if name=='charge-lock-negative':
         for key in ['static VOID ami_v6_charge_start(VOID)','static VOID ami_v6_charge_stop(VOID)']:
             body[key]=body[key].replace('    Forbid();\n','').replace('    Permit();\n','')
+    if name=='startup-limit-negative':
+        key='static BOOL ami_v6_clock_try_init(VOID)'
+        old='        if (ami_v6_startup_left == 0UL)\n            ami_v6_clock_fail_open();\n'
+        assert old in body[key]
+        body[key]=body[key].replace(old,'')
     text=prelude+api+data+macros+fixture+''.join(body.values())+main
     c=build/(name+'.c');exe=build/name;c.write_text(text)
     cmd=[os.environ.get('CC','clang'),'-std=c11','-Wall','-Wextra','-Werror','-O1','-g']+shlex.split(os.environ.get('CFLAGS',''))
@@ -165,6 +181,7 @@ for name in ['fixed','live-guard-negative','charge-lock-negative']:
     assert (int(summary[2])==0)==(name=='fixed')
     if name=='live-guard-negative':assert 'FAIL not-live base refused' in run.stdout
     if name=='charge-lock-negative':assert 'FAIL new period not overcharged' in run.stdout
+    if name=='startup-limit-negative':assert 'FAIL startup retry exhaustion' in run.stdout
     results[name]={'exit':run.returncode,'checks':int(summary[1]),'failures':int(summary[2]),'source_sha256':hashlib.sha256(text.encode()).hexdigest(),'output':run.stdout}
 (build/'results.json').write_text(json.dumps(results,indent=2)+'\n')
 

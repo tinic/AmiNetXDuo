@@ -64,12 +64,17 @@ static struct
     ULONG        stats[5];  /* ticks, exhaustions, overrun yields, ticks ending low, promotions by tick */
 } ami_v6;
 static struct MsgPort ami_v6_port;
+static ULONG ami_v6_refilled;
 #ifdef V6_ECLOCK
-/* Hz, budget ticks (or frames), refill ticks, failures, disabled latch.
+/* Hz, budget ticks (or frames), refill ticks, failures, mode, startup waits.
+   Mode: 0 active, 1 failed until rebind, 2 waiting for the first valid clock.
    Keep the original five-counter port compatible with frozen tools. */
-static ULONG ami_v6_clock_stats[5];
+static ULONG ami_v6_clock_stats[6];
 static struct MsgPort ami_v6_clock_port;
 static BOOL ami_v6_clock_valid;
+#define AMI_V6_STARTUP_TRIES 4096UL
+/* An operation bound, not an elapsed-time deadline before a clock exists. */
+static ULONG ami_v6_startup_left;
 
 /* Exact ceiling without a wide divide or hz*milliseconds overflow.
    The diagnostic accepts only 1..1000 ms; the refill is 19 ms. */
@@ -83,7 +88,7 @@ static ULONG ami_v6_ticks(ULONG hz, ULONG milliseconds)
    this experiment off until rebind; the dedicated port makes failure visible. */
 static VOID ami_v6_clock_fail_open(VOID)
 {
-    if (ami_v6_clock_stats[4] == 0UL)
+    if (ami_v6_clock_stats[4] != 1UL)
         ami_v6_clock_stats[3]++;
     ami_v6_clock_stats[4] = 1UL;
     ami_v6.used = 0;
@@ -121,6 +126,38 @@ static BOOL ami_v6_has_victim(VOID)
 #define V6_REFILL 19000UL
 #endif
 
+#ifdef V6_ECLOCK
+/* Readers can start before the tick Task has finished opening its device.
+   Try without waiting; until the first valid reading they run at priority 1.
+   Once active, any clock loss uses the separate permanent failure latch. */
+static BOOL ami_v6_clock_try_init(VOID)
+{
+    ULONG now = 0, hz = tx_amiga_eclock_read_locked(&now);
+
+    if (hz == 0UL)
+    {
+        ami_v6_clock_stats[5]++;
+        if (ami_v6_startup_left != 0UL)
+            ami_v6_startup_left--;
+        if (ami_v6_startup_left == 0UL)
+            ami_v6_clock_fail_open();
+        return FALSE;
+    }
+    ami_v6_clock_stats[0] = hz;
+#ifdef V6_FRAMES
+    ami_v6_clock_stats[1] = (ULONG)V6_FRAMES;
+#else
+    ami_v6_clock_stats[1] = ami_v6_ticks(hz, (ULONG)V6_TIME_US / 1000UL);
+#endif
+    ami_v6_clock_stats[2] = ami_v6_ticks(hz, 19UL);
+    ami_v6_refilled = now;
+    ami_v6.used = 0;
+    ami_v6.charging = FALSE;
+    ami_v6_clock_stats[4] = 0UL;
+    return TRUE;
+}
+#endif
+
 static ULONG ami_v6_clock(VOID)
 {
 #ifdef V6_ECLOCK
@@ -149,6 +186,8 @@ static VOID ami_v6_charge_start(VOID)
     if (ami_v6.level != 0 && me->tc_Node.ln_Pri == 0)
         (VOID)SetTaskPri(me, (LONG)TX_AMIGA_HANDOFF_PRIORITY);
 #ifdef V6_ECLOCK
+    if (ami_v6_clock_stats[4] == 2UL)
+        (VOID)ami_v6_clock_try_init();
     if (ami_v6_clock_stats[4] != 0UL)
     {
         Permit();
@@ -193,8 +232,6 @@ static VOID ami_v6_charge_stop(VOID)
 }
 
 /* The tick: refill, and put a low reader back to 1 wherever it is. */
-static ULONG ami_v6_refilled;
-
 static VOID ami_v6_tick(VOID)
 {
     struct Task *t = ami_v6.task;
@@ -202,7 +239,11 @@ static VOID ami_v6_tick(VOID)
 
 #ifdef V6_ECLOCK
     if (ami_v6_clock_stats[4] != 0UL)
+    {
+        if (ami_v6_clock_stats[4] == 2UL)
+            (VOID)ami_v6_clock_try_init();
         return;
+    }
 #endif
     now = ami_v6_clock();
 #ifdef V6_ECLOCK
@@ -284,31 +325,17 @@ static VOID ami_v6_bind(struct Task *me)
         return;                     /* the first reader (the wired one) only */
     }
 #ifdef V6_ECLOCK
-    {
-        ULONG now = 0, hz = tx_amiga_eclock_read_locked(&now);
-
-        ami_v6_clock_stats[0] = hz;
-#ifdef V6_FRAMES
-        ami_v6_clock_stats[1] = (ULONG)V6_FRAMES;
-#else
-        ami_v6_clock_stats[1] = ami_v6_ticks(hz, (ULONG)V6_TIME_US / 1000UL);
-#endif
-        ami_v6_clock_stats[2] = ami_v6_ticks(hz, 19UL);
-        /* Failure count is cumulative for this loaded module, including
-           rebinds, so cycling an interface cannot hide a failed clock. */
-        ami_v6_clock_stats[4] = 0UL;
-        ami_v6_refilled = now;
-        ami_v6.used = 0;
-        ami_v6.charging = FALSE;
-    }
+    /* Counts survive rebind. Only a new loaded module clears them. */
+    ami_v6_clock_stats[0] = ami_v6_clock_stats[1] = ami_v6_clock_stats[2] = 0UL;
+    ami_v6_clock_stats[4] = 2UL;
+    ami_v6_startup_left = AMI_V6_STARTUP_TRIES;
+    ami_v6.used = 0;
+    ami_v6.charging = FALSE;
+    (VOID)ami_v6_clock_try_init();
 #endif
     ami_v6.task  = me;
     ami_v6.level = 1;
     (VOID)SetTaskPri(me, (LONG)TX_AMIGA_HANDOFF_PRIORITY);
-#ifdef V6_ECLOCK
-    if (ami_v6_clock_stats[0] == 0UL)
-        ami_v6_clock_fail_open(); /* publish the failure and preserve progress */
-#endif
     ami_v6_port.mp_Node.ln_Name = (char *)"AmiNetXDuo v6";
     ami_v6_port.mp_Node.ln_Type = NT_MSGPORT;
     ami_v6_port.mp_Flags        = PA_IGNORE;
@@ -318,7 +345,7 @@ static VOID ami_v6_bind(struct Task *me)
     AddPort(&ami_v6_port);
 #ifdef V6_ECLOCK
     ami_v6_clock_port = ami_v6_port;
-    ami_v6_clock_port.mp_Node.ln_Name = (char *)"AmiNetXDuo eclock";
+    ami_v6_clock_port.mp_Node.ln_Name = (char *)"AmiNetXDuo eclock2";
     ami_v6_clock_port.mp_SigTask = (struct Task *)ami_v6_clock_stats;
     ami_v6_clock_port.mp_MsgList.lh_Head =
         (struct Node *)&ami_v6_clock_port.mp_MsgList.lh_Tail;
