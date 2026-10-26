@@ -333,9 +333,13 @@ if(AMINETXDUO_SANITIZE)
         set(_reader_sanitize --ubsan)
     endif()
 endif()
-foreach(_reader_case IN ITEMS budget_refill budget_gate victim wait_route budget_clock)
+foreach(_reader_case IN ITEMS budget_refill budget_gate victim wait_route budget_clock budget_sparse2 budget_sparse4 clock_snapshot)
+    set(_reader_extra)
     if(_reader_case STREQUAL "victim")
         set(_reader_script "${CMAKE_SOURCE_DIR}/tests/bsdsocket/host/test_reader_victim.py")
+    elseif(_reader_case MATCHES "^budget_sparse([24])$")
+        set(_reader_script "${CMAKE_CURRENT_SOURCE_DIR}/host/test_reader_budget_clock.py")
+        set(_reader_extra --sparse --stride "${CMAKE_MATCH_1}")
     else()
         set(_reader_script "${CMAKE_CURRENT_SOURCE_DIR}/host/test_reader_${_reader_case}.py")
     endif()
@@ -343,5 +347,5 @@ foreach(_reader_case IN ITEMS budget_refill budget_gate victim wait_route budget
         COMMAND "${CMAKE_COMMAND}" -E env "CC=${CMAKE_C_COMPILER}"
                 "CFLAGS=${CMAKE_C_FLAGS}" "${Python3_EXECUTABLE}"
                 "${_reader_script}" "${CMAKE_CURRENT_BINARY_DIR}/reader_${_reader_case}"
-                ${_reader_sanitize})
+                ${_reader_sanitize} ${_reader_extra})
 endforeach()

@@ -54,6 +54,8 @@ static ULONG ReadEClock(struct EClockVal *out){
  return answer;
 }
 '''
+config_start=source.index('#if defined(V6_ECLOCK_STRIDE)')
+config=source[config_start:source.index('/* ---- #353',config_start)]
 start=source.index('static struct\n{',source.index('/* ---- #353'))
 end=source.index('#ifdef V6_GATED',start)
 data=source[start:end]  # Includes the actual native state, conversion and failure handler.
@@ -65,11 +67,11 @@ provider=live_provider+function(port,'ULONG tx_amiga_eclock_read_locked(ULONG *l
 signatures=['static BOOL ami_v6_clock_try_init(VOID)',
  'static BOOL ami_v6_has_victim(VOID)','static ULONG ami_v6_clock(VOID)',
  'static VOID ami_v6_charge_start(VOID)','static VOID ami_v6_charge_stop(VOID)',
- 'static VOID ami_v6_charge_checkpoint(VOID)',
+ 'static VOID ami_v6_charge_checkpoint(ULONG frames)',
  'static VOID ami_v6_tick(VOID)','static VOID ami_v6_settle(BOOL overrun)',
  'static VOID ami_v6_bind(struct Task *me)','static VOID ami_v6_unbind(struct Task *me)']
 functions={s:function(source,s) for s in signatures}
-checkpoint_key='static VOID ami_v6_charge_checkpoint(VOID)'
+checkpoint_key='static VOID ami_v6_charge_checkpoint(ULONG frames)'
 # The frame arm charges frames; this time-only optimization is not compiled.
 functions[checkpoint_key]='#ifndef V6_FRAMES\n'+functions[checkpoint_key]+'#endif\n'
 fixture='static BOOL victim(VOID){return TRUE;}\nstatic BOOL (*ami_sana2_budget_victim_hook)(VOID)=victim;\n'
@@ -173,31 +175,111 @@ int main(void){
  ami_v6_unbind(&task);check(!ports&&!_tx_amiga_tick_hook,"failed rebind is fully unpublished on stop");
  old_reads=reads;ami_v6_charge_start();ami_v6_charge_stop();check(reads==old_reads,"unbound owner never reads device");
  check(!forbid_depth&&!pending&&!unsafe_reads,"all native clock reads protected and balanced");
- reset();bind();clock_now=10;ami_v6_charge_start();clock_now=110;old_reads=reads;ami_v6_charge_checkpoint();
+ reset();bind();clock_now=10;ami_v6_charge_start();clock_now=110;old_reads=reads;ami_v6_charge_checkpoint(0);
  check(reads==old_reads+1&&ami_v6.used==100&&ami_v6.t0==110&&ami_v6.running&&ami_v6.charging,"checkpoint charges once and reuses one sample");
  clock_now=150;ami_v6_charge_stop();check(ami_v6.used==140&&!ami_v6.running&&!ami_v6.charging,"stop charges only time since checkpoint");
- reset();bind();ami_v6_charge_start();task.tc_Node.ln_Pri=0;clock_now=10;ami_v6_charge_checkpoint();
+ reset();bind();ami_v6_charge_start();task.tc_Node.ln_Pri=0;clock_now=10;ami_v6_charge_checkpoint(0);
  check(task.tc_Node.ln_Pri==1,"checkpoint restores the current high level after park priority");
- task.tc_Node.ln_Pri=5;clock_now=20;ami_v6_charge_checkpoint();check(task.tc_Node.ln_Pri==5,"checkpoint preserves externally raised priority");
- reset();bind();clock_now=1;ami_v6_charge_start();clock_now=10000;ami_v6_charge_checkpoint();old_reads=reads;
+ task.tc_Node.ln_Pri=5;clock_now=20;ami_v6_charge_checkpoint(0);check(task.tc_Node.ln_Pri==5,"checkpoint preserves externally raised priority");
+ reset();bind();clock_now=1;ami_v6_charge_start();clock_now=10000;ami_v6_charge_checkpoint(0);old_reads=reads;
  check(ami_v6.used==ami_v6_clock_stats[1]&&ami_v6.running&&!ami_v6.charging,"checkpoint saturates while work remains active");
- for(unsigned i=0;i<20;i++){clock_now++;ami_v6_charge_checkpoint();}
+ for(unsigned i=0;i<20;i++){clock_now++;ami_v6_charge_checkpoint(0);}
  check(reads==old_reads&&ami_v6.used==ami_v6_clock_stats[1],"spent checkpoints retain quota without device reads");
- clock_now=13479;h_tick();clock_now=13488;ami_v6_charge_checkpoint();
+ clock_now=13479;h_tick();clock_now=13488;ami_v6_charge_checkpoint(0);
  check(ami_v6.used==9&&ami_v6.t0==13488&&ami_v6.charging,"refill resumes busy checkpoint accounting");
- reset();bind();clock_now=1000;ami_v6_charge_start();clock_now=13478;inject=1;ami_v6_charge_checkpoint();
+ reset();bind();clock_now=1000;ami_v6_charge_start();clock_now=13478;inject=1;ami_v6_charge_checkpoint(0);
  check(ami_v6_refilled==13479&&!ami_v6.used&&ami_v6.charging&&ami_v6.t0==13479,"checkpoint publishes before deferred refill");
  clock_now=13480;ami_v6_charge_stop();check(ami_v6.used==1,"checkpoint refill charges only new period");
- reset();bind();ami_v6_charge_start();ami_v6.level=0;task.tc_Node.ln_Pri=0;rate=0;ami_v6_charge_checkpoint();
+ reset();bind();ami_v6_charge_start();ami_v6.level=0;task.tc_Node.ln_Pri=0;rate=0;ami_v6_charge_checkpoint(0);
  check(ami_v6_clock_stats[4]==1&&ami_v6_clock_stats[3]==1&&task.tc_Node.ln_Pri==1&&!ami_v6.running,"checkpoint clock loss restores progress");
- reset();bind();ami_v6.used=ami_v6_clock_stats[1];ami_v6.level=0;task.tc_Node.ln_Pri=0;_tx_amiga_tick_run.tr_live=0;ami_v6_charge_checkpoint();
+ reset();bind();ami_v6.used=ami_v6_clock_stats[1];ami_v6.level=0;task.tc_Node.ln_Pri=0;_tx_amiga_tick_run.tr_live=0;ami_v6_charge_checkpoint(0);
  check(ami_v6_clock_stats[4]==1&&task.tc_Node.ln_Pri==1,"spent checkpoint detects retired clock");
- reset();_tx_amiga_tick_run.tr_live=0;bind();ami_v6_charge_checkpoint();_tx_amiga_tick_run.tr_live=1;clock_now=10;ami_v6_charge_checkpoint();
+ reset();_tx_amiga_tick_run.tr_live=0;bind();ami_v6_charge_checkpoint(0);_tx_amiga_tick_run.tr_live=1;clock_now=10;ami_v6_charge_checkpoint(0);
  check(!ami_v6_clock_stats[4]&&ami_v6.charging&&ami_v6.running&&ami_v6.t0==10,"checkpoint can activate delayed startup without waiting");
- ami_v6_unbind(&task);old_reads=reads;ami_v6_charge_checkpoint();check(reads==old_reads&&!forbid_depth&&!unsafe_reads,"unbound checkpoint is inert and all exclusion balanced");
+ ami_v6_unbind(&task);old_reads=reads;ami_v6_charge_checkpoint(0);check(reads==old_reads&&!forbid_depth&&!unsafe_reads,"unbound checkpoint is inert and all exclusion balanced");
  printf("native-clock checks=%u failures=%u\n",checks,failures);return failures?1:0;
 }
 '''
+if '--sparse' in sys.argv:
+    native_start=source.index('#elif defined(V6_ECLOCK) && defined(V6_TIME_US)\n        {')
+    native_end=source.index('\n#else',native_start)
+    drain=source[source.index('        {',native_start):native_end]
+    sparse_fixture='''
+typedef uint16_t UWORD;
+#define AMI_SANA2_RX_RUN_MAX 128
+static UWORD ami_sana2_rx_drain(VOID *rd,UWORD max){(void)rd;(void)max;return 128;}
+static VOID run_drain(VOID){VOID *rd=0;
+'''+drain+'\n}\n'
+    sparse_main=main[:main.index('int main(void)')]+r'''
+int main(void){
+ reset();bind();check(ami_v6_clock_stats[6]==1&&ami_v6_clock_stats[7]==V6_ECLOCK_STRIDE&&ami_v6_clock_stats[8]==128,"sample configuration and initial attempt published");
+ clock_now=10;ami_v6_charge_start();unsigned before=reads;clock_now=20;ami_v6_charge_checkpoint(1);
+ check(reads==before&&!ami_v6.used&&ami_v6.t0==10&&ami_v6.charging&&ami_v6_clock_stats[9]==1,"skip retains full active interval");
+ for(unsigned i=1;i<V6_ECLOCK_STRIDE;i++){clock_now=20+10*i;ami_v6_charge_checkpoint(1);}
+ check(reads==before+1&&ami_v6.used==10*V6_ECLOCK_STRIDE&&ami_v6.t0==clock_now&&!ami_v6.pending_frames&&!ami_v6.checkpoints,"stride sample debits all skipped time once");
+ clock_now=1000;ami_v6_charge_stop();check(ami_v6.used==990&&!ami_v6.running&&!ami_v6.charging,"actual stop charges entire pending interval");
+ clock_now=2000;ami_v6_charge_start();clock_now=2005;ami_v6_charge_checkpoint(1);clock_now=2010;ami_v6_charge_stop();check(ami_v6.used==1000,"handoff does not replenish aggregate credit");
+ reset();bind();ami_v6_charge_start();before=reads;clock_now=10;ami_v6_charge_checkpoint(128);
+ check(reads==before+1&&ami_v6.used==10&&ami_v6_clock_stats[10]==1,"full frame threshold forces early sample");
+ reset();bind();ami_v6_charge_start();before=reads;clock_now=10;ami_v6_charge_checkpoint(127);clock_now=20;ami_v6_charge_checkpoint(1);
+ check(reads==before+1&&ami_v6.used==20&&!ami_v6.pending_frames,"accumulated partial drains force a sample");
+ reset();bind();ami_v6_charge_start();before=reads;clock_now=10;ami_v6_charge_checkpoint(0xffffffffU);
+ check(reads==before+1&&ami_v6.used==10&&!ami_v6.pending_frames,"large frame input cannot wrap the threshold");
+ reset();bind();ami_v6_charge_start();before=reads;ami_v6.level=0;task.tc_Node.ln_Pri=0;_tx_amiga_tick_run.tr_live=0;ami_v6_charge_checkpoint(1);
+ check(reads==before&&ami_v6_clock_stats[4]==1&&task.tc_Node.ln_Pri==1&&!ami_v6.running,"skipped checkpoint detects retirement without device read");
+ reset();bind();ami_v6_charge_start();clock_now=13478;pending=1;ami_v6_charge_checkpoint(1);
+ check(ami_v6_refilled==13479&&!ami_v6.used&&ami_v6.t0==13479&&ami_v6.charging&&!ami_v6.pending_frames&&!ami_v6.checkpoints,"deferred refill resets skipped interval atomically");
+ clock_now=13480;ami_v6_charge_stop();check(ami_v6.used==1,"stop after refill charges only new period");
+ reset();bind();ami_v6_charge_start();clock_now=10000;ami_v6_charge_checkpoint(128);before=reads;
+ check(ami_v6.used==ami_v6_clock_stats[1]&&!ami_v6.charging&&ami_v6.running,"sparse sample saturates but keeps running");
+ ami_v6_settle(FALSE);check(ami_v6.level==0&&task.tc_Node.ln_Pri==0,"spent sparse credit demotes at a released baton");
+ for(unsigned i=0;i<10;i++)ami_v6_charge_checkpoint(128);
+ check(reads==before&&ami_v6.used==ami_v6_clock_stats[1],"spent sparse budget survives checkpoints without reads");
+ clock_now=13479;h_tick();clock_now=13484;ami_v6_charge_checkpoint(1);clock_now=13489;ami_v6_charge_stop();
+ check(ami_v6.used==10,"refill restarts a saturated busy reader with deferred samples");
+ reset();_tx_amiga_tick_run.tr_live=0;bind();ami_v6_charge_checkpoint(1);_tx_amiga_tick_run.tr_live=1;clock_now=10;ami_v6_charge_checkpoint(1);
+ check(!ami_v6_clock_stats[4]&&ami_v6.running&&ami_v6.charging&&ami_v6.t0==10,"sparse startup retries without waiting");
+ reset();bind();ami_v6_charge_start();ami_v6.level=0;task.tc_Node.ln_Pri=0;rate=0;ami_v6_charge_checkpoint(128);
+ check(ami_v6_clock_stats[4]==1&&task.tc_Node.ln_Pri==1,"forced sample clock fault restores progress");
+ reset();bind();ami_v6_charge_start();task.tc_Node.ln_Pri=0;ami_v6_charge_checkpoint(1);check(task.tc_Node.ln_Pri==1,"skipped sample restores current priority level");
+ task.tc_Node.ln_Pri=5;ami_v6_charge_checkpoint(1);check(task.tc_Node.ln_Pri==5,"skipped sample keeps externally raised priority");
+ reset();bind();ami_v6_charge_start();before=reads;clock_now=10;run_drain();
+ check(reads==before+1&&ami_v6_clock_stats[10]==1&&ami_v6.used==10,"real drain call forwards its actual frame count");
+ unsigned attempts=ami_v6_clock_stats[6];ami_v6_unbind(&task);bind();check(ami_v6_clock_stats[6]==attempts+1,"attempt count survives interface rebind");
+ ami_v6_unbind(&task);before=reads;ami_v6_charge_checkpoint(1);check(!ports&&reads==before&&!_tx_amiga_tick_hook,"unbound sparse path is inert");
+ check(!forbid_depth&&!pending&&!unsafe_reads,"all sparse sampling exclusion is balanced");
+ printf("sparse-clock checks=%u failures=%u\n",checks,failures);return failures?1:0;
+}
+'''
+    sparse_results={}
+    variants=['fixed','frame-cap-negative','stride-negative','stop-gap-negative','live-probe-negative','lock-negative','drain-count-negative']
+    strides=[int(sys.argv[sys.argv.index('--stride')+1])] if '--stride' in sys.argv else [2,4]
+    assert all(stride in [2,4] for stride in strides)
+    for stride in strides:
+        for name in variants:
+            api=provider;body=functions.copy();drain_fixture=sparse_fixture
+            if name=='frame-cap-negative':body[checkpoint_key]=body[checkpoint_key].replace('ami_v6.pending_frames < AMI_V6_SAMPLE_FRAMES)','1)')
+            if name=='stride-negative':body[checkpoint_key]=body[checkpoint_key].replace('(ULONG)V6_ECLOCK_STRIDE','1UL')
+            if name=='stop-gap-negative':body['static VOID ami_v6_charge_stop(VOID)']=body['static VOID ami_v6_charge_stop(VOID)'].replace('ami_v6.used += (elapsed >= left) ? left : elapsed;','ami_v6.used += (elapsed >= left) ? 0 : 0;')
+            if name=='live-probe-negative':api=api.replace(live_provider,'UINT tx_amiga_eclock_live_locked(VOID){return TX_TRUE;}\n')
+            if name=='lock-negative':body[checkpoint_key]=re.sub(r'(?m)^[ \t]*(?:Forbid|Permit)\(\);\n','',body[checkpoint_key])
+            if name=='drain-count-negative':drain_fixture=drain_fixture.replace('ami_v6_charge_checkpoint((ULONG)taken);','ami_v6_charge_checkpoint((ULONG)taken * 0UL);')
+            text=prelude+config+api+data+macros+fixture+''.join(body.values())+drain_fixture+sparse_main
+            stem=f's{stride}-{name}';c=build/(stem+'.c');exe=build/stem;c.write_text(text)
+            cmd=[os.environ.get('CC','clang'),'-std=c11','-Wall','-Wextra','-Werror','-O1','-g',f'-DV6_ECLOCK_STRIDE={stride}']+shlex.split(os.environ.get('CFLAGS',''))
+            if '--sanitize' in sys.argv:cmd+=['-fsanitize=address,undefined','-fno-sanitize-recover=all']
+            elif '--ubsan' in sys.argv:cmd+=['-fsanitize=undefined','-fno-sanitize-recover=all']
+            subprocess.run(cmd+[str(c),'-o',str(exe)],check=True)
+            run=subprocess.run([str(exe)],capture_output=True,text=True);(build/(stem+'.log')).write_text(run.stdout+run.stderr)
+            summary=re.search(r'sparse-clock checks=(\d+) failures=(\d+)',run.stdout)
+            assert summary and run.returncode==(0 if name=='fixed' else 1),(stem,run.stdout,run.stderr)
+            assert (int(summary[2])==0)==(name=='fixed'),(stem,run.stdout)
+            targets={'frame-cap-negative':'full frame threshold forces early sample','stride-negative':'skip retains full active interval','stop-gap-negative':'actual stop charges entire pending interval','live-probe-negative':'skipped checkpoint detects retirement','lock-negative':'deferred refill resets skipped interval atomically','drain-count-negative':'real drain call forwards its actual frame count'}
+            if name in targets:assert 'FAIL '+targets[name] in run.stdout,(stem,run.stdout)
+            sparse_results[stem]={'checks':int(summary[1]),'failures':int(summary[2]),'exit':run.returncode,'source_sha256':hashlib.sha256(text.encode()).hexdigest(),'output':run.stdout};print(stem,run.stdout)
+    (build/'results.json').write_text(json.dumps(sparse_results,indent=2)+'\n')
+    raise SystemExit(0)
+
 results={}
 for name in ['fixed','live-guard-negative','charge-lock-negative','startup-limit-negative',
              'spent-refill-negative','spent-live-negative','unbounded-debit-negative',
@@ -235,7 +317,7 @@ for name in ['fixed','live-guard-negative','charge-lock-negative','startup-limit
         body[checkpoint_key]=body[checkpoint_key].replace('ami_v6.charging = (ami_v6.used < (ULONG)V6_BUDGET);', 'ami_v6.charging = TRUE;')
     if name=='checkpoint-priority-negative':
         body[checkpoint_key]=body[checkpoint_key].replace('(VOID)SetTaskPri(me, (LONG)TX_AMIGA_HANDOFF_PRIORITY);', '(VOID)me;')
-    text=prelude+api+data+macros+fixture+''.join(body.values())+main
+    text=prelude+config+api+data+macros+fixture+''.join(body.values())+main
     c=build/(name+'.c');exe=build/name;c.write_text(text)
     cmd=[os.environ.get('CC','clang'),'-std=c11','-Wall','-Wextra','-Werror','-O1','-g']+shlex.split(os.environ.get('CFLAGS',''))
     if '--sanitize' in sys.argv:cmd+=['-fsanitize=address,undefined','-fno-sanitize-recover=all']
@@ -285,7 +367,7 @@ int main(void){
  printf("native-frame checks=%u failures=%u\n",checks,failures);return failures?1:0;
 }
 '''
-text=prelude+'\n#define V6_FRAMES 128\n'+provider+data+macros+fixture+''.join(functions.values())+frame_fixture+frame_main
+text=prelude+'\n#define V6_FRAMES 128\n'+config+provider+data+macros+fixture+''.join(functions.values())+frame_fixture+frame_main
 c=build/'frames.c';exe=build/'frames';c.write_text(text)
 subprocess.run(cmd+[str(c),'-o',str(exe)],check=True)
 run=subprocess.run([str(exe)],capture_output=True,text=True);(build/'frames.log').write_text(run.stdout+run.stderr)

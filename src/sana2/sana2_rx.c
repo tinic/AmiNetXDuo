@@ -51,6 +51,16 @@ VOID ami_sana2_block_enter(VOID);
 #error V6_ECLOCK time budget must be whole milliseconds from 1 through 1000
 #endif
 #endif
+#if defined(V6_ECLOCK_STRIDE) && \
+    (!defined(V6_ECLOCK) || !defined(V6_TIME_US) || defined(V6_FRAMES))
+#error V6_ECLOCK_STRIDE requires the native time-budget diagnostic
+#endif
+#ifndef V6_ECLOCK_STRIDE
+#define V6_ECLOCK_STRIDE 1
+#endif
+#if V6_ECLOCK_STRIDE != 1 && V6_ECLOCK_STRIDE != 2 && V6_ECLOCK_STRIDE != 4
+#error V6_ECLOCK_STRIDE must be 1, 2 or 4
+#endif
 
 /* ---- #353 V6b sporadic server, bench only (one wired interface) ---- */
 #if defined(V6_TIME_US) || defined(V6_FRAMES)
@@ -63,21 +73,33 @@ static struct
     BOOL         charging;
 #ifdef V6_ECLOCK
     BOOL         running;   /* active work even after its credit is spent */
+    ULONG        checkpoints;
+    ULONG        pending_frames;
 #endif
     ULONG        stats[5];  /* ticks, exhaustions, overrun yields, ticks ending low, promotions by tick */
 } ami_v6;
 static struct MsgPort ami_v6_port;
 static ULONG ami_v6_refilled;
 #ifdef V6_ECLOCK
-/* Hz, budget ticks (or frames), refill ticks, failures, mode, startup waits.
+/* Hz, budget ticks (or frames), refill ticks, failures, mode, startup waits,
+   read attempts, checkpoint stride, frame threshold, skipped, forced samples.
    Mode: 0 active, 1 failed until rebind, 2 waiting for the first valid clock.
    The separate original "AmiNetXDuo v6" five-counter port is unchanged. */
-static ULONG ami_v6_clock_stats[6];
+static ULONG ami_v6_clock_stats[11];
 static struct MsgPort ami_v6_clock_port;
 static BOOL ami_v6_clock_valid;
 #define AMI_V6_STARTUP_TRIES 4096UL
+#define AMI_V6_SAMPLE_FRAMES 128UL
 /* An operation bound, not an elapsed-time deadline before a clock exists. */
 static ULONG ami_v6_startup_left;
+
+/* Attempts include an unavailable startup clock, not only device calls.
+   Kept cumulative across rebinds, like failures and startup waits. */
+static ULONG ami_v6_read(ULONG *lo)
+{
+    ami_v6_clock_stats[6]++;
+    return tx_amiga_eclock_read_locked(lo);
+}
 
 /* Exact ceiling without a wide divide or hz*milliseconds overflow.
    The diagnostic accepts only 1..1000 ms; the refill is 19 ms. */
@@ -136,7 +158,7 @@ static BOOL ami_v6_has_victim(VOID)
    Once active, any clock loss uses the separate permanent failure latch. */
 static BOOL ami_v6_clock_try_init(VOID)
 {
-    ULONG now = 0, hz = tx_amiga_eclock_read_locked(&now);
+    ULONG now = 0, hz = ami_v6_read(&now);
 
     if (hz == 0UL)
     {
@@ -174,7 +196,7 @@ static ULONG ami_v6_clock(VOID)
 
     /* Subtract low words modulo 2^32. Live periods are 19 ms minimum, far
        below one E-Clock low-word wrap; no absolute-time conversion is used. */
-    ami_v6_clock_valid = (tx_amiga_eclock_read_locked(&now) != 0UL);
+    ami_v6_clock_valid = (ami_v6_read(&now) != 0UL);
     return now;
 #else
     return __builtin_bswap32(*(volatile ULONG *)0xf2003004UL);
@@ -196,6 +218,7 @@ static VOID ami_v6_charge_start(VOID)
         (VOID)SetTaskPri(me, (LONG)TX_AMIGA_HANDOFF_PRIORITY);
 #ifdef V6_ECLOCK
     ami_v6.running = TRUE;
+    ami_v6.checkpoints = ami_v6.pending_frames = 0;
     if (ami_v6_clock_stats[4] == 2UL)
         (VOID)ami_v6_clock_try_init();
     if (ami_v6_clock_stats[4] != 0UL)
@@ -264,7 +287,7 @@ static VOID ami_v6_charge_stop(VOID)
 /* A drain checkpoint keeps the same active interval. Reuse its sample as
    the next origin instead of stop/read then start/read. The outer Forbid
    also holds a deferred refill until both debit and origin are published. */
-static VOID ami_v6_charge_checkpoint(VOID)
+static VOID ami_v6_charge_checkpoint(ULONG frames)
 {
     struct Task *me = FindTask(NULL);
 
@@ -273,7 +296,40 @@ static VOID ami_v6_charge_checkpoint(VOID)
     Forbid();
     if (ami_v6.charging)
     {
-        ULONG now = ami_v6_clock();
+        ULONG now;
+
+        /* A skipped sample retains the entire active interval. The stop
+           before EVERY wait/handoff still charges it in full. No packet
+           arrival is waited for here. Refuse a retired timer immediately. */
+        if (tx_amiga_eclock_live_locked() == (UINT)TX_FALSE)
+        {
+            ami_v6_clock_fail_open();
+            Permit();
+            return;
+        }
+        if (ami_v6.level != 0 && me->tc_Node.ln_Pri == 0)
+            (VOID)SetTaskPri(me, (LONG)TX_AMIGA_HANDOFF_PRIORITY);
+        /* Saturate the frame threshold rather than wrapping on addition.
+           A drain is bounded separately by RX_RUN_MAX. The threshold forces
+           a read after that drain, so fewer than SAMPLE_FRAMES + RUN_MAX
+           frames can pass between checkpoints. This is not a wall-time
+           latency guarantee. */
+        if (frames >= AMI_V6_SAMPLE_FRAMES - ami_v6.pending_frames)
+            ami_v6.pending_frames = AMI_V6_SAMPLE_FRAMES;
+        else
+            ami_v6.pending_frames += frames;
+        ami_v6.checkpoints++;
+        if (ami_v6.checkpoints < (ULONG)V6_ECLOCK_STRIDE &&
+            ami_v6.pending_frames < AMI_V6_SAMPLE_FRAMES)
+        {
+            ami_v6_clock_stats[9]++;
+            Permit();
+            return;
+        }
+        if (ami_v6.checkpoints < (ULONG)V6_ECLOCK_STRIDE)
+            ami_v6_clock_stats[10]++;
+        ami_v6.checkpoints = ami_v6.pending_frames = 0;
+        now = ami_v6_clock();
 
         if (ami_v6_clock_valid)
         {
@@ -283,8 +339,6 @@ static VOID ami_v6_charge_checkpoint(VOID)
             ami_v6.used += (elapsed >= left) ? left : elapsed;
             ami_v6.t0 = now;
             ami_v6.charging = (ami_v6.used < (ULONG)V6_BUDGET);
-            if (ami_v6.level != 0 && me->tc_Node.ln_Pri == 0)
-                (VOID)SetTaskPri(me, (LONG)TX_AMIGA_HANDOFF_PRIORITY);
         }
         else
             ami_v6_clock_fail_open();
@@ -327,6 +381,9 @@ static VOID ami_v6_tick(VOID)
     if (ami_v6.level == 0)
         ami_v6.stats[3]++;
     ami_v6.used = 0;
+#ifdef V6_ECLOCK
+    ami_v6.checkpoints = ami_v6.pending_frames = 0;
+#endif
 #if !defined(V6_FRAMES)
 #ifdef V6_ECLOCK
     /* Saturation stopped measuring, not running. Resume its new-period
@@ -399,6 +456,8 @@ static VOID ami_v6_bind(struct Task *me)
     /* Counts survive rebind. Only a new loaded module clears them. */
     ami_v6_clock_stats[0] = ami_v6_clock_stats[1] = ami_v6_clock_stats[2] = 0UL;
     ami_v6_clock_stats[4] = 2UL;
+    ami_v6_clock_stats[7] = (ULONG)V6_ECLOCK_STRIDE;
+    ami_v6_clock_stats[8] = AMI_V6_SAMPLE_FRAMES;
     ami_v6_startup_left = AMI_V6_STARTUP_TRIES;
     ami_v6.used = 0;
     ami_v6.charging = FALSE;
@@ -417,7 +476,7 @@ static VOID ami_v6_bind(struct Task *me)
     AddPort(&ami_v6_port);
 #ifdef V6_ECLOCK
     ami_v6_clock_port = ami_v6_port;
-    ami_v6_clock_port.mp_Node.ln_Name = (char *)"AmiNetXDuo eclock2";
+    ami_v6_clock_port.mp_Node.ln_Name = (char *)"AmiNetXDuo eclock3";
     ami_v6_clock_port.mp_SigTask = (struct Task *)ami_v6_clock_stats;
     ami_v6_clock_port.mp_MsgList.lh_Head =
         (struct Node *)&ami_v6_clock_port.mp_MsgList.lh_Tail;
@@ -2994,6 +3053,12 @@ static VOID ami_sana2_rx_thread(ULONG argument)
                 ami_v6.used += taken;
             Permit();
         }
+#elif defined(V6_ECLOCK) && defined(V6_TIME_US)
+        {
+            UWORD taken = ami_sana2_rx_drain(rd, (UWORD)AMI_SANA2_RX_RUN_MAX);
+
+            ami_v6_charge_checkpoint((ULONG)taken);
+        }
 #else
         (VOID)ami_sana2_rx_drain(rd, (UWORD)AMI_SANA2_RX_RUN_MAX);
 #endif
@@ -3001,9 +3066,7 @@ static VOID ami_sana2_rx_thread(ULONG argument)
         /* A busy reader that overran its budget without waiting stands
            aside through a release/reacquire, never holding the baton. */
         /* Charge checkpoint: the run so far counts before the budget test. */
-#if defined(V6_ECLOCK) && !defined(V6_FRAMES)
-        ami_v6_charge_checkpoint();
-#else
+#if !defined(V6_ECLOCK) || defined(V6_FRAMES)
         ami_v6_charge_stop();
         ami_v6_charge_start();
 #endif
