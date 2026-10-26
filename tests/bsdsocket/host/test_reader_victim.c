@@ -9,12 +9,12 @@ static struct AmiSocketBase master, children[90], *root;
 static struct Task tasks[30];
 static struct Node tail;
 static struct MinNode child_tail;
-static ULONG now;
-static unsigned depth, checks, failures, clear_root;
+ULONG _tx_timer_system_clock;
+#define now _tx_timer_system_clock
+static unsigned depth, checks, failures, clear_root, advance_on_disable;
 
-VOID Disable(VOID) { if (depth++) abort(); if (clear_root) root = NULL; }
+VOID Disable(VOID) { if (depth++) abort(); if (clear_root) root = NULL; if (advance_on_disable) now++; }
 VOID Enable(VOID) { if (depth != 1) abort(); depth--; }
-ULONG tx_time_get(VOID) { if (!depth) abort(); return now; }
 static void check(BOOL ok, const char *what) {
     checks++;
     if (!ok) { failures++; printf("FAIL %s\n", what); }
@@ -34,7 +34,7 @@ static void reset(void) {
     memset(children, 0, sizeof(children));
     memset(tasks, 0, sizeof(tasks));
     memset(bsd_reader_victim_stats, 0, sizeof(ULONG) * 6);
-    root = &master; now = 100; clear_root = depth = 0;
+    root = &master; now = 100; clear_root = depth = advance_on_disable = 0;
     ready(0); openers(0);
 }
 static BOOL victim(void) {
@@ -63,6 +63,9 @@ int main(void) {
     children[0].sb_LastNetCall = now - 10;
     check(!victim(), "window boundary remains recent");
     now++; check(victim(), "expired caller eligible");
+    reset(); ready(1); openers(1); children[0].sb_LastNetTask=&tasks[0];
+    children[0].sb_LastNetCall=now-10; advance_on_disable=1;
+    check(victim(), "clock snapshot follows critical-section entry");
     reset(); ready(1); openers(1); children[0].sb_LastNetTask = &tasks[0];
     now=3; children[0].sb_LastNetCall=UINT32_MAX-1;
     check(!victim(), "clock wrap keeps recent caller");

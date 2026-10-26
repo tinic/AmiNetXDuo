@@ -27,6 +27,6 @@ extern struct HostExecBase *SysBase;
 extern ULONG bsd_reader_victim_stats[6];
 VOID Disable(VOID);
 VOID Enable(VOID);
-ULONG tx_time_get(VOID);
+ULONG tx_amiga_time_get_locked(VOID);
 UINT tx_amiga_task_may_be_internal(VOID *task);
 BOOL bsd_reader_victim_ready(struct AmiSocketBase **master_slot);

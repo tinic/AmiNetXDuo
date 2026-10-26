@@ -14,6 +14,9 @@
  */
 #include "tx_api.h"
 #include "nx_api.h"
+#ifdef V6_GATED
+#include "tx_amiga.h"
+#endif
 
 #include <exec/types.h>
 #include <exec/execbase.h>
@@ -758,7 +761,7 @@ static __inline VOID bsd_reader_note_call(struct AmiSocketBase *base)
        Publish the actual caller and time as one snapshot. */
     Forbid();
     base->sb_LastNetTask = FindTask(NULL);
-    base->sb_LastNetCall = tx_time_get();
+    base->sb_LastNetCall = tx_amiga_time_get_locked();
     Permit();
 }
 BOOL  bsd_reader_victim_ready(struct AmiSocketBase **master_slot);

@@ -32,7 +32,7 @@ BOOL bsd_reader_victim_ready(struct AmiSocketBase **master_slot)
     master = *master_slot;
     if (master == NULL)
         goto done;
-    now = tx_time_get();
+    now = tx_amiga_time_get_locked();
     node = SysBase->TaskReady.lh_Head;
     for (;;)
     {

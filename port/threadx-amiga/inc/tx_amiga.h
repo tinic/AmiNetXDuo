@@ -229,6 +229,10 @@ UINT    tx_amiga_caller_is_thread(VOID);
    Never reads a port control block past an arbitrary struct Task. */
 UINT    tx_amiga_task_may_be_internal(VOID *task);
 
+/* Snapshot the ThreadX tick count while the caller already holds Forbid()
+   or Disable(). Clock writers in this port use the same task exclusion. */
+ULONG   tx_amiga_time_get_locked(VOID);
+
 /* A ThreadX thread sometimes has to block in Exec (Wait/WaitIO) without
    keeping the single hosted scheduler baton.  These calls are the port
    boundary for that transaction; application code must use the higher-level

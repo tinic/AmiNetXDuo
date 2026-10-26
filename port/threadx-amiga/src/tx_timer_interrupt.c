@@ -83,3 +83,10 @@ VOID _tx_amiga_timer_clock_advance(ULONG ticks)
     _tx_timer_system_clock +=  ticks;
     Permit();
 }
+
+ULONG tx_amiga_time_get_locked(VOID)
+{
+    /* _tx_time_get() adds a redundant Forbid/Permit pair for these callers.
+       Keep that public API unchanged; this port helper requires exclusion. */
+    return _tx_timer_system_clock;
+}
