@@ -699,16 +699,19 @@ typedef struct AmiSana2Reader
        block.  Nothing of the interface can ever be freed. */
     BOOL                zombie;
 
-    /* Reads the device would not give back at teardown, over every ring.
-       Nonzero means slots, pinned packets and the reply port are still
+    /* Requests the device would not give back at teardown, over every ring
+       and the poll below. Nonzero means packets and the reply port are still
        reachable by the device and none of them can be freed. */
     volatile UWORD      orphans;
 
     /* ANXD_CMD_RX_POLL (aminetxduo/anxs2ext.h), sent once at the end of
        every drain so a driver holding frames for the reads just re-posted
        delivers them before the reader sleeps.  Replied on the port when a
-       device does not honour IOF_QUICK, and taken back at once. */
+       device does not honour IOF_QUICK. Such a reply is collected by identity
+       in the drain/reap, never cast to a receive slot. Protected by the
+       ThreadX baton, like the reader's rings. */
     struct IOSana2Req   poll;
+    BOOL                poll_pending;
 
     /* ACKPACE: the timer that wakes this reader when the next held
        acknowledgment is due and nothing else would (sana2_ackpace.c). */
@@ -1179,6 +1182,9 @@ UWORD ami_sana2_rx_drain_batch(AmiSana2Reader *rd, AmiRxBatch *bt);
 #endif
 VOID  ami_sana2_rx_abort_outstanding(AmiSana2Reader *rd);
 VOID  ami_sana2_rx_flush(AmiSana2Reader *rd);
+VOID  ami_sana2_rx_poll(AmiSana2Reader *rd);
+UWORD ami_sana2_rx_drain(AmiSana2Reader *rd, UWORD budget);
+VOID  ami_sana2_rx_teardown(AmiSana2Reader *rd);
 #endif
 
 /* sana2_tx.c */

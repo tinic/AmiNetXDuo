@@ -10,6 +10,7 @@
 /* BeginIO(), which the transmit path posts with; the shim declares it and
    this file defines it. */
 #include <inline/alib.h>
+#include <proto/exec.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -57,21 +58,49 @@ VOID Permit(VOID)  { }
 
 VOID SendIO(struct IORequest *req) { (VOID)req; }
 static struct IORequest *h_last_begun;
-VOID BeginIO(struct IORequest *req) { h_last_begun = req; }
+static BOOL h_poll_async;
+static BOOL h_poll_reply_now;
+static BYTE h_poll_error;
+static unsigned h_poll_begins;
+static unsigned h_wait_ios;
+VOID BeginIO(struct IORequest *req)
+{
+    h_last_begun = req;
+    if (req->io_Command == ANXD_CMD_RX_POLL)
+    {
+        h_poll_begins++;
+        req->io_Error = h_poll_error;
+        if (h_poll_async)
+        {
+            req->io_Flags &= (UBYTE)~IOF_QUICK;
+            if (h_poll_reply_now)
+                AddTail(&req->io_Message.mn_ReplyPort->mp_MsgList,
+                         &req->io_Message.mn_Node);
+        }
+    }
+}
 
 /* What the teardown asked the device to give back, in order. */
 static struct IORequest *h_aborted[16];
 static unsigned          h_aborts;
+static BOOL              h_poll_reply_on_abort;
 LONG AbortIO(struct IORequest *req)
 {
     if (h_aborts < 16)
         h_aborted[h_aborts] = req;
     h_aborts++;
+    if (h_poll_reply_on_abort && req->io_Command == ANXD_CMD_RX_POLL)
+    {
+        req->io_Error = IOERR_ABORTED;
+        AddTail(&req->io_Message.mn_ReplyPort->mp_MsgList,
+                 &req->io_Message.mn_Node);
+    }
     return 0;
 }
 BYTE WaitIO(struct IORequest *req)
 {
     (VOID)req;
+    h_wait_ios++;
     return 0;
 }
 /* Off except in the reclaim test: there the device's replies are real
@@ -196,7 +225,8 @@ UINT _txe_thread_delete(TX_THREAD *p)
     return TX_SUCCESS;
 }
 UINT _txe_thread_terminate(TX_THREAD *p) { (VOID)p; return TX_SUCCESS; }
-UINT _tx_thread_sleep(ULONG t) { (VOID)t; return TX_SUCCESS; }
+static unsigned h_sleeps;
+UINT _tx_thread_sleep(ULONG t) { (VOID)t; h_sleeps++; return TX_SUCCESS; }
 
 UINT _txe_semaphore_create(TX_SEMAPHORE *s, CHAR *n, ULONG c, UINT size)
 {
@@ -2425,8 +2455,175 @@ static void test_flush_is_bounded(void)
             "flush: no reply port of its own");
 }
 
+/* A negotiated poll normally finishes inside BeginIO. The hostile cases
+   below queue it, answer inside BeginIO, ignore AbortIO, or answer only after
+   the reader has exited. None may turn a control reply into an AmiRxSlot. */
+static AmiSana2Reader *poll_fixture(void)
+{
+    AmiSana2Reader *rd = &iface.reader;
+
+    fixture_init();
+    rd->iface = &iface;
+    ami_sana2_port_init(&rd->port_mem, &rc_task, 20, PA_SIGNAL);
+    rd->port = &rd->port_mem;
+    rd->poll.ios2_Req.io_Command = ANXD_CMD_RX_POLL;
+    rd->poll.ios2_Req.io_Message.mn_ReplyPort = rd->port;
+    iface.rx_poll_ok = TRUE;
+    h_getmsg_real = TRUE;
+    h_poll_async = FALSE;
+    h_poll_reply_now = FALSE;
+    h_poll_reply_on_abort = FALSE;
+    h_poll_error = 0;
+    h_poll_begins = 0;
+    h_wait_ios = 0;
+    h_aborts = 0;
+    h_sleeps = 0;
+    h_commands = 0;
+    h_signal_frees = 0;
+    return rd;
+}
+
+static void test_poll_quick_and_async_replies(void)
+{
+    AmiSana2Reader *rd = poll_fixture();
+    AmiSana2Rx *rx = &iface.rx[0];
+
+    printf("  receive poll completion and nonblocking fallback\n");
+    ami_sana2_rx_poll(rd);
+    ami_sana2_rx_poll(rd);
+    h_check(h_poll_begins == 2 && !rd->poll_pending && iface.rx_poll_ok,
+            "poll: quick success permits the next pass to poll");
+    h_check(h_wait_ios == 0, "poll: quick success never waits");
+
+    h_poll_error = IOERR_NOCMD;
+    ami_sana2_rx_poll(rd);
+    h_check(h_poll_begins == 3 && !rd->poll_pending && !iface.rx_poll_ok,
+            "poll: quick refusal disables polling with nothing outstanding");
+    ami_sana2_rx_poll(rd);
+    h_check(h_poll_begins == 3, "poll: unsupported command is not retried");
+
+    rd = poll_fixture();
+    rd->stop = TRUE;
+    ami_sana2_rx_poll(rd);
+    h_check(h_poll_begins == 0, "poll: stopping reader posts nothing");
+    rd->stop = FALSE;
+    iface.rx_poll_ok = FALSE;
+    ami_sana2_rx_poll(rd);
+    h_check(h_poll_begins == 0, "poll: negotiation is required");
+
+    rd = poll_fixture();
+    h_poll_async = TRUE;
+    ami_sana2_rx_poll(rd);
+    h_check(h_poll_begins == 1 && rd->poll_pending && !iface.rx_poll_ok,
+            "poll: queued request remains owned and disables the optimization");
+    h_check(h_wait_ios == 0 && h_sleeps == 0,
+            "poll: queued request does not wait for its answer");
+    /* Even a later capability update cannot reuse the outstanding request. */
+    iface.rx_poll_ok = TRUE;
+    ami_sana2_rx_poll(rd);
+    h_check(h_poll_begins == 1 && rd->poll_pending,
+            "poll: an in-flight request is never reused");
+    iface.rx_poll_ok = FALSE;
+
+    /* A poll reply ahead of an ordinary completion does not consume its
+       frame budget, and the ordinary slot is still settled correctly. */
+    AddTail(&rd->port->mp_MsgList, &rd->poll.ios2_Req.io_Message.mn_Node);
+    rx->iface = &iface;
+    rx->reader = rd;
+    rx->slot = &slot;
+    rx->depth = 1;
+    slot.owner = rx;
+    slot.posted = TRUE;
+    slot.req.ios2_Req.io_Command = CMD_READ;
+    slot.req.ios2_Req.io_Error = IOERR_ABORTED;
+    AddTail(&rd->port->mp_MsgList, &slot.req.ios2_Req.io_Message.mn_Node);
+    h_check(ami_sana2_rx_drain(rd, 1) == 1 && !rd->poll_pending && !slot.posted,
+            "poll: drain recognizes control reply then settles the read");
+    h_check(rx->unposted == 1 && iface.stats.rx_errors == 0 &&
+            h_lock_depth == 0 && _nx_ip_input_thread == TX_NULL,
+            "poll: reply changes neither receive statistics nor lock ownership");
+    h_check(ami_sana2_rx_should_block(rd, 0),
+            "poll: both messages were collected");
+
+    rd = poll_fixture();
+    h_poll_async = TRUE;
+    h_poll_reply_now = TRUE;
+    ami_sana2_rx_poll(rd);
+    h_check(rd->poll_pending && !iface.rx_poll_ok && h_wait_ios == 0,
+            "poll: synchronous ReplyMsg with QUICK cleared still needs collection");
+    h_check(ami_sana2_rx_drain(rd, 1) == 0 && !rd->poll_pending,
+            "poll: already-queued reply is collected without a packet");
+    ami_sana2_rx_poll(rd);
+    h_check(h_poll_begins == 1, "poll: collection does not re-enable async polling");
+    h_getmsg_real = FALSE;
+    h_poll_async = FALSE;
+    h_poll_reply_now = FALSE;
+}
+
+static void test_poll_teardown_and_late_reply(void)
+{
+    AmiSana2Reader *rd = poll_fixture();
+
+    printf("  receive poll abort and late-reply retention\n");
+    h_poll_async = TRUE;
+    ami_sana2_rx_poll(rd);
+    rd->stop = TRUE;
+    h_poll_reply_on_abort = TRUE;
+    ami_sana2_rx_teardown(rd);
+    h_check(h_aborts == 1 && h_aborted[0] == (struct IORequest *)&rd->poll,
+            "poll: teardown aborts the outstanding control request");
+    h_check(!rd->poll_pending && rd->orphans == 0 && rd->port == NULL &&
+            h_signal_frees == 1,
+            "poll: aborted reply is collected before the signal is freed");
+    h_check(h_wait_ios == 0 && h_sleeps == 0 && h_commands == 0,
+            "poll: immediate abort reply needs neither a wait nor a flush");
+
+    rd = poll_fixture();
+    h_poll_async = TRUE;
+    ami_sana2_rx_poll(rd);
+    rd->stop = TRUE;
+    ami_sana2_rx_teardown(rd);
+    h_check(h_aborts == 1 && h_commands == 1 && h_command_last == CMD_FLUSH,
+            "poll: ignored abort falls back to the bounded flush");
+    h_check(rd->poll_pending && rd->orphans == 1 &&
+            rd->port == &rd->port_mem && h_signal_frees == 0,
+            "poll: unanswered control request retains its port and signal");
+    h_check(h_sleeps == 2 * AMI_SANA2_RX_REAP_TRIES && h_wait_ios == 0,
+            "poll: teardown has only the existing bounded reap waits");
+
+    /* The reader may have exited, but its Task and stack must remain until
+       this last device-owned request is back, just as for a late CMD_READ. */
+    rd->started = TRUE;
+    rd->joined = TRUE;
+    rd->stack = rc_stack;
+    rd->thread.tx_thread_state = TX_COMPLETED;
+    iface.rx_orphaned = TRUE;
+    h_free_watch = rc_stack;
+    h_free_watched = 0;
+    h_thread_deletes = 0;
+    h_sleeps = 0;
+    h_check(!ami_sana2_rx_reclaim(&iface, TRUE) && rd->orphans == 1,
+            "poll: retained sweep holds a lone outstanding poll");
+    h_check(h_free_watched == 0 && h_thread_deletes == 0 && h_sleeps == 0,
+            "poll: retained sweep neither frees nor waits while poll is out");
+    AddTail(&rd->port_mem.mp_MsgList, &rd->poll.ios2_Req.io_Message.mn_Node);
+    h_check(ami_sana2_rx_reclaim(&iface, TRUE) && !rd->poll_pending &&
+            rd->orphans == 0 && !iface.rx_orphaned,
+            "poll: late control reply allows reclamation");
+    h_check(h_free_watched == 1 && h_thread_deletes == 1 &&
+            rd->port_mem.mp_Flags == PA_IGNORE && rd->port_mem.mp_SigTask == NULL,
+            "poll: late reply is collected before Task and stack retire");
+    h_check(h_signal_frees == 0 && h_wait_ios == 0 && h_sleeps == 0,
+            "poll: reclaim never frees another Task's signal or waits");
+    h_getmsg_real = FALSE;
+    h_poll_async = FALSE;
+    h_free_watch = NULL;
+}
+
 int main(void)
 {
+    test_poll_quick_and_async_replies();
+    test_poll_teardown_and_late_reply();
     test_flush_is_bounded();
 #ifdef AMINETXDUO_RX_BATCH
     test_batch_post_and_drain();
