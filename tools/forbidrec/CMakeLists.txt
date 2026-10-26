@@ -1,5 +1,6 @@
 # forbidrec, every Forbid()/Disable() hold timed; frload, the Amiga half of
-# its workload; hush, digital silence through AHI for the USB audio path.
+# its workload; hush, digital silence through AHI for the USB audio path;
+# tone, a sine through it for glitchdet.py to find the dropouts in.
 # Instruments: built for every cross configuration so the m68k warning gate
 # covers them, shipped nowhere.  run-amiberry.sh is the gate;
 # run-a1200.sh is the measurement.
@@ -18,8 +19,9 @@ set_source_files_properties(forbidrec_stub.S PROPERTIES
 
 add_executable(frload frload.c)
 add_executable(hush hush.c)
+add_executable(tone tone.c)
 
-foreach(t forbidrec frload hush)
+foreach(t forbidrec frload hush tone)
     # libnix, as every on-Amiga harness here links: the NDK's bsdsocket
     # headers agree with its sys/ headers and with nothing else.
     target_compile_options(${t} PRIVATE -Wall -Wextra -noixemul)
