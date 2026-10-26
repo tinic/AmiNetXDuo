@@ -266,7 +266,8 @@ if '--sparse' in sys.argv:
     sparse_fixture='''
 typedef uint16_t UWORD;
 #define AMI_SANA2_RX_RUN_MAX 128
-static UWORD ami_sana2_rx_drain(VOID *rd,UWORD max){(void)rd;(void)max;return 128;}
+static UWORD drain_frames=128;
+static UWORD ami_sana2_rx_drain(VOID *rd,UWORD max){(void)rd;(void)max;return drain_frames;}
 static VOID run_drain(VOID){VOID *rd=0;
 '''+drain+'\n}\n'
     sparse_main=main[:main.index('int main(void)')]+r'''
@@ -304,6 +305,10 @@ int main(void){
  task.tc_Node.ln_Pri=5;ami_v6_charge_checkpoint(1);check(task.tc_Node.ln_Pri==5,"skipped sample keeps externally raised priority");
  reset();bind();ami_v6_charge_start();before=reads;clock_now=10;run_drain();
  check(reads==before+1&&ami_v6_clock_stats[10]==1&&ami_v6.used==10,"real drain call forwards its actual frame count");
+ reset();bind();clock_now=10;ami_v6_charge_start();ami_v6_charge_checkpoint(127);
+ before=reads;drain_frames=159;clock_now=20;run_drain();
+ check(reads==before+1&&ami_v6.used==10&&!ami_v6.pending_frames,"overshooting batch drain forces a sample after a pending interval");
+ check(ami_v6_clock_stats[10]==(V6_ECLOCK_STRIDE>2?1U:0U)&&ami_v6_clock_stats[9]==1,"batch overshoot distinguishes cadence from early forced sampling");
  unsigned attempts=ami_v6_clock_stats[6];ami_v6_unbind(&task);bind();check(ami_v6_clock_stats[6]==attempts+1,"attempt count survives interface rebind");
  ami_v6_unbind(&task);before=reads;ami_v6_charge_checkpoint(1);check(!ports&&reads==before&&!_tx_amiga_tick_hook,"unbound sparse path is inert");
  check(!forbid_depth&&!pending&&!unsafe_reads,"all sparse sampling exclusion is balanced");

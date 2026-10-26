@@ -310,10 +310,11 @@ static VOID ami_v6_charge_checkpoint(ULONG frames)
         if (ami_v6.level != 0 && me->tc_Node.ln_Pri == 0)
             (VOID)SetTaskPri(me, (LONG)TX_AMIGA_HANDOFF_PRIORITY);
         /* Saturate the frame threshold rather than wrapping on addition.
-           A drain is bounded separately by RX_RUN_MAX. The threshold forces
-           a read after that drain, so fewer than SAMPLE_FRAMES + RUN_MAX
-           frames can pass between checkpoints. This is not a wall-time
-           latency guarantee. */
+           A drain starts replies while took < RUN_MAX; a final batch is
+           completed whole and can overshoot by RX_BATCH_MAX - 1. Sampling
+           after that drain allows at most (SAMPLE_FRAMES - 1) + RUN_MAX
+           frames without batches (255 at defaults), or another BATCH_MAX - 1
+           with batches (286). This is not a wall-time latency guarantee. */
         if (frames >= AMI_V6_SAMPLE_FRAMES - ami_v6.pending_frames)
             ami_v6.pending_frames = AMI_V6_SAMPLE_FRAMES;
         else
@@ -2161,7 +2162,8 @@ static VOID ami_sana2_rx_complete(AmiSana2Rx *rx, AmiRxSlot *slot)
 }
 
 /*
- * Take up to `budget` replies off the port and return how many there were.
+ * Take replies while fewer than `budget` frames have been counted. Complete
+ * a final batch whole, so that reply may overshoot by RX_BATCH_MAX - 1.
  *
  * Bounded, and not by accident.  ami_sana2_rx_complete() puts each slot back on
  * the wire before it delivers the frame, so a reply that arrives while this
@@ -2281,7 +2283,7 @@ AMI_SANA2_BATCH_LINKAGE UWORD ami_sana2_rx_drain_batch(AmiSana2Reader *rd,
 }
 #endif /* AMINETXDUO_RX_BATCH */
 
-static UWORD ami_sana2_rx_drain(AmiSana2Reader *rd, UWORD budget)
+AMI_SANA2_BATCH_LINKAGE UWORD ami_sana2_rx_drain(AmiSana2Reader *rd, UWORD budget)
 {
     AmiSana2If     *iface = rd->iface;
     NX_IP          *ip = iface->ip;

@@ -1173,6 +1173,7 @@ VOID ami_sana2_gro_flush(AmiSana2Rx *rx);
 #ifdef AMINETXDUO_SANA2_RX_HOST_TEST
 /* The host harness's way into the reader's batch post and drain and the
    teardown's abort sweep (sana2_rx.c), file-local in the library. */
+UWORD ami_sana2_rx_drain(AmiSana2Reader *rd, UWORD budget);
 #ifdef AMINETXDUO_RX_BATCH
 UWORD ami_sana2_rx_post_batch(AmiSana2Rx *rx, AmiRxBatch *bt);
 UWORD ami_sana2_rx_drain_batch(AmiSana2Reader *rd, AmiRxBatch *bt);

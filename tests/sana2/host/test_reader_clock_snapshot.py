@@ -26,7 +26,9 @@ static struct MsgPort *FindPort(CONST_STRPTR name){
 }
 static void CopyMem(const void *src,void *dst,ULONG n){
  size_t expected=src==child?sizeof child:clock_size;
- if(depth!=1)unsafe++;copies++;
+ if(depth!=1)
+  unsafe++;
+ copies++;
  if(n!=expected)bad++;
  /* Record a wrong length as a semantic failure before a deliberate negative
     could read beyond the fake port. ASan still checks the positive copies. */
@@ -35,10 +37,14 @@ static void CopyMem(const void *src,void *dst,ULONG n){
 '''
 main=r'''
 int main(int argc,char **argv){
- if(argc!=2)return 2;version=(unsigned)atoi(argv[1]);
+ if(argc!=2)
+  return 2;
+ version=(unsigned)atoi(argv[1]);
  ULONG values[11]={715909,4296,13603,0,0,6,123,4,128,50,2};
  clock_size=(version==1?5:version==2?6:11)*sizeof(ULONG);clock_data=malloc(clock_size);
- if(!clock_data)return 2;memcpy(clock_data,values,clock_size);clock_port.mp_SigTask=clock_data;child_port.mp_SigTask=child;
+ if(!clock_data)
+  return 2;
+ memcpy(clock_data,values,clock_size);clock_port.mp_SigTask=clock_data;child_port.mp_SigTask=child;
  int rc=helper_main();unsigned failures=0;
  failures+=(rc!=(version?0:5));failures+=(depth!=0||unsafe!=0||bad!=0);failures+=(copies!=(version==0?0:version==4?1:2));
  free(clock_data);printf("snapshot checks=3 failures=%u\n",failures);return failures?1:0;

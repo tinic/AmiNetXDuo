@@ -1971,6 +1971,74 @@ static void test_a_burst_is_never_left_on_the_port(void)
 #ifdef AMINETXDUO_RX_BATCH
 /* ---------------------------------------------------- ANXD_CMD_RX_BATCH -- */
 
+/* Execute the real outer drain, including the whole final batch. The queued
+   aborted reads cost one apiece without delivering fabricated packets. */
+static void test_batch_drain_budget_overshoot(void)
+{
+    static AmiRxSlot singles[AMI_SANA2_RX_RUN_MAX];
+    static AmiRxSlot batch_slots[AMI_SANA2_RX_BATCH_MAX];
+    static union {
+        AnxdS2RxBatch b;
+        UBYTE bytes[sizeof(AnxdS2RxBatch) +
+                    AMI_SANA2_RX_BATCH_MAX * sizeof(APTR)];
+    } record;
+    AmiSana2Reader rd;
+    AmiRxBatch batch;
+    struct MsgPort port;
+    AmiSana2Rx *rx = &iface.rx[0];
+    UWORD i, took;
+
+    fixture_init();
+    memset(&rd, 0, sizeof(rd));
+    memset(&batch, 0, sizeof(batch));
+    memset(&port, 0, sizeof(port));
+    memset(&record, 0, sizeof(record));
+    memset(singles, 0, sizeof(singles));
+    memset(batch_slots, 0, sizeof(batch_slots));
+    NewList(&port.mp_MsgList);
+    rd.iface = &iface;
+    rd.port = &port;
+    rx->iface = &iface;
+    rx->use_batch = 0; /* Replies are ours; do not re-post synthetic I/O. */
+    for (i = 0; i < AMI_SANA2_RX_RUN_MAX; i++)
+    {
+        singles[i].owner = rx;
+        singles[i].req.ios2_Req.io_Command = CMD_READ;
+        singles[i].req.ios2_Req.io_Error = IOERR_ABORTED;
+    }
+    for (i = 0; i < AMI_SANA2_RX_BATCH_MAX; i++)
+    {
+        batch_slots[i].owner = rx;
+        record.b.Cookie[i] = &batch_slots[i];
+    }
+    record.b.Count = record.b.Filled = AMI_SANA2_RX_BATCH_MAX;
+    batch.owner = rx;
+    batch.rec = &record.b;
+    batch.req.ios2_Req.io_Command = ANXD_CMD_RX_BATCH;
+    batch.req.ios2_Req.io_Error = IOERR_ABORTED;
+    batch.in_flight = TRUE;
+    for (i = 0; i + 1 < AMI_SANA2_RX_RUN_MAX; i++)
+        AddTail(&port.mp_MsgList, &singles[i].req.ios2_Req.io_Message.mn_Node);
+    AddTail(&port.mp_MsgList, &batch.req.ios2_Req.io_Message.mn_Node);
+    AddTail(&port.mp_MsgList,
+            &singles[AMI_SANA2_RX_RUN_MAX - 1].req.ios2_Req.io_Message.mn_Node);
+    h_getmsg_real = TRUE;
+    took = ami_sana2_rx_drain(&rd, AMI_SANA2_RX_RUN_MAX);
+    h_check(took == AMI_SANA2_RX_RUN_MAX - 1 + AMI_SANA2_RX_BATCH_MAX,
+            "outer drain: final full batch overshoots the nominal budget");
+    h_check(!batch.in_flight, "outer drain: final batch is fully reclaimed");
+    h_check(port.mp_MsgList.lh_Head ==
+            &singles[AMI_SANA2_RX_RUN_MAX - 1].req.ios2_Req.io_Message.mn_Node,
+            "outer drain: quota leaves the next reply queued");
+    h_check(_nx_ip_input_thread == TX_NULL && h_lock_depth == 0,
+            "outer drain: overshoot restores the IP seat and mutex");
+    took = ami_sana2_rx_drain(&rd, AMI_SANA2_RX_RUN_MAX);
+    h_check(took == 1, "outer drain: next pass consumes the queued remainder");
+    h_check(port.mp_MsgList.lh_Head->ln_Succ == NULL,
+            "outer drain: next pass empties the port without an arrival wait");
+    h_getmsg_real = FALSE;
+}
+
 /*
  * The batch reader against a modelled device: one ring of four slots in two
  * batches.  Posting a batch arms its slots, marks them posted and hands the
@@ -2429,6 +2497,7 @@ int main(void)
 {
     test_flush_is_bounded();
 #ifdef AMINETXDUO_RX_BATCH
+    test_batch_drain_budget_overshoot();
     test_batch_post_and_drain();
     test_batch_fallback_with_a_sibling_in_flight();
 #endif
