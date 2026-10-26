@@ -100,8 +100,10 @@ int main(void){
  check(ami_v6_ticks(709379,6)==4257&&ami_v6_ticks(709379,19)==13479,"PAL thresholds");
  check(ami_v6_ticks(715909,6)==4296&&ami_v6_ticks(715909,19)==13603,"NTSC thresholds");
  reset();_tx_amiga_tick_run.tr_live=0;bind();
- check(!ami_v6.task&&!ports&&!_tx_amiga_tick_hook&&task.tc_Node.ln_Pri==0,"unavailable clock refuses bind");
- check(!forbid_depth,"failed bind balances exclusion");
+ check(ami_v6.task==&task&&ports==2&&_tx_amiga_tick_hook==ami_v6_tick&&task.tc_Node.ln_Pri==1&&ami_v6_clock_stats[3]==1&&ami_v6_clock_stats[4],"unavailable bind publishes fallback and preserves progress");
+ check(!forbid_depth,"unavailable bind balances exclusion");
+ reset();rate=0;bind();
+ check(ami_v6.task==&task&&ports==2&&ami_v6_clock_stats[3]==1&&ami_v6_clock_stats[4]&&task.tc_Node.ln_Pri==1,"zero-rate bind also publishes high-priority fallback");
  reset();clock_now=100000;bind();
  check(ami_v6.task==&task&&ports==2&&_tx_amiga_tick_hook==ami_v6_tick,"bind publishes both protected ports and hook");
  check(ami_v6_clock_stats[0]==709379&&ami_v6_clock_stats[1]==4257&&ami_v6_clock_stats[2]==13479,"bind uses measured raw tick thresholds");
@@ -132,6 +134,11 @@ int main(void){
  check(task.tc_Node.ln_Pri==5&&ami_v6_clock_stats[4],"failure preserves externally raised priority");
  ami_v6_unbind(&other);check(ports==2&&ami_v6.task==&task,"other reader cannot unbind owner");
  ami_v6_unbind(&task);check(!ports&&!ami_v6.task&&!_tx_amiga_tick_hook,"unbind removes ports and callback");
+ rate=709379;bind();
+ check(ports==2&&ami_v6_clock_stats[3]==1&&!ami_v6_clock_stats[4],"successful rebind preserves cumulative failure count");
+ ami_v6_unbind(&task);rate=0;bind();
+ check(ami_v6_clock_stats[3]==2&&ami_v6_clock_stats[4]&&task.tc_Node.ln_Pri==1,"another failed bind increments cumulative failure count");
+ ami_v6_unbind(&task);check(!ports&&!_tx_amiga_tick_hook,"failed rebind is fully unpublished on stop");
  old_reads=reads;ami_v6_charge_start();ami_v6_charge_stop();check(reads==old_reads,"unbound owner never reads device");
  check(!forbid_depth&&!pending&&!unsafe_reads,"all native clock reads protected and balanced");
  printf("native-clock checks=%u failures=%u\n",checks,failures);return failures?1:0;

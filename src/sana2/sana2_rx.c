@@ -285,13 +285,8 @@ static VOID ami_v6_bind(struct Task *me)
     }
 #ifdef V6_ECLOCK
     {
-        ULONG now, hz = tx_amiga_eclock_read_locked(&now);
+        ULONG now = 0, hz = tx_amiga_eclock_read_locked(&now);
 
-        if (hz == 0UL)
-        {
-            Permit();
-            return;                 /* no timer.base call before it is live */
-        }
         ami_v6_clock_stats[0] = hz;
 #ifdef V6_FRAMES
         ami_v6_clock_stats[1] = (ULONG)V6_FRAMES;
@@ -299,7 +294,9 @@ static VOID ami_v6_bind(struct Task *me)
         ami_v6_clock_stats[1] = ami_v6_ticks(hz, (ULONG)V6_TIME_US / 1000UL);
 #endif
         ami_v6_clock_stats[2] = ami_v6_ticks(hz, 19UL);
-        ami_v6_clock_stats[3] = ami_v6_clock_stats[4] = 0UL;
+        /* Failure count is cumulative for this loaded module, including
+           rebinds, so cycling an interface cannot hide a failed clock. */
+        ami_v6_clock_stats[4] = 0UL;
         ami_v6_refilled = now;
         ami_v6.used = 0;
         ami_v6.charging = FALSE;
@@ -308,6 +305,10 @@ static VOID ami_v6_bind(struct Task *me)
     ami_v6.task  = me;
     ami_v6.level = 1;
     (VOID)SetTaskPri(me, (LONG)TX_AMIGA_HANDOFF_PRIORITY);
+#ifdef V6_ECLOCK
+    if (ami_v6_clock_stats[0] == 0UL)
+        ami_v6_clock_fail_open(); /* publish the failure and preserve progress */
+#endif
     ami_v6_port.mp_Node.ln_Name = (char *)"AmiNetXDuo v6";
     ami_v6_port.mp_Node.ln_Type = NT_MSGPORT;
     ami_v6_port.mp_Flags        = PA_IGNORE;
