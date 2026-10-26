@@ -22,7 +22,9 @@ int main(void)
         return 5;
     }
     printf("gchildstat checks=%lu yes=%lu capped=%lu port_marker_skips=%lu "
-           "recent_skips=%lu max_visits=%lu\n", snapshot[0], snapshot[1],
-           snapshot[2], snapshot[3], snapshot[4], snapshot[5]);
+           "recent_skips=%lu max_visits=%lu\n", (unsigned long)snapshot[0],
+           (unsigned long)snapshot[1], (unsigned long)snapshot[2],
+           (unsigned long)snapshot[3], (unsigned long)snapshot[4],
+           (unsigned long)snapshot[5]);
     return 0;
 }
