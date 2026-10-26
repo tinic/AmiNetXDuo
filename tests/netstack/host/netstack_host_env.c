@@ -1180,6 +1180,16 @@ VOID ami_sana2_set_block_hooks(AmiSana2BlockHook before_wait, AmiSana2BlockHook 
     (VOID)after_wait;
 }
 
+VOID ami_sana2_set_reader_wait_hook(AmiSana2BlockHook before_wait)
+{
+    (VOID)before_wait;
+}
+
+VOID ami_netstack_baton_release_reader(VOID)
+{
+    ami_netstack_baton_release();
+}
+
 VOID ami_sana2_set_open_hooks(VOID (*quiesce)(VOID), VOID (*restore)(VOID))
 {
     (VOID)quiesce;

@@ -39,6 +39,7 @@
 #include <inline/alib.h>
 
 VOID ami_sana2_block_enter(VOID);
+VOID ami_sana2_reader_wait_enter(VOID);
 VOID ami_sana2_block_leave(VOID);
 
 /* --------------------------------------------------------- receive probe */
@@ -2527,7 +2528,7 @@ static VOID ami_sana2_rx_thread(ULONG argument)
          */
         if (ami_sana2_rx_should_block(rd, AMI_SANA2_RX_RUN_MAX))
         {
-            ami_sana2_block_enter();
+            ami_sana2_reader_wait_enter();
             Wait(rd->wake_mask | rd->reap_mask | rd->ack_mask);
 #ifdef AMINETXDUO_RXPROBE
             {

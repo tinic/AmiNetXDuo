@@ -235,7 +235,13 @@ UINT    tx_amiga_caller_is_thread(VOID);
    invoke tx_amiga_exec_wait_wake() after Permit(); *moved is TX_TRUE when the
    thread being released was no longer the current baton holder.  Park is
    called after the resume-side Permit() and returns TX_FALSE only when an
-   adopted task was orphaned while it slept. */
+   adopted task was orphaned while it slept.  Raise opts a port-created Task
+   into the handoff priority so an I/O reply can preempt a polling application.
+   Use it only for a raw reader wait, after a successful release, with Forbid()
+   held: a general bracket may enclose driver commands or other work.
+   Finish restores that priority after the outer
+   bracket's park, or on a failed/missing resume; it does not need a live
+   TX_THREAD.  Adopted callers and green threads are not raised. */
 ULONG   tx_amiga_exec_wait_system_state_locked(VOID);
 TX_THREAD *tx_amiga_exec_wait_current_locked(VOID);
 TX_THREAD *tx_amiga_exec_wait_owner_locked(VOID);
@@ -244,6 +250,8 @@ UINT    tx_amiga_exec_wait_release_locked(TX_THREAD *thread_ptr,
 UINT    tx_amiga_exec_wait_resume_locked(TX_THREAD *thread_ptr, UINT *wake);
 VOID    tx_amiga_exec_wait_wake(VOID);
 UINT    tx_amiga_exec_wait_park(TX_THREAD *thread_ptr);
+VOID    tx_amiga_exec_wait_raise_locked(TX_THREAD *thread_ptr);
+VOID    tx_amiga_exec_wait_finish(VOID);
 
 /* TX_TRUE if [start, start+size) overlaps the stack of a thread ThreadX still has
    on its created list, which tx_thread_create() refuses with TX_PTR_ERROR.

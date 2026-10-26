@@ -17,6 +17,12 @@
  *   acquire  B inside the bracket, another Task's thread current: acquire
  *            resumes B, never A
  *   nested   a second release and its acquire only count, on B
+ *
+ * Also exercise the raw-I/O wake priority on a port-created Task.  Exec's
+ * strict-priority wake rule is modeled explicitly: at band zero the reader
+ * must outrank a polling Task while it rejoins ThreadX, then return to its
+ * original priority before any protocol work.  ThreadX/Exec are still fakes;
+ * these tests do not measure scheduling latency or throughput.
  */
 
 #include "tx_amiga_exec_wait.c"
@@ -26,6 +32,7 @@
 #include <string.h>
 
 VOID ami_netstack_baton_release(VOID);
+VOID ami_netstack_baton_release_reader(VOID);
 VOID ami_netstack_baton_acquire(VOID);
 
 
@@ -42,6 +49,10 @@ struct ExecBase *SysBase;
 
 static struct Task  fake_me, fake_other;
 static struct Task *fake_current;
+static struct _tx_amiga_ctrl fake_ctrl;
+static UINT suspend_status, resume_status, park_status;
+static unsigned priority_calls, park_calls;
+static BYTE park_priority;
 
 static TX_THREAD   *suspended[8];
 static unsigned     suspend_calls;
@@ -51,6 +62,8 @@ static unsigned     resume_calls;
 UINT _tx_thread_suspend(TX_THREAD *thread_ptr)
 {
     suspended[suspend_calls++ & 7U] = thread_ptr;
+    if (suspend_status != TX_SUCCESS)
+        return suspend_status;
     thread_ptr->tx_thread_state = TX_SUSPENDED;
     return TX_SUCCESS;
 }
@@ -58,12 +71,20 @@ UINT _tx_thread_suspend(TX_THREAD *thread_ptr)
 UINT _tx_thread_resume(TX_THREAD *thread_ptr)
 {
     resumed[resume_calls++ & 7U] = thread_ptr;
+    if (resume_status != TX_SUCCESS)
+        return resume_status;
     thread_ptr->tx_thread_state = TX_READY;
     return TX_SUCCESS;
 }
 
 UINT _tx_amiga_dispatch_or_wake(VOID)               { return TX_FALSE; }
-UINT _tx_amiga_thread_park(TX_THREAD *thread_ptr)   { (void) thread_ptr; return TX_TRUE; }
+UINT _tx_amiga_thread_park(TX_THREAD *thread_ptr)
+{
+    (void) thread_ptr;
+    park_calls++;
+    park_priority = fake_current->tc_Node.ln_Pri;
+    return park_status;
+}
 VOID _tx_amiga_wake_scheduler(VOID)                 { }
 
 /* netstack_baton.c's other entry points, not reached by these tests. */
@@ -75,6 +96,11 @@ AmiMemStats *ami_mem_stats(VOID)                     { return (AmiMemStats *) 0;
 
 VOID  Forbid(VOID)  { }
 VOID  Permit(VOID)  { }
+VOID SetTaskPri(struct Task *task, LONG priority)
+{
+    priority_calls++;
+    task->tc_Node.ln_Pri = (BYTE)priority;
+}
 
 struct Task *FindTask(const char *name)
 {
@@ -125,6 +151,9 @@ static TX_THREAD thread_a, thread_b, thread_c;
    adoption between calls; B holds the baton.  C is another Task's thread. */
 static void setup(void)
 {
+    memset(&fake_me, 0, sizeof(fake_me));
+    memset(&fake_other, 0, sizeof(fake_other));
+    memset(&fake_ctrl, 0, sizeof(fake_ctrl));
     memset(&thread_a, 0, sizeof(thread_a));
     memset(&thread_b, 0, sizeof(thread_b));
     memset(&thread_c, 0, sizeof(thread_c));
@@ -159,8 +188,25 @@ static void setup(void)
     _tx_thread_current_ptr = &thread_b;
     fake_current           = &fake_me;
     suspend_calls = resume_calls = 0U;
+    suspend_status = resume_status = TX_SUCCESS;
+    park_status = TX_TRUE;
+    priority_calls = park_calls = 0U;
+    park_priority = 0;
+    _tx_thread_system_state = 0;
     memset(suspended, 0, sizeof(suspended));
     memset(resumed, 0, sizeof(resumed));
+}
+
+static void setup_owned(BYTE priority, UINT flags)
+{
+    setup();
+    fake_current = &fake_ctrl.ctrl_task;
+    fake_current->tc_UserData = fake_current;
+    fake_current->tc_Node.ln_Pri = priority;
+    fake_ctrl.ctrl_magic = TX_AMIGA_CTRL_MAGIC;
+    fake_ctrl.ctrl_thread = &thread_b;
+    thread_b.tx_thread_amiga_task = fake_current;
+    thread_b.tx_thread_amiga_flags = flags;
 }
 
 /* B's Task sits in Exec inside a bracket, and another Task's thread has the
@@ -193,6 +239,44 @@ static void test_release(void)
     expect("baton let go", _tx_thread_current_ptr, TX_NULL);
     expect_n("B nesting", thread_b.tx_thread_amiga_exec_wait_nesting, 1UL);
     check_a_untouched();
+
+    setup_owned(0, 0);
+    ami_netstack_baton_release_reader();
+    expect_n("reader suspended in ThreadX", thread_b.tx_thread_state, TX_SUSPENDED);
+    expect_n("I/O wake preempts priority-zero poller",
+             fake_current->tc_Node.ln_Pri > 0, 1UL);
+    expect_n("reader uses handoff priority", fake_current->tc_Node.ln_Pri,
+             TX_AMIGA_HANDOFF_PRIORITY);
+    expect_n("one wake boost", priority_calls, 1UL);
+
+    setup_owned(5, 0);
+    ami_netstack_baton_release_reader();
+    expect_n("higher priority stays higher", fake_current->tc_Node.ln_Pri, 5UL);
+    expect_n("no higher-priority write", priority_calls, 0UL);
+    ami_netstack_baton_acquire();
+    expect_n("higher priority survives acquire", fake_current->tc_Node.ln_Pri, 5UL);
+
+    setup_owned(0, 0);
+    ami_netstack_baton_release();
+    ami_netstack_baton_acquire();
+    expect_n("general I/O bracket is not boosted", priority_calls, 0UL);
+
+    setup_owned(0, TX_AMIGA_THREAD_ADOPTED);
+    ami_netstack_baton_release_reader();
+    ami_netstack_baton_acquire();
+    expect_n("adopted priority is untouched", priority_calls, 0UL);
+
+    setup_owned(0, TX_AMIGA_THREAD_GREEN);
+    ami_netstack_baton_release_reader();
+    ami_netstack_baton_acquire();
+    expect_n("green realm priority is untouched", priority_calls, 0UL);
+
+    setup_owned(0, 0);
+    suspend_status = TX_SUSPEND_ERROR;
+    ami_netstack_baton_release_reader();
+    expect_n("failed suspend never raises", priority_calls, 0UL);
+    expect_n("failed suspend closes bracket", thread_b.tx_thread_amiga_exec_wait_nesting, 0UL);
+    expect("failed suspend retains baton", _tx_thread_current_ptr, &thread_b);
 }
 
 static void test_acquire(void)
@@ -209,6 +293,50 @@ static void test_acquire(void)
     expect("resumed B", resumed[0], &thread_b);
     expect_n("B nesting", thread_b.tx_thread_amiga_exec_wait_nesting, 0UL);
     check_a_untouched();
+
+    setup_owned(0, 0);
+    ami_netstack_baton_release_reader();
+    ami_netstack_baton_acquire();
+    expect_n("boost covers baton reacquire", park_priority, TX_AMIGA_HANDOFF_PRIORITY);
+    expect_n("protocol resumes at original priority", fake_current->tc_Node.ln_Pri, 0UL);
+    expect_n("boost restored once", priority_calls, 2UL);
+    expect_n("restore state cleared", fake_ctrl.ctrl_exec_wait_raised, 0UL);
+    ami_netstack_baton_acquire();
+    expect_n("unmatched acquire cannot restore twice", priority_calls, 2UL);
+
+    setup_owned(0, 0);
+    ami_netstack_baton_release_reader();
+    fake_current->tc_Node.ln_Pri = 5;
+    ami_netstack_baton_acquire();
+    expect_n("explicit priority change survives the bracket", fake_current->tc_Node.ln_Pri, 5UL);
+    expect_n("explicit priority change not overwritten", priority_calls, 1UL);
+    expect_n("explicit priority change clears boost state", fake_ctrl.ctrl_exec_wait_raised, 0UL);
+
+    setup_owned(0, 0);
+    ami_netstack_baton_release_reader();
+    resume_status = TX_RESUME_ERROR;
+    ami_netstack_baton_acquire();
+    expect_n("failed resume restores priority", fake_current->tc_Node.ln_Pri, 0UL);
+    expect_n("failed resume does not park", park_calls, 0UL);
+    expect_n("failed resume closes bracket", thread_b.tx_thread_amiga_exec_wait_nesting, 0UL);
+
+    setup_owned(0, 0);
+    ami_netstack_baton_release_reader();
+    park_status = TX_FALSE;
+    ami_netstack_baton_acquire();
+    expect_n("failed park restores priority", fake_current->tc_Node.ln_Pri, 0UL);
+
+    setup_owned(0, 0);
+    ami_netstack_baton_release_reader();
+    /* The reaper detached/deleted the TX_THREAD while raw I/O was blocked.
+       Its Task/control block outlives the thread. */
+    fake_ctrl.ctrl_thread = TX_NULL;
+    _tx_thread_created_ptr = TX_NULL;
+    _tx_thread_created_count = 0UL;
+    memset(&thread_b, 0, sizeof(thread_b));
+    ami_netstack_baton_acquire();
+    expect_n("detached thread still restores Task priority", fake_current->tc_Node.ln_Pri, 0UL);
+    expect_n("detached thread never resumed", resume_calls, 0UL);
 }
 
 static void test_nested(void)
@@ -234,6 +362,19 @@ static void test_nested(void)
     expect_n("outer acquire: resume calls", resume_calls, 1UL);
     expect("outer acquire: resumed B", resumed[0], &thread_b);
     check_a_untouched();
+
+    setup_owned(0, 0);
+    ami_netstack_baton_release_reader();
+    ami_netstack_baton_release_reader();
+    expect_n("nested release only raises once", priority_calls, 1UL);
+    ami_netstack_baton_acquire();
+    expect_n("inner acquire keeps wake boost", fake_current->tc_Node.ln_Pri,
+             TX_AMIGA_HANDOFF_PRIORITY);
+    expect_n("inner acquire does not park", park_calls, 0UL);
+    ami_netstack_baton_acquire();
+    expect_n("outer acquire restores original priority", fake_current->tc_Node.ln_Pri, 0UL);
+    expect_n("outer acquire parks once", park_calls, 1UL);
+    expect_n("nested bracket saves original priority", priority_calls, 2UL);
 }
 
 int main(int argc, char **argv)

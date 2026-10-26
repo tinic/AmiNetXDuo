@@ -9,6 +9,58 @@
 
 #include "tx_amiga_internal.h"
 
+/* An I/O reply makes a Task Exec-ready before it can rejoin ThreadX.  At the
+   application's priority, a polling caller can keep taking the free baton
+   while this Task is still TX_SUSPENDED.  Cover that gap with the same wake
+   priority used by the baton park.  Only Tasks created by this port qualify:
+   an adopted caller owns its priority, and green threads share one Task.
+
+   Keep the saved priority in the Task's control block, not the TX_THREAD:
+   a timed-out reaper can detach and delete the latter before I/O returns. */
+VOID tx_amiga_exec_wait_raise_locked(TX_THREAD *thread_ptr)
+{
+    struct Task *me = FindTask((STRPTR)0);
+    struct _tx_amiga_ctrl *ctrl;
+
+    if (thread_ptr == TX_NULL || thread_ptr->tx_thread_amiga_task != (VOID *)me ||
+        (thread_ptr->tx_thread_amiga_flags &
+         (TX_AMIGA_THREAD_ADOPTED | TX_AMIGA_THREAD_GREEN)) != 0U)
+        return;
+
+    ctrl = _tx_amiga_ctrl_of(me);
+    if (ctrl == (struct _tx_amiga_ctrl *)0 ||
+        ctrl->ctrl_thread != thread_ptr || ctrl->ctrl_exec_wait_raised != 0U ||
+        me->tc_Node.ln_Pri >= (BYTE)TX_AMIGA_HANDOFF_PRIORITY)
+        return;
+
+    ctrl->ctrl_exec_wait_priority = me->tc_Node.ln_Pri;
+    ctrl->ctrl_exec_wait_raised = 1U;
+    (VOID)SetTaskPri(me, (LONG)TX_AMIGA_HANDOFF_PRIORITY);
+}
+
+/* Called only when the outer Exec-wait bracket ends.  No TX_THREAD access:
+   the I/O may have outlived its thread.  Clear the flag before SetTaskPri()
+   can reschedule us. */
+VOID tx_amiga_exec_wait_finish(VOID)
+{
+    struct Task *me = FindTask((STRPTR)0);
+    struct _tx_amiga_ctrl *ctrl;
+    BYTE priority;
+
+    Forbid();
+    ctrl = _tx_amiga_ctrl_of(me);
+    if (ctrl != (struct _tx_amiga_ctrl *)0 && ctrl->ctrl_exec_wait_raised != 0U)
+    {
+        priority = ctrl->ctrl_exec_wait_priority;
+        ctrl->ctrl_exec_wait_raised = 0U;
+        /* An explicit priority change made while I/O was pending belongs to
+           its caller.  Undo only the temporary value we installed. */
+        if (me->tc_Node.ln_Pri == (BYTE)TX_AMIGA_HANDOFF_PRIORITY)
+            (VOID)SetTaskPri(me, (LONG)priority);
+    }
+    Permit();
+}
+
 /* This is intentionally the only public observation of the core's interrupt
    state.  The netstack records a non-zero value as a broken bracket invariant;
    it no longer binds the ThreadX global itself. */

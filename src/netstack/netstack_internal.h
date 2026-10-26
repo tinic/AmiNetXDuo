@@ -467,6 +467,7 @@ VOID ami_netstack_mark(const char *event);
  * Wait() for an IORequest.
  */
 VOID ami_netstack_baton_release(VOID);
+VOID ami_netstack_baton_release_reader(VOID);
 VOID ami_netstack_baton_acquire(VOID);
 BOOL ami_netstack_baton_abandon(TX_THREAD *thread);
 

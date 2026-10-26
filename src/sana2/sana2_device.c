@@ -35,12 +35,14 @@ static BOOL ami_raw_allowed = (AMI_SANA2_RAW_DEFAULT != 0) ? TRUE : FALSE;
  */
 static AmiSana2BlockHook ami_block_enter;
 static AmiSana2BlockHook ami_block_leave;
+static AmiSana2BlockHook ami_reader_wait;
 
 VOID ami_sana2_set_block_hooks(AmiSana2BlockHook before_wait,
                                AmiSana2BlockHook after_wait)
 {
     ami_block_enter = before_wait;
     ami_block_leave = after_wait;
+    ami_reader_wait = NULL;
 }
 
 /*
@@ -53,6 +55,19 @@ VOID ami_sana2_block_enter(VOID)
 {
     if (ami_block_enter != NULL)
         ami_block_enter();
+}
+
+VOID ami_sana2_set_reader_wait_hook(AmiSana2BlockHook before_wait)
+{
+    ami_reader_wait = before_wait;
+}
+
+VOID ami_sana2_reader_wait_enter(VOID)
+{
+    if (ami_reader_wait != NULL)
+        ami_reader_wait();
+    else
+        ami_sana2_block_enter();
 }
 
 VOID ami_sana2_block_leave(VOID)

@@ -1870,6 +1870,7 @@ static LONG ami_ns_bring_up(BOOL loopback_only)
      */
     ami_sana2_set_block_hooks(ami_netstack_baton_release,
                               ami_netstack_baton_acquire);
+    ami_sana2_set_reader_wait_hook(ami_netstack_baton_release_reader);
 
     ami_netstack_mark("start");
 

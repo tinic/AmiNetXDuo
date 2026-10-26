@@ -31,6 +31,7 @@
 /* Declared here rather than pulled in from tx_thread.h, which wants
    TX_SOURCE_CODE. */
 VOID ami_netstack_baton_release(VOID);
+VOID ami_netstack_baton_release_reader(VOID);
 VOID ami_netstack_baton_acquire(VOID);
 BOOL ami_netstack_baton_abandon(TX_THREAD *thread);
 BOOL ami_netstack_baton_reclaim_dead(VOID);
@@ -2267,6 +2268,96 @@ static VOID bt_test_no_signal_reap(VOID)
     }
 }
 
+/* A SANA reader has left ThreadX while waiting for an Exec signal.  A
+   priority-zero poller cannot see it on ThreadX's ready list.  Exercise the
+   actual Exec Signal/Wait handoff, including the priority restore before
+   protocol work resumes, without a network device or a timing threshold. */
+static TX_THREAD bt_io_thread;
+static volatile UWORD bt_io_ready, bt_io_woke, bt_io_done;
+static volatile BYTE bt_io_before, bt_io_after;
+
+static VOID bt_io_entry(ULONG input)
+{
+    struct Task *me = FindTask(NULL);
+
+    (VOID)input;
+    bt_io_before = me->tc_Node.ln_Pri;
+    ami_netstack_baton_release_reader();
+    bt_io_ready = 1U;
+    Wait(BT_SIG_ACQUIRE);
+    bt_io_woke = 1U;
+    ami_netstack_baton_acquire();
+    bt_io_after = me->tc_Node.ln_Pri;
+    bt_io_done = 1U;
+}
+
+static VOID bt_test_reader_wake(VOID)
+{
+    TX_THREAD *owner = TX_NULL;
+    ULONG generation = 0;
+    APTR stack = AllocMem(BT_STACK, MEMF_PUBLIC | MEMF_CLEAR);
+    struct Task *reader;
+    UINT status;
+    UWORD woke;
+    BYTE waiting_priority;
+
+    t_log("bracket: reader I/O wake ahead of a priority-zero poller\n", 0, 0);
+    t_check(stack != NULL, "allocated reader stack", 0);
+    if (stack == NULL)
+        return;
+
+    status = tx_amiga_adopt_thread(&owner, &generation, (CHAR *)"reader test owner",
+                                   20U, TX_FALSE);
+    t_check(status == TX_SUCCESS, "adopted reader test owner", (LONG)status);
+    if (status != TX_SUCCESS)
+    {
+        FreeMem(stack, BT_STACK);
+        return;
+    }
+
+    status = tx_thread_create(&bt_io_thread, (CHAR *)"reader wake test",
+                              bt_io_entry, 0UL, stack, BT_STACK,
+                              10U, 10U, TX_NO_TIME_SLICE, TX_AUTO_START);
+    t_check(status == TX_SUCCESS, "created reader thread", (LONG)status);
+    (VOID)tx_amiga_orphan_thread(owner, generation);
+    if (status != TX_SUCCESS)
+    {
+        FreeMem(stack, BT_STACK);
+        return;
+    }
+
+    bt_wait_for(&bt_io_ready, "reader to release the baton for I/O");
+    Forbid();
+    reader = (struct Task *)bt_io_thread.tx_thread_amiga_task;
+    waiting_priority = reader->tc_Node.ln_Pri;
+    Signal(reader, BT_SIG_ACQUIRE);
+    Permit();
+    /* With the boost, Signal's strictly higher-priority recipient sets this
+       before the polling Task can continue.  The priority assertion also
+       rejects an accidental equal-priority quantum expiry in a control run. */
+    woke = bt_io_woke;
+    t_check(waiting_priority == TX_AMIGA_HANDOFF_PRIORITY,
+            "reader waits at handoff priority", (LONG)waiting_priority);
+    t_check(woke != 0U, "I/O signal dispatched reader before poller continued",
+            (LONG)woke);
+    bt_wait_for(&bt_io_done, "reader to reacquire and restore priority");
+    t_check(bt_io_before == TX_AMIGA_TASK_PRIORITY && bt_io_after == bt_io_before,
+            "reader restores base priority before protocol work", (LONG)bt_io_after);
+
+    status = tx_amiga_adopt_thread(&owner, &generation, (CHAR *)"reader test cleanup",
+                                   20U, TX_FALSE);
+    t_check(status == TX_SUCCESS, "adopted reader cleanup", (LONG)status);
+    if (status == TX_SUCCESS)
+    {
+        (VOID)tx_thread_terminate(&bt_io_thread);
+        status = tx_thread_delete(&bt_io_thread);
+        t_check(status == TX_SUCCESS, "deleted reader thread", (LONG)status);
+        (VOID)tx_amiga_orphan_thread(owner, generation);
+        if (status == TX_SUCCESS && bt_io_done != 0U)
+            FreeMem(stack, BT_STACK);
+    }
+}
+
 int main(int argc, char **argv)
 {
     struct Task *me = FindTask(NULL);
@@ -2294,6 +2385,7 @@ int main(int argc, char **argv)
             "an unadopted Task is not the baton holder", 0);
 
     bt_test_interrupt_control_idempotent();
+    bt_test_reader_wake();
 
     /* Green threads have no native Exec task to become a reaper zombie; this
        case specifically exhausts the native thread's handshake signals. */

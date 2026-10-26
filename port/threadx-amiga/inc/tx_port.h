@@ -391,15 +391,19 @@ void    _tx_amiga_start_interrupts(void);
 
 /* Exec priority for Tasks that ThreadX creates.  ThreadX, not Exec, picks
    which of them runs, so they all share one priority; making it depend on the
-   ThreadX priority would put Exec's scheduler in competition with ours.  */
+   ThreadX priority would put Exec's scheduler in competition with ours.
+   Share priority zero with ordinary applications so continuous protocol work
+   cannot starve their CPU work.  Baton and I/O wakeups use the temporary
+   handoff priority below, restored before protocol processing resumes. */
 
 #ifndef TX_AMIGA_TASK_PRIORITY
-#define TX_AMIGA_TASK_PRIORITY                  1
+#define TX_AMIGA_TASK_PRIORITY                  0
 #endif
 
-/* Exec priority of a Task parked in _tx_amiga_thread_park(), and only while it is
-   parked.  One above the band, because Exec reschedules on a Signal() only for a
-   STRICTLY higher priority; still below TX_AMIGA_TIMER_PRIORITY.
+/* Exec wake priority while parked for the baton or while a port-created Task
+   is in an Exec-wait bracket.  Restored after acquiring the baton, before
+   protocol work.  One above the band, because Exec reschedules on a Signal()
+   only for a STRICTLY higher priority; still below TX_AMIGA_TIMER_PRIORITY.
 
    The boost is not free: _tx_thread_system_return() pays SetTaskPri() twice per
    park, once to raise and once to restore, and SetTaskPri is 1.8% of the wire

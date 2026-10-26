@@ -50,6 +50,8 @@ struct _tx_amiga_ctrl
     ULONG            ctrl_reaper_signal;
     volatile ULONG  *ctrl_reaped;                   /* flag on reaper's stack */
     volatile UINT    ctrl_zombie;                   /* reaper gave up on it   */
+    BYTE             ctrl_exec_wait_priority;       /* before the I/O wake boost */
+    UBYTE            ctrl_exec_wait_raised;
 };
 
 

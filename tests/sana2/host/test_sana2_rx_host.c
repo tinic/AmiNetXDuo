@@ -392,6 +392,7 @@ VOID _nx_tcp_receive_pass_complete(NX_IP *ip_ptr) { (VOID)ip_ptr; }
 ULONG _tx_time_get(VOID) { return 0; }
 UWORD ami_sana2_bound_count(VOID) { return 1; }
 VOID ami_sana2_block_enter(VOID) { }
+VOID ami_sana2_reader_wait_enter(VOID) { }
 VOID ami_sana2_block_leave(VOID) { }
 /* The teardown's CMD_FLUSH goes through the bounded command; recorded.
    Copied at the call: the request is the caller's stack frame. */

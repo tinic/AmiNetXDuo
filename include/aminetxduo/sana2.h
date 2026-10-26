@@ -303,6 +303,10 @@ VOID ami_sana2_set_raw_allowed(BOOL allowed);
 typedef VOID (*AmiSana2BlockHook)(VOID);
 VOID ami_sana2_set_block_hooks(AmiSana2BlockHook before_wait,
                                AmiSana2BlockHook after_wait);
+/* Optional reader-only entry hook; after_wait still closes the bracket.
+   A missing reader hook falls back to before_wait.  Set this after the pair
+   above, which clears the optional hook when replacing/removing the pair. */
+VOID ami_sana2_set_reader_wait_hook(AmiSana2BlockHook before_wait);
 
 /*
  * The device's answer to ANXD_CMD_RX_CAPACITY changed while the unit was

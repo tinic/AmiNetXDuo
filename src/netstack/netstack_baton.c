@@ -226,7 +226,7 @@ static VOID ami_baton_observe_state(VOID)
         ami_baton_sampler();
 }
 
-VOID ami_netstack_baton_release(VOID)
+static VOID ami_baton_release(BOOL reader_wait)
 {
     struct Task   *me = FindTask(NULL);
     TX_THREAD     *thread;
@@ -281,11 +281,25 @@ VOID ami_netstack_baton_release(VOID)
            ever non-zero after a freeze, that is the freeze. */
         ami_baton_stats.bs_BatonMoved++;
     }
+    else if (reader_wait)
+        tx_amiga_exec_wait_raise_locked(thread);
 
     Permit();
 
     if (wake == (UINT) TX_TRUE)
         tx_amiga_exec_wait_wake();
+}
+
+VOID ami_netstack_baton_release(VOID)
+{
+    ami_baton_release(FALSE);
+}
+
+/* Only the RX reader's empty-port Wait opts into the wake boost.  General
+   brackets also enclose driver commands and must keep their base priority. */
+VOID ami_netstack_baton_release_reader(VOID)
+{
+    ami_baton_release(TRUE);
 }
 
 VOID ami_netstack_baton_acquire(VOID)
@@ -300,6 +314,9 @@ VOID ami_netstack_baton_acquire(VOID)
     if (thread == TX_NULL ||
         thread->tx_thread_amiga_exec_wait_nesting == 0U)
     {
+        /* I/O can return after the reaper detached the thread.  The Task's
+           wake boost must end even when its TX_THREAD no longer exists. */
+        tx_amiga_exec_wait_finish();
         Permit();
         return;
     }
@@ -322,6 +339,7 @@ VOID ami_netstack_baton_acquire(VOID)
     status = tx_amiga_exec_wait_resume_locked(thread, &wake);
     if (status != TX_SUCCESS)
     {
+        tx_amiga_exec_wait_finish();
         Permit();
         AMI_ERROR("netstack: a thread waiting for the baton was not resumed");
         return;
@@ -340,7 +358,11 @@ VOID ami_netstack_baton_acquire(VOID)
      * the resume has happened -- so this says what was lost rather than
      * pretending to recover.
      */
-    if (tx_amiga_exec_wait_park(thread) == (UINT)TX_FALSE)
+    status = tx_amiga_exec_wait_park(thread);
+    /* Rejoin ThreadX at the wake priority, but do protocol work at the base
+       priority.  Finish touches only the calling Task, even on an orphan. */
+    tx_amiga_exec_wait_finish();
+    if (status == (UINT)TX_FALSE)
         AMI_ERROR("netstack: a task waiting for the baton was orphaned; "
                   "it continues without one");
 }

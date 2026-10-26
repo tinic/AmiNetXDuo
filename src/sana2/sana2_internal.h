@@ -1125,6 +1125,7 @@ VOID ami_sana2_copy_bytes(UCHAR *to, const UCHAR *from, ULONG len);
 
 /* sana2_device.c */
 VOID ami_sana2_block_enter(VOID);
+VOID ami_sana2_reader_wait_enter(VOID);
 VOID ami_sana2_block_leave(VOID);
 VOID ami_sana2_port_init(struct MsgPort *port, struct Task *task, BYTE sigbit,
                          UBYTE flags);
