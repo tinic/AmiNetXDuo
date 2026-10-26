@@ -144,6 +144,17 @@ UINT tx_amiga_task_alive_locked(struct Task *task)
     return(TX_FALSE);
 }
 
+UINT tx_amiga_task_may_be_internal(VOID *task)
+{
+    struct Task *fresh = (struct Task *) task;
+
+    /* Only the in-Task marker is safe on an arbitrary external Task.  An
+       external self-userdata task is conservatively excluded as well; do
+       not inspect the control-block magic beyond its struct Task. */
+    return(fresh != NULL && fresh->tc_UserData == (APTR)fresh
+           ? TX_TRUE : TX_FALSE);
+}
+
 
 /* An identity for a Task that a recycled address does not inherit.  Exec has no
    task ID on the shipped ROMs (see above), so this is the stack bounds and the

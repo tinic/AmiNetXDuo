@@ -870,6 +870,9 @@ LONG bsd_WaitSelect(register LONG nfds                __asm("d0"),
     BOOL       terminal_wait = FALSE;   /* tick total > LONG_MAX: no re-arm */
     BOOL       poll_only     = FALSE;
 
+#ifdef V6_GATED
+    bsd_reader_note_call(SocketBase);
+#endif
     if (nfds < 0)
         return bsd_fail(SocketBase, AMI_EINVAL);
 

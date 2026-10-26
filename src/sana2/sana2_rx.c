@@ -52,6 +52,20 @@ static struct
     ULONG        stats[5];  /* ticks, exhaustions, overrun yields, ticks ending low, promotions by tick */
 } ami_v6;
 static struct MsgPort ami_v6_port;
+#ifdef V6_GATED
+BOOL (*ami_sana2_budget_victim_hook)(VOID);
+
+static BOOL ami_v6_has_victim(VOID)
+{
+    BOOL yes = FALSE;
+
+    Forbid();
+    if (ami_sana2_budget_victim_hook != NULL)
+        yes = ami_sana2_budget_victim_hook();
+    Permit();
+    return yes;
+}
+#endif
 
 #if defined(V6_FRAMES)
 #define V6_BUDGET V6_FRAMES
@@ -141,6 +155,10 @@ static VOID ami_v6_settle(BOOL overrun)
         return;
     Forbid();
     want = (ami_v6.used < (ULONG)V6_BUDGET) ? (BYTE)TX_AMIGA_HANDOFF_PRIORITY : (BYTE)0;
+#ifdef V6_GATED
+    if (want == 0 && ami_v6.level != 0 && !ami_v6_has_victim())
+        want = (BYTE)TX_AMIGA_HANDOFF_PRIORITY;
+#endif
     if (want == 0 && ami_v6.level != 0)
         ami_v6.stats[1]++;
     if (overrun)
@@ -2715,6 +2733,9 @@ static VOID ami_sana2_rx_thread(ULONG argument)
         ami_v6_charge_start();
         if (FindTask(NULL) == ami_v6.task &&
             ami_v6.level != 0 && ami_v6.used >= (ULONG)V6_BUDGET &&
+#ifdef V6_GATED
+            ami_v6_has_victim() &&
+#endif
             !ami_sana2_rx_should_block(rd, AMI_SANA2_RX_RUN_MAX))
         {
             ami_v6_charge_stop();

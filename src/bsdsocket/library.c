@@ -183,6 +183,14 @@ static VOID bsd_new_list(struct MinList *list)
  * interface address arriving, changing or going away.
  */
 static struct AmiSocketBase *bsd_master_base;
+#ifdef V6_GATED
+static struct MsgPort bsd_reader_stats_port;
+
+static BOOL bsd_reader_has_victim(VOID)
+{
+    return bsd_reader_victim_ready(&bsd_master_base);
+}
+#endif
 
 static ULONG bsd_dead_task_signals;
 
@@ -345,6 +353,17 @@ static struct AmiSocketBase *bsd_lib_init(
     bsd_log_hook_init();
 
     bsd_master_base = base;
+#ifdef V6_GATED
+    bsd_reader_stats_port.mp_Node.ln_Name = (char *)"AmiNetXDuo gchild";
+    bsd_reader_stats_port.mp_Node.ln_Type = NT_MSGPORT;
+    bsd_reader_stats_port.mp_Flags = PA_IGNORE;
+    bsd_reader_stats_port.mp_SigTask = (struct Task *)bsd_reader_victim_stats;
+    bsd_new_list((struct MinList *)&bsd_reader_stats_port.mp_MsgList);
+    Forbid();
+    AddPort(&bsd_reader_stats_port);
+    ami_sana2_budget_victim_hook = bsd_reader_has_victim;
+    Permit();
+#endif
 
     ami_event_publish();
 
@@ -529,6 +548,9 @@ static struct AmiSocketBase *bsd_child_create(struct AmiSocketBase *master)
     child->sb_Lib.lib_Flags   = LIBF_CHANGED;
     child->sb_Master          = master;
     child->sb_Task            = FindTask(NULL);
+#ifdef V6_GATED
+    bsd_reader_note_call(child);
+#endif
 
     bsd_prof_segtag(child, master->sb_SegList);
 
@@ -597,7 +619,15 @@ static struct AmiSocketBase *bsd_child_create(struct AmiSocketBase *master)
     child->sb_EventSigMask = 1UL << sig;
 
     ObtainSemaphore(&master->sb_Lock);
+#ifdef V6_GATED
+    /* The diagnostic victim scan does not take sb_Lock. Prevent its
+       preemption of an unfinished list splice. */
+    Forbid();
+#endif
     AddTail((struct List *)&master->sb_Children, (struct Node *)&child->sb_Node);
+#ifdef V6_GATED
+    Permit();
+#endif
     ReleaseSemaphore(&master->sb_Lock);
 
     ami_mem_open_delta(1);
@@ -686,7 +716,13 @@ static VOID bsd_child_destroy(struct AmiSocketBase *child)
     bsd_nx_release(child);
 
     ObtainSemaphore(&master->sb_Lock);
+#ifdef V6_GATED
+    Forbid();
+#endif
     Remove((struct Node *)&child->sb_Node);
+#ifdef V6_GATED
+    Permit();
+#endif
     ReleaseSemaphore(&master->sb_Lock);
 
     ami_mem_open_delta(-1);
@@ -1604,6 +1640,12 @@ APTR bsd_lib_expunge(register struct AmiSocketBase *SocketBase __asm("a6"))
     ami_set_second_hook(NULL);
     ami_set_shutdown_hook(NULL);
     bsd_log_hook_exit();
+#ifdef V6_GATED
+    Forbid();
+    ami_sana2_budget_victim_hook = NULL;
+    RemPort(&bsd_reader_stats_port);
+    Permit();
+#endif
     bsd_master_base = NULL;
 
     ami_event_unpublish();

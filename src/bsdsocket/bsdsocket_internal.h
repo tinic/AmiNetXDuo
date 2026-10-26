@@ -274,6 +274,10 @@ struct AmiSocketBase
     LONG                    sb_NextHandoffId;
 
     struct Task            *sb_Task;        /* the task that opened us       */
+#ifdef V6_GATED
+    ULONG                   sb_LastNetCall; /* recent network customer, ticks */
+    struct Task            *sb_LastNetTask; /* compared only, never dereferenced */
+#endif
 
     /*
      * ThreadX context for this opener's task (netx_call.c). NetX Duo's
@@ -747,6 +751,20 @@ VOID  bsd_usergroup_open(VOID);
  * Inside one, nothing must block on anything except ThreadX. */
 LONG  bsd_nx_enter(struct AmiSocketBase *base);
 VOID  bsd_nx_leave(struct AmiSocketBase *base);
+#ifdef V6_GATED
+static __inline VOID bsd_reader_note_call(struct AmiSocketBase *base)
+{
+    /* A base may be called by a task other than its original opener.
+       Publish the actual caller and time as one snapshot. */
+    Forbid();
+    base->sb_LastNetTask = FindTask(NULL);
+    base->sb_LastNetCall = tx_time_get();
+    Permit();
+}
+BOOL  bsd_reader_victim_ready(struct AmiSocketBase **master_slot);
+extern ULONG bsd_reader_victim_stats[6];
+extern BOOL (*ami_sana2_budget_victim_hook)(VOID);
+#endif
 
 /* Drop the base's cached ThreadX registration. Teardown only, no bracket open.
    See netx_call.c for what is cached and why. */

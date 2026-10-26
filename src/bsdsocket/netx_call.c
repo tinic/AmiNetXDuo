@@ -40,6 +40,9 @@ LONG bsd_nx_enter(struct AmiSocketBase *base)
 
     if (base == NULL)
         return -1;
+#ifdef V6_GATED
+    bsd_reader_note_call(base);
+#endif
 
     /*
      * The depth is the base's, the bracket is its holder's.  Another Task
@@ -115,6 +118,9 @@ VOID bsd_nx_leave(struct AmiSocketBase *base)
 
     if (--base->sb_NxNest > 0)
         return;
+#ifdef V6_GATED
+    bsd_reader_note_call(base);
+#endif
 
 #ifdef AMINETXDUO_NXCENSUS
     t0 = bsd_nx_eclock();

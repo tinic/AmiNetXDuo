@@ -2052,6 +2052,10 @@ static LONG bsd_recv_iov(struct AmiSocketBase *base, AmiSocket *sock,
     LONG         result;
     BOOL         held = FALSE;
 
+#ifdef V6_GATED
+    /* A receive can consume its parked packet without entering ThreadX. */
+    bsd_reader_note_call(base);
+#endif
     if ((sock->as_Flags & (ASF_TCP | ASF_RDSHUT)) == ASF_RDSHUT)
     {
         if (truncated != NULL)

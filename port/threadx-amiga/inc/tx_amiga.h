@@ -224,6 +224,11 @@ TX_THREAD *tx_amiga_adopted_thread(VOID);
    port is not the same question as "is _tx_thread_system_state zero".  */
 UINT    tx_amiga_caller_is_thread(VOID);
 
+/* Caller reached task freshly under Disable(). Conservative in-Task marker
+   check: also excludes an external Task using its own address as user data.
+   Never reads a port control block past an arbitrary struct Task. */
+UINT    tx_amiga_task_may_be_internal(VOID *task);
+
 /* A ThreadX thread sometimes has to block in Exec (Wait/WaitIO) without
    keeping the single hosted scheduler baton.  These calls are the port
    boundary for that transaction; application code must use the higher-level

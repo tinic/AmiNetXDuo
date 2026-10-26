@@ -43,6 +43,7 @@ set(BSDSOCKET_SOURCES
     netstats.c              # GetNetworkStatistics: 4.4BSD's ipstat/tcpstat/
                             # udpstat/icmpstat over NetX Duo's counters
     netx_call.c             # ThreadX context bracket for NetX Duo calls
+    reader_victim.c         # bounded diagnostic ready-task predicate
     library_runtime.c)      # DOSBase, rand(): no crt0 in a shared library
 
 # in6.c is the AF_INET6 ABI: the _Static_asserts that pin sockaddr_in6, the
