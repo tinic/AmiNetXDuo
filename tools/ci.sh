@@ -517,7 +517,9 @@ host_test_targets() { # builddir
 #      ownership without mistaking a valid recycled pool slot for the orphan.
 #      575 with addrinfo_dns_policy: default IPv4 LAN DNS query policy and
 #      source-aware ordering of A/AAAA answers (x86_64 shim only).
-HOST_TESTS_EXPECTED=575
+#      576 with arp_lan_chatter (#354): ARP between other hosts leaves the
+#      peer's entry in place (all hosts).
+HOST_TESTS_EXPECTED=576
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,
