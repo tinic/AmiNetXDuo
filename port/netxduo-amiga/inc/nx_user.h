@@ -81,6 +81,16 @@ extern struct TX_THREAD_STRUCT *_nx_ip_input_thread;
 
 #define NX_ARP_MAX_QUEUE_DEPTH                  2
 
+/* An entry only for an address this machine sends to.  Auto entries give one
+   to the sender of every ARP packet heard, the requests between other hosts
+   too, and _nx_arp_entry_allocate() recycles the one allocated longest ago:
+   on a busy LAN the 19 entries (AMI_ARP_CACHE_SIZE) turned over under a
+   transfer, the peer's mapping went with them, and an A1200 uploading at
+   550 Mbit/s dropped ~200 segments while it resolved again (#354).  A request
+   for us is still answered from the packet itself; an entry already present
+   is still refreshed.  tests/arp, arp_lan_chatter. */
+#define NX_DISABLE_ARP_AUTO_ENTRY
+
 /* Seconds.  Governs unresolved entries only: NX_ARP_EXPIRATION_RATE is 0 here,
    so a resolved entry carries no next-update time and is never re-probed. */
 #define NX_ARP_UPDATE_RATE                      1
