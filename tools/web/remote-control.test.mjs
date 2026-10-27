@@ -41,7 +41,12 @@ function onFrames(socket, take) {
       if (masked) for (let i = 0; i < size; i++) payload[i] ^= pending[head + (i & 3)];
       const op = pending[0] & 0x0f;
       pending = pending.subarray(fullHead + size);
-      if (op !== 8) take(op, payload);
+      if (op === 8) {
+        if (!socket.writableEnded && !socket.destroyed) {
+          sendFrame(socket, 8, payload);
+          socket.end();
+        }
+      } else take(op, payload);
     }
   });
 }
@@ -84,6 +89,10 @@ async function fixture(options = {}) {
     if (req.url === "/shell?session=1" || req.url === "/shell?session=0") {
       let marker = "";
       onFrames(socket, (op, data) => {
+        if (op === 1 && data.toString("utf8") === "break") {
+          received.push("break");
+          return;
+        }
         assert.equal(op, 2);
         const s = data.toString("utf8");
         received.push(s);
@@ -92,6 +101,7 @@ async function fixture(options = {}) {
           marker = start[1];
           sendFrame(socket, 2, `Echo "${marker} BEGIN"\r\n${marker} BEGIN\r\n`);
         } else if (marker && s.includes("RC=$RC")) {
+          if (options.shellPending) return;
           if (options.shellClose) {
             const data = Buffer.alloc(2 + Buffer.byteLength(options.shellClose.reason));
             data.writeUInt16BE(options.shellClose.code);
@@ -213,6 +223,36 @@ test("Shell close diagnostics retain the peer code, reason and elapsed time", as
     await assert.rejects(() => runCommand(f.base, "Wait 90", { timeoutMs: 3000 }),
       /Shell closed before its completion marker \(code=1001, reason="server restarting", wasClean=(true|false), elapsedMs=\d+\)/);
     assert.ok(f.received.includes("Wait 90"));
+  } finally { await f.close(); }
+});
+
+test("Shell timeout sends Break by default and can leave the guest request outstanding", async () => {
+  for (const breakOnError of [undefined, true, false]) {
+    const f = await fixture({ shellPending: true });
+    try {
+      await assert.rejects(() => runCommand(f.base, "Wait 90", { timeoutMs: 100, breakOnError }),
+                           /Shell command timed out after 100 ms/);
+      // Let the server receive the queued text frame before checking its wire log.
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      assert.ok(f.received.includes("Wait 90"));
+      assert.equal(f.received.includes("break"), breakOnError !== false);
+    } finally { await f.close(); }
+  }
+});
+
+test("CLI --no-break reports a timeout without sending Break", async () => {
+  const f = await fixture({ shellPending: true });
+  try {
+    await assert.rejects(() => execFileAsync(process.execPath,
+      [cli, "--url", f.base, "--timeout", "0.1", "--no-break", "run", "Wait 90"],
+      { timeout: 5000 }), (error) => {
+        assert.equal(error.code, 2);
+        assert.equal(error.stdout, "");
+        assert.match(JSON.parse(error.stderr).error, /Shell command timed out after 100 ms/);
+        return true;
+      });
+    assert.ok(f.received.includes("Wait 90"));
+    assert.equal(f.received.includes("break"), false);
   } finally { await f.close(); }
 });
 
