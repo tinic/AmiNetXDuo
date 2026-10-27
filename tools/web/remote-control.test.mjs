@@ -92,6 +92,18 @@ async function fixture(options = {}) {
           marker = start[1];
           sendFrame(socket, 2, `Echo "${marker} BEGIN"\r\n${marker} BEGIN\r\n`);
         } else if (marker && s.includes("RC=$RC")) {
+          if (options.shellClose) {
+            const data = Buffer.alloc(2 + Buffer.byteLength(options.shellClose.reason));
+            data.writeUInt16BE(options.shellClose.code);
+            data.write(options.shellClose.reason, 2);
+            sendFrame(socket, 8, data);
+            socket.end();
+            return;
+          }
+          if (options.shellInvalidFrame) {
+            sendFrame(socket, 3, "invalid opcode");
+            return;
+          }
           const failing = received.includes("False");
           sendFrame(socket, 2, `${failing ? "False\r\nFailed" : "Version\r\nAmigaOS 3.1"}\r\n` +
             `Echo "${marker} RC=$RC"\r\n${marker} RC=${failing ? 5 : 0}\r\n`);
@@ -192,6 +204,29 @@ test("Shell produces one bounded result with an exit code", async () => {
     assert.equal(failed.exitCode, 5);
     assert.equal(failed.output, "Failed\n");
     await assert.rejects(() => runCommand(f.base, "Version\nDelete ALL"));
+  } finally { await f.close(); }
+});
+
+test("Shell close diagnostics retain the peer code, reason and elapsed time", async () => {
+  const f = await fixture({ shellClose: { code: 1001, reason: "server restarting" } });
+  try {
+    await assert.rejects(() => runCommand(f.base, "Wait 90", { timeoutMs: 3000 }),
+      /Shell closed before its completion marker \(code=1001, reason="server restarting", wasClean=(true|false), elapsedMs=\d+\)/);
+    assert.ok(f.received.includes("Wait 90"));
+  } finally { await f.close(); }
+});
+
+test("Shell protocol errors retain the WebSocket error instead of a generic label", async () => {
+  const f = await fixture({ shellInvalidFrame: true });
+  try {
+    await assert.rejects(() => runCommand(f.base, "Wait 90", { timeoutMs: 3000 }),
+      (error) => {
+        assert.match(error.message, /^Shell WebSocket failed: .+ \(elapsedMs=\d+\)$/);
+        assert.ok(error.cause instanceof Error);
+        assert.ok(error.message.includes(error.cause.message));
+        return true;
+      });
+    assert.ok(f.received.includes("Wait 90"));
   } finally { await f.close(); }
 });
 
