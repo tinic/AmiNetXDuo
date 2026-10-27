@@ -352,7 +352,7 @@ function usage() {
 
 Set ANXD_URL instead of repeating --url.
 Shell commands use session 1 by default; /shell in a browser uses session 0.
---no-break leaves the guest command running on a shell error or timeout; the caller owns recovery.
+--no-break suppresses this client's Break on shell errors or timeouts; the caller owns recovery.
 
 Commands:
   run 'AmigaDOS command'            JSON: exitCode, terminal output, duration
