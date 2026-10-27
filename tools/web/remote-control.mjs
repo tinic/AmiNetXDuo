@@ -131,6 +131,8 @@ function withoutTerminalEcho(text, command, marker) {
   return lines.join("\n");
 }
 
+// Set breakOnError:false when interrupting a guest command could invalidate an
+// outstanding request. This only closes the transport; the caller owns recovery.
 export async function runCommand(base, command, options = {}) {
   const ms = options.timeoutMs ?? 30000;
   const maxOutput = options.maxOutput ?? 1024 * 1024;
@@ -189,7 +191,7 @@ export async function runCommand(base, command, options = {}) {
       timeout(ms, "Shell command"),
     ]);
   } catch (e) {
-    if (!oversized && ws.readyState === WebSocket.OPEN) ws.send("break");
+    if (options.breakOnError !== false && !oversized && ws.readyState === WebSocket.OPEN) ws.send("break");
     throw e;
   } finally {
     ws.close();
@@ -346,10 +348,11 @@ export async function screenshot(base, local, ms = 30000, action = null) {
 }
 
 function usage() {
-  return `Usage: node tools/web/remote-control.mjs [--url http://amiga.local:8080] [--session 0|1] [--timeout SECONDS] [--max-output BYTES] COMMAND ...
+  return `Usage: node tools/web/remote-control.mjs [--url http://amiga.local:8080] [--session 0|1] [--timeout SECONDS] [--max-output BYTES] [--no-break] COMMAND ...
 
 Set ANXD_URL instead of repeating --url.
 Shell commands use session 1 by default; /shell in a browser uses session 0.
+--no-break suppresses this client's Break on shell errors or timeouts; the caller owns recovery.
 
 Commands:
   run 'AmigaDOS command'            JSON: exitCode, terminal output, duration
@@ -368,6 +371,7 @@ async function main(args) {
   let ms = 30000;
   let maxOutput = 1024 * 1024;
   let session = 1;
+  let breakOnError = true;
   while (args.length && args[0].startsWith("--")) {
     const flag = args.shift();
     if (flag === "--url") base = args.shift() ?? "";
@@ -384,13 +388,14 @@ async function main(args) {
       if (!Number.isInteger(maxOutput) || maxOutput < 1024 || maxOutput > 64 * 1024 * 1024) {
         throw new Error("--max-output must be 1024..67108864 bytes");
       }
-    } else if (flag === "--help") { process.stdout.write(usage()); return; }
+    } else if (flag === "--no-break") breakOnError = false;
+    else if (flag === "--help") { process.stdout.write(usage()); return; }
     else throw new Error(`unknown option ${flag}`);
   }
   if (!base) throw new Error("--url or ANXD_URL is required");
   const [verb, ...operands] = args;
   let result;
-  if (verb === "run" && operands.length === 1) result = await runCommand(base, operands[0], { timeoutMs: ms, maxOutput, session });
+  if (verb === "run" && operands.length === 1) result = await runCommand(base, operands[0], { timeoutMs: ms, maxOutput, session, breakOnError });
   else if (verb === "get" && operands.length === 2) result = await getFile(base, ...operands, ms);
   else if (verb === "put" && operands.length === 2) result = await putFile(base, ...operands, ms);
   else if (verb === "screenshot" && operands.length === 1) result = await screenshot(base, operands[0], ms);
