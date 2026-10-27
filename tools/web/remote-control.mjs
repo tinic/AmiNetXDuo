@@ -44,6 +44,21 @@ function timeout(ms, label) {
   });
 }
 
+function socketError(label, event, elapsedMs) {
+  const cause = event.error;
+  const detail = cause?.message || event.message || "connection failed";
+  const code = cause?.cause?.code || cause?.code;
+  return new Error(`${label}: ${detail}` +
+    (code ? ` (code=${code})` : "") +
+    (elapsedMs === undefined ? "" : ` (elapsedMs=${elapsedMs})`), { cause });
+}
+
+function socketClosed(label, event, elapsedMs) {
+  return new Error(`${label} (code=${event.code}, reason=${JSON.stringify(event.reason)}, ` +
+    `wasClean=${event.wasClean}` +
+    (elapsedMs === undefined ? ")" : `, elapsedMs=${elapsedMs})`));
+}
+
 async function openSocket(url, ms) {
   const ws = new WebSocket(url);
   ws.binaryType = "arraybuffer";
@@ -52,10 +67,9 @@ async function openSocket(url, ms) {
       new Promise((resolve, reject) => {
         ws.addEventListener("open", resolve, { once: true });
         ws.addEventListener("error", (event) => {
-          const detail = event.error?.message || event.message || "connection failed";
-          reject(new Error(`WebSocket ${url}: ${detail}`));
+          reject(socketError(`WebSocket ${url}`, event));
         }, { once: true });
-        ws.addEventListener("close", () => reject(new Error(`WebSocket closed before opening: ${url}`)), { once: true });
+        ws.addEventListener("close", (event) => reject(socketClosed(`WebSocket closed before opening: ${url}`, event)), { once: true });
       }),
       timeout(ms, "WebSocket connection"),
     ]);
@@ -166,8 +180,10 @@ export async function runCommand(base, command, options = {}) {
             }
           }
         });
-        ws.addEventListener("close", () => reject(new Error("Shell closed before its completion marker")), { once: true });
-        ws.addEventListener("error", () => reject(new Error("Shell WebSocket failed")), { once: true });
+        ws.addEventListener("close", (event) => reject(socketClosed(
+          "Shell closed before its completion marker", event, Date.now() - beganAt)), { once: true });
+        ws.addEventListener("error", (event) => reject(socketError(
+          "Shell WebSocket failed", event, Date.now() - beganAt)), { once: true });
         ws.send(Buffer.from(`FailAt 9999\nEcho "${marker} BEGIN"\n`, "utf8"));
       }),
       timeout(ms, "Shell command"),
