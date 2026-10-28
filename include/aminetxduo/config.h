@@ -213,11 +213,12 @@ typedef struct AmiIfConfig {
        this interface grows its receive window.  0 = BSD_TCP_WINDOW_GROW_RTT_MS. */
     UWORD       tcp_grow_rtt;
     /* TCPWANWINDOW: bytes a socket on this interface may advertise on a long
-       path -- handshake round trip at or above the TCPGROWRTT line -- in
-       place of the RXBUFFER fit, which still holds on a short one.  0 = not
-       set: the fit applies on every path.  Opt-in, for a card whose ring is
-       smaller than the path's bandwidth-delay product behind an upstream that
-       spaces the data (bsdsocket_window.h, ami_bsd_tcp_window_receive_bound). */
+       path -- handshake round trip at or above the TCPGROWRTT line -- on any
+       link, in place of what the settle and the RXBUFFER fit give; the fit
+       still holds on a short path.  0 = not set.  Opt-in, for a card whose
+       ring is smaller than the path's bandwidth-delay product behind an
+       upstream that spaces the data, or a path that loses a full window's
+       burst (bsdsocket_window.h, ami_bsd_tcp_window_receive_bound). */
     ULONG       tcp_wan_window;
     /* GROFRAMES: the most TCP frames the reader chains into one segment
        before TCP sees it, 1..AMI_CFG_GRO_FRAMES_MAX.  Smaller runs reach
