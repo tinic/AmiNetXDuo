@@ -54,6 +54,18 @@ ULONG ami_bsd_tcp_window_max_for(ULONG pool_packets, ULONG payload,
     return (max < lan) ? lan : max;
 }
 
+ULONG ami_bsd_tcp_tx_queue_for(ULONG pool_packets, ULONG ceiling)
+{
+    ULONG depth = pool_packets / (ULONG)BSD_TCP_TX_POOL_SHARE;
+
+    if (depth < (ULONG)BSD_TCP_TX_QUEUE_MIN)
+        depth = (ULONG)BSD_TCP_TX_QUEUE_MIN;
+    if (depth > ceiling)
+        depth = ceiling;
+
+    return depth;
+}
+
 ULONG ami_bsd_tcp_window_fit(ULONG window, ULONG hw_bytes, ULONG mss)
 {
     ULONG frame;

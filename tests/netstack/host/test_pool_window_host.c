@@ -702,6 +702,55 @@ static void j_the_pool_is_sized_from_the_fastest_class(void)
                                                   stride));
 }
 
+/*
+ * THE TRANSMIT QUEUE, #354: a quarter of the pool per socket.  The clamped
+ * pool reaches the ceiling, the smallest keeps the old 8, and one socket
+ * never holds more than half the pool (the floor's case) or more than a
+ * quarter where the floor does not decide.  The ceiling is
+ * NX_TCP_MAXIMUM_TX_QUEUE (nx_user.h), passed as socket.c passes it: this
+ * test sees no NetX headers.
+ */
+#define H_TX_CEILING    1024UL
+
+static void k_the_transmit_queue_is_a_quarter_of_the_pool(void)
+{
+    ULONG p;
+    int   over = 0;
+
+    h_check(ami_bsd_tcp_tx_queue_for((ULONG)AMI_POOL_MAX_PACKETS,
+                                     H_TX_CEILING) == H_TX_CEILING,
+            "the clamped pool does not reach the transmit ceiling");
+    h_check(ami_bsd_tcp_tx_queue_for(2048UL, H_TX_CEILING) == 512UL,
+            "a 2,048-packet pool does not give a quarter");
+    h_check(ami_bsd_tcp_tx_queue_for(512UL, H_TX_CEILING) == 128UL,
+            "a 512-packet pool does not give a quarter");
+    h_check(ami_bsd_tcp_tx_queue_for(94UL, H_TX_CEILING) == 23UL,
+            "the A1200 with no Fast RAM does not get a quarter");
+    h_check(ami_bsd_tcp_tx_queue_for((ULONG)AMI_POOL_MIN_PACKETS,
+                                     H_TX_CEILING) ==
+            (ULONG)BSD_TCP_TX_QUEUE_MIN,
+            "the smallest pool lost the floor of 8");
+    h_check(ami_bsd_tcp_tx_queue_for(0UL, H_TX_CEILING) ==
+            (ULONG)BSD_TCP_TX_QUEUE_MIN,
+            "no pool lost the floor of 8");
+    h_check(ami_bsd_tcp_tx_queue_for(65536UL, H_TX_CEILING) == H_TX_CEILING,
+            "a pool past the clamp went over the ceiling");
+    h_check(ami_bsd_tcp_tx_queue_for(4096UL, 64UL) == 64UL,
+            "a smaller ceiling was not kept");
+
+    for (p = (ULONG)AMI_POOL_MIN_PACKETS; p <= (ULONG)AMI_POOL_MAX_PACKETS; p++)
+    {
+        ULONG d = ami_bsd_tcp_tx_queue_for(p, H_TX_CEILING);
+
+        if (d < (ULONG)BSD_TCP_TX_QUEUE_MIN || d > H_TX_CEILING ||
+            2UL * d > p ||
+            (d > (ULONG)BSD_TCP_TX_QUEUE_MIN && 4UL * d > p))
+            over = 1;
+    }
+    h_check(!over, "one socket's transmit queue passed its share of a pool");
+}
+
+
 int main(void)
 {
     printf("packet pool sizing and the window it backs, v0.25.5\n");
@@ -716,6 +765,7 @@ int main(void)
     h_a_big_machine_is_bounded_by_the_link();
     i_the_window_settles_for_the_path_and_the_link();
     j_the_pool_is_sized_from_the_fastest_class();
+    k_the_transmit_queue_is_a_quarter_of_the_pool();
 
     printf("%lu checks, %lu failures, %s\n",
            h_checks, h_failures, (h_failures == 0UL) ? "PASS" : "FAIL");

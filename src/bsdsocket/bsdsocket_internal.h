@@ -207,13 +207,8 @@ typedef struct
 #define BSD_UDP_QUEUE_CEILING   64
 #define BSD_UDP_POOL_SHARE      4       /* 1/N of the pool per socket       */
 
-/* The TCP transmit queue, in unacknowledged segments.  bsd_tcp_tx_queue_default()
-   in socket.c sizes each socket from the pool: 1/N of it, never below the old
-   fixed depth, never above NX_TCP_MAXIMUM_TX_QUEUE (nx_user.h, the SO_SNDBUF
-   ceiling).  On a 512-packet pool that is the ceiling; on the 16-packet floor
-   it is the old 8.  Why it moves at all is in nx_user.h. */
-#define BSD_TCP_TX_QUEUE_MIN    8
-#define BSD_TCP_TX_POOL_SHARE   8       /* 1/N of the pool per socket       */
+/* The TCP transmit queue's share of the pool, BSD_TCP_TX_POOL_SHARE and
+   BSD_TCP_TX_QUEUE_MIN, is in bsdsocket_window.h (ami_bsd_tcp_tx_queue_for). */
 
 /* Room for one dotted quad plus terminator, used by Inet_NtoA(). */
 #define BSD_NTOA_BUFLEN         16

@@ -1,5 +1,6 @@
 /*
- * bsdsocket.library, the receive window the packet pool can back.
+ * bsdsocket.library, the receive window the packet pool can back, and the
+ * transmit queue.
  *
  * A socket may only advertise what the pool it draws from can hold.  Kept
  * here, next to the pool arithmetic it reads, because the two are one
@@ -247,5 +248,25 @@ ULONG ami_bsd_tcp_window_for(ULONG pool_packets, ULONG payload,
                              ULONG consumers);
 ULONG ami_bsd_tcp_window_max_for(ULONG pool_packets, ULONG payload,
                                  ULONG consumers);
+
+/*
+ * The TCP transmit queue a socket starts with, in unacknowledged segments:
+ * 1/BSD_TCP_TX_POOL_SHARE of `pool_packets`, never below
+ * BSD_TCP_TX_QUEUE_MIN (the old fixed depth), never above `ceiling`
+ * (NX_TCP_MAXIMUM_TX_QUEUE, nx_user.h, the SO_SNDBUF ceiling).  A quarter:
+ * the 4,096-packet clamp gives 1024, the ceiling; 512 packets give 128;
+ * under 32 the floor of 8 holds.  An eighth held the A1200 (4,096 packets)
+ * at 512 segments, 747,520 bytes a round trip: uploads measured ~280
+ * Mbit/s at 20 ms, 142 at 40 (#354).  Why it moves at all is in nx_user.h.
+ * Pure arithmetic, host-tested.
+ */
+#ifndef BSD_TCP_TX_QUEUE_MIN
+#define BSD_TCP_TX_QUEUE_MIN    8
+#endif
+#ifndef BSD_TCP_TX_POOL_SHARE
+#define BSD_TCP_TX_POOL_SHARE   4       /* 1/N of the pool per socket       */
+#endif
+
+ULONG ami_bsd_tcp_tx_queue_for(ULONG pool_packets, ULONG ceiling);
 
 #endif /* AMINETXDUO_BSDSOCKET_WINDOW_H */
