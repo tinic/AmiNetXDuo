@@ -461,6 +461,7 @@ if(NOT CMAKE_CROSSCOMPILING)
     # these (2026-09-17).  Same sources as test_tcp_earlyretx.
     add_executable(test_tcp_lossrecovery
         host/test_tcp_lossrecovery_host.c
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_sack_option_get.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_rtt_sample.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_create.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_send_internal.c"
