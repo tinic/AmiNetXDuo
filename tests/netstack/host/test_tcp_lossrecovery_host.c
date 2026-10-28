@@ -682,7 +682,9 @@ static void timeout_hole(void)
     _nx_tcp_fast_periodic_processing(&h_ip);
     before = h_datagrams;
     (VOID)h_ack(1, 0, 0, 0, 0);
-    h_check_eq(h_datagrams - before, 1, "FIN recovery respects the current congestion window");
+    h_check((h_datagrams - before) * H_MSS <= h_sock.nx_tcp_socket_tx_window_congestion &&
+            (h_datagrams - before + 1) * H_MSS > h_sock.nx_tcp_socket_tx_window_congestion,
+            "FIN recovery fills, and does not exceed, the current congestion window");
     h_check_eq(h_resent(1), 1, "FIN does not make the cursor skip the first unacknowledged segment");
 }
 
