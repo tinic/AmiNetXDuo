@@ -468,6 +468,7 @@ if(NOT CMAKE_CROSSCOMPILING)
         "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_rx_window_advertised.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_state_ack_check.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_retransmit.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_fast_periodic_processing.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_transmit_configure.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_timestamp_option_get.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_tcp_socket_block_cleanup.c")

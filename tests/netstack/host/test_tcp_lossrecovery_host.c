@@ -244,6 +244,18 @@ VOID _nx_tcp_packet_send_probe(NX_TCP_SOCKET *socket_ptr, ULONG tx_sequence, UCH
     (void)data;
 }
 
+VOID _nx_tcp_packet_send_syn(NX_TCP_SOCKET *socket_ptr, ULONG tx_sequence)
+{
+    (void)socket_ptr; (void)tx_sequence;
+    h_check(0, "RTO data recovery must not send SYN");
+}
+
+VOID _nx_tcp_packet_send_fin(NX_TCP_SOCKET *socket_ptr, ULONG tx_sequence)
+{
+    (void)socket_ptr; (void)tx_sequence;
+    h_check(0, "RTO data recovery must not send FIN");
+}
+
 VOID _nx_tcp_socket_connection_reset(NX_TCP_SOCKET *socket_ptr)
 {
     (void)socket_ptr;
@@ -608,6 +620,120 @@ static void two_holes_partial_ack(UINT dups)
     h_check(after <= before + H_MSS, "a partial acknowledgment does not grow the window past one segment");
 }
 
+/* #354: a timeout in fast recovery must resend SND.UNA even when HighRxt
+   already covers it.  The remaining hole follows the advancing ACK clock,
+   with no additional timer ticks, no repeated batch sends and no retry
+   inflation.  The old path repaired one packet per RTO. */
+static void timeout_hole(void)
+{
+    UINT i, before;
+    ULONG timer;
+
+    printf("timeout in fast recovery, then advancing ACKs\n");
+    h_fixture();
+    for (i = 0; i < 8; i++)
+    {
+        (VOID)h_send();
+    }
+    h_sock.nx_tcp_socket_fast_recovery = NX_TRUE;
+#ifdef NX_ENABLE_TCP_SACK
+    h_sock.nx_tcp_socket_sack_block_count = 1;
+    h_sock.nx_tcp_socket_sack_left[0] = h_seq(1);
+    h_sock.nx_tcp_socket_sack_right[0] = h_seq(8);
+    h_sock.nx_tcp_socket_tx_high_rxt = h_seq(8);
+#endif
+    h_sock.nx_tcp_socket_timeout = _nx_tcp_fast_timer_rate;
+    before = h_datagrams;
+    _nx_tcp_fast_periodic_processing(&h_ip);
+    h_check_eq(h_datagrams - before, 1, "RTO resends one segment");
+    h_check_eq(h_resent(0), 1, "RTO ignores obsolete HighRxt/SACK and resends SND.UNA");
+    h_check_eq(h_sock.nx_tcp_socket_tx_window_congestion, H_MSS, "RTO leaves one MSS congestion window");
+    h_check_eq(h_sock.nx_tcp_socket_timeout_retries, 1, "RTO counts one retry");
+#ifdef NX_ENABLE_TCP_SACK
+    h_check_eq(h_sock.nx_tcp_socket_sack_block_count, 0, "RTO discards stale SACK state");
+#endif
+    before = h_datagrams;
+    (VOID)h_ack(1, 0, 0, 0, 0);
+    h_check_eq(h_datagrams - before, 2, "advancing ACK immediately resends two segments in slow start");
+    h_check_eq(h_sock.nx_tcp_socket_timeout_retries, 0, "ACK resends do not increase retries");
+    timer = h_sock.nx_tcp_socket_timeout;
+    before = h_datagrams;
+    (VOID)h_ack(1, 0, 0, 0, 0);
+    h_check_eq(h_datagrams, before, "duplicate ACK does not repeat cursor's resends");
+    h_check_eq(h_sock.nx_tcp_socket_timeout, timer, "duplicate ACK leaves timer alone");
+    for (i = 2; i <= 8; i++)
+    {
+        (VOID)h_ack(i, 0, 0, 0, 0);
+    }
+    for (i = 0; i < 8; i++)
+    {
+        h_check_eq(h_resent(i), 1, "each old segment resent exactly once without another timer tick");
+    }
+    h_check_eq(h_sock.nx_tcp_socket_transmit_sent_count, 0, "RTO old flight completely acknowledged");
+
+    h_fixture();
+    for (i = 0; i < 8; i++)
+    {
+        (VOID)h_send();
+    }
+    h_sock.nx_tcp_socket_state = NX_TCP_FIN_WAIT_1;
+    h_sock.nx_tcp_socket_tx_sequence++;
+    h_sock.nx_tcp_socket_timeout = _nx_tcp_fast_timer_rate;
+    _nx_tcp_fast_periodic_processing(&h_ip);
+    before = h_datagrams;
+    (VOID)h_ack(1, 0, 0, 0, 0);
+    h_check((h_datagrams - before) * H_MSS <= h_sock.nx_tcp_socket_tx_window_congestion &&
+            (h_datagrams - before + 1) * H_MSS > h_sock.nx_tcp_socket_tx_window_congestion,
+            "FIN recovery fills, and does not exceed, the current congestion window");
+    h_check_eq(h_resent(1), 1, "FIN does not make the cursor skip the first unacknowledged segment");
+
+    h_fixture();
+    for (i = 0; i < 8; i++)
+    {
+        (VOID)h_send();
+    }
+    h_sock.nx_tcp_socket_tx_window_advertised = H_MSS / 2;
+    h_sock.nx_tcp_socket_timeout = _nx_tcp_fast_timer_rate;
+    before = h_datagrams;
+    _nx_tcp_fast_periodic_processing(&h_ip);
+    h_check_eq(h_datagrams - before, 1, "RTO resends old data despite a shrunken nonzero window");
+    h_sock.nx_tcp_socket_timeout = _nx_tcp_fast_timer_rate;
+    _nx_tcp_fast_periodic_processing(&h_ip);
+    h_check_eq(h_datagrams - before, 2, "small receiver window cannot suppress subsequent RTOs");
+
+    h_fixture();
+    for (i = 0; i < 8; i++)
+    {
+        (VOID)h_send();
+    }
+    h_sock.nx_tcp_socket_timeout = _nx_tcp_fast_timer_rate;
+    _nx_tcp_fast_periodic_processing(&h_ip);
+    (VOID)h_ack(1, 0, 0, 0, 0);
+    (VOID)h_ack(1, 0, 0, 0, 0);
+    (VOID)h_ack(1, 0, 0, 0, 0);
+    (VOID)h_ack(1, 0, 0, 0, 0);
+    h_check_eq(h_sock.nx_tcp_socket_fast_recovery, NX_TRUE, "duplicate ACKs enter new fast recovery after RTO");
+    h_check_eq(h_sock.nx_tcp_socket_tx_rto_next, h_sock.nx_tcp_socket_tx_rto_end,
+               "fast recovery supersedes timeout mode");
+    before = h_datagrams;
+    (VOID)h_ack(8, 0, 0, 0, 0);
+    h_check_eq(h_datagrams, before, "fast recovery exit cannot revive stale timeout sends");
+
+    h_fixture();
+    for (i = 0; i < 8; i++)
+    {
+        (VOID)h_send();
+    }
+    h_sock.nx_tcp_socket_timeout = _nx_tcp_fast_timer_rate;
+    _nx_tcp_fast_periodic_processing(&h_ip);
+    h_sock.nx_tcp_socket_tx_rto_end = h_seq(10);
+    before = h_datagrams;
+    (VOID)h_ack(1, 0, 0, 0, 0);
+    h_check_eq(h_datagrams, before, "invalid old-flight bound cannot underflow send credit");
+    h_check_eq(h_sock.nx_tcp_socket_tx_rto_next, h_sock.nx_tcp_socket_tx_rto_end,
+               "invalid timeout cursor is retired");
+}
+
 int main(void)
 {
     _nx_tcp_fast_timer_rate     = (NX_IP_PERIODIC_RATE + (NX_TCP_FAST_TIMER_RATE - 1)) / NX_TCP_FAST_TIMER_RATE;
@@ -621,6 +747,7 @@ int main(void)
     burst_hole();
     two_holes_partial_ack(3);
     two_holes_partial_ack(14);
+    timeout_hole();
 
     printf("%lu checks, %lu failures, %s\n",
            h_checks, h_failures, (h_failures == 0UL) ? "PASS" : "FAIL");
