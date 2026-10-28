@@ -124,6 +124,18 @@ BOOL ami_bsd_tcp_window_long_path(ULONG rtt_ms, ULONG grow_rtt_ms)
     return (rtt_ms >= bsd_grow_rtt(grow_rtt_ms)) ? TRUE : FALSE;
 }
 
+/* TCPWANWINDOW within the window settled for the socket, never below
+   `floor`. */
+static ULONG bsd_wan_window(ULONG want, ULONG wan_window, ULONG floor)
+{
+    ULONG wan = (wan_window < want) ? wan_window : want;
+
+    if (floor > want)
+        floor = want;
+
+    return (wan > floor) ? wan : floor;
+}
+
 ULONG ami_bsd_tcp_window_receive_bound(ULONG want, ULONG hw_bytes, ULONG mss,
                                        ULONG bps, ULONG rtt_ms,
                                        ULONG grow_rtt_ms, ULONG wan_window,
@@ -131,8 +143,13 @@ ULONG ami_bsd_tcp_window_receive_bound(ULONG want, ULONG hw_bytes, ULONG mss,
 {
     ULONG fit;
 
+    /* A long path on a gigabit card: the card is not consulted, so
+       TCPWANWINDOW, when set, is the window -- floored at two segments, the
+       fit's own floor.  #354: genet kept 802,816 under TCPWANWINDOW=300000. */
     if (!ami_bsd_tcp_window_burst_bound(bps, rtt_ms, grow_rtt_ms))
-        return want;
+        return (wan_window != 0UL)
+               ? bsd_wan_window(want, wan_window, 2UL * mss)
+               : want;
 
     fit = ami_bsd_tcp_window_fit(want, hw_bytes, mss);
 
@@ -142,12 +159,9 @@ ULONG ami_bsd_tcp_window_receive_bound(ULONG want, ULONG hw_bytes, ULONG mss,
        window settled for the socket. */
     if (rtt_ms >= bsd_grow_rtt(grow_rtt_ms))
     {
-        ULONG wan;
-
         if (wan_window == 0UL)
             return wan_fitted ? fit : want;
-        wan = (wan_window < want) ? wan_window : want;
-        return (wan > fit) ? wan : fit;
+        return bsd_wan_window(want, wan_window, fit);
     }
 
     return fit;

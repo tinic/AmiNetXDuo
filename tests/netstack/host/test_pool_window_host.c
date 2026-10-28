@@ -613,9 +613,35 @@ static void i_the_window_settles_for_the_path_and_the_link(void)
                                              hundm, 22UL, 50UL, 46720UL, FALSE)
                 == 8UL * 1460UL,
             "TCPWANWINDOW ignored a raised TCPGROWRTT line");
+    /* A gigabit card on a long path is never burst-bound, and TCPWANWINDOW
+       still sets its window: #354, genet kept 802,816 under
+       TCPWANWINDOW=300000.  Unset, the settled window stands, overruns or
+       not; a LAN round trip keeps the fit; two segments are the floor. */
+    h_check(ami_bsd_tcp_window_receive_bound(802816UL, 128UL * 2048UL, 1460UL,
+                                             gbit, rtt, 0UL, 300000UL, FALSE)
+                == 300000UL,
+            "TCPWANWINDOW did not bound a long path on a gigabit card");
     h_check(ami_bsd_tcp_window_receive_bound(max, 52UL * 256UL, 1460UL,
-                                             gbit, rtt, 0UL, 46720UL, FALSE) == max,
-            "TCPWANWINDOW capped a path that was never burst-bound");
+                                             gbit, rtt, 0UL, 46720UL, TRUE)
+                == 46720UL,
+            "TCPWANWINDOW under the ring fit was lifted on a gigabit card");
+    h_check(ami_bsd_tcp_window_receive_bound(802816UL, 128UL * 2048UL, 1460UL,
+                                             gbit, rtt, 0UL, 2000000UL, FALSE)
+                == 802816UL,
+            "TCPWANWINDOW on a gigabit card passed the settled window");
+    h_check(ami_bsd_tcp_window_receive_bound(802816UL, 128UL * 2048UL, 1460UL,
+                                             gbit, rtt, 0UL, 1000UL, FALSE)
+                == 2UL * 1460UL,
+            "TCPWANWINDOW on a gigabit card went under two segments");
+    h_check(ami_bsd_tcp_window_receive_bound(max, 128UL * 2048UL, 1460UL,
+                                             gbit, rtt, 0UL, 0UL, FALSE) == max &&
+            ami_bsd_tcp_window_receive_bound(max, 128UL * 2048UL, 1460UL,
+                                             gbit, rtt, 0UL, 0UL, TRUE) == max,
+            "an unset TCPWANWINDOW capped a gigabit long path");
+    h_check(ami_bsd_tcp_window_receive_bound(lmax, 128UL * 2048UL, 1460UL,
+                                             gbit, rtt - 1UL, 0UL, 46720UL, FALSE)
+                == ami_bsd_tcp_window_fit(lmax, 128UL * 2048UL, 1460UL),
+            "TCPWANWINDOW reached a gigabit LAN round trip");
 
     /* The buffer behind a cut window: twice the cut, so the acknowledgment
        of a whole burst still offers a window; never more than the window
