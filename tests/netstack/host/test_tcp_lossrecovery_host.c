@@ -354,7 +354,7 @@ static UINT h_send(void)
 /* One acknowledgment from the peer: the cumulative number, and up to two SACK
    blocks in segment numbers ([from, to) exclusive), the way
    _nx_tcp_packet_process leaves them in the socket before the check. */
-static UINT h_ack(UINT acked_segments, UINT b1_from, UINT b1_to, UINT b2_from, UINT b2_to)
+static UINT h_ack_with_current_sack(UINT acked_segments)
 {
     NX_TCP_HEADER hdr;
 
@@ -364,6 +364,11 @@ static UINT h_ack(UINT acked_segments, UINT b1_from, UINT b1_to, UINT b2_from, U
     hdr.nx_tcp_acknowledgment_number = h_seq(acked_segments);
     hdr.nx_tcp_header_word_3         = NX_TCP_HEADER_SIZE | NX_TCP_ACK_BIT | 65535UL;
 
+    return _nx_tcp_socket_state_ack_check(&h_sock, &hdr);
+}
+
+static UINT h_ack(UINT acked_segments, UINT b1_from, UINT b1_to, UINT b2_from, UINT b2_to)
+{
 #ifdef NX_ENABLE_TCP_SACK
     h_sock.nx_tcp_socket_sack_block_count = 0;
     if (b1_to > b1_from)
@@ -382,7 +387,7 @@ static UINT h_ack(UINT acked_segments, UINT b1_from, UINT b1_to, UINT b2_from, U
     (void)b1_from; (void)b1_to; (void)b2_from; (void)b2_to;
 #endif
 
-    return _nx_tcp_socket_state_ack_check(&h_sock, &hdr);
+    return h_ack_with_current_sack(acked_segments);
 }
 
 /* How many times segment `s` was sent after the first H_PACKETS sends, and
@@ -734,6 +739,74 @@ static void timeout_hole(void)
                "invalid timeout cursor is retired");
 }
 
+#ifdef NX_ENABLE_TCP_SACK
+static void timeout_fresh_sack_tail(void)
+{
+    UINT scenario, i, before;
+    ULONG timer;
+
+    printf("fresh SACK tail after timeout, withdrawal and next timeout\n");
+    for (scenario = 0; scenario < 3; scenario++)
+    {
+        h_fixture();
+        for (i = 0; i < 8; i++) { (VOID)h_send(); }
+        h_sock.nx_tcp_socket_sack_block_count = 1;
+        h_sock.nx_tcp_socket_sack_left[0] = h_seq(4);
+        h_sock.nx_tcp_socket_sack_right[0] = h_seq(8);
+        h_sock.nx_tcp_socket_timeout = _nx_tcp_fast_timer_rate;
+        _nx_tcp_fast_periodic_processing(&h_ip);
+        h_check_eq(h_sock.nx_tcp_socket_sack_block_count, 0, "timeout forgets old tail SACK");
+        (VOID)h_ack(1, 4, 8, 0, 0);
+        (VOID)h_ack_with_current_sack(2);
+        (VOID)h_ack_with_current_sack(3);
+        h_check_eq(h_sock.nx_tcp_socket_sack_block_count, 1, "plain ACK below cached left edge keeps tail evidence");
+        h_check_eq(h_datagrams - h_pkt_next, 4, "fresh tail SACK avoids all three duplicate copies");
+        for (i = 0; i < 4; i++)
+        {
+            h_check_eq(h_resent(i), 1, "fresh SACK never hides the missing prefix");
+        }
+        h_check_eq(h_sock.nx_tcp_socket_tx_rto_next, h_seq(4), "SACKed tail keeps its recovery cursor");
+        before = h_datagrams;
+        timer = h_sock.nx_tcp_socket_timeout;
+        _nx_tcp_socket_retransmit_after_timeout(&h_ip, &h_sock);
+        h_check_eq(h_datagrams, before, "repeated fresh SACK check sends nothing");
+        h_check_eq(h_sock.nx_tcp_socket_timeout, timer, "fresh SACK check does not change timer");
+        if (scenario == 0)
+        {
+            (VOID)h_ack(8, 0, 0, 0, 0);
+            h_check_eq(h_datagrams, before, "cumulative ACK completes SACKed tail without copies");
+        }
+        else
+        {
+            if (scenario == 2)
+            {
+                h_sock.nx_tcp_socket_timeout = _nx_tcp_fast_timer_rate;
+                _nx_tcp_fast_periodic_processing(&h_ip);
+                h_check_eq(h_datagrams, before + 1, "next RTO still resends unacknowledged head");
+                h_check_eq(h_sock.nx_tcp_socket_sack_block_count, 0, "next RTO discards fresh tail SACK too");
+            }
+            before = h_datagrams;
+            /* A plain wire ACK does not invoke the option parser.  Keep
+               the old SACK here and require the ACK path to reject it. */
+            (VOID)h_ack_with_current_sack(4);
+            h_check(h_datagrams > before && h_resent(4) == 1, "withdrawn tail SACK resumes queued recovery");
+            h_check_eq(h_sock.nx_tcp_socket_sack_block_count, 0, "ACK entering cached SACK block invalidates that claim");
+            for (i = 5; i <= 8; i++) { (VOID)h_ack(i, 0, 0, 0, 0); }
+        }
+        h_check_eq(h_sock.nx_tcp_socket_transmit_sent_count, 0, "tail path releases all acknowledged packets");
+    }
+
+    h_fixture();
+    for (i = 0; i < 8; i++) { (VOID)h_send(); }
+    h_sock.nx_tcp_socket_timeout = _nx_tcp_fast_timer_rate;
+    _nx_tcp_fast_periodic_processing(&h_ip);
+    for (i = 1; i <= 8; i++) { (VOID)h_ack(i, 4, 6, 0, 0); }
+    h_check_eq(h_resent(6), 1, "interior SACK cannot hide a missing later segment");
+    h_check_eq(h_resent(7), 1, "interior SACK cannot stop before the missing tail");
+    h_check_eq(h_sock.nx_tcp_socket_transmit_sent_count, 0, "interior SACK path completes without another timer");
+}
+#endif /* NX_ENABLE_TCP_SACK */
+
 int main(void)
 {
     _nx_tcp_fast_timer_rate     = (NX_IP_PERIODIC_RATE + (NX_TCP_FAST_TIMER_RATE - 1)) / NX_TCP_FAST_TIMER_RATE;
@@ -748,6 +821,9 @@ int main(void)
     two_holes_partial_ack(3);
     two_holes_partial_ack(14);
     timeout_hole();
+#ifdef NX_ENABLE_TCP_SACK
+    timeout_fresh_sack_tail();
+#endif /* NX_ENABLE_TCP_SACK */
 
     printf("%lu checks, %lu failures, %s\n",
            h_checks, h_failures, (h_failures == 0UL) ? "PASS" : "FAIL");
