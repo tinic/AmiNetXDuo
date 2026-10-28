@@ -670,6 +670,20 @@ static void timeout_hole(void)
         h_check_eq(h_resent(i), 1, "each old segment resent exactly once without another timer tick");
     }
     h_check_eq(h_sock.nx_tcp_socket_transmit_sent_count, 0, "RTO old flight completely acknowledged");
+
+    h_fixture();
+    for (i = 0; i < 8; i++)
+    {
+        (VOID)h_send();
+    }
+    h_sock.nx_tcp_socket_state = NX_TCP_FIN_WAIT_1;
+    h_sock.nx_tcp_socket_tx_sequence++;
+    h_sock.nx_tcp_socket_timeout = _nx_tcp_fast_timer_rate;
+    _nx_tcp_fast_periodic_processing(&h_ip);
+    before = h_datagrams;
+    (VOID)h_ack(1, 0, 0, 0, 0);
+    h_check_eq(h_datagrams - before, 1, "FIN recovery respects the current congestion window");
+    h_check_eq(h_resent(1), 1, "FIN does not make the cursor skip the first unacknowledged segment");
 }
 
 int main(void)
