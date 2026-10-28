@@ -807,6 +807,64 @@ static void timeout_fresh_sack_tail(void)
 }
 #endif /* NX_ENABLE_TCP_SACK */
 
+static void fin_ack_sequence(void)
+{
+    UINT states[] = {NX_TCP_FIN_WAIT_1, NX_TCP_CLOSING, NX_TCP_LAST_ACK};
+    UINT state, i;
+    ULONG before;
+    NX_TCP_HEADER header;
+
+    for (state = 0; state < sizeof(states) / sizeof(states[0]); state++)
+    {
+        h_fixture();
+        for (i = 0; i < 8; i++) { (VOID)h_send(); }
+        h_sock.nx_tcp_socket_state = states[state];
+        h_sock.nx_tcp_socket_tx_sequence++;
+        for (i = 0; i < NX_TCP_FAST_RETRANSMIT_THRESHOLD; i++) { (VOID)h_ack(0, 0, 0, 0, 0); }
+        h_check_eq(h_sock.nx_tcp_socket_duplicated_ack_received, NX_TCP_FAST_RETRANSMIT_THRESHOLD,
+                   "pending FIN preserves duplicate ACK sequence");
+        h_check(h_sock.nx_tcp_socket_fast_recovery == NX_TRUE && h_resent(0) == 1,
+                "pending FIN permits fast retransmit of missing DATA");
+
+        h_fixture();
+        for (i = 0; i < 8; i++) { (VOID)h_send(); }
+        h_sock.nx_tcp_socket_state = states[state];
+        h_sock.nx_tcp_socket_tx_sequence++;
+        h_sock.nx_tcp_socket_tx_window_congestion = H_MSS;
+        (VOID)h_ack(1, 0, 0, 0, 0);
+        h_check_eq(h_sock.nx_tcp_socket_tx_window_congestion, 2 * H_MSS,
+                   "pending FIN does not reduce DATA ACK congestion credit");
+        h_check_eq(h_sock.nx_tcp_socket_previous_highest_ack, H_ISN,
+                   "previous ACK records DATA sequence before FIN");
+        (VOID)h_ack(8, 0, 0, 0, 0);
+        h_check(h_sock.nx_tcp_socket_tx_outstanding_bytes == 0 &&
+                h_sock.nx_tcp_socket_transmit_sent_count == 0 && h_sock.nx_tcp_socket_fin_acked == NX_FALSE,
+                "DATA-only completion leaves FIN outstanding");
+        h_check(h_sock.nx_tcp_socket_timeout != 0, "pending FIN retains retry timer");
+        before = h_sock.nx_tcp_socket_tx_window_congestion;
+        memset(&header, 0, sizeof(header));
+        header.nx_tcp_sequence_number = h_sock.nx_tcp_socket_rx_sequence;
+        header.nx_tcp_acknowledgment_number = h_seq(8) + 1;
+        header.nx_tcp_header_word_3 = NX_TCP_HEADER_SIZE | NX_TCP_ACK_BIT | 65535UL;
+        (VOID)_nx_tcp_socket_state_ack_check(&h_sock, &header);
+        h_check(h_sock.nx_tcp_socket_fin_acked == NX_TRUE &&
+                h_sock.nx_tcp_socket_tx_window_congestion == before,
+                "FIN-only ACK does not earn DATA congestion credit");
+
+        h_fixture();
+        for (i = 0; i < 8; i++) { (VOID)h_send(); }
+        h_sock.nx_tcp_socket_state = states[state];
+        h_sock.nx_tcp_socket_tx_sequence++;
+        h_sock.nx_tcp_socket_tx_window_congestion = 8 * H_MSS + 1;
+        h_sock.nx_tcp_socket_tx_slow_start_threshold = H_MSS;
+        header.nx_tcp_sequence_number = h_sock.nx_tcp_socket_rx_sequence;
+        (VOID)_nx_tcp_socket_state_ack_check(&h_sock, &header);
+        h_check(h_sock.nx_tcp_socket_tx_cwnd_acked == 8 * H_MSS &&
+                h_sock.nx_tcp_socket_tx_window_congestion == 8 * H_MSS + 1,
+                "combined DATA and FIN ACK credits only DATA bytes");
+    }
+}
+
 int main(void)
 {
     _nx_tcp_fast_timer_rate     = (NX_IP_PERIODIC_RATE + (NX_TCP_FAST_TIMER_RATE - 1)) / NX_TCP_FAST_TIMER_RATE;
@@ -821,6 +879,7 @@ int main(void)
     two_holes_partial_ack(3);
     two_holes_partial_ack(14);
     timeout_hole();
+    fin_ack_sequence();
 #ifdef NX_ENABLE_TCP_SACK
     timeout_fresh_sack_tail();
 #endif /* NX_ENABLE_TCP_SACK */
