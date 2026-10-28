@@ -501,22 +501,18 @@ static VOID bsd_tcp_rx_queue_cap(NX_TCP_SOCKET *tcp)
  * Mbit/s on a 1.5 ms LAN, 14 over 26 ms.  The ring no longer bounds it: a
  * write that finds the ring full waits in the shim's own queue for the next
  * completion instead of sleeping a tick (sana2_internal.h,
- * AMI_SANA2_TX_PEND).  See nx_user.h.
+ * AMI_SANA2_TX_PEND).  The share is bsdsocket_window.h's; see nx_user.h.
  */
 static VOID bsd_tcp_tx_queue_default(struct AmiSocketBase *base,
                                      NX_TCP_SOCKET *tcp)
 {
     NX_PACKET_POOL *pool  = bsd_stack_pool(base);
-    ULONG           depth = BSD_TCP_TX_QUEUE_MIN;
+    ULONG           depth;
 
-    if (pool != NULL)
-    {
-        depth = pool->nx_packet_pool_total / BSD_TCP_TX_POOL_SHARE;
-        if (depth < BSD_TCP_TX_QUEUE_MIN)
-            depth = BSD_TCP_TX_QUEUE_MIN;
-        if (depth > NX_TCP_MAXIMUM_TX_QUEUE)
-            depth = NX_TCP_MAXIMUM_TX_QUEUE;
-    }
+    /* No pool yet: 0 packets, so the floor. */
+    depth = ami_bsd_tcp_tx_queue_for(
+                (pool != NULL) ? pool->nx_packet_pool_total : 0UL,
+                (ULONG)NX_TCP_MAXIMUM_TX_QUEUE);
     tcp->nx_tcp_socket_transmit_queue_maximum         = depth;
     tcp->nx_tcp_socket_transmit_queue_maximum_default = depth;
 }
