@@ -3,4 +3,4 @@
 # Open the URL when you change the line.
 Emu68	https://github.com/michalsc/Emu68/releases	PiStorm32; 1.1 alpha.1 or newer
 ZZ9000 driver package	https://github.com/BlitterStudio/zz9000-drivers/releases	`ZZ9000Net.device`
-plipbox multicast firmware and driver	https://github.com/tinic/plipbox/releases/tag/v0.6.1-multicast	plipbox adapters; use the matched firmware and `plipbox.device`
+plipbox multicast firmware and driver	https://github.com/tinic/plipbox/releases/tag/v0.6.2-multicast	plipbox adapters; use the matched firmware and `plipbox.device`
