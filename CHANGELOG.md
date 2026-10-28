@@ -7,6 +7,13 @@ are history.
 
 ## Unreleased
 
+- TCP uploads keep up to 1024 segments in flight on a large packet pool, which
+  doubles upload speed over long round trips.
+- `TCPWANWINDOW` takes effect on gigabit interfaces too.
+- TCP uploads no longer drop a burst of segments when the stack hears an
+  ARP request from another host.
+- WiFiPi no longer overwrites low memory when a multicast join runs out of
+  memory, and handles multicast ranges wider than one request.
 - Updated NetX Duo with upstream protocol and TLS fixes.
 - TCP connections survive temporary loss of their local IPv6 address and
   can resume when that address is restored.
