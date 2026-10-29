@@ -519,7 +519,9 @@ host_test_targets() { # builddir
 #      source-aware ordering of A/AAAA answers (x86_64 shim only).
 #      576 with arp_lan_chatter (#354): ARP between other hosts leaves the
 #      peer's entry in place (all hosts).
-HOST_TESTS_EXPECTED=576
+#      578 with adopt_suspend_clean and adopt_suspend_latched: the suspend
+#      clears the run signal with SetSignal() only when it is latched.
+HOST_TESTS_EXPECTED=578
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,
