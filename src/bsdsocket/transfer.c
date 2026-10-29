@@ -267,6 +267,16 @@ typedef struct
     AmiSana2If    *run;
 } BsdSendArgs;
 
+/*
+ * _nx_ and not nx_, as bsd_recv_once() is: bsd_nx_enter() has supplied the
+ * thread context, so the _nxe_ wrapper's THREADS_ONLY check is a
+ * Forbid/FindTask/Permit per segment that re-proves it.  Its other tests are
+ * proved too: ASF_CONNECTED (bsd_send_tcp_run) means a created, connected
+ * socket with its address family set, and the packet was allocated here as
+ * NX_TCP_PACKET, whose headroom covers the IP and timestamped TCP headers.
+ * _nx_tcp_socket_send() still refuses a socket that is not ESTABLISHED or
+ * CLOSE_WAIT with NX_NOT_CONNECTED, under the IP mutex.
+ */
 static UINT bsd_send_once(VOID *arg, ULONG wait)
 {
     BsdSendArgs *a = (BsdSendArgs *)arg;
@@ -274,17 +284,17 @@ static UINT bsd_send_once(VOID *arg, ULONG wait)
     UINT         status;
 
     if (wait == NX_NO_WAIT || a->run == NULL)
-        return nx_tcp_socket_send(a->tcp, a->packet, wait);
+        return _nx_tcp_socket_send(a->tcp, a->packet, wait);
 
     /* The two verdicts a wait can change; the send is not all-or-nothing,
        and what a refused call put on the wire is already off the packet. */
-    status = nx_tcp_socket_send(a->tcp, a->packet, NX_NO_WAIT);
+    status = _nx_tcp_socket_send(a->tcp, a->packet, NX_NO_WAIT);
     if (status != NX_WINDOW_OVERFLOW && status != NX_TX_QUEUE_DEPTH)
         return status;
 
     ami_sana2_tx_run_flush(a->run);
 #endif
-    return nx_tcp_socket_send(a->tcp, a->packet, wait);
+    return _nx_tcp_socket_send(a->tcp, a->packet, wait);
 }
 
 /* The interface the connection sends on; NULL for one that has none yet, and
@@ -476,7 +486,7 @@ static LONG bsd_send_tcp_run(struct AmiSocketBase *base, AmiSocket *sock,
                 return (sent > 0) ? sent : bsd_fail(base, AMI_EINTR);
             }
 
-            status = nx_tcp_socket_send(&sock->as_Nx.tcp, packet, NX_NO_WAIT);
+            status = _nx_tcp_socket_send(&sock->as_Nx.tcp, packet, NX_NO_WAIT);
             if ((status == NX_WINDOW_OVERFLOW || status == NX_TX_QUEUE_DEPTH ||
                  status == NX_NO_PACKET) && left != NX_NO_WAIT)
             {
