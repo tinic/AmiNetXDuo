@@ -1494,6 +1494,51 @@ static void gso_queue_byte_bound(void)
     _nx_tcp_sack_recovery_reset(&h_sock);
 }
 
+/* A final short wire segment stays in the aggregate.  An ACK inside that
+   tail must leave only its remaining DATA eligible for a repair. */
+static void gso_short_final_segment(void)
+{
+    static UCHAR data[3 * H_MSS + 128];
+    NX_PACKET *p = &h_pkt[0];
+    NX_TCP_GSO_INFO *info = (NX_TCP_GSO_INFO *)data;
+    UINT before;
+
+    h_fixture();
+    memset(p, 0, sizeof(*p));
+    memset(data, 't', sizeof(data));
+    info -> version = NX_TCP_GSO_VERSION;
+    info -> flags = 0;
+    info -> mss = H_MSS;
+    info -> offset = info -> length = 0;
+    h_iface.nx_interface_capability_flag |= NX_INTERFACE_CAPABILITY_TCP_GSO;
+    h_iface.nx_interface_ip_mtu_size = 1500;
+    p -> nx_packet_pool_owner = &h_control_pool;
+    p -> nx_packet_data_start = data;
+    p -> nx_packet_data_end = data + sizeof(data);
+    p -> nx_packet_prepend_ptr = data + 80;
+    p -> nx_packet_length = 2 * H_MSS + 37;
+    p -> nx_packet_append_ptr = p -> nx_packet_prepend_ptr + p -> nx_packet_length;
+    p -> nx_packet_interface_capability_flag = NX_INTERFACE_CAPABILITY_TCP_GSO;
+    h_pkt_next = 1;
+
+    h_check_eq(_nx_tcp_socket_send_internal(&h_sock, p, NX_NO_WAIT), NX_SUCCESS,
+               "a short final GSO segment is accepted without an extra send");
+    h_check_eq(h_logged, 1, "one core send carries full segments and the short tail");
+    h_check_eq(h_log_bytes[0], 2 * H_MSS + 37, "the aggregate retains the exact final DATA length");
+    (VOID)h_ack_bytes(2 * H_MSS + 13);
+    h_check_eq(h_sock.nx_tcp_socket_tx_outstanding_bytes, 24,
+               "a partial tail ACK credits all the preceding DATA");
+    before = h_logged;
+    _nx_tcp_socket_retransmit(&h_ip, &h_sock, NX_FALSE);
+    h_check_eq(h_logged - before, 1, "the short tail has one repair");
+    h_check_eq(h_log[before], H_ISN + 2 * H_MSS + 13, "the repair starts inside the short tail");
+    h_check_eq(h_log_bytes[before], 24, "the repair never reads beyond the final DATA byte");
+    (VOID)h_ack_bytes(2 * H_MSS + 37);
+    h_check_eq(h_sock.nx_tcp_socket_transmit_sent_count, 0, "the final ACK retires the aggregate");
+    h_check_eq(h_sock.nx_tcp_socket_tx_outstanding_bytes, 0, "the final ACK returns all byte credit");
+    _nx_tcp_sack_recovery_reset(&h_sock);
+}
+
 static void gso_one_repair_owner(void)
 {
     NX_PACKET *p = h_gso_send(8);
@@ -1750,6 +1795,7 @@ int main(void)
     gso_async_rto_cursor();
     gso_one_repair_owner();
     gso_queue_byte_bound();
+    gso_short_final_segment();
     gso_bounded_recovery();
 #elif defined(NX_ENABLE_INTERFACE_CAPABILITY) && defined(NX_DISABLE_TCP_GSO)
     segmentation_disabled_fallback();
