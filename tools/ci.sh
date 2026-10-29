@@ -519,7 +519,9 @@ host_test_targets() { # builddir
 #      source-aware ordering of A/AAAA answers (x86_64 shim only).
 #      576 with arp_lan_chatter (#354): ARP between other hosts leaves the
 #      peer's entry in place (all hosts).
-HOST_TESTS_EXPECTED=576
+#      581 with netsim_tcp_clean, _bottleneck, _loss, _reverse and _shallow
+#      (#354): two NetX Duo stacks over a simulated link (all hosts).
+HOST_TESTS_EXPECTED=581
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,

@@ -29,6 +29,7 @@
 
 struct NX_IP_DRIVER_STRUCT;
 struct NX_IP_STRUCT;
+struct NX_TCP_SOCKET_STRUCT;
 
 #define NETSIM_SIDES            2
 #define NETSIM_TICK_NS          (1000000000ULL / TX_TIMER_TICKS_PER_SECOND)
@@ -58,6 +59,10 @@ typedef struct NetSimPathStats
     ULONG64 max_gap_at_ns;
     UINT    seen;
     ULONG   high_seq;
+    ULONG   data_frames;        /* segments with payload                  */
+    ULONG   acks;               /* pure acknowledgments                   */
+    ULONG   cwnd_50ms;          /* the sender's, 50 ms after its first    */
+    UINT    cwnd_sampled;       /* data segment on this path              */
 } NetSimPathStats;
 
 /* Before nx_ip_create(): both paths, side 0 to 1 first, and the loss seed. */
@@ -80,6 +85,17 @@ VOID    netsim_stats_reset(VOID);
 
 /* Frames a side had no packet for. */
 ULONG   netsim_rx_nobuf(UINT side);
+
+/* The socket sending bulk data from `side`, for the cwnd sample and the
+   trace; NULL when the transfer is over.
+ *
+ * NETSIM_TRACE=<file> writes one line per event, with the virtual time:
+ * data sent (seq, len, retransmission or not), queue drop, random loss,
+ * acknowledgment received by the sender (ack, window, SACK blocks, and the
+ * sender's congestion state once NetX Duo has taken it), and the
+ * retransmission timer firing.  Sequence numbers are relative to the first
+ * data segment. */
+VOID    netsim_sender_set(UINT side, struct NX_TCP_SOCKET_STRUCT *tcp);
 
 /* No virtual time past this; the run fails with reason=deadline. */
 VOID    netsim_deadline_set(ULONG64 at_ns);

@@ -7,6 +7,7 @@
 
 #include "nx_api.h"
 #include "nx_ip.h"
+#include "nx_tcp.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -53,6 +54,14 @@ static ULONG64      ns_now;
 static ULONG64      ns_next_tick = NETSIM_TICK_NS;
 static ULONG64      ns_deadline  = ~0ULL;
 static ULONG64      ns_rng;
+
+static NX_TCP_SOCKET *ns_sender;
+static UINT         ns_sender_side;
+static ULONG        ns_sender_rto;
+static FILE        *ns_trace;
+static int          ns_trace_init;
+static ULONG        ns_trace_base;
+static UINT         ns_trace_based;
 
 ULONG64 netsim_now_ns(VOID)
 {
@@ -126,13 +135,25 @@ static UINT netsim_tcp_data(const UCHAR *d, ULONG len, ULONG *seq, ULONG *bytes)
     return *bytes != 0;
 }
 
-static VOID netsim_account(NetSimPath *p, const NetSimFrame *f)
+/* Count a frame onto its path; 1 when it carries data already sent. */
+static UINT netsim_account(NetSimPath *p, const NetSimFrame *f)
 {
     NetSimPathStats *st = &p->st;
     ULONG seq, bytes, end;
+    ULONG64 before = st->retx_bytes;
 
     if (!netsim_tcp_data(f->data, f->len, &seq, &bytes))
-        return;
+    {
+        const UCHAR *d = f->data;
+
+        /* A pure acknowledgment: ACK, no SYN, FIN or RST. */
+        if (f->len >= 40 && d[9] == NX_PROTOCOL_TCP &&
+            (d[((d[0] & 0x0F) * 4) + 13] & 0x17) == 0x10)
+            st->acks++;
+        return 0;
+    }
+
+    st->data_frames++;
 
     end = seq + bytes;
 
@@ -164,34 +185,207 @@ static VOID netsim_account(NetSimPath *p, const NetSimFrame *f)
 
     st->data_bytes   += bytes;
     st->last_data_ns  = ns_now;
+
+    return st->retx_bytes != before;
 }
 
-/* NETSIM_TRACE=1: every TCP segment as it is handed to the wire, for
-   reading a failing run.  Off, it costs one test per frame. */
-static int ns_trace = -1;
+/* ---------------------------------------------------------- the trace -- */
 
-static VOID netsim_trace(UINT from, const NetSimFrame *f)
+static FILE *netsim_trace_file(VOID)
 {
-    const UCHAR *d = f->data;
-    ULONG        ihl, total;
+    const char *path;
 
-    if (ns_trace < 0)
-        ns_trace = (getenv("NETSIM_TRACE") != NULL);
-    if (!ns_trace || f->len < 40 || d[9] != NX_PROTOCOL_TCP)
+    if (!ns_trace_init)
+    {
+        ns_trace_init = 1;
+        path = getenv("NETSIM_TRACE");
+        if (path != NULL && *path != '\0')
+        {
+            ns_trace = fopen(path, "w");
+            if (ns_trace == NULL)
+            {
+                printf("netsim=FAIL reason=trace_open path=%s\n", path);
+                exit(1);
+            }
+        }
+    }
+
+    return ns_trace;
+}
+
+static ULONG netsim_rel(ULONG seq)
+{
+    return seq - ns_trace_base;
+}
+
+static ULONG netsim_get32(const UCHAR *d)
+{
+    return ((ULONG)d[0] << 24) | ((ULONG)d[1] << 16) | ((ULONG)d[2] << 8) | d[3];
+}
+
+static VOID netsim_trace_stamp(FILE *t)
+{
+    fprintf(t, "t_us=%llu", (unsigned long long)(ns_now / 1000ULL));
+}
+
+/* The sender's congestion state, as NetX Duo holds it. */
+static VOID netsim_trace_state(FILE *t)
+{
+    NX_TCP_SOCKET *s = ns_sender;
+
+    fprintf(t, " cwnd=%lu ssthresh=%lu fast_recovery=%u recover=%lu"
+               " high_rxt=%lu snd_nxt=%lu outstanding=%lu dupacks=%u"
+               " peer_win=%lu",
+            (unsigned long)s->nx_tcp_socket_tx_window_congestion,
+            (unsigned long)s->nx_tcp_socket_tx_slow_start_threshold,
+            (unsigned)s->nx_tcp_socket_fast_recovery,
+            (unsigned long)netsim_rel(s->nx_tcp_socket_tx_sequence_recover),
+            (unsigned long)netsim_rel(s->nx_tcp_socket_tx_high_rxt),
+            (unsigned long)netsim_rel(s->nx_tcp_socket_tx_sequence),
+            (unsigned long)s->nx_tcp_socket_tx_outstanding_bytes,
+            (unsigned)s->nx_tcp_socket_duplicated_ack_received,
+            (unsigned long)s->nx_tcp_socket_tx_window_advertised);
+#ifdef NETSIM_HAVE_PRR
+    fprintf(t, " prr_recover_fs=%lu prr_delivered=%lu prr_out=%lu prr_credit=%lu",
+            (unsigned long)s->nx_tcp_socket_prr_recover_fs,
+            (unsigned long)s->nx_tcp_socket_prr_delivered,
+            (unsigned long)s->nx_tcp_socket_prr_out,
+            (unsigned long)s->nx_tcp_socket_prr_credit);
+#endif
+}
+
+/* ev=tx, ev=drop, ev=lost: a data segment the sender handed to the wire. */
+static VOID netsim_trace_data(const char *ev, const NetSimFrame *f, UINT retx)
+{
+    FILE        *t = netsim_trace_file();
+    const UCHAR *d = f->data;
+    ULONG        ihl, total, doff, seq;
+
+    if (t == NULL || f->len < 40 || d[9] != NX_PROTOCOL_TCP)
         return;
 
     ihl   = (ULONG)(d[0] & 0x0F) * 4UL;
     total = ((ULONG)d[2] << 8) | d[3];
-    d    += ihl;
+    doff  = (ULONG)(d[ihl + 12] >> 4) * 4UL;
+    if (total <= ihl + doff)
+        return;
 
-    printf("seg t_us=%llu from=%u seq=%lu ack=%lu len=%lu win=%u flags=0x%02x\n",
-           (unsigned long long)(ns_now / 1000ULL), from,
-           (unsigned long)(((ULONG)d[4] << 24) | ((ULONG)d[5] << 16) |
-                           ((ULONG)d[6] << 8) | d[7]),
-           (unsigned long)(((ULONG)d[8] << 24) | ((ULONG)d[9] << 16) |
-                           ((ULONG)d[10] << 8) | d[11]),
-           (unsigned long)(total - ihl - (ULONG)(d[12] >> 4) * 4UL),
-           ((UINT)d[14] << 8) | d[15], d[13]);
+    seq = netsim_get32(d + ihl + 4);
+    if (!ns_trace_based)
+    {
+        ns_trace_based = 1;
+        ns_trace_base  = seq;
+    }
+
+    netsim_trace_stamp(t);
+    fprintf(t, " ev=%s seq=%lu len=%lu", ev, (unsigned long)netsim_rel(seq),
+            (unsigned long)(total - ihl - doff));
+    if (retx != 2)
+        fprintf(t, " retx=%u", retx);
+    fputc('\n', t);
+}
+
+/* ev=ack: an acknowledgment the sender has just processed. */
+static VOID netsim_trace_ack(const NetSimFrame *f)
+{
+    FILE        *t = netsim_trace_file();
+    const UCHAR *d = f->data;
+    const UCHAR *opt, *end;
+    ULONG        ihl, total, doff;
+
+    if (t == NULL || ns_sender == NX_NULL || !ns_trace_based ||
+        f->len < 40 || d[9] != NX_PROTOCOL_TCP)
+        return;
+
+    ihl   = (ULONG)(d[0] & 0x0F) * 4UL;
+    total = ((ULONG)d[2] << 8) | d[3];
+    doff  = (ULONG)(d[ihl + 12] >> 4) * 4UL;
+    if (total != ihl + doff || (d[ihl + 13] & 0x10) == 0)
+        return;
+
+    netsim_trace_stamp(t);
+    fprintf(t, " ev=ack ack=%lu win=%u sack=",
+            (unsigned long)netsim_rel(netsim_get32(d + ihl + 8)),
+            ((UINT)d[ihl + 14] << 8) | d[ihl + 15]);
+
+    opt = d + ihl + 20;
+    end = d + ihl + doff;
+    {
+        UINT any = 0;
+
+        while (opt < end && *opt != 0)
+        {
+            if (*opt == 1)
+            {
+                opt++;
+                continue;
+            }
+            if (opt + 1 >= end || opt[1] < 2 || opt + opt[1] > end)
+                break;
+            if (opt[0] == 5)
+            {
+                const UCHAR *b;
+
+                for (b = opt + 2; b + 8 <= opt + opt[1]; b += 8)
+                {
+                    fprintf(t, "%s%lu-%lu", any ? "," : "",
+                            (unsigned long)netsim_rel(netsim_get32(b)),
+                            (unsigned long)netsim_rel(netsim_get32(b + 4)));
+                    any = 1;
+                }
+            }
+            opt += opt[1];
+        }
+        if (!any)
+            fputc('-', t);
+    }
+
+    netsim_trace_state(t);
+    fputc('\n', t);
+}
+
+/* The retransmission timer has fired since the last look, and the 50 ms
+   congestion window sample. */
+static VOID netsim_sender_poll(VOID)
+{
+    NetSimPathStats *st;
+
+    if (ns_sender == NX_NULL)
+        return;
+
+    if (ns_sender->nx_tcp_socket_timeout_retries != ns_sender_rto)
+    {
+        FILE *t = netsim_trace_file();
+
+        if (t != NULL && ns_sender->nx_tcp_socket_timeout_retries > ns_sender_rto)
+        {
+            netsim_trace_stamp(t);
+            fprintf(t, " ev=rto retries=%lu",
+                    (unsigned long)ns_sender->nx_tcp_socket_timeout_retries);
+            netsim_trace_state(t);
+            fputc('\n', t);
+        }
+        ns_sender_rto = ns_sender->nx_tcp_socket_timeout_retries;
+    }
+
+    st = &ns_path[ns_sender_side ^ 1U].st;
+    if (st->seen && !st->cwnd_sampled &&
+        ns_now >= st->first_data_ns + 50000000ULL)
+    {
+        st->cwnd_sampled = 1;
+        st->cwnd_50ms    = ns_sender->nx_tcp_socket_tx_window_congestion;
+    }
+}
+
+VOID netsim_sender_set(UINT side, NX_TCP_SOCKET *tcp)
+{
+    ns_sender      = tcp;
+    ns_sender_side = side;
+    ns_sender_rto  = (tcp != NX_NULL) ? tcp->nx_tcp_socket_timeout_retries : 0;
+    ns_trace_based = 0;
+
+    if (tcp == NX_NULL && ns_trace != NULL)
+        fflush(ns_trace);
 }
 
 /* A datagram from `from`'s driver, onto the path towards the other side. */
@@ -203,6 +397,7 @@ static VOID netsim_transmit(UINT from, NX_PACKET *packet)
     ULONG        len = packet->nx_packet_length;
     ULONG        at  = 0;
     ULONG64      start, ser;
+    UINT         retx;
 
     f = (NetSimFrame *)malloc(sizeof(*f) + len);
     if (f == NULL)
@@ -226,8 +421,9 @@ static VOID netsim_transmit(UINT from, NX_PACKET *packet)
     f->lost = 0;
 
     p->st.frames++;
-    netsim_account(p, f);
-    netsim_trace(from, f);
+    retx = netsim_account(p, f);
+    netsim_trace_data("tx", f, retx);
+    netsim_sender_poll();
 
     /* What has been serialised by now has left the queue. */
     while (p->queued != NULL && p->queued->depart_ns <= ns_now)
@@ -240,6 +436,7 @@ static VOID netsim_transmit(UINT from, NX_PACKET *packet)
         p->backlog + len + NETSIM_WIRE_OVERHEAD > p->cfg.queue_bytes)
     {
         p->st.drops_queue++;
+        netsim_trace_data("drop", f, 2);
         free(f);
         return;
     }
@@ -256,6 +453,7 @@ static VOID netsim_transmit(UINT from, NX_PACKET *packet)
     {
         f->lost = 1;
         p->st.drops_loss++;
+        netsim_trace_data("lost", f, 2);
     }
 
     if (p->tail != NULL)
@@ -365,9 +563,11 @@ static VOID netsim_receiver(ULONG side_index)
             packet->nx_packet_append_ptr = packet->nx_packet_prepend_ptr + f->len;
             packet->nx_packet_length     = f->len;
             packet->nx_packet_address.nx_packet_interface_ptr = &ip->nx_ip_interface[0];
-            free(f);
-
             _nx_ip_packet_receive(ip, packet);
+
+            if (side_index == ns_sender_side)
+                netsim_trace_ack(f);
+            free(f);
         }
 
         _nx_ip_input_thread = outer;
@@ -440,6 +640,8 @@ VOID netsim_port_idle(VOID)
 {
     ULONG64 next = ns_next_tick;
     UINT    side;
+
+    netsim_sender_poll();
 
     for (side = 0; side < NETSIM_SIDES; side++)
     {

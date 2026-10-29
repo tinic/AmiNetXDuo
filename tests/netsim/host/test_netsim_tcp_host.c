@@ -43,6 +43,10 @@
  *                 egress interface
  *     a2e205fb    egress kept                       92.5%    28 ms   1.025
  *
+ * and shallow (64 KB): main 71.1%, 998 ms, 1.115; a2e205fb and d4d683ce
+ * 80.6%, 20 ms, 1.001.  With 150 KB both fixed cores stall 913 ms on a
+ * repair retransmission the queue dropped again (NETSIM_TRACE).
+ *
  * One scenario per ctest case, named on the command line.  Output is
  * key=value, and the exit code is the verdict.
  *
@@ -125,7 +129,19 @@ static const NsScenario ns_scenarios[] =
       { 150000000ULL, 10 * NS_MS, 0, 0 },
       { 150000000ULL, 10 * NS_MS, 0, 0 },
       32UL * 1024UL * 1024UL, 1, 900, 500 * NS_MS, 0 },
+
+    /* A shallow queue, 64 KB: wanemu's default and an ISP uplink's.  The
+       bottleneck's floors. */
+    { "shallow",
+      { 150000000ULL, 10 * NS_MS, 65536, 0 },
+      { 150000000ULL, 10 * NS_MS, 0, 0 },
+      32UL * 1024UL * 1024UL, 0, 850, 500 * NS_MS, 1050 },
 };
+
+/* Slow start, printed and not yet asserted: two NetX Duo stacks at their
+   defaults ramp at one segment per acknowledgment (RFC 5681's min(N, SMSS))
+   while the receive ramp stretches the acknowledgments. */
+#define NS_SS_BYTES             375000UL
 
 /* One end of a connection. */
 typedef struct NsEnd
@@ -150,12 +166,14 @@ typedef struct NsPhase
     UINT            corrupt;
     ULONG64         half_ns;        /* half delivered                      */
     ULONG64         done_ns;
+    ULONG64         ss_ns;          /* NS_SS_BYTES delivered               */
     ULONG           retransmits;    /* the sender's NetX Duo count         */
     NsEnd           end[NETSIM_SIDES];
     TX_SEMAPHORE    finished;
 } NsPhase;
 
 static const NsScenario *ns_sc;
+static NsScenario        ns_run;
 static NX_IP            ns_ip[NETSIM_SIDES];
 static NX_PACKET_POOL   ns_pool[NETSIM_SIDES];
 static UCHAR            ns_ip_stack[NETSIM_SIDES][4096];
@@ -306,6 +324,8 @@ static VOID ns_send_all(NsPhase *ph, NsEnd *e)
 {
     ULONG offset = 0;
 
+    netsim_sender_set(e->side, &e->tcp);
+
     while (offset < ph->bytes)
     {
         ULONG len = ph->bytes - offset;
@@ -356,6 +376,8 @@ static VOID ns_receive_all(NsPhase *ph, NsEnd *e)
         }
         nx_packet_release(packet);
 
+        if (ph->ss_ns == 0 && ph->got >= NS_SS_BYTES)
+            ph->ss_ns = netsim_now_ns();
         if (ph->half_ns == 0 && ph->got >= ph->bytes / 2)
             ph->half_ns = netsim_now_ns();
     }
@@ -461,6 +483,7 @@ static ULONG ns_run_phase(const char *label, UINT from, UINT port)
 
     tx_semaphore_get(&ph->finished, TX_WAIT_FOREVER);
     tx_semaphore_get(&ph->finished, TX_WAIT_FOREVER);
+    netsim_sender_set(from, NX_NULL);
 
     st        = netsim_stats_towards(from ^ 1U);
     steady_ns = ph->done_ns - ph->half_ns;
@@ -486,6 +509,18 @@ static ULONG ns_run_phase(const char *label, UINT from, UINT port)
            (unsigned long)ph->retransmits,
            (unsigned long)ph->end[from ^ 1U].settled,
            (unsigned long long)((ph->done_ns - start) / NS_MS));
+
+    {
+        ULONG acks = netsim_stats_towards(from)->acks;
+
+        printf("slowstart phase=%s ss_375k_ms=%llu cwnd_50ms=%lu"
+               " data_segments=%lu acks=%lu segs_per_ack_x100=%lu\n",
+               label,
+               (unsigned long long)(ph->ss_ns ? (ph->ss_ns - st->first_data_ns) / NS_MS : 0),
+               (unsigned long)st->cwnd_50ms, (unsigned long)st->data_frames,
+               (unsigned long)acks,
+               (unsigned long)(acks ? st->data_frames * 100UL / acks : 0));
+    }
 
     for (side = 0; side < NETSIM_SIDES; side++)
     {
@@ -623,7 +658,7 @@ int main(int argc, char **argv)
 {
     size_t i;
 
-    if (argc == 2)
+    if (argc == 2 || argc == 3)
     {
         for (i = 0; i < sizeof(ns_scenarios) / sizeof(ns_scenarios[0]); i++)
         {
@@ -634,9 +669,17 @@ int main(int argc, char **argv)
 
     if (ns_sc == NULL)
     {
-        printf("netsim=FAIL reason=usage want=clean|bottleneck|loss|reverse\n");
+        printf("netsim=FAIL reason=usage"
+               " want=clean|bottleneck|loss|reverse|shallow [queue_bytes]\n");
         return 2;
     }
+
+    /* A second argument replaces the forward queue, for probing the depth
+       at which a scenario breaks; ctest never passes one. */
+    ns_run = *ns_sc;
+    if (argc == 3)
+        ns_run.fwd.queue_bytes = (ULONG)strtoul(argv[2], NULL, 10);
+    ns_sc = &ns_run;
 
     /* NetX Duo's initial sequence numbers come from NX_RAND. */
     srand(1);

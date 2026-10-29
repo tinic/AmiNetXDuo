@@ -21,6 +21,10 @@ set(AMINETXDUO_NETSIM_NETXDUO "${AMINETXDUO_NETXDUO}" CACHE PATH
     "NetX Duo tree the netsim test builds (default: the submodule)")
 set(_netsim_nx "${AMINETXDUO_NETSIM_NETXDUO}")
 
+# PRR's state goes on the trace's acknowledgment lines where the tree has it.
+file(STRINGS "${_netsim_nx}/common/inc/nx_api.h" _netsim_prr
+     REGEX "nx_tcp_socket_prr_out;")
+
 file(GLOB _netsim_threadx "${AMINETXDUO_THREADX}/common/src/*.c")
 file(GLOB _netsim_netxduo "${_netsim_nx}/common/src/*.c")
 
@@ -54,11 +58,15 @@ target_compile_definitions(test_netsim_tcp PRIVATE
     NX_DISABLE_ERROR_CHECKING
     TX_DISABLE_ERROR_CHECKING)
 
+if(_netsim_prr)
+    target_compile_definitions(test_netsim_tcp PRIVATE NETSIM_HAVE_PRR)
+endif()
+
 find_package(Threads REQUIRED)
 target_link_libraries(test_netsim_tcp PRIVATE Threads::Threads)
 
 set_target_properties(test_netsim_tcp PROPERTIES C_STANDARD 11)
 
-foreach(_scenario clean bottleneck loss reverse)
+foreach(_scenario clean bottleneck loss reverse shallow)
     add_test(NAME netsim_tcp_${_scenario} COMMAND test_netsim_tcp ${_scenario})
 endforeach()
