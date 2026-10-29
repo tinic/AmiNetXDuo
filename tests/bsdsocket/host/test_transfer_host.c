@@ -188,6 +188,12 @@ static struct
     ULONG       send_lens[32];
     ULONG       send_marks[32];
     NX_TCP_GSO_INFO send_recs[32];
+
+    /* bsd_tcp_tx_autotune(): each call's pending byte count, and how many
+       sends had happened when it was made. */
+    UINT        autotunes;
+    ULONG       autotune_pending[32];
+    UINT        autotune_sends[32];
 } h;
 
 UINT ami_sana2_gso_max_segs(NX_INTERFACE *interface_ptr)
@@ -314,6 +320,19 @@ ULONG SetSignal(ULONG new_signals, ULONG signal_set)
 
 /* bsd_break_signals() reads the caller's tc_SigRecvd; the caller's signals
    are h.signals, read at the moment of the call. */
+/* socket.c's queue autotune: recorded, never grows anything here. */
+VOID bsd_tcp_tx_autotune(NX_TCP_SOCKET *tcp, ULONG pending_bytes)
+{
+    (VOID)tcp;
+
+    if (h.autotunes < 32)
+    {
+        h.autotune_pending[h.autotunes] = pending_bytes;
+        h.autotune_sends[h.autotunes]   = h.sends;
+    }
+    h.autotunes++;
+}
+
 struct Task *FindTask(const char *name)
 {
     static struct Task me;
@@ -1394,6 +1413,11 @@ static void t_mss_segmentation(void)
           "and the bytes are the ones the caller gave, in order");
     CHECK(h.nx_enters == 1 && h.nx_leaves == 1,
           "the whole send is one trip into the kernel, not one per segment");
+    CHECK(h.autotunes == 3 &&
+              h.autotune_pending[0] == 24 && h.autotune_sends[0] == 0 &&
+              h.autotune_pending[1] == 14 && h.autotune_sends[1] == 1 &&
+              h.autotune_pending[2] == 4 && h.autotune_sends[2] == 2,
+          "the queue autotune hears what is left before each segment");
 
     /* An MSS the socket has not negotiated falls back to 536. */
     h_reset();

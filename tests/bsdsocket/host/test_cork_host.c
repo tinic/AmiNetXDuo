@@ -286,6 +286,13 @@ static void h_safe(void)
 
 /* bsd_break_signals() reads the caller's tc_SigRecvd: h.signals at the
    moment of the call, whichever task is asking. */
+/* socket.c's queue autotune: never grows anything here. */
+VOID bsd_tcp_tx_autotune(NX_TCP_SOCKET *tcp, ULONG pending_bytes)
+{
+    (VOID)tcp;
+    (VOID)pending_bytes;
+}
+
 struct Task *FindTask(const char *name)
 {
     (VOID)name;
