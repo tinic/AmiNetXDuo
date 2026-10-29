@@ -1440,6 +1440,8 @@ static NX_PACKET *gso_parent(ULONG thl, ULONG payload, ULONG mss, UBYTE flags,
     info->version = NX_TCP_GSO_VERSION;
     info->flags   = 0;
     info->mss     = (USHORT)mss;
+    info->offset  = 0;
+    info->length  = 0;
 
     for (i = 1; i < G_BUFS && at < payload; i++)
     {
@@ -1463,25 +1465,23 @@ static NX_PACKET *gso_parent(ULONG thl, ULONG payload, ULONG mss, UBYTE flags,
     return &g_buf[0];
 }
 
-/* Child `i` of the block, as the wire must carry it.  `offload`: the field
+/* The frame for payload bytes [off, off + len) with IPv4 ID base + `id_add`
+   and TCP flags `flags`, as the wire must carry it.  `offload`: the field
    holds the pseudo-header sum, folded and not complemented. */
-static ULONG gso_expect(UCHAR *out, ULONG i, int offload)
+static ULONG gso_expect_at(UCHAR *out, ULONG off, ULONG len, ULONG id_add,
+                           UBYTE flags, int offload)
 {
     ULONG  hlen  = G_IHL + g_thl;
-    ULONG  k     = (g_payload + g_mss - 1) / g_mss;
-    ULONG  off   = i * g_mss;
-    ULONG  len   = (g_payload - off < g_mss) ? g_payload - off : g_mss;
     UCHAR *ip    = out;
     UCHAR *tcp   = out + G_IHL;
     ULONG  id, seq, sum, pseudo;
-    UBYTE  flags = g_tmpl[G_IHL + 13];
 
     memcpy(out, g_tmpl, hlen);
     memcpy(out + hlen, g_stream + off, len);
 
     ip[2] = (UCHAR)((hlen + len) >> 8);
     ip[3] = (UCHAR)(hlen + len);
-    id = (((ULONG)g_tmpl[4] << 8) | g_tmpl[5]) + i;
+    id = (((ULONG)g_tmpl[4] << 8) | g_tmpl[5]) + id_add;
     ip[4] = (UCHAR)(id >> 8);
     ip[5] = (UCHAR)id;
     ip[10] = ip[11] = 0;
@@ -1493,10 +1493,6 @@ static ULONG gso_expect(UCHAR *out, ULONG i, int offload)
            ((ULONG)g_tmpl[G_IHL + 6] << 8) | g_tmpl[G_IHL + 7]) + off;
     tcp[4] = (UCHAR)(seq >> 24); tcp[5] = (UCHAR)(seq >> 16);
     tcp[6] = (UCHAR)(seq >> 8);  tcp[7] = (UCHAR)seq;
-    if (i + 1 < k)
-        flags &= (UBYTE)~0x09;              /* FIN, PSH: the last only      */
-    if (i != 0)
-        flags &= (UBYTE)~0x80;              /* CWR: the first only          */
     tcp[13] = flags;
     tcp[16] = tcp[17] = 0;
 
@@ -1513,6 +1509,21 @@ static ULONG gso_expect(UCHAR *out, ULONG i, int offload)
     tcp[17] = (UCHAR)sum;
 
     return hlen + len;
+}
+
+/* Child `i` of the whole block. */
+static ULONG gso_expect(UCHAR *out, ULONG i, int offload)
+{
+    ULONG k     = (g_payload + g_mss - 1) / g_mss;
+    ULONG off   = i * g_mss;
+    ULONG len   = (g_payload - off < g_mss) ? g_payload - off : g_mss;
+    UBYTE flags = g_tmpl[G_IHL + 13];
+
+    if (i + 1 < k)
+        flags &= (UBYTE)~0x09;              /* FIN, PSH: the last only      */
+    if (i != 0)
+        flags &= (UBYTE)~0x80;              /* CWR: the first only          */
+    return gso_expect_at(out, off, len, i, flags, offload);
 }
 
 /* The parent, buffers and descriptors both, as it was handed over. */
@@ -1908,6 +1919,155 @@ static void test_gso_fills_slots_and_queue(void)
     h_check(ok, "and every context is free");
 }
 
+/* A version 1 record is its first four bytes: whatever follows them in
+   the headroom is not read, and it means the whole block. */
+static void test_gso_record_v1(void)
+{
+    NX_PACKET       *p;
+    NX_TCP_GSO_INFO *info;
+
+    printf("sana2: a version 1 GSO record keeps its meaning\n");
+
+    fixture_init(FALSE, S2WireType_Ethernet);
+    h_copy_on_begin = 1;
+    p = gso_parent(32, 350, 100, 0x99, 0xFFFFFF60UL, 0xFFFE, 37, g_odd_cuts, 5);
+    info = (NX_TCP_GSO_INFO *)(VOID *)p->nx_packet_data_start;
+    info->version = 1;
+    memset(p->nx_packet_data_start + 4, 0xEE, 4);
+
+    h_check(ami_sana2_tx_send(&iface, p, AMI_ETHERTYPE_IPV4, 0xBC24,
+                              0x11EF103A) == NX_SUCCESS && h_sends == 4,
+            "the whole block, as four writes");
+    h_check(gso_frames_match(4, 0), "each one its segment");
+}
+
+/*
+ * REPAIR: exactly one frame for [offset, offset + length), seq + offset, the
+ * header's IPv4 ID, PUSH only where it ends the payload, never FIN or CWR.
+ * The template carries all four flags, so each one dropped is visible.
+ */
+static void test_gso_repair(void)
+{
+    static const struct
+    {
+        ULONG       off;
+        ULONG       len;
+        UBYTE       flags;
+        const char *what;
+    } c[] = {
+        {   0, 100, 0x10, "at the start: no CWR, no PUSH, no FIN" },
+        { 137,  61, 0x10, "in the middle, at an odd offset across buffers" },
+        { 300,  50, 0x18, "at the end: PUSH, still no FIN" },
+        { 349,   1, 0x18, "the last byte alone" },
+    };
+    NX_PACKET       *p;
+    NX_TCP_GSO_INFO *info;
+    UCHAR            want[H_FRAME];
+    ULONG            i, len;
+    int              arm;
+
+    printf("sana2: a GSO repair record is one frame of the payload\n");
+
+    for (arm = 0; arm < 2; arm++)
+    {
+        for (i = 0; i < sizeof(c) / sizeof(c[0]); i++)
+        {
+            fixture_init(FALSE, S2WireType_Ethernet);
+            iface.tx_csum_ok = arm ? ANXD_S2_TXF_TCP : 0;
+            h_copy_on_begin = 1;
+            p = gso_parent(32, 350, 100, 0x99, 0xFFFFFF60UL, 0xFFFE, 37,
+                           g_odd_cuts, 5);
+            info = (NX_TCP_GSO_INFO *)(VOID *)p->nx_packet_data_start;
+            info->flags  = NX_TCP_GSO_FLAG_REPAIR;
+            info->offset = (USHORT)c[i].off;
+            info->length = (USHORT)c[i].len;
+            gso_snapshot();
+
+            h_check(ami_sana2_tx_send(&iface, p, AMI_ETHERTYPE_IPV4, 0xBC24,
+                                      0x11EF103A) == NX_SUCCESS &&
+                    h_sends == 1 && h_frame_ok[0],
+                    "one write, copied");
+
+            len = gso_expect_at(want, c[i].off, c[i].len, 0, c[i].flags, arm);
+            h_check(h_len_log[0] == (len < 46 ? 46 : len) &&
+                    memcmp(h_frames[0], want, len) == 0, c[i].what);
+            h_check(arm == 0 ||
+                    ami_sana2_tx_flags(((struct IOSana2Req *)h_sent_log[0])
+                                           ->ios2_Data) == ANXD_S2_TXF_TCP,
+                    "and on the offload arm the write is flagged");
+
+            gso_reply(0);
+            ami_sana2_tx_reap(&iface);
+            h_check(h_releases == 1 && h_released == p &&
+                    iface.stats.packets_sent == 1,
+                    "its completion releases the parent, once");
+            h_check(gso_untouched(), "and the parent is untouched");
+        }
+    }
+}
+
+/* What a version 2 record may not say. */
+static void test_gso_record_refused(void)
+{
+    static const struct
+    {
+        UBYTE       version;
+        UBYTE       flags;
+        USHORT      off;
+        USHORT      len;
+        const char *what;
+    } c[] = {
+        { 2, 0, 1,   0,   "a whole block with an offset" },
+        { 2, 0, 0,   1,   "a whole block with a length" },
+        { 2, 1, 0,   0,   "a repair of nothing" },
+        { 2, 1, 0,   101, "a repair longer than a segment" },
+        { 2, 1, 300, 51,  "a repair past the payload" },
+        { 2, 1, 350, 1,   "a repair starting at the end" },
+        { 2, 2, 0,   0,   "an unknown flag" },
+        { 2, 3, 0,   10,  "REPAIR with an unknown flag" },
+        { 3, 0, 0,   0,   "version 3" },
+        { 0, 0, 0,   0,   "version 0" },
+        { 1, 1, 0,   10,  "REPAIR in a version 1 record" },
+    };
+    NX_PACKET       *p;
+    NX_TCP_GSO_INFO *info;
+    ULONG            i;
+
+    printf("sana2: GSO records that say something else are dropped\n");
+
+    for (i = 0; i < sizeof(c) / sizeof(c[0]); i++)
+    {
+        fixture_init(FALSE, S2WireType_Ethernet);
+        p = gso_parent(32, 350, 100, 0x99, 1, 1, 37, g_odd_cuts, 5);
+        gso_snapshot();
+        info = (NX_TCP_GSO_INFO *)(VOID *)p->nx_packet_data_start;
+        info->version = c[i].version;
+        info->flags   = c[i].flags;
+        info->offset  = c[i].off;
+        info->length  = c[i].len;
+
+        h_check(ami_sana2_tx_send(&iface, p, AMI_ETHERTYPE_IPV4, 0xBC24,
+                                  0x11EF103A) != NX_SUCCESS &&
+                h_sends == 0 && h_releases == 1 && h_released == p &&
+                iface.stats.tx_errors == 1, c[i].what);
+    }
+
+    /* A version 2 record needs all eight bytes in front of the headers.  Six
+       here: what would be its length is the first word of the IPv4 header. */
+    fixture_init(FALSE, S2WireType_Ethernet);
+    p = gso_parent(32, 350, 100, 0x99, 1, 1, 37, g_odd_cuts, 5);
+    p->nx_packet_data_start = p->nx_packet_prepend_ptr - 6;
+    info = (NX_TCP_GSO_INFO *)(VOID *)p->nx_packet_data_start;
+    info->version = NX_TCP_GSO_VERSION;
+    info->flags   = NX_TCP_GSO_FLAG_REPAIR;
+    info->mss     = 100;
+    info->offset  = 0;
+    h_check(ami_sana2_tx_send(&iface, p, AMI_ETHERTYPE_IPV4, 0xBC24,
+                              0x11EF103A) != NX_SUCCESS &&
+            h_sends == 0 && h_releases == 1,
+            "a version 2 record without its eight bytes of headroom");
+}
+
 /* What is not a block this interface can cut is never put on the wire. */
 static void test_gso_refused(void)
 {
@@ -1923,7 +2083,7 @@ static void test_gso_refused(void)
         p = gso_parent(32, 350, 100, 0x18, 1, 1, 37, g_odd_cuts, 5);
         info = (NX_TCP_GSO_INFO *)(VOID *)p->nx_packet_data_start;
         if (c == 2)
-            info->version = 2;
+            info->version = 9;
         if (c == 3)
             info->flags = 1;
         if (c == 4)
@@ -1935,7 +2095,7 @@ static void test_gso_refused(void)
                                                        : AMI_ETHERTYPE_IPV4,
                                   0xBC24, 0x11EF103A) != NX_SUCCESS &&
                 h_sends == 0 && h_releases == 1 && iface.stats.tx_errors == 1,
-                c == 0 ? "IPv6" : c == 1 ? "raw mode" : c == 2 ? "version 2" :
+                c == 0 ? "IPv6" : c == 1 ? "raw mode" : c == 2 ? "version 9" :
                 c == 3 ? "flags set" : c == 4 ? "SYN" : "MSS over the MTU");
     }
 }
@@ -1975,6 +2135,9 @@ int main(void)
     test_gso_no_table();
     test_gso_fills_slots_and_queue();
     test_gso_refused();
+    test_gso_record_v1();
+    test_gso_repair();
+    test_gso_record_refused();
 #ifdef AMINETXDUO_TX_RUN
     test_drain_waits_for_a_queued_flush();
 #endif

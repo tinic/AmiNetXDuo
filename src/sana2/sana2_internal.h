@@ -448,7 +448,8 @@ typedef struct AmiTxGso
     NX_PACKET  *parent;         /* NULL: free                               */
     NX_PACKET  *cur_buf;        /* the forward cursor: the buffer, and the  */
     LONG        cur_start;      /* payload offset its prepend_ptr is at     */
-    ULONG       payload;        /* bytes after the headers                  */
+    UWORD       base;           /* payload bytes the children span: from   */
+    UWORD       end;            /* here up to there; 0 and all for a block */
     UWORD       mss;
     UBYTE       ihl;
     UBYTE       thl;
@@ -456,7 +457,24 @@ typedef struct AmiTxGso
     UBYTE       outstanding;    /* children not yet done with the parent    */
     UBYTE       lost;           /* children refused, aborted or dropped     */
     UBYTE       next_seg;       /* the child the next launch is             */
+    UBYTE       mode;           /* AMI_SANA2_GSO_REPAIR, _TAIL              */
 } AmiTxGso;
+
+/* A repair record's one child, and whether it ends the payload. */
+#define AMI_SANA2_GSO_REPAIR    0x01
+#define AMI_SANA2_GSO_TAIL      0x02
+
+/* Child `seg`'s payload offset, and its length in *len. */
+static inline ULONG ami_sana2_gso_slice(const AmiTxGso *g, UWORD seg,
+                                        ULONG *len)
+{
+    ULONG off = (ULONG)g->base + (ULONG)seg * g->mss;
+
+    *len = (ULONG)g->end - off;
+    if (*len > g->mss)
+        *len = g->mss;
+    return off;
+}
 
 /* ACKPACE (sana2_ackpace.c): a pure acknowledgment waiting for its turn,
    and the E-clock ticks the bytes it acknowledges take at the rate. */

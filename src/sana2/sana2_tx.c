@@ -1116,9 +1116,7 @@ ami_sana2_gso_capture(AmiSana2If *iface, AmiTxSlot *slot, ULONG length,
     eth[13] = (UBYTE)(ether_type);
 
     hlen = ami_sana2_gso_header(slot, hdr);
-    seg_len = g->payload - (ULONG)slot->seg_index * g->mss;
-    if (seg_len > g->mss)
-        seg_len = g->mss;
+    (VOID)ami_sana2_gso_slice(g, slot->seg_index, &seg_len);
     left = seg_len;
 
     view.wirelen = AMI_ETH_HEADER_SIZE + length;

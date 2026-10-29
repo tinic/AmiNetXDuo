@@ -493,16 +493,36 @@ BOOL ami_sana2_gso_parse(NX_PACKET *packet, ULONG mtu, AmiTxGso *g)
     const UCHAR           *ip;
     const UCHAR           *tcp;
     ULONG                  first, ihl, thl, payload, segs;
+    ULONG                  room, base, end;
+    UBYTE                  mode = 0;
 
-    /* The record sits in front of the headroom, never inside it. */
-    if ((ULONG)(packet->nx_packet_prepend_ptr - packet->nx_packet_data_start) <
-        (ULONG)sizeof(NX_TCP_GSO_INFO))
+    /* The record sits in front of the headroom, never inside it: four
+       bytes of version 1, the whole of version 2. */
+    room = (ULONG)(packet->nx_packet_prepend_ptr -
+                   packet->nx_packet_data_start);
+    if (room < 4UL)
         return FALSE;
 
     info = (const NX_TCP_GSO_INFO *)(const VOID *)packet->nx_packet_data_start;
-    if (info->version != NX_TCP_GSO_VERSION || info->flags != 0 ||
-        info->mss == 0)
+    if (info->mss == 0)
         return FALSE;
+    if (info->version == 1)
+    {
+        if (info->flags != 0)
+            return FALSE;
+    }
+    else if (info->version == NX_TCP_GSO_VERSION &&
+             room >= (ULONG)sizeof(NX_TCP_GSO_INFO))
+    {
+        if (info->flags == NX_TCP_GSO_FLAG_REPAIR)
+            mode = AMI_SANA2_GSO_REPAIR;
+        else if (info->flags != 0 || info->offset != 0 || info->length != 0)
+            return FALSE;
+    }
+    else
+    {
+        return FALSE;
+    }
 
     /* Both headers whole in the first buffer: every child copies them from
        there. */
@@ -526,20 +546,40 @@ BOOL ami_sana2_gso_parse(NX_PACKET *packet, ULONG mtu, AmiTxGso *g)
     if (tcp[13] & (AMI_TCP_SYN | AMI_TCP_RST | AMI_TCP_URG))
         return FALSE;
 
-    if (packet->nx_packet_length <= ihl + thl)
+    /* The IPv4 total length bounds the payload to sixteen bits. */
+    if (packet->nx_packet_length <= ihl + thl ||
+        packet->nx_packet_length > 0xFFFFUL)
         return FALSE;
     payload = packet->nx_packet_length - ihl - thl;
 
     if (mtu != 0 && ihl + thl + info->mss > mtu)
         return FALSE;
 
-    segs = (payload + info->mss - 1UL) / info->mss;
-    if (segs > AMI_SANA2_GSO_MAX_SEGS)
-        return FALSE;
+    if (mode != 0)
+    {
+        /* One frame, inside the payload and no larger than a segment. */
+        base = info->offset;
+        end  = base + info->length;
+        if (info->length == 0 || info->length > info->mss || end > payload)
+            return FALSE;
+        if (end == payload)
+            mode |= AMI_SANA2_GSO_TAIL;
+        segs = 1;
+    }
+    else
+    {
+        base = 0;
+        end  = payload;
+        segs = (payload + info->mss - 1UL) / info->mss;
+        if (segs > AMI_SANA2_GSO_MAX_SEGS)
+            return FALSE;
+    }
 
     g->cur_buf   = packet;
     g->cur_start = -(LONG)(ihl + thl);
-    g->payload   = payload;
+    g->base      = (UWORD)base;
+    g->end       = (UWORD)end;
+    g->mode      = mode;
     g->mss       = info->mss;
     g->ihl       = (UBYTE)ihl;
     g->thl       = (UBYTE)thl;
@@ -561,11 +601,7 @@ ULONG ami_sana2_gso_prepare(AmiTxSlot *slot, NX_PACKET *parent)
     LONG       start;
 
     slot->seg_index = g->next_seg++;
-    seg_off = (ULONG)slot->seg_index * g->mss;
-    seg_len = g->payload - seg_off;
-
-    if (seg_len > g->mss)
-        seg_len = g->mss;
+    seg_off = ami_sana2_gso_slice(g, slot->seg_index, &seg_len);
 
     if (g->cur_buf == NULL || (LONG)seg_off < g->cur_start)
     {
@@ -611,15 +647,11 @@ static VOID ami_sana2_gso_fields(const AmiTxGso *g, UWORD seg,
                                  const UCHAR *ip, AmiGsoFields *f)
 {
     const UCHAR *tcp     = ip + g->ihl;
-    ULONG        seg_off = (ULONG)seg * g->mss;
+    ULONG        seg_off = ami_sana2_gso_slice(g, seg, &f->seg_len);
     ULONG        old_len = ami_sana2_tx_be16(ip + 2);
     ULONG        old_id  = ami_sana2_tx_be16(ip + 4);
     ULONG        sum;
     UBYTE        flags   = tcp[13];
-
-    f->seg_len = g->payload - seg_off;
-    if (f->seg_len > g->mss)
-        f->seg_len = g->mss;
 
     f->ip_len = (UWORD)(g->ihl + g->thl + f->seg_len);
     f->ip_id  = (UWORD)(old_id + seg);  /* the core reserved k from here  */
@@ -635,11 +667,22 @@ static VOID ami_sana2_gso_fields(const AmiTxGso *g, UWORD seg,
     f->seq = ((ami_sana2_tx_be16(tcp + 4) << 16) |
               ami_sana2_tx_be16(tcp + 6)) + seg_off;
 
-    /* FIN and PUSH belong to the end of the block, CWR to its start. */
-    if ((ULONG)seg + 1UL < g->segs)
-        flags &= (UBYTE)~(AMI_TCP_FIN | AMI_TCP_PSH);
-    if (seg != 0)
-        flags &= (UBYTE)~AMI_TCP_CWR;
+    /* FIN and PUSH belong to the end of the block, CWR to its start.  A
+       repair is neither: PUSH only where it ends the payload, never FIN or
+       CWR. */
+    if ((g->mode & AMI_SANA2_GSO_REPAIR) != 0)
+    {
+        flags &= (UBYTE)~(AMI_TCP_FIN | AMI_TCP_CWR);
+        if ((g->mode & AMI_SANA2_GSO_TAIL) == 0)
+            flags &= (UBYTE)~AMI_TCP_PSH;
+    }
+    else
+    {
+        if ((ULONG)seg + 1UL < g->segs)
+            flags &= (UBYTE)~(AMI_TCP_FIN | AMI_TCP_PSH);
+        if (seg != 0)
+            flags &= (UBYTE)~AMI_TCP_CWR;
+    }
     f->flags = flags;
 }
 
