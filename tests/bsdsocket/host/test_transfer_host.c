@@ -2049,6 +2049,8 @@ static AmiSocket *h_gso_tcp(void)
     s->as_Nx.tcp.nx_tcp_socket_connect_ip.nxd_ip_version = NX_IP_VERSION_V4;
     s->as_Nx.tcp.nx_tcp_socket_connect_mss = 100;
     s->as_Nx.tcp.nx_tcp_socket_transmit_queue_maximum = 100;
+    s->as_Nx.tcp.nx_tcp_socket_tx_window_advertised   = 1000000;
+    s->as_Nx.tcp.nx_tcp_socket_tx_window_congestion   = 1000000;
     h.mss      = 100;
     h.gso_segs = 4;
     h_pool.nx_packet_pool_payload_size = 1568;
@@ -2213,6 +2215,117 @@ static void t_gso_reserve(void)
           "a 64-packet pool keeps sixteen");
 }
 
+/*
+ * The block fits the window the core will send it into: a wider one is cut
+ * there into new packets, a second copy.  The stub moves no window, so every
+ * block of the write sees the same one.
+ */
+static int h_gso_sizes(const ULONG *lens, const ULONG *marked, unsigned n)
+{
+    unsigned i;
+
+    if (h.sends != n)
+        return 0;
+    for (i = 0; i < n; i++)
+    {
+        if (h.send_lens[i] != lens[i] ||
+            (h.send_marks[i] != 0) != (marked[i] != 0) ||
+            (marked[i] && !h_gso_block(i, lens[i])))
+            return 0;
+    }
+    return 1;
+}
+
+static void t_gso_window(void)
+{
+    static const ULONG l300[] = { 300, 300, 300, 100 };
+    static const ULONG m300[] = { 1, 1, 1, 0 };
+    static const ULONG l200[] = { 200, 200, 200, 200, 200 };
+    static const ULONG m200[] = { 1, 1, 1, 1, 1 };
+    NX_TCP_SOCKET     *tcp;
+
+    printf("transfer: a GSO block fits the open send window\n");
+
+    /* cwnd 300 of a wide peer window: three segments a block, and the
+       tail segment the ordinary way. */
+    h_reset();
+    tcp = &h_gso_tcp()->as_Nx.tcp;
+    tcp->nx_tcp_socket_tx_window_congestion = 300;
+    CHECK(bsd_send(1, h_gso_buf, 1000, 0, &h_base) == 1000 &&
+          h_gso_sizes(l300, m300, 4),
+          "cwnd 300: blocks of 300, never wider than the window");
+
+    /* The peer's window narrower than cwnd, with bytes in flight. */
+    h_reset();
+    tcp = &h_gso_tcp()->as_Nx.tcp;
+    tcp->nx_tcp_socket_tx_window_advertised = 650;
+    tcp->nx_tcp_socket_tx_outstanding_bytes = 300;
+    CHECK(bsd_send(1, h_gso_buf, 1000, 0, &h_base) == 1000 &&
+          h_gso_sizes(l300, m300, 4),
+          "a 650-byte peer window with 300 in flight: blocks of 300");
+
+    /* Exactly two segments open. */
+    h_reset();
+    tcp = &h_gso_tcp()->as_Nx.tcp;
+    tcp->nx_tcp_socket_tx_window_congestion = 200;
+    CHECK(bsd_send(1, h_gso_buf, 1000, 0, &h_base) == 1000 &&
+          h_gso_sizes(l200, m200, 5),
+          "a window of two segments: two-segment blocks");
+
+    /* One segment open, or one and a half: the ordinary path. */
+    h_reset();
+    tcp = &h_gso_tcp()->as_Nx.tcp;
+    tcp->nx_tcp_socket_tx_window_congestion = 100;
+    CHECK(bsd_send(1, h_gso_buf, 1000, 0, &h_base) == 1000 && h_gso_none(10),
+          "a window of one segment: no block, no record");
+
+    h_reset();
+    tcp = &h_gso_tcp()->as_Nx.tcp;
+    tcp->nx_tcp_socket_tx_window_congestion = 199;
+    CHECK(bsd_send(1, h_gso_buf, 1000, 0, &h_base) == 1000 && h_gso_none(10),
+          "199 bytes open: no block");
+
+    /* Nothing open: segments, which the core queues to wait. */
+    h_reset();
+    tcp = &h_gso_tcp()->as_Nx.tcp;
+    tcp->nx_tcp_socket_tx_outstanding_bytes = 1000000;
+    CHECK(bsd_send(1, h_gso_buf, 1000, 0, &h_base) == 1000 && h_gso_none(10),
+          "a closed window: no block");
+
+    /* RFC 5681 3.2: the first duplicate ACK opens two more segments. */
+    h_reset();
+    tcp = &h_gso_tcp()->as_Nx.tcp;
+    tcp->nx_tcp_socket_tx_window_congestion   = 100;
+    tcp->nx_tcp_socket_duplicated_ack_received = 1;
+    CHECK(bsd_send(1, h_gso_buf, 1000, 0, &h_base) == 1000 &&
+          h_gso_sizes(l300, m300, 4),
+          "cwnd 100 on the first duplicate ACK: blocks of 300");
+
+    /* And no wider than the peer's window for it. */
+    h_reset();
+    tcp = &h_gso_tcp()->as_Nx.tcp;
+    tcp->nx_tcp_socket_tx_window_congestion    = 100;
+    tcp->nx_tcp_socket_tx_window_advertised    = 250;
+    tcp->nx_tcp_socket_duplicated_ack_received = 2;
+    CHECK(bsd_send(1, h_gso_buf, 1000, 0, &h_base) == 1000 &&
+          h_gso_sizes(l200, m200, 5),
+          "the second duplicate ACK under a 250-byte peer window: blocks of 200");
+
+#ifdef NX_ENABLE_TCP_SACK
+    /* SACK recovery: the peer's window held to the PRR credit, cwnd aside. */
+    h_reset();
+    tcp = &h_gso_tcp()->as_Nx.tcp;
+    tcp->nx_tcp_socket_tx_window_congestion = 100;
+    tcp->nx_tcp_socket_sack_permitted       = NX_TRUE;
+    tcp->nx_tcp_socket_fast_recovery        = NX_TRUE;
+    tcp->nx_tcp_socket_prr_recover_fs       = 1000;
+    tcp->nx_tcp_socket_prr_credit           = 300;
+    CHECK(bsd_send(1, h_gso_buf, 1000, 0, &h_base) == 1000 &&
+          h_gso_sizes(l300, m300, 4),
+          "in SACK recovery: blocks of the PRR credit, 300");
+#endif
+}
+
 /* What a block that did not all go credits: what went, as for a segment. */
 static void t_gso_short_and_break(void)
 {
@@ -2287,6 +2400,7 @@ int main(void)
     t_gso_blocks();
     t_gso_declined();
     t_gso_reserve();
+    t_gso_window();
     t_gso_short_and_break();
 
     printf("\n%lu checks, %lu failures\n", h_checks, h_failures);

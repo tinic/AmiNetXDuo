@@ -411,6 +411,54 @@ static ULONG bsd_budget_left(const BsdWaitBudget *b)
 #define BSD_GSO_RESERVE_SHARE   8
 #define BSD_GSO_RESERVE_MIN     16
 
+/*
+ * The window the core sends into now, the expression
+ * _nx_tcp_socket_send_internal() uses (nx_tcp_socket_send_internal.c, "Pick
+ * up the min(cwnd, swnd)") spelled the same way: min(cwnd, rwnd), cwnd
+ * widened by two segments on the first two duplicate ACKs, less what is in
+ * flight, and under SACK recovery the peer's window held to the PRR credit.
+ * A block wider than this is cut there into new packets and copied a second
+ * time, on the one path GSO is for.  Read without the IP mutex, as the
+ * credit is: it sizes a block, the core still decides.
+ */
+static ULONG bsd_send_gso_window(const NX_TCP_SOCKET *tcp)
+{
+    ULONG win;
+
+    if (tcp->nx_tcp_socket_tx_window_advertised >
+        tcp->nx_tcp_socket_tx_window_congestion)
+    {
+        win = tcp->nx_tcp_socket_tx_window_congestion;
+        if (tcp->nx_tcp_socket_duplicated_ack_received == 1 ||
+            tcp->nx_tcp_socket_duplicated_ack_received == 2)
+        {
+            win += tcp->nx_tcp_socket_connect_mss << 1;
+            if (win > tcp->nx_tcp_socket_tx_window_advertised)
+                win = tcp->nx_tcp_socket_tx_window_advertised;
+        }
+    }
+    else
+    {
+        win = tcp->nx_tcp_socket_tx_window_advertised;
+    }
+
+    win = (win > tcp->nx_tcp_socket_tx_outstanding_bytes)
+              ? win - tcp->nx_tcp_socket_tx_outstanding_bytes : 0;
+
+#ifdef NX_ENABLE_TCP_SACK
+    if (NX_TCP_SACK_RECOVERY_ACTIVE(tcp))
+    {
+        win = tcp->nx_tcp_socket_tx_window_advertised;
+        win = (win > tcp->nx_tcp_socket_tx_outstanding_bytes)
+                  ? win - tcp->nx_tcp_socket_tx_outstanding_bytes : 0;
+        if (win > tcp->nx_tcp_socket_prr_credit)
+            win = tcp->nx_tcp_socket_prr_credit;
+    }
+#endif
+
+    return win;
+}
+
 /* How many payload bytes the next block carries, or 0 for the one-segment
    path.  Whole segments only; at least two. */
 static ULONG bsd_send_gso_bytes(AmiSocket *sock, NX_PACKET_POOL *pool,
@@ -418,7 +466,7 @@ static ULONG bsd_send_gso_bytes(AmiSocket *sock, NX_PACKET_POOL *pool,
 {
     NX_TCP_SOCKET *tcp  = &sock->as_Nx.tcp;
     NX_INTERFACE  *nxif = tcp->nx_tcp_socket_connect_interface;
-    ULONG          mss, bytes, credit, payload, need, reserve;
+    ULONG          mss, bytes, credit, win, payload, need, reserve;
 
     if (nxif == NX_NULL ||
         (nxif->nx_interface_capability_flag &
@@ -441,6 +489,9 @@ static ULONG bsd_send_gso_bytes(AmiSocket *sock, NX_PACKET_POOL *pool,
     credit = _nx_tcp_socket_queue_byte_credit(tcp);
     if (bytes > credit)
         bytes = credit;
+    win = bsd_send_gso_window(tcp);
+    if (bytes > win)
+        bytes = win;
     bytes -= bytes % mss;
     if (bytes < 2UL * mss)
         return 0;
