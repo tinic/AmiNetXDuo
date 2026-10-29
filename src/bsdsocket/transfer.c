@@ -609,9 +609,10 @@ static LONG bsd_send_tcp_run(struct AmiSocketBase *base, AmiSocket *sock,
                                             NX_NO_WAIT);
             if (status == NX_SUCCESS)
             {
+                ULONG wire_mss = _nx_tcp_socket_payload_mss(&sock->as_Nx.tcp);
+
                 chunk = gso;
-                bsd_send_gso_mark(packet,
-                                  _nx_tcp_socket_payload_mss(&sock->as_Nx.tcp));
+                bsd_send_gso_mark(packet, wire_mss);
             }
             else
             {
