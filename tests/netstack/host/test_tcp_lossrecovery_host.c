@@ -1327,6 +1327,40 @@ static void prr_repeated_ack_and_shared_credit(UINT deny)
 }
 #endif
 
+static void prr_proportional_math(void)
+{
+    static const ULONG values[] = {0, 1, 2, 3, 333, 5840, 5841, 65535, 65536,
+                                  0x7fffffffUL, 0x80000001UL, 0xfffffffeUL, 0xffffffffUL};
+    ULONG seed = 17, a, b, d, expected;
+    ULONG64 reference;
+    UINT i, j, k;
+    for (i = 0; i < sizeof(values) / sizeof(values[0]); i++)
+    {
+        for (j = 0; j < sizeof(values) / sizeof(values[0]); j++)
+        {
+            a = values[i]; d = values[j];
+            for (k = 0; k < 3; k++)
+            {
+                b = k == 0 ? d / 2 : k == 1 ? d : 2920;
+                reference = d == 0 ? 0 : ((ULONG64)a * b + d - 1) / d;
+                expected = reference > 0xffffffffUL ? 0xffffffffUL : (ULONG)reference;
+                h_check_eq(_nx_tcp_prr_proportional_credit(a, b, d), expected,
+                           "32-bit PRR credit matches independent wide reference at boundaries");
+            }
+        }
+    }
+    for (i = 0; i < 2048; i++)
+    {
+        seed = seed * 1664525UL + 1013904223UL; a = seed;
+        seed = seed * 1664525UL + 1013904223UL; b = seed;
+        seed = seed * 1664525UL + 1013904223UL; d = seed;
+        reference = d == 0 ? 0 : ((ULONG64)a * b + d - 1) / d;
+        expected = reference > 0xffffffffUL ? 0xffffffffUL : (ULONG)reference;
+        h_check_eq(_nx_tcp_prr_proportional_credit(a, b, d), expected,
+                   "overflow-safe PRR ratio matches independent wide reference");
+    }
+}
+
 int main(void)
 {
     _nx_tcp_fast_timer_rate     = (NX_IP_PERIODIC_RATE + (NX_TCP_FAST_TIMER_RATE - 1)) / NX_TCP_FAST_TIMER_RATE;
@@ -1335,6 +1369,7 @@ int main(void)
 
     printf("RFC 6675 loss recovery, against a socket rather than a network\n");
 
+    prr_proportional_math();
     single_loss();
     second_loss_at_the_tail();
     burst_hole();
