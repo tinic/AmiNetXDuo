@@ -66,6 +66,43 @@ ULONG ami_bsd_tcp_tx_queue_for(ULONG pool_packets, ULONG ceiling)
     return depth;
 }
 
+ULONG ami_bsd_tcp_tx_free_packets(ULONG total, ULONG available,
+                                  ULONG receive_credit_packets)
+{
+    ULONG reserve;
+    if (total < (ULONG)BSD_TCP_WINDOW_BIG_POOL)
+        return 0UL;
+    reserve = total / 8UL;
+    if (reserve < 16UL)
+        reserve = 16UL;
+    if (available > total)
+        available = total;
+    if (available <= reserve)
+        return 0UL;
+    available -= reserve;
+    return (available > receive_credit_packets)
+           ? available - receive_credit_packets : 0UL;
+}
+
+ULONG ami_bsd_tcp_tx_flight_depth(ULONG bps, ULONG rtt_ms, ULONG mss,
+                                  ULONG quota)
+{
+    ULONG bytes_per_ms, bytes, limit;
+    if (bps == 0UL || rtt_ms == 0UL || mss == 0UL || quota == 0UL)
+        return 0UL;
+    if (quota > 0x7FFFFFFFUL / mss)
+        quota = 0x7FFFFFFFUL / mss;
+    if (quota == 0UL)
+        return 0UL;
+    limit = quota * mss;
+    bytes_per_ms = bps / 8000UL + ((bps % 8000UL) != 0UL ? 1UL : 0UL);
+    if (rtt_ms > (limit / 2UL) / bytes_per_ms)
+        return quota;
+    bytes = 2UL * bytes_per_ms * rtt_ms;
+    bytes = bytes / mss + ((bytes % mss) != 0UL ? 1UL : 0UL);
+    return (bytes < quota) ? bytes : quota;
+}
+
 ULONG ami_bsd_tcp_window_fit(ULONG window, ULONG hw_bytes, ULONG mss)
 {
     ULONG frame;

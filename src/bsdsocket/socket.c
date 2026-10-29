@@ -517,6 +517,161 @@ static VOID bsd_tcp_tx_queue_default(struct AmiSocketBase *base,
     tcp->nx_tcp_socket_transmit_queue_maximum_default = depth;
 }
 
+/* The reserved pointer of a native NetX user is not an AmiSocket. All BSD
+   sockets, including accepted ones, were created with this exact name. */
+static AmiSocket *bsd_tcp_auto_socket(NX_TCP_SOCKET *tcp)
+{
+    return (tcp->nx_tcp_socket_name == bsd_tcp_name)
+           ? (AmiSocket *)tcp->nx_tcp_socket_reserved_ptr : NULL;
+}
+
+static ULONG bsd_tcp_packet_credit(ULONG bytes, ULONG mss, ULONG total)
+{
+    ULONG n;
+    if (mss == 0UL)
+        mss = BSD_TCP_RX_MSS_REF;
+    n = bytes / mss + ((bytes % mss) != 0UL ? 1UL : 0UL);
+    return (n < total) ? n : total;
+}
+
+static ULONG bsd_tcp_credit_add(ULONG a, ULONG b, ULONG total)
+{
+    return (a >= total || b >= total - a) ? total : a + b;
+}
+
+/*
+ * Grow only when a real write fills the old queue on a measured long path.
+ * The queue limit is a byte/resource bound in the GSO core too, so retaining
+ * its old 1024*MSS ceiling would still cap a 40ms upload at roughly300Mbit/s.
+ * The automatic ceiling comes from this pool; the manual SO_SNDBUF ceiling
+ * and a caller's explicit choice are unchanged.
+ *
+ * No allocation and no wait. An unavailable IP mutex leaves the old policy
+ * in force; pressure is retried no more than once per measured RTT. The
+ * receive windows' still-open credit is reserved in whole buffers before
+ * any extra TX grant. Backlogged senders share the remaining room, and a
+ * new sender can take back unused automatic credit from an older sender.
+ * This function runs under the caller's bsd_nx_enter() bracket.
+ */
+VOID bsd_tcp_tx_autotune(NX_TCP_SOCKET *tcp, ULONG pending_bytes)
+{
+    NX_IP *ip;
+    NX_PACKET_POOL *pool;
+    NX_INTERFACE *nxif;
+    NX_TCP_SOCKET *other;
+    AmiSocket *sock;
+    AmiSana2If *sana;
+    ULONG mss, limit, outstanding, rtt, grow, bps, now;
+    ULONG total, count, i, rx_credit = 0UL, tx_used = 0UL;
+    ULONG contenders = 1UL, free_packets, capacity, fair, reserved = 0UL;
+    ULONG own_used, quota, depth;
+
+    sock = bsd_tcp_auto_socket(tcp);
+    if (sock == NULL || sock->as_SndBuf != 0 || pending_bytes == 0UL)
+        return;
+    ip = tcp->nx_tcp_socket_ip_ptr;
+    pool = (ip != NX_NULL) ? ip->nx_ip_default_packet_pool : NX_NULL;
+    nxif = tcp->nx_tcp_socket_connect_interface;
+    if (pool == NX_NULL || pool->nx_packet_pool_total < BSD_TCP_WINDOW_BIG_POOL ||
+        nxif == NX_NULL || nxif->nx_interface_additional_link_info == NULL)
+        return;
+    sana = (AmiSana2If *)nxif->nx_interface_additional_link_info;
+    rtt = sock->as_SettleRtt;
+    grow = ami_sana2_get_tcp_grow_rtt(sana);
+    if (!ami_bsd_tcp_window_long_path(rtt, grow))
+        return;
+    bps = ami_sana2_get_bps(sana);
+    if (bps < BSD_TCP_WINDOW_FAST_BPS)
+        return;
+    mss = _nx_tcp_socket_payload_mss(tcp);
+    if (mss == 0UL || mss > 65535UL)
+        return;
+    outstanding = tcp->nx_tcp_socket_tx_outstanding_bytes;
+    limit = tcp->nx_tcp_socket_transmit_queue_maximum;
+    limit = (limit > 0x7FFFFFFFUL / mss) ? 0x7FFFFFFFUL : limit * mss;
+    if (outstanding < limit && pending_bytes <= limit - outstanding)
+        return;
+
+    now = ami_millis();
+    if (sock->as_AutoTxNext != 0UL && (LONG)(now - sock->as_AutoTxNext) < 0)
+        return;
+    sock->as_AutoTxNext = now + ((rtt < 60000UL) ? rtt : 60000UL);
+    if (tx_mutex_get(&ip->nx_ip_protection, TX_NO_WAIT) != TX_SUCCESS)
+        return;
+
+    total = pool->nx_packet_pool_total;
+    count = ip->nx_ip_tcp_created_sockets_count;
+    other = ip->nx_ip_tcp_created_sockets_ptr;
+    for (i = 0; i < count && other != NX_NULL; i++)
+    {
+        ULONG smss = _nx_tcp_socket_payload_mss(other);
+        ULONG used = bsd_tcp_packet_credit(other->nx_tcp_socket_tx_outstanding_bytes,
+                                           smss, total);
+        tx_used = bsd_tcp_credit_add(tx_used, used, total);
+        if (bsd_tcp_draws(other->nx_tcp_socket_state))
+            rx_credit = bsd_tcp_credit_add(rx_credit,
+                          bsd_tcp_packet_credit(other->nx_tcp_socket_rx_window_current,
+                                                 smss, total), total);
+        if (other != tcp &&
+            (used >= BSD_TCP_TX_QUEUE_MIN ||
+             other->nx_tcp_socket_transmit_suspension_list != NX_NULL))
+            contenders++;
+        other = other->nx_tcp_socket_created_next;
+    }
+    free_packets = ami_bsd_tcp_tx_free_packets(total, pool->nx_packet_pool_available,
+                                               rx_credit);
+    capacity = bsd_tcp_credit_add(tx_used, free_packets, total);
+    fair = capacity / contenders;
+    if (fair == 0UL)
+        fair = 1UL;                     /* never strand a zero-flight writer */
+
+    other = ip->nx_ip_tcp_created_sockets_ptr;
+    for (i = 0; i < count && other != NX_NULL; i++)
+    {
+        AmiSocket *os = bsd_tcp_auto_socket(other);
+        if (other != tcp && os != NULL && os->as_SndBuf == 0 && os->as_AutoTxDepth != 0UL)
+        {
+            ULONG used = bsd_tcp_packet_credit(other->nx_tcp_socket_tx_outstanding_bytes,
+                              _nx_tcp_socket_payload_mss(other), total);
+            ULONG grant = os->as_AutoTxDepth;
+            if (used == 0UL && other->nx_tcp_socket_transmit_suspension_list == NX_NULL)
+            {
+                /* Small later writes retain the historical progress floor;
+                   a new large request must ask for room again. */
+                grant = BSD_TCP_TX_QUEUE_MIN;
+                os->as_AutoTxDepth = 0UL;
+            }
+            else
+            {
+                if (grant > fair)
+                    grant = fair;
+                os->as_AutoTxDepth = grant;
+                if (grant > used)
+                    reserved = bsd_tcp_credit_add(reserved, grant - used, total);
+            }
+            other->nx_tcp_socket_transmit_queue_maximum = grant;
+            other->nx_tcp_socket_transmit_queue_maximum_default = grant;
+        }
+        other = other->nx_tcp_socket_created_next;
+    }
+    free_packets = (free_packets > reserved) ? free_packets - reserved : 0UL;
+    own_used = bsd_tcp_packet_credit(outstanding, mss, total);
+    quota = bsd_tcp_credit_add(own_used, free_packets, total);
+    if (quota > fair)
+        quota = fair;
+    depth = ami_bsd_tcp_tx_flight_depth(bps, rtt, mss, quota);
+    if (depth == 0UL)
+        depth = 1UL;
+    /* An untouched legacy queue is not reduced just to try an optimization. */
+    if (sock->as_AutoTxDepth != 0UL || depth > tcp->nx_tcp_socket_transmit_queue_maximum)
+    {
+        tcp->nx_tcp_socket_transmit_queue_maximum = depth;
+        tcp->nx_tcp_socket_transmit_queue_maximum_default = depth;
+        sock->as_AutoTxDepth = depth;
+    }
+    tx_mutex_put(&ip->nx_ip_protection);
+}
+
 static VOID bsd_tcp_seed_isn(NX_TCP_SOCKET *tcp)
 {
     ULONG seed = ami_random_ulong();

@@ -269,4 +269,16 @@ ULONG ami_bsd_tcp_window_max_for(ULONG pool_packets, ULONG payload,
 
 ULONG ami_bsd_tcp_tx_queue_for(ULONG pool_packets, ULONG ceiling);
 
+/* Automatic TX growth is optional headroom, not a new minimum allocation.
+   Leave control packets and the outstanding receive-window promises alone.
+   Below BIG_POOL the historical policy is unchanged. */
+ULONG ami_bsd_tcp_tx_free_packets(ULONG total, ULONG available,
+                                  ULONG receive_credit_packets);
+
+/* Two bandwidth-delay flights, bounded by the resource quota. Zero means
+   the path is not measured. Arithmetic stays within signed sequence space
+   and needs no 64-bit runtime division on the Amiga. */
+ULONG ami_bsd_tcp_tx_flight_depth(ULONG bps, ULONG rtt_ms, ULONG mss,
+                                  ULONG quota);
+
 #endif /* AMINETXDUO_BSDSOCKET_WINDOW_H */
