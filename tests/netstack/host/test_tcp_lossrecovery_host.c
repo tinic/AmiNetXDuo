@@ -290,6 +290,7 @@ static UINT           h_pkt_next;
    retransmissions. */
 static ULONG          h_log[H_LOG];
 static ULONG          h_log_bytes[H_LOG];
+static NX_INTERFACE  *h_log_interface[H_LOG];
 static UCHAR          h_log_first[H_LOG];
 static UINT           h_logged;
 
@@ -311,6 +312,7 @@ VOID _nx_ip_packet_send(NX_IP *ip_ptr, NX_PACKET *packet_ptr,
         ULONG word = ((NX_TCP_HEADER *)packet_ptr -> nx_packet_prepend_ptr) -> nx_tcp_header_word_3;
         NX_CHANGE_ULONG_ENDIAN(word);
         h_log[h_logged] = seq;
+        h_log_interface[h_logged] = packet_ptr -> nx_packet_address.nx_packet_interface_ptr;
         h_log_bytes[h_logged] = packet_ptr -> nx_packet_length - (word >> NX_TCP_HEADER_SHIFT) * (ULONG)sizeof(ULONG);
         h_log_first[h_logged] = packet_ptr -> nx_packet_prepend_ptr[(word >> NX_TCP_HEADER_SHIFT) * (ULONG)sizeof(ULONG)];
         h_logged++;
@@ -1192,6 +1194,8 @@ static void prr_partial_credit_slice(void)
         h_check_eq(h_logged - before, 1, "partial PRR credit produces one bounded slice");
         h_check_eq(h_log[before], H_ISN + 333 * i, "successive slices advance through the same queued segment");
         h_check_eq(h_log_bytes[before], 333, "slice never exceeds actual PRR byte credit");
+        h_check(h_log_interface[before] == &h_iface,
+                "partial repair retains the original IPv4 egress interface");
         h_check_eq(h_sock.nx_tcp_socket_prr_out - sent, 333, "actual slice bytes debit shared credit");
         h_check_eq(h_sock.nx_tcp_socket_prr_credit, 0, "partial slice consumes its exact budget");
         h_check(h_pkt[0].nx_packet_prepend_ptr == original_prepend &&
@@ -1219,6 +1223,8 @@ static void prr_partial_credit_slice(void)
     h_check_eq(h_log[before], H_ISN + 666, "chained source uses correct byte offset");
     h_check_eq(h_log_first[before], 'c', "slice copies DATA from the chained buffer");
     h_check_eq(h_log_bytes[before], 333, "chained slice preserves exact credit bound");
+    h_check(h_log_interface[before] == &h_iface,
+            "chained repair retains the original IPv4 egress interface");
     h_pkt[0].nx_packet_next = NX_NULL;
     _nx_tcp_sack_recovery_reset(&h_sock);
 }
