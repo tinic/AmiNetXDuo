@@ -31,6 +31,26 @@ add_test(NAME adopt_pool_sweep COMMAND test_adopt_pool sweep)
 add_test(NAME adopt_pool_evict COMMAND test_adopt_pool evict)
 add_test(NAME soak_orphan_baton_identity COMMAND test_adopt_pool orphan-baton)
 
+# tx_amiga_adopt_suspend()'s run-signal clear: a SetSignal() only when the bit
+# is latched.  tx_amiga_adopt.c is #included whole, the same way.
+add_executable(test_adopt_suspend host/test_adopt_suspend_host.c)
+
+target_include_directories(test_adopt_suspend PRIVATE
+    "${CMAKE_SOURCE_DIR}/port/threadx-amiga/src"        # tx_amiga_adopt.c
+    "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"          # tx_port.h, first
+    "${CMAKE_SOURCE_DIR}/port/threadx-amiga/inc"
+    "${CMAKE_SOURCE_DIR}/tests/bsdsocket/host/shim"     # exec/*, proto/exec.h
+    "${CMAKE_SOURCE_DIR}/include"
+    "${AMINETXDUO_THREADX}/common/inc")
+
+target_compile_definitions(test_adopt_suspend PRIVATE
+    AMINETXDUO_HOST_VENDORED_TX_PORT="${CMAKE_SOURCE_DIR}/port/threadx-amiga/inc/tx_port.h")
+
+target_compile_options(test_adopt_suspend PRIVATE -Wno-pointer-sign)
+
+add_test(NAME adopt_suspend_clean COMMAND test_adopt_suspend clean)
+add_test(NAME adopt_suspend_latched COMMAND test_adopt_suspend latched)
+
 # Which of one Task's threads the Exec-wait bracket suspends and resumes.
 # tx_amiga_exec_wait.c is #included whole; netstack_baton.c is compiled as it
 # ships, against the NetX Duo HEADERS netstack_internal.h names, no NetX code.
