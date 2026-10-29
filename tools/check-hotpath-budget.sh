@@ -111,14 +111,16 @@ TABLE = {
                                                              #  batch test, 182 with
                                                              #  short Disable pairs
                                                              #  around shared queues
-                         ("_netdev_tx_direct",       125),    # 118, the ACK path:
+                         ("_netdev_hand_over",        68)],   # 60
+    # The write path moved to netdev_tx.c with the TX_BATCH work so a host
+    # test can drive it; same function, same budget.
+    "netdev_tx.c":      [("_netdev_tx_direct",       125)],   # 118, the ACK path:
                                                              #  98 -> 118 with the
                                                              #  reclaim-on-ask and
                                                              #  the one-section build
                                                              #  (two tests, no
                                                              #  per-frame work); the
                                                              #  A1200 sends 65 -> 107
-                         ("_netdev_hand_over",        68)],   # 60
 
     # THE TCP CORE IS VENDORED, WHICH IS WHY IT IS HERE AND NOT WHY IT IS NOT.
     # These four run once per received segment and are 9.2% of the profile
