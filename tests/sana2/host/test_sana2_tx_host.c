@@ -42,7 +42,9 @@ VOID Disable(VOID)
         fn();
 }
 VOID Enable(VOID)  { }
-VOID Forbid(VOID)  { }
+/* Counted: the GSO path's scheduling regions per block. */
+static unsigned long h_forbids;
+VOID Forbid(VOID)  { h_forbids++; }
 /* ACKPACE stays off here (ack_tpkb 0); the hold is test_sana2_ackpace's. */
 BOOL ami_sana2_ack_hold(AmiSana2If *iface, NX_PACKET *packet,
                         ULONG dst_msw, ULONG dst_lsw)
@@ -403,6 +405,7 @@ static void fixture_init(BOOL raw, ULONG hw_type)
     h_before_disable = NULL;
     h_copy_on_begin  = 0;
     h_released       = NULL;
+    h_forbids        = 0;
     memset(h_frame_ok, 0, sizeof(h_frame_ok));
 }
 
@@ -2100,6 +2103,55 @@ static void test_gso_refused(void)
     }
 }
 
+/* Sixteen children: one Forbid() for the context and all their slots, and
+   none per child after that, whether the device queues or finishes inside
+   BeginIO(). */
+static void test_gso_one_forbid_per_block(void)
+{
+    static const ULONG cuts[] = { 400, 400, 400, 400 };
+    NX_PACKET *p;
+    ULONG      n;
+    int        quick;
+
+    printf("sana2: a 16-child GSO block takes one Forbid(), not one per child\n");
+
+    for (quick = 0; quick < 2; quick++)
+    {
+        fixture_init(FALSE, S2WireType_Ethernet);
+        h_quick_kept      = quick;
+        iface.tx_quick_ok = (BOOL)quick;
+        p = gso_parent(20, 1600, 100, 0x18, 1, 1, 37, cuts, 4);
+
+        h_check(ami_sana2_tx_send(&iface, p, AMI_ETHERTYPE_IPV4, 0xBC24,
+                                  0x11EF103A) == NX_SUCCESS && h_sends == 16,
+                quick ? "quick: sixteen writes" : "queued: sixteen writes");
+        if (!quick)
+        {
+            h_check(h_releases == 0, "queued: the parent is the block's");
+            for (n = 0; n < 16; n++)
+                gso_reply(n);
+            ami_sana2_tx_reap(&iface);
+        }
+        h_check(h_releases == 1 && h_released == p &&
+                iface.gso[0].parent == NULL,
+                "the parent goes back once, its context free");
+        h_check(h_forbids == 1, quick ? "quick: one Forbid() for the block"
+                                      : "queued: one Forbid() for the block");
+    }
+
+    /* Four slots and a device that finishes inside BeginIO(): one region
+       per round of four, never one per child. */
+    fixture_init(FALSE, S2WireType_Ethernet);
+    h_quick_kept      = 1;
+    iface.tx_quick_ok = TRUE;
+    iface.tx_slots    = 4;
+    p = gso_parent(20, 1600, 100, 0x18, 1, 1, 37, cuts, 4);
+    (VOID)ami_sana2_tx_send(&iface, p, AMI_ETHERTYPE_IPV4, 0xBC24, 0x11EF103A);
+    h_check(h_sends == 16 && h_releases == 1 && iface.tx_pend_count == 0,
+            "four slots: sixteen writes, the parent back once");
+    h_check(h_forbids == 4, "and one Forbid() per round of four slots");
+}
+
 int main(void)
 {
     frames_init();
@@ -2134,6 +2186,7 @@ int main(void)
     test_gso_offline_mid_block();
     test_gso_no_table();
     test_gso_fills_slots_and_queue();
+    test_gso_one_forbid_per_block();
     test_gso_refused();
     test_gso_record_v1();
     test_gso_repair();

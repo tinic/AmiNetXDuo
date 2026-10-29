@@ -436,30 +436,66 @@ static VOID ami_sana2_tx_complete(AmiSana2If *iface, AmiTxSlot *slot)
 /* ------------------------------------------------------------- TCP GSO */
 
 /*
+ * `*p += n` and `*p -= n` as one read-modify-write instruction, which a task
+ * switch cannot split on the one CPU; the subtraction says whether it left
+ * zero, from the Z flag of the same instruction.  The host build's atomics
+ * stand in for the tests.
+ */
+static inline VOID __attribute__((always_inline))
+ami_sana2_gso_add(UBYTE *p, UBYTE n)
+{
+#if defined(__mc68000__) || defined(__m68k__)
+    __asm__ __volatile__("add.b %1,%0" : "+m"(*p) : "d"(n) : "cc", "memory");
+#else
+    (VOID)__atomic_add_fetch(p, n, __ATOMIC_SEQ_CST);
+#endif
+}
+
+static inline BOOL __attribute__((always_inline))
+ami_sana2_gso_sub_zero(UBYTE *p, UBYTE n)
+{
+#if defined(__mc68000__) || defined(__m68k__)
+    UBYTE z;
+
+    __asm__ __volatile__("sub.b %2,%1\n\tseq %0"
+                         : "=d"(z), "+m"(*p) : "d"(n) : "cc", "memory");
+    return (z != 0) ? TRUE : FALSE;
+#else
+    return (__atomic_sub_fetch(p, n, __ATOMIC_SEQ_CST) == 0) ? TRUE : FALSE;
+#endif
+}
+
+/*
  * `n` children of block `idx` are done with the parent: written, refused by
  * the device, or never launched (`lost`).  Whichever is last releases it,
- * once; the context is free from that store on.  Forbid() for the count,
- * which the reader's reap and a sender's own completion both reach.
+ * once; the context is free from that store on.
+ *
+ * No Forbid(), for tx_complete()'s reason.  The reader's reap, the IP thread
+ * and a sender's own reap or IOF_QUICK completion, and drain or the offline
+ * kick, can all reach this for one block at once.  What they share is the
+ * count, and each change to it is one instruction (above), so the task that
+ * takes it to zero is the only one.  `lost` is added before the count drops,
+ * so that task reads every child's verdict.  Until it stores `parent` NULL no
+ * gso_send() can take the context, and the barrier keeps the reads above that
+ * store.
  */
 static VOID ami_sana2_gso_put(AmiSana2If *iface, UWORD idx, UWORD n, BOOL lost)
 {
-    AmiTxGso  *g      = &iface->gso[idx - 1];
-    NX_PACKET *parent = NULL;
-    UWORD      dropped = 0;
-    UWORD      segs    = 0;
+    AmiTxGso  *g = &iface->gso[idx - 1];
+    NX_PACKET *parent;
+    UWORD      dropped;
+    UWORD      segs;
 
-    Forbid();
     if (lost)
-        g->lost = (UBYTE)(g->lost + n);
-    g->outstanding = (UBYTE)(g->outstanding - n);
-    if (g->outstanding == 0)
-    {
-        parent  = g->parent;
-        dropped = g->lost;
-        segs    = g->segs;
-        g->parent = NULL;
-    }
-    Permit();
+        ami_sana2_gso_add(&g->lost, (UBYTE)n);
+    if (!ami_sana2_gso_sub_zero(&g->outstanding, (UBYTE)n))
+        return;
+
+    parent  = g->parent;
+    dropped = g->lost;
+    segs    = g->segs;
+    __asm__ __volatile__("" ::: "memory");
+    g->parent = NULL;
 
     if (parent == NULL)
         return;
@@ -657,6 +693,27 @@ static AmiTxSlot *ami_sana2_tx_claim(AmiSana2If *iface)
     Permit();
 
     return slot;
+}
+
+/* Up to `want` free slots for a GSO block's children, marked busy, as a mask
+   of their indices (AMI_SANA2_TX_SLOTS is at most 32).  Under the caller's
+   Forbid(), for the reason ami_sana2_tx_claim() takes its own. */
+static ULONG ami_sana2_tx_claim_run(AmiSana2If *iface, UWORD want)
+{
+    ULONG mask = 0;
+    UWORD i;
+
+    for (i = 0; i < iface->tx_slots && want != 0; i++)
+    {
+        if (!iface->tx[i].busy)
+        {
+            iface->tx[i].busy = TRUE;
+            mask |= 1UL << i;
+            want--;
+        }
+    }
+
+    return mask;
 }
 
 /*
@@ -914,9 +971,11 @@ ami_sana2_gso_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
 {
     AmiTxGso   blk;
     AmiTxSlot *slot;
+    ULONG      claimed = 0;
     UWORD      idx = AMI_SANA2_GSO_NONE;
     UWORD      at;
     UWORD      i;
+    UWORD      s;
 
     /* Cooked IPv4 only: the copy hook is what cuts the block, and neither a
        raw write nor an IPv6 datagram is cut there.  The capability says
@@ -951,6 +1010,10 @@ ami_sana2_gso_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
         }
         at++;
     }
+    /* The children's slots in the same region: one Forbid() per block, as
+       the ordinary write takes one per frame.  Not past a queued write. */
+    if (idx != AMI_SANA2_GSO_NONE && iface->tx_pend_count == 0)
+        claimed = ami_sana2_tx_claim_run(iface, blk.segs);
     Permit();
 
     /* Cannot happen: a block in flight holds a slot or a queue entry, and
@@ -964,15 +1027,37 @@ ami_sana2_gso_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
         return NX_TX_QUEUE_DEPTH;
     }
 
-    for (i = 0; i < blk.segs; i++)
+    /* The slots claimed with the context, launched in order; then again only
+       if one came straight back, from a device that finished it inside
+       BeginIO().  The unlocked look costs nothing when it is wrong: a missed
+       slot leaves the rest to the queue and the kick. */
+    i = 0;
+    while (claimed != 0)
     {
-        slot = (iface->tx_pend_count != 0) ? NULL : ami_sana2_tx_claim(iface);
-        if (slot == NULL)
-            break;
+        BOOL back = FALSE;
 
-        slot->gso = idx;
-        (VOID)ami_sana2_tx_launch(iface, slot, packet, ether_type, dst_msw,
-                                  dst_lsw);
+        for (s = 0; claimed != 0; s++)
+        {
+            if ((claimed & (1UL << s)) == 0)
+                continue;
+            claimed &= ~(1UL << s);
+
+            slot      = &iface->tx[s];
+            slot->gso = idx;
+            (VOID)ami_sana2_tx_launch(iface, slot, packet, ether_type,
+                                      dst_msw, dst_lsw);
+            if (!slot->busy)
+                back = TRUE;
+            i++;
+        }
+
+        if (back && i < blk.segs && iface->tx_pend_count == 0)
+        {
+            Forbid();
+            if (iface->tx_pend_count == 0)
+                claimed = ami_sana2_tx_claim_run(iface, (UWORD)(blk.segs - i));
+            Permit();
+        }
     }
 
     if (i < blk.segs)
