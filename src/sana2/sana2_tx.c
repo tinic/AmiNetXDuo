@@ -504,7 +504,7 @@ static VOID ami_sana2_gso_put(AmiSana2If *iface, UWORD idx, UWORD n, BOOL lost)
         AMI_WARN("sana2: a GSO block lost %ld of its %ld segments. TCP "
                  "sends them again", (LONG)dropped, (LONG)segs);
 
-    nx_packet_transmit_release(parent);
+    AMI_NX_CLEANUP(nx_packet_transmit_release(parent));
 }
 
 static VOID ami_sana2_gso_complete(AmiSana2If *iface, AmiTxSlot *slot,
@@ -984,7 +984,7 @@ ami_sana2_gso_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
     if (iface->raw_mode || ether_type != AMI_ETHERTYPE_IPV4 ||
         iface->gso == NULL || !ami_sana2_gso_parse(packet, iface->mtu, &blk))
     {
-        nx_packet_transmit_release(packet);
+        AMI_NX_CLEANUP(nx_packet_transmit_release(packet));
         iface->stats.tx_errors++;
         return NX_INVALID_PACKET;
     }
@@ -1021,7 +1021,7 @@ ami_sana2_gso_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
        rather than trusted. */
     if (idx == AMI_SANA2_GSO_NONE)
     {
-        nx_packet_transmit_release(packet);
+        AMI_NX_CLEANUP(nx_packet_transmit_release(packet));
         iface->stats.tx_errors += blk.segs;
         iface->stats.tx_queue_full++;
         return NX_TX_QUEUE_DEPTH;
