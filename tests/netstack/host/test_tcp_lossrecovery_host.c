@@ -1621,6 +1621,32 @@ static void gso_bounded_recovery(void)
 }
 #endif
 
+#ifdef NX_ENABLE_TCP_SACK
+static void prr_full_pool_tiny_hole(void)
+{
+    UINT i, before;
+    h_fixture();
+    for (i = 0; i < 8; i++) { (VOID)h_send(); }
+    h_control_deny = NX_TRUE;
+    h_slice_deny = NX_TRUE;
+    h_sock.nx_tcp_socket_sack_block_count = 1;
+    h_sock.nx_tcp_socket_sack_left[0] = H_ISN + 1;
+    h_sock.nx_tcp_socket_sack_right[0] = h_seq(6);
+    before = h_logged;
+    for (i = 0; i < NX_TCP_FAST_RETRANSMIT_THRESHOLD; i++)
+    {
+        (VOID)h_ack_with_current_sack(0);
+    }
+    h_check_eq(h_logged - before, 1, "full pool cannot suppress mandatory first repair of a one-byte hole");
+    h_check_eq(h_log[before], H_ISN, "full-pool repair uses the queued original at SND.UNA");
+    h_check_eq(h_log_bytes[before], H_MSS, "full-pool SACK escape sends no more than one MSS");
+    h_check_eq(h_sock.nx_tcp_socket_prr_out, H_MSS, "full original spends every repeated wire byte");
+    h_check_eq(h_sock.nx_tcp_socket_prr_credit, 0, "whole original cannot overspend remaining PRR credit");
+    h_check_eq(h_sock.nx_tcp_socket_tx_high_rxt, h_seq(1), "full original advances actual retransmission coverage");
+    _nx_tcp_sack_recovery_reset(&h_sock);
+}
+#endif
+
 static void prr_proportional_math(void)
 {
     static const ULONG values[] = {0, 1, 2, 3, 333, 5840, 5841, 65535, 65536,
@@ -1670,6 +1696,9 @@ int main(void)
     gso_one_repair_owner();
     gso_queue_byte_bound();
     gso_bounded_recovery();
+#endif
+#ifdef NX_ENABLE_TCP_SACK
+    prr_full_pool_tiny_hole();
 #endif
     prr_proportional_math();
     cumulative_bytes_before_retirement(NX_FALSE);
