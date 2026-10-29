@@ -255,6 +255,11 @@ static ULONG tx_child(APTR data, ULONG index, UBYTE *dst, ULONG len)
     return 0;
 }
 
+static VOID tx_posted(APTR data, ULONG count)
+{
+    (void)data; (void)count;
+}
+
 static UWORD tx_run(NetdevNic *nic, UWORD first, UWORD count,
                     UWORD (*fill)(APTR arg, UWORD index, UBYTE *buf),
                     APTR arg, UBYTE *failed)
@@ -284,18 +289,20 @@ static void test_tx_batch_needs_the_appended_pair(void)
     ext.Base.TxFlags = tx_flags;
     ext.TxBatch      = tx_batch;
     ext.TxChild      = tx_child;
+    ext.TxPosted     = tx_posted;
     memset(&op, 0, sizeof(op));
     answer = NULL;
     CHECK(netdev_take_extension(&ext.Base, &op, &answer) &&
-          op.op_TxBatch == (APTR)tx_batch && op.op_TxChild == (APTR)tx_child,
-          "a record covering the pair hands it over for TX_BATCH");
+          op.op_TxBatch == (APTR)tx_batch && op.op_TxChild == (APTR)tx_child &&
+          op.op_TxPosted == (APTR)tx_posted,
+          "a record covering the three hands them over for TX_BATCH");
 
     ext.Base.Size = (UWORD)(ANXD_S2_EXTENSION_BATCH_SIZE - 1);
     memset(&op, 0, sizeof(op));
     answer = NULL;
     CHECK(netdev_take_extension(&ext.Base, &op, &answer) &&
           op.op_TxBatch == NULL && op.op_TxChild == NULL,
-          "a record one byte short of the pair hands over nothing of it");
+          "a record one byte short of them hands over nothing of it");
 
     ext.Base.Size = (UWORD)(offsetof(AnxdS2ExtensionTx, TxBatch));
     memset(&op, 0, sizeof(op));
@@ -318,7 +325,7 @@ static void test_tx_batch_needs_the_appended_pair(void)
     answer = NULL;
     CHECK(netdev_take_extension(&ext.Base, &op, &answer) &&
           op.op_TxBatch == NULL,
-          "half a pair is no pair");
+          "two of the three are none");
 
     /* What the unit offers. */
     ext.TxChild = tx_child;

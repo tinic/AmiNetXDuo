@@ -99,8 +99,9 @@ typedef struct NetdevOpener
                                            opener's writes */
     APTR                op_RxFilled;
     APTR                op_TxFlags;     /* per-write ANXD_S2_TXF_* callback */
-    APTR                op_TxBatch;     /* TX_BATCH's pair, or NULL: only */
+    APTR                op_TxBatch;     /* TX_BATCH's three, or NULL: only */
     APTR                op_TxChild;     /* from a record that covers them */
+    APTR                op_TxPosted;
     ULONG               op_Extensions;  /* ANXD_S2F_* accepted for this open */
     AnxdLinkSpeed      *op_LinkSpeed;    /* input/output during Open only */
 
@@ -271,7 +272,10 @@ typedef struct NetdevUnit
     /* A pump pass stopped at its frame budget with writes waiting and a
        free slot: the software interrupt runs the next one. */
     UBYTE                       nu_PumpOwed;
-    UBYTE                       nu_Pad3;
+    /* Frames the masked section now running may still copy: set at the
+       section's entry (netdev_tx_section) and spent by every pump inside
+       it, so a service pass and its owed pass share one budget. */
+    UBYTE                       nu_PumpBudget;
     ULONG                       nu_TxBatches;     /* batch writes answered  */
     ULONG                       nu_TxBatchPauses; /* left at the head, ring
                                                      full or budget spent  */
@@ -423,6 +427,14 @@ static inline VOID nd_zero(UBYTE *p, ULONG n)
 #define NETDEV_PUMP_FRAMES  8
 #endif
 
+/* A masked section that may pump opens: NETDEV_PUMP_FRAMES for all of
+   it.  The software interrupt, the server, the blank, ANXD_CMD_RX_POLL and
+   the write path's own Disable() each call this once at their entry. */
+static inline VOID netdev_tx_section(NetdevUnit *unit)
+{
+    unit->nu_PumpBudget = (UBYTE)NETDEV_PUMP_FRAMES;
+}
+
 /* A write leaving nu_Writes by any path but the pump's own resume. */
 static inline VOID netdev_tx_forget(NetdevUnit *unit, struct IOSana2Req *io)
 {
@@ -447,6 +459,12 @@ LONG  netdev_tx_timed_issue(NetdevUnit *unit, struct IOSana2Req *io,
    backstop: TRUE when either pumped.  Both under the caller's Disable(). */
 BOOL netdev_tx_owed(NetdevUnit *unit);
 BOOL netdev_tx_tick(NetdevUnit *unit);
+/* The chip's service with its one budget (netdev_tx_section), the pass a
+   budget-cut pump owed and nothing more, under the caller's Disable(): the
+   software interrupt, the server and ANXD_CMD_RX_POLL.  netdev_interrupt()'s
+   answer.  And the blank's share of the pump, after its own section. */
+ULONG netdev_tx_service(NetdevUnit *unit);
+VOID  netdev_tx_blank(NetdevUnit *unit);
 
 /* netdev_device.c */
 VOID netdev_reply(struct IOSana2Req *io, LONG err, ULONG wire);

@@ -917,9 +917,9 @@ typedef struct AmiTxSlot
     NX_PACKET          *seg_buf;
     ULONG               seg_buf_off;
     /* A batch write (ANXD_S2F_TX_BATCH): the block's children, 0 for any
-       other write, and how many of them the device has copied, the
-       highest index taken plus one.  seg_index is then the child placed
-       last, which TxChild moves. */
+       other write, and how many of them, from the first, the device has
+       committed (TxPosted).  seg_index is then the child placed last,
+       which TxChild moves. */
     UBYTE               batch_count;
     UBYTE               batch_done;
 #endif
@@ -1245,6 +1245,7 @@ AMIGA_ASM_ARGS ULONG ami_sana2_tx_batch(APTR ios2_data,
                                         AnxdS2TxBatchInfo *info);
 AMIGA_ASM_ARGS ULONG ami_sana2_tx_child(APTR ios2_data, ULONG index,
                                         UBYTE *dst, ULONG len);
+AMIGA_ASM_ARGS VOID  ami_sana2_tx_posted(APTR ios2_data, ULONG count);
 #endif /* AMINETXDUO_TCP_GSO */
 AMIGA_ASM_ARGS UBYTE ami_sana2_tx_flags(APTR ios2_data);
 #ifdef AMINETXDUO_TX_RUN

@@ -235,6 +235,14 @@ VOID netdev_offline(NetdevUnit *unit, ULONG event)
    harness has no core, so it counts the call and reports nothing found. */
 static int interrupt_calls;
 
+/* netdev_tx.c's service section, which this file does not link: the
+   interrupt it wraps is the recorder above. */
+ULONG netdev_interrupt(NetdevUnit *unit);
+ULONG netdev_tx_service(NetdevUnit *unit)
+{
+    return netdev_interrupt(unit);
+}
+
 ULONG netdev_interrupt(NetdevUnit *unit)
 {
     interrupt_calls++;

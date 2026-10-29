@@ -23,6 +23,7 @@
 #include "netdev_internal.h"
 #include "netdev_mcaf.h"
 #include "dp8390.h"
+#include "genet_ring.h"     /* the run's reclaim rule, as genet_tx_run */
 
 static int failures;
 static int checks;
@@ -112,6 +113,20 @@ VOID netdev_event(NetdevUnit *unit, ULONG mask)
     (VOID)unit;
     (VOID)mask;
     events++;
+}
+
+/* netdev_device.c's chip service, as the real one runs it: the core, then
+   the pump when the core had work (`intr_mine`). */
+static int intr_mine;
+static int intr_calls;
+
+ULONG netdev_interrupt(NetdevUnit *unit)
+{
+    intr_calls++;
+    if (!intr_mine)
+        return 0;
+    netdev_tx_pump(unit);
+    return 1;
 }
 
 /* netdev_hooks.c is m68k register glue: a C call stands in for it. */
@@ -241,6 +256,12 @@ static UWORD t_run(NetdevNic *nic, UWORD first, UWORD count,
     if (disable_depth > 0)
         run_masked++;
     *failed = 0;
+    /* What genet_tx_run does before it counts its room. */
+    if (genet_tx_run_reclaims(nic->txb_inuse, ring_size, count))
+    {
+        t_flush(nic);
+        (VOID)t_reclaim(nic);
+    }
     room = (UWORD)(ring_size - nic->txb_inuse);
     if (count > room)
         count = room;
@@ -295,6 +316,9 @@ typedef struct
     UWORD   last_len;
     UWORD   tag;
     int     fail_at;        /* -1: never                                    */
+    int     answer_zero;    /* TxBatch answers 0                            */
+    ULONG   posted;         /* the last TxPosted count                      */
+    int     posts;
     int     copies[32];     /* TxChild calls per frame                      */
 } Write;
 
@@ -315,7 +339,15 @@ static ULONG t_txbatch(APTR data, AnxdS2TxBatchInfo *info)
     info->SegLen   = w->seg_len;
     info->LastLen  = w->last_len;
     info->Reserved = 0;
-    return w->count;
+    return w->answer_zero ? 0 : w->count;
+}
+
+static VOID t_txposted(APTR data, ULONG count)
+{
+    Write *w = (Write *)data;
+
+    w->posted = count;
+    w->posts++;
 }
 
 static ULONG t_txchild(APTR data, ULONG index, UBYTE *dst, ULONG len)
@@ -366,6 +398,7 @@ static void fixture(UWORD ring)
     flushed_before_reclaim = 0;
     disable_depth = forbid_depth = forbids = replies = causes = events = 0;
     child_calls = 0;
+    intr_mine = intr_calls = 0;
 
     NewList(&unit.nu_Writes);
     NewList(&unit.nu_OpenerList);
@@ -386,6 +419,7 @@ static void fixture(UWORD ring)
     opener.op_TxFlags    = (APTR)t_txflags;
     opener.op_TxBatch    = (APTR)t_txbatch;
     opener.op_TxChild    = (APTR)t_txchild;
+    opener.op_TxPosted   = (APTR)t_txposted;
     opener.op_Extensions = ANXD_S2F_TX_BATCH | ANXD_S2F_TX_QUICK;
 }
 
@@ -419,12 +453,23 @@ static void drain_ring(void)
     unit.nu_Nic.txb_inuse = ring_held;
 }
 
-/* One masked pump pass, as the interrupt or the blank runs it. */
+/* One masked section that pumps once, as the write path's own runs it. */
 static void pump_pass(void)
 {
     masked_frames = 0;
     Disable();
+    netdev_tx_section(&unit);
     netdev_tx_pump(&unit);
+    Enable();
+}
+
+/* The software interrupt's section: the service and the owed pass. */
+static void soft_pass(void)
+{
+    masked_frames = 0;
+    max_masked_frames = 0;
+    Disable();
+    (VOID)netdev_tx_service(&unit);
     Enable();
 }
 
@@ -476,6 +521,8 @@ static void test_one_batch(void)
     expect(replies == 0 && io->ios2_Req.io_Error == 0 &&
            (io->ios2_Req.io_Flags & IOF_QUICK) != 0,
            "answered once, quick, no error");
+    expect(wr[0].posted == 5 && wr[0].posts == 1,
+           "the committed prefix reported once: five");
     expect(unit.nu_Stats.PacketsSent == 5, "five frames counted, not one");
     expect(unit.nu_TxBatchIo == NULL && unit.nu_TxBatches == 1,
            "and no batch left in hand");
@@ -495,6 +542,7 @@ static void test_partial_then_resume(void)
     netdev_tx_direct(&unit, io);
 
     expect(nposted == 3 && posted[2].index == 2, "three frames now");
+    expect(wr[0].posted == 3, "and three reported committed");
     expect(replies == 0 && (io->ios2_Req.io_Flags & IOF_QUICK) == 0,
            "not answered: queued, IOF_QUICK cleared");
     expect(unit.nu_Writes.lh_Head == &io->ios2_Req.io_Message.mn_Node &&
@@ -519,6 +567,8 @@ static void test_partial_then_resume(void)
     expect(replies == 2 && io->ios2_Req.io_Error == 0 &&
            io->ios2_Req.io_Message.mn_Node.ln_Type == NT_REPLYMSG,
            "the batch answered once, after its last frame, and the write");
+    expect(wr[0].posted == 5 && wr[0].posts == 2,
+           "the prefix reported per run: 3, then 5");
     expect(unit.nu_TxBatchIo == NULL && IsListEmpty(&unit.nu_Writes),
            "nothing left");
     expect(unit.nu_Stats.PacketsSent == 6, "six frames counted");
@@ -547,9 +597,11 @@ static void test_ring_full(void)
         pump_pass();
     expect(nposted == 0 && causes == 0 && unit.nu_PumpOwed == 0,
            "ten passes on a full ring: nothing posted, no self-signal");
+    netdev_tx_section(&unit);
     expect(!netdev_tx_tick(&unit), "and the blank's backstop stays out");
 
     drain_ring();
+    netdev_tx_section(&unit);
     expect(netdev_tx_tick(&unit) && nposted == 4 &&
            frames_in_order(0, 0, 3) && posted[3].write == wr[1].tag,
            "the ring free: the blank sends the batch, then the write");
@@ -575,6 +627,26 @@ static void test_flush_before_reclaim(void)
            "and the batch goes out at once");
 }
 
+/* A ring out of phase with the batches: 49 of 64 in use, all of them sent
+   by the chip but not yet retired, and a 16-frame batch.  The run asks
+   first and takes all sixteen; it does not pause with one left. */
+static void test_out_of_phase(void)
+{
+    struct IOSana2Req *io;
+
+    printf("netdev tx: a batch larger than the free slots reclaims first\n");
+    fixture(64);
+    unit.nu_Nic.txb_inuse = 49;
+    ring_busy = 0;              /* sent; only the retirement is owed */
+    io = mk(0, 16);
+    netdev_tx_direct(&unit, io);
+    expect(nposted == 16 && frames_in_order(0, 0, 16) && reclaims >= 1,
+           "all sixteen frames, after one reclaim");
+    expect(unit.nu_TxBatchIo == NULL && unit.nu_TxBatchPauses == 0 &&
+           (io->ios2_Req.io_Flags & IOF_QUICK) != 0,
+           "never paused: answered quick");
+}
+
 /* 64 slots free and three 16-frame batches waiting: no pass copies more
    than NETDEV_PUMP_FRAMES, each cut owes one pass, and the owed passes
    finish the job in order. */
@@ -596,11 +668,7 @@ static void test_pump_budget(void)
 
     while (unit.nu_PumpOwed && passes < 20)
     {
-        masked_frames = 0;
-        max_masked_frames = 0;
-        Disable();
-        (VOID)netdev_tx_owed(&unit);
-        Enable();
+        soft_pass();
         if (max_masked_frames > worst)
             worst = max_masked_frames;
         passes++;
@@ -629,10 +697,94 @@ static void test_tick_backstop(void)
     drain_ring();
     expect(unit.nu_Nic.txb_inuse == 0, "an empty ring, nothing to retire");
     Disable();
-    expect(netdev_tx_tick(&unit), "the tick pumps");
+    netdev_tx_section(&unit);
+    netdev_tx_blank(&unit);
     Enable();
+    expect(nposted > NETDEV_PUMP_FRAMES, "the blank pumps");
     expect(nposted == 12 && frames_in_order(0, 0, 12) && replies == 1,
            "and the batch is out and answered");
+}
+
+/*
+ * One budget per masked section, not per pump: the software interrupt's
+ * service pumps and then runs the owed pass, the blank pumps and may run
+ * the chip's service as well, and ANXD_CMD_RX_POLL runs the service.  None
+ * of them copies more than NETDEV_PUMP_FRAMES in all.
+ */
+static void test_section_budget(void)
+{
+    int n;
+
+    printf("netdev tx: every masked section copies at most %d frames\n",
+           NETDEV_PUMP_FRAMES);
+
+    /* The soft interrupt: the chip had work, and a pass was owed. */
+    fixture(64);
+    for (n = 0; n < 3; n++)
+        netdev_queue_tail(&unit.nu_Writes, mk(n, 16));
+    intr_mine = 1;
+    unit.nu_PumpOwed = 1;
+    soft_pass();
+    expect(intr_calls == 1 && nposted == NETDEV_PUMP_FRAMES &&
+           max_masked_frames == NETDEV_PUMP_FRAMES,
+           "soft: the service and the owed pass share eight");
+    expect(unit.nu_PumpOwed == 1 && causes == 1,
+           "and the rest is owed to the next section");
+
+    /* The blank: its pump, then the chip's service for a silent line. */
+    fixture(64);
+    for (n = 0; n < 3; n++)
+        netdev_queue_tail(&unit.nu_Writes, mk(n, 16));
+    intr_mine = 1;
+    masked_frames = max_masked_frames = 0;
+    Disable();
+    netdev_tx_section(&unit);
+    netdev_tx_blank(&unit);
+    (VOID)netdev_interrupt(&unit);
+    Enable();
+    expect(nposted == NETDEV_PUMP_FRAMES &&
+           max_masked_frames == NETDEV_PUMP_FRAMES,
+           "blank: its pump and the service share eight");
+
+    /* RX_POLL is the service under its own Disable(). */
+    fixture(64);
+    for (n = 0; n < 3; n++)
+        netdev_queue_tail(&unit.nu_Writes, mk(n, 16));
+    intr_mine = 1;
+    soft_pass();
+    expect(nposted == NETDEV_PUMP_FRAMES, "poll: eight");
+}
+
+/* Writes that fail cost the budget too: twelve malformed batches are not
+   twelve refusals in one masked pass. */
+static void test_failures_spend_budget(void)
+{
+    int n;
+
+    printf("netdev tx: refused writes are bounded per pass\n");
+    fixture(64);
+    for (n = 0; n < REQS; n++)
+    {
+        netdev_queue_tail(&unit.nu_Writes, mk(n, 3));
+        wr[n].last_len = 20;            /* under the minimum: refused */
+    }
+    pump_pass();
+    expect(nposted == 0 && events == NETDEV_PUMP_FRAMES &&
+           replies == NETDEV_PUMP_FRAMES,
+           "eight refused in the pass, the rest left");
+    expect(causes == 1 && !IsListEmpty(&unit.nu_Writes),
+           "and one pass owed for them");
+
+    fixture(64);
+    for (n = 0; n < REQS; n++)
+    {
+        netdev_queue_tail(&unit.nu_Writes, mk(n, 3));
+        wr[n].fail_at = 0;              /* the first copy fails */
+    }
+    pump_pass();
+    expect(nposted == 0 && replies == NETDEV_PUMP_FRAMES &&
+           child_calls == NETDEV_PUMP_FRAMES,
+           "eight copy failures in the pass, not twelve");
 }
 
 /* CloseDevice() with a batch paused at the head: answered aborted, once,
@@ -690,6 +842,15 @@ static void test_bad_shape(void)
     expect(nposted == 0 && child_calls == 0 &&
            io->ios2_Req.io_Error == S2ERR_BAD_ARGUMENT,
            "seventeen frames: refused, nothing copied");
+    /* A flagged write whose TxBatch answers 0 is malformed, not an
+       ordinary write: nothing of it goes out (anxs2ext.h). */
+    fixture(64);
+    io = mk(0, 3);
+    wr[0].answer_zero = 1;
+    netdev_tx_direct(&unit, io);
+    expect(nposted == 0 && child_calls == 0 &&
+           io->ios2_Req.io_Error == S2ERR_BAD_ARGUMENT,
+           "TxBatch answering 0: refused, nothing sent");
     fixture(64);
     io = mk(0, 3);
     wr[0].last_len = 20;
@@ -753,8 +914,11 @@ int main(void)
     test_partial_then_resume();
     test_ring_full();
     test_flush_before_reclaim();
+    test_out_of_phase();
     test_pump_budget();
     test_tick_backstop();
+    test_section_budget();
+    test_failures_spend_budget();
     test_close_mid_batch();
     test_copy_fails();
     test_bad_shape();

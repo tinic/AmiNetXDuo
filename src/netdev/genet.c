@@ -1703,7 +1703,7 @@ static UWORD genet_tx_run(NetdevNic *nic, UWORD first, UWORD count,
         return 0;
     }
 
-    if (nic->txb_inuse >= GE_TX_RING)
+    if (genet_tx_run_reclaims(nic->txb_inuse, GE_TX_RING, count))
     {
         ge_tx_kick(nic);
         (VOID)ge_txintr(nic);

@@ -1388,11 +1388,13 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
 #ifdef AMINETXDUO_TCP_GSO
     iface->extension.TxBatch     = ami_sana2_tx_batch;
     iface->extension.TxChild     = ami_sana2_tx_child;
+    iface->extension.TxPosted    = ami_sana2_tx_posted;
     if (ami_config_tx_batch(1UL) != 0UL)
         iface->extension.Base.Request |= ANXD_S2F_TX_BATCH;
 #else
     iface->extension.TxBatch     = NULL;
     iface->extension.TxChild     = NULL;
+    iface->extension.TxPosted    = NULL;
 #endif
 #ifdef AMINETXDUO_RX_CHECKSUM_OFFLOAD
     /* Request only the device fact this build consumes.  GRO classification

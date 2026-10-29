@@ -858,6 +858,12 @@ ULONG ami_sana2_tx_batch(APTR ios2_data, AnxdS2TxBatchInfo *info)
     return 0;
 }
 
+VOID ami_sana2_tx_posted(APTR ios2_data, ULONG count)
+{
+    (VOID)ios2_data;
+    (VOID)count;
+}
+
 ULONG ami_sana2_tx_child(APTR ios2_data, ULONG index, UBYTE *dst, ULONG len)
 {
     (VOID)ios2_data;
@@ -2307,6 +2313,7 @@ static void case_tx_batch_negotiation(void)
         h_check(h_ext_size >= (UWORD)ANXD_S2_EXTENSION_BATCH_SIZE &&
                 iface->extension.TxBatch == ami_sana2_tx_batch &&
                 iface->extension.TxChild == ami_sana2_tx_child &&
+                iface->extension.TxPosted == ami_sana2_tx_posted &&
                 iface->extension.Reserved[0] == NULL &&
                 iface->extension.Reserved[1] == NULL,
                 "the record carries the pair, the reserved pointers NULL");

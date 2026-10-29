@@ -187,6 +187,7 @@ VOID BeginIO(struct IORequest *req)
         h_bcount = ami_sana2_tx_batch(((struct IOSana2Req *)req)->ios2_Data,
                                       &h_binfo);
         h_batch_more(h_batch_take != 0 ? h_batch_take : (UWORD)h_bcount);
+        ami_sana2_tx_posted(((struct IOSana2Req *)req)->ios2_Data, h_bnext);
         if (h_bnext < h_bcount)
             req->io_Flags &= (UBYTE)~IOF_QUICK;
     }
@@ -2510,6 +2511,7 @@ static void test_batch_child_restart(void)
         h_batch_more(1);
         h_bnext = 3;
         h_batch_more(1);
+        ami_sana2_tx_posted(data, 4);
         {
             int ok = (h_bn == 6);
 
@@ -2522,7 +2524,7 @@ static void test_batch_child_restart(void)
                                   "child exactly");
         }
         h_check(((AmiTxSlot *)data)->batch_done == 4,
-                "and the high-water mark is the batch, not the copy count");
+                "and what counts is the prefix the device posted");
         gso_reply(0);
         ami_sana2_tx_reap(&iface);
         h_check(h_releases == 1 && iface.stats.packets_sent == 4,
@@ -2581,6 +2583,56 @@ static void test_batch_abort_mid_batch(void)
                              "waiting write once");
     h_check(iface.stats.packets_sent == 1 && iface.stats.tx_errors == 4,
             "one frame sent, three lost and the waiting write");
+}
+
+/*
+ * Copies are not frames: a device that copies every child, out of order and
+ * twice, but posts only the first two before the abort, has sent two and
+ * lost two, whatever TxChild was asked.
+ */
+static void test_batch_prefix_not_copies(void)
+{
+    NX_PACKET *p;
+    APTR       data;
+
+    printf("sana2: a batch counts what was posted, not what was copied\n");
+
+    fixture_init(FALSE, S2WireType_Ethernet);
+    iface.tx_batch_ok = 1;
+    h_batch_dev  = 1;
+    h_batch_take = 1;
+    p = gso_parent(32, 350, 100, 0x18, 1, 1, 37, g_odd_cuts, 5);
+    (VOID)ami_sana2_tx_send(&iface, p, AMI_ETHERTYPE_IPV4, 0xBC24, 0x11EF103A);
+    data = ((struct IOSana2Req *)h_breq)->ios2_Data;
+    h_bnext = 3;
+    h_batch_more(1);            /* the last, first */
+    h_bnext = 1;
+    h_batch_more(2);            /* then 1 and 2 */
+    h_bnext = 3;
+    h_batch_more(1);            /* and the last again */
+    ami_sana2_tx_posted(data, 2);
+    h_check(((AmiTxSlot *)data)->batch_done == 2,
+            "five copies, two frames posted");
+    ((struct IOSana2Req *)h_breq)->ios2_Req.io_Error = IOERR_ABORTED;
+    gso_reply(0);
+    ami_sana2_tx_reap(&iface);
+    h_check(iface.stats.packets_sent == 2 && iface.stats.tx_errors == 2 &&
+            iface.stats.tx_bytes == 2UL * (52 + 100),
+            "aborted: two sent, their bytes, two lost");
+    h_check(h_releases == 1 && h_released == p, "and the parent once");
+
+    /* A count past the batch is the batch. */
+    fixture_init(FALSE, S2WireType_Ethernet);
+    iface.tx_batch_ok = 1;
+    h_batch_dev  = 1;
+    h_batch_take = 1;
+    p = gso_parent(32, 350, 100, 0x18, 1, 1, 37, g_odd_cuts, 5);
+    (VOID)ami_sana2_tx_send(&iface, p, AMI_ETHERTYPE_IPV4, 0xBC24, 0x11EF103A);
+    data = ((struct IOSana2Req *)h_breq)->ios2_Data;
+    ami_sana2_tx_posted(data, 9);
+    h_check(((AmiTxSlot *)data)->batch_done == 4, "posted 9 of 4 is 4");
+    gso_reply(0);
+    ami_sana2_tx_reap(&iface);
 }
 
 /* Blocks behind a full ring wait as one entry each, in order, and launch
@@ -2701,6 +2753,7 @@ int main(void)
     test_batch_stats_and_bounds();
     test_batch_child_restart();
     test_batch_abort_mid_batch();
+    test_batch_prefix_not_copies();
     test_batch_queues_as_one();
     test_batch_one_forbid();
     test_batch_not_taken();

@@ -263,6 +263,11 @@ static UWORD netdev_tx_batch_step(NetdevUnit *unit, struct IOSana2Req *io,
     unit->nu_TxBatchNext = (UWORD)(first + posted);
     *copied = (UWORD)(*copied + posted);
 
+    /* The committed prefix, once a run: what the opener counts as sent. */
+    if (posted != 0)
+        ((AnxdS2TxPosted)op->op_TxPosted)(io->ios2_Data,
+                                          (ULONG)unit->nu_TxBatchNext);
+
     /* Per frame, as the ordinary write counts its one. */
     if (posted != 0)
     {
@@ -342,15 +347,15 @@ static VOID netdev_tx_reclaim_full(NetdevUnit *unit)
 }
 
 /*
- * Drain the queue into whatever transmit buffers the chip has free, at most
- * NETDEV_PUMP_FRAMES frames a pass.  The caller holds Disable().  Stands off
- * while a task-level build owns nu_TxBuf; that builder pumps again once its
- * own frame is issued, so nothing is stranded.
+ * Drain the queue into whatever transmit buffers the chip has free, out of
+ * the masked section's budget (nu_PumpBudget, netdev_tx_section): every
+ * write taken costs at least one, whether it is sent, refused or fails, so
+ * a queue of bad writes is bounded too.  The caller holds Disable().
+ * Stands off while a task-level build owns nu_TxBuf; that builder pumps
+ * again once its own frame is issued, so nothing is stranded.
  */
 VOID netdev_tx_pump(NetdevUnit *unit)
 {
-    UWORD budget = NETDEV_PUMP_FRAMES;
-
     /* A task is mid-transmit under Forbid() (tx_task_lock): it pumps for
        itself when it is done, and nothing here may touch the ring now. */
     if (unit->nu_Nic.tx_busy)
@@ -368,7 +373,7 @@ VOID netdev_tx_pump(NetdevUnit *unit)
 
         if (unit->nu_TxBuilding || IsListEmpty(&unit->nu_Writes))
             return;
-        if (budget == 0)
+        if (unit->nu_PumpBudget == 0)
         {
             netdev_tx_owe(unit);
             return;
@@ -382,15 +387,24 @@ VOID netdev_tx_pump(NetdevUnit *unit)
         if ((flags & ANXD_S2_TXF_BATCH) != 0)
         {
             UWORD copied = 0;
-            UWORD r = netdev_tx_batch_step(unit, io, op, budget, &copied);
+            UWORD r = netdev_tx_batch_step(unit, io, op,
+                                           unit->nu_PumpBudget, &copied);
 
-            budget = (UWORD)(budget - copied);
+            if (r == NETDEV_BATCH_PAUSED && copied == 0)
+            {
+                /* Nothing fitted: where it was, and the pass is over. */
+                AddHead(&unit->nu_Writes, &io->ios2_Req.io_Message.mn_Node);
+                return;
+            }
+            /* A refusal costs a frame's worth: it took the callbacks. */
+            if (copied == 0)
+                copied = 1;
+            unit->nu_PumpBudget = (UBYTE)((copied < unit->nu_PumpBudget)
+                                          ? unit->nu_PumpBudget - copied : 0);
             if (r == NETDEV_BATCH_PAUSED)
             {
                 /* Where it was: ahead of every later write. */
                 AddHead(&unit->nu_Writes, &io->ios2_Req.io_Message.mn_Node);
-                if (copied == 0)
-                    return;
                 continue;
             }
             if (r == NETDEV_BATCH_DONE)
@@ -401,7 +415,7 @@ VOID netdev_tx_pump(NetdevUnit *unit)
         (VOID)flags;
 #endif
 
-        budget--;
+        unit->nu_PumpBudget--;
         total = netdev_tx_timed_build(unit, io, op);
         if (total == 0)
             continue;
@@ -423,7 +437,8 @@ VOID netdev_tx_pump(NetdevUnit *unit)
     }
 }
 
-/* The software interrupt's half of netdev_tx_owe(), under its Disable(). */
+/* The software interrupt's half of netdev_tx_owe(), under its Disable() and
+   out of its section's budget. */
 BOOL netdev_tx_owed(NetdevUnit *unit)
 {
     if (!unit->nu_PumpOwed)
@@ -446,6 +461,28 @@ BOOL netdev_tx_tick(NetdevUnit *unit)
         return FALSE;
     netdev_tx_pump(unit);
     return TRUE;
+}
+
+ULONG netdev_tx_service(NetdevUnit *unit)
+{
+    ULONG mine;
+
+    netdev_tx_section(unit);
+    mine = netdev_interrupt(unit);
+    (VOID)netdev_tx_owed(unit);
+    return mine;
+}
+
+/* The blank's pump: the core's tick when it retired something, else the
+   backstop above.  Out of the blank's one section, which netdev_tick_c()
+   opens at its entry. */
+VOID netdev_tx_blank(NetdevUnit *unit)
+{
+    if (unit->nu_Nic.ops->tick != NULL &&
+        unit->nu_Nic.ops->tick(&unit->nu_Nic))
+        netdev_tx_pump(unit);
+    else
+        (VOID)netdev_tx_tick(unit);
 }
 
 /* ------------------------------------------------------ the write call --- */
@@ -476,6 +513,7 @@ VOID netdev_tx_direct(NetdevUnit *unit, struct IOSana2Req *io)
 #endif
 
     Disable();
+    netdev_tx_section(unit);
     /* The command-table check is outside this critical section.  If OFFLINE
        drained the queue between that check and here, adding the write now
        would strand it on a stopped unit with no completion left to pump it. */
@@ -584,6 +622,7 @@ static VOID netdev_tx_direct_task(NetdevUnit *unit, struct IOSana2Req *io)
         unit->nu_Nic.txb_inuse >= unit->nu_Nic.txb_cnt)
     {
         Disable();
+        netdev_tx_section(unit);
         netdev_queue_tail(&unit->nu_Writes, io);
         unit->nu_Nic.tx_busy = 0;
         netdev_tx_pump(unit);
@@ -613,6 +652,7 @@ static VOID netdev_tx_direct_task(NetdevUnit *unit, struct IOSana2Req *io)
         if (!IsListEmpty(&unit->nu_Writes))
         {
             Disable();
+            netdev_tx_section(unit);
             netdev_tx_pump(unit);
             Enable();
         }
@@ -647,6 +687,7 @@ static VOID netdev_tx_direct_task(NetdevUnit *unit, struct IOSana2Req *io)
     if (!IsListEmpty(&unit->nu_Writes))
     {
         Disable();
+        netdev_tx_section(unit);
         netdev_tx_pump(unit);
         Enable();
     }

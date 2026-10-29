@@ -964,7 +964,7 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
             if (unit->nu_InIsr == 0)
             {
                 unit->nu_InIsr = 1;
-                (VOID)netdev_interrupt(unit);
+                (VOID)netdev_tx_service(unit);
                 unit->nu_InIsr = 0;
             }
             Enable();

@@ -555,8 +555,9 @@ static VOID ami_sana2_gso_complete(AmiSana2If *iface, AmiTxSlot *slot,
 }
 
 /*
- * A batch write's statistics, per frame: the children the device copied
- * were sent, the rest were not.  A write the device failed with every
+ * A batch write's statistics, per frame: the children the device committed
+ * (TxPosted) were sent, the rest were not; a copy it made and never posted
+ * is not a frame.  A write the device failed with every
  * child copied still counts its one error.  Before gso_complete(), while
  * the context still holds the block's shape.
  */

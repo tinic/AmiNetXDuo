@@ -224,6 +224,18 @@ static void h_tx_csum_shape(void)
                genet_tx_csum_same(b, shape), 0);
 }
 
+/* A run asks for completions whenever it would not fit, not only on a
+   full ring. */
+static void i_tx_run_reclaims(void)
+{
+    expect_u32("run: 49/64 in use, 16 frames: reclaim first",
+               genet_tx_run_reclaims(49, 64, 16), 1);
+    expect_u32("run: 48/64 in use, 16 frames: they fit",
+               genet_tx_run_reclaims(48, 64, 16), 0);
+    expect_u32("run: a full ring", genet_tx_run_reclaims(64, 64, 1), 1);
+    expect_u32("run: an empty ring", genet_tx_run_reclaims(0, 64, 16), 0);
+}
+
 int main(void)
 {
     a_fresh();
@@ -234,6 +246,7 @@ int main(void)
     f_tx_csum();
     g_rx_line();
     h_tx_csum_shape();
+    i_tx_run_reclaims();
 
     if (failures != 0)
     {

@@ -883,6 +883,7 @@ LONG netdev_online(NetdevUnit *unit)
     netdev_event(unit, S2EVENT_ONLINE);
 
     Disable();
+    netdev_tx_section(unit);
     netdev_tx_pump(unit);
     Enable();
 
@@ -1126,13 +1127,12 @@ ULONG netdev_soft_c(register NetdevUnit *unit __asm("a1"))
     if (unit->nu_InIsr == 0)
     {
         unit->nu_InIsr = 1;
-        if (netdev_interrupt(unit) != 0)
+        /* The service and the pass a budget-cut pump owed, one budget. */
+        if (netdev_tx_service(unit) != 0)
         {
             unit->nu_IntSeen++;
             unit->nu_IntSilent = 0;
         }
-        /* The pump pass a budget-cut one owed (netdev_tx_owe). */
-        (VOID)netdev_tx_owed(unit);
         unit->nu_InIsr = 0;
     }
     Enable();
@@ -1159,7 +1159,7 @@ ULONG netdev_server_c(register NetdevUnit *unit __asm("a1"))
     }
 
     unit->nu_InIsr = 1;
-    mine = netdev_interrupt(unit);
+    mine = netdev_tx_service(unit);
     unit->nu_InIsr = 0;
 
     if (mine != 0)
@@ -1182,6 +1182,8 @@ ULONG netdev_tick_c(register NetdevUnit *unit __asm("a1"))
     BOOL wedged = FALSE;
 
     Disable();
+    /* One pump budget for everything this blank does under the mask. */
+    netdev_tx_section(unit);
 
     /* A task mid-transmit under the tx task lock (tx_busy) keeps the core's
        reclaim off the ring, so no completion can be recorded while it holds
@@ -1215,14 +1217,10 @@ ULONG netdev_tick_c(register NetdevUnit *unit __asm("a1"))
         unit->nu_IntSilent++;
 
     /* A core with a link to poll or completions to collect, once a blank. */
-    if (unit->nu_Online && unit->nu_InIsr == 0 &&
-        unit->nu_Nic.ops->tick != NULL &&
-        unit->nu_Nic.ops->tick(&unit->nu_Nic))
-        netdev_tx_pump(unit);
-    /* Writes waiting with a slot free and nothing else to run the pump:
-       the backstop for a pass cut at its budget on a quiet wire. */
-    else if (unit->nu_Online && unit->nu_InIsr == 0)
-        (VOID)netdev_tx_tick(unit);
+    /* And writes waiting with a slot free and nothing else to run the
+       pump: the backstop for a pass cut at its budget on a quiet wire. */
+    if (unit->nu_Online && unit->nu_InIsr == 0)
+        netdev_tx_blank(unit);
 
     if (unit->nu_Online && unit->nu_IntSilent >= 10u && unit->nu_InIsr == 0 &&
         (!netdev_pcmcia_is_unit(unit) || unit->nu_Nic.running))

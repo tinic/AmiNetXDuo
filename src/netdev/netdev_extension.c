@@ -13,8 +13,8 @@ typedef char anxd_batch_header_is_8[
     (offsetof(AnxdS2RxBatch, Cookie) == 8u) ? 1 : -1];
 typedef char anxd_ext_tx_batch_at_32[
     (offsetof(AnxdS2ExtensionTx, TxBatch) == 32u) ? 1 : -1];
-typedef char anxd_ext_tx_batch_size_is_40[
-    (ANXD_S2_EXTENSION_BATCH_SIZE == 40u) ? 1 : -1];
+typedef char anxd_ext_tx_batch_size_is_44[
+    (ANXD_S2_EXTENSION_BATCH_SIZE == 44u) ? 1 : -1];
 #endif
 
 BOOL netdev_take_extension(AnxdS2Extension *ext, NetdevOpener *op,
@@ -51,10 +51,12 @@ BOOL netdev_take_extension(AnxdS2Extension *ext, NetdevOpener *op,
     {
         const AnxdS2ExtensionTx *tx = (const AnxdS2ExtensionTx *)ext;
 
-        if (tx->TxBatch != NULL && tx->TxChild != NULL)
+        if (tx->TxBatch != NULL && tx->TxChild != NULL &&
+            tx->TxPosted != NULL)
         {
-            op->op_TxBatch = (APTR)tx->TxBatch;
-            op->op_TxChild = (APTR)tx->TxChild;
+            op->op_TxBatch  = (APTR)tx->TxBatch;
+            op->op_TxChild  = (APTR)tx->TxChild;
+            op->op_TxPosted = (APTR)tx->TxPosted;
         }
     }
     if (ext->TxFlags != NULL)
@@ -110,7 +112,7 @@ ULONG netdev_extension_supported(NetdevOpener *op, const NetdevNic *nic)
        (netdev_tx.c), cooked: the shell writes each frame's link header. */
     if (nic->tx_run != NULL && nic->tx_task_lock &&
         op->op_TxBatch != NULL && op->op_TxChild != NULL &&
-        op->op_TxFlags != NULL && op->op_CopyFrom != NULL && !op->op_Raw)
+        op->op_TxPosted != NULL && op->op_TxFlags != NULL && op->op_CopyFrom != NULL && !op->op_Raw)
         supported |= ANXD_S2F_TX_BATCH;
     if ((op->op_RxFlags & ANXD_S2_RXF_VERIFIED) != 0)
         supported |= ANXD_S2F_RX_VERIFIED;

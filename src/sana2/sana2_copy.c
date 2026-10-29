@@ -1093,12 +1093,19 @@ AMIGA_ASM_ARGS ULONG ami_sana2_tx_child(APTR ios2_data, ULONG index,
     /* The whole child, from its first byte: the copy's own restart rule. */
     slot->total  = len;
     slot->cursor = NULL;
-    if (!ami_sana2_gso_copy(slot, dst, len))
-        return 0;
+    return ami_sana2_gso_copy(slot, dst, len) ? 1UL : 0UL;
+}
 
-    if (index + 1UL > slot->batch_done)
-        slot->batch_done = (UBYTE)(index + 1UL);
-    return 1;
+/* The frames the device has committed, from frame 0: the only count the
+   completion believes (ami_sana2_batch_count). */
+AMIGA_ASM_ARGS VOID ami_sana2_tx_posted(APTR ios2_data, ULONG count)
+{
+    AmiTxSlot *slot = (AmiTxSlot *)ios2_data;
+
+    if (slot == NULL || slot->batch_count == 0)
+        return;
+    slot->batch_done = (UBYTE)((count < slot->batch_count)
+                               ? count : slot->batch_count);
 }
 #endif /* AMINETXDUO_TCP_GSO */
 

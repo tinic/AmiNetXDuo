@@ -151,6 +151,16 @@ static inline BOOL genet_tx_csum_same(const UBYTE *frame, const UBYTE *shape)
                   frame[genet_tx_thl_at(frame)] == shape[6]);
 }
 
+/* Whether a run of `count` frames asks the chip what it has finished
+   first (genet_tx_run): whenever the ring's free slots are fewer than the
+   run, not only when none are.  A ring 49/64 in use has 15 free, and a
+   16-frame batch would otherwise pause with one frame left, once every
+   four batches, while the chip had long since sent what it held. */
+static inline BOOL genet_tx_run_reclaims(UWORD inuse, UWORD ring, UWORD count)
+{
+    return (BOOL)((UWORD)(ring - inuse) < count);
+}
+
 /*
  * The receive line's mask while a reader is behind.  A pass that stopped at
  * a frame whose reader had no read posted (`held`) consumed nothing, and an
