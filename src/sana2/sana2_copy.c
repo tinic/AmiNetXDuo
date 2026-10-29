@@ -455,6 +455,7 @@ BOOL ami_sana2_tx_pseudo_sum(NX_PACKET *pkt)
 }
 
 /* ------------------------------------------------------------- TCP GSO */
+#ifdef AMINETXDUO_TCP_GSO
 
 /*
  * A GSO child's frame is its parent's headers patched for the segment, the
@@ -594,13 +595,25 @@ BOOL ami_sana2_gso_parse(NX_PACKET *packet, ULONG mtu, AmiTxGso *g)
  */
 ULONG ami_sana2_gso_prepare(AmiTxSlot *slot, NX_PACKET *parent)
 {
+    AmiTxGso *g = &slot->iface->gso[slot->gso - 1];
+
+    return ami_sana2_gso_place(slot, parent, g->next_seg++);
+}
+
+/*
+ * Child `seg` into the slot.  In order the cursor only moves forward, as
+ * above; a batch's TxChild may also ask for an earlier child again, and the
+ * walk then starts over from the parent.
+ */
+ULONG ami_sana2_gso_place(AmiTxSlot *slot, NX_PACKET *parent, UWORD seg)
+{
     AmiTxGso  *g = &slot->iface->gso[slot->gso - 1];
     ULONG      seg_off;
     ULONG      seg_len;
     NX_PACKET *buf;
     LONG       start;
 
-    slot->seg_index = g->next_seg++;
+    slot->seg_index = (UBYTE)seg;
     seg_off = ami_sana2_gso_slice(g, slot->seg_index, &seg_len);
 
     if (g->cur_buf == NULL || (LONG)seg_off < g->cur_start)
@@ -641,6 +654,22 @@ ULONG ami_sana2_gso_prepare(AmiTxSlot *slot, NX_PACKET *parent)
     slot->seg_summed  = FALSE;
 
     return (ULONG)g->ihl + g->thl + seg_len;
+}
+
+/* The write length of child `seg`: its headers and slice, and on Ethernet
+   at least the 46 bytes the copy pads to (ami_sana2_tx_launch). */
+ULONG ami_sana2_gso_frame_len(const AmiSana2If *iface, const AmiTxGso *g,
+                              UWORD seg)
+{
+    ULONG seg_len;
+    ULONG len;
+
+    (VOID)ami_sana2_gso_slice(g, seg, &seg_len);
+    len = (ULONG)g->ihl + g->thl + seg_len;
+    if (iface->hw_type == S2WireType_Ethernet &&
+        len < (ULONG)(AMI_ETH_MIN_FRAME - AMI_ETH_HEADER_SIZE))
+        len = (ULONG)(AMI_ETH_MIN_FRAME - AMI_ETH_HEADER_SIZE);
+    return len;
 }
 
 static VOID ami_sana2_gso_fields(const AmiTxGso *g, UWORD seg,
@@ -1017,6 +1046,63 @@ static BOOL __attribute__((noinline)) ami_sana2_gso_copy(AmiTxSlot *slot,
 }
 
 /*
+ * TX_BATCH (aminetxduo/anxs2ext.h): the shape of a batch write, and child
+ * `index` of it, the same bytes the child's own write would have carried --
+ * the copy below is the one S2_CopyFromBuff runs for a GSO child.  Both may
+ * run while a device advances a queued write from interrupt context: loads,
+ * the cursor of this slot, and the copy, nothing else.
+ */
+AMIGA_ASM_ARGS ULONG ami_sana2_tx_batch(APTR ios2_data,
+                                        AnxdS2TxBatchInfo *info)
+{
+    const AmiTxSlot *slot = (const AmiTxSlot *)ios2_data;
+    const AmiTxGso  *g;
+
+    if (slot == NULL || info == NULL || slot->batch_count == 0 ||
+        slot->gso == AMI_SANA2_GSO_NONE)
+        return 0;
+
+    g = &slot->iface->gso[slot->gso - 1];
+    info->Count    = slot->batch_count;
+    info->SegLen   = (UWORD)ami_sana2_gso_frame_len(slot->iface, g, 0);
+    info->LastLen  = (UWORD)ami_sana2_gso_frame_len(
+        slot->iface, g, (UWORD)(slot->batch_count - 1));
+    info->Reserved = 0;
+    return slot->batch_count;
+}
+
+AMIGA_ASM_ARGS ULONG ami_sana2_tx_child(APTR ios2_data, ULONG index,
+                                        UBYTE *dst, ULONG len)
+{
+    AmiTxSlot      *slot = (AmiTxSlot *)ios2_data;
+    const AmiTxGso *g;
+
+    if (slot == NULL || dst == NULL || slot->batch_count == 0 ||
+        slot->gso == AMI_SANA2_GSO_NONE || slot->packet == NULL ||
+        index >= slot->batch_count)
+        return 0;
+
+    g = &slot->iface->gso[slot->gso - 1];
+    if (len != ami_sana2_gso_frame_len(slot->iface, g, (UWORD)index))
+        return 0;
+
+    /* Another child than the one placed: its slice, and its sum to come. */
+    if (index != slot->seg_index)
+        (VOID)ami_sana2_gso_place(slot, slot->packet, (UWORD)index);
+
+    /* The whole child, from its first byte: the copy's own restart rule. */
+    slot->total  = len;
+    slot->cursor = NULL;
+    if (!ami_sana2_gso_copy(slot, dst, len))
+        return 0;
+
+    if (index + 1UL > slot->batch_done)
+        slot->batch_done = (UBYTE)(index + 1UL);
+    return 1;
+}
+#endif /* AMINETXDUO_TCP_GSO */
+
+/*
  * S2_CopyFromBuff.  `from` is this CMD_WRITE's ios2_Data, the AmiTxSlot.  A
  * device may take the frame in one call or several and may restart the whole
  * transfer on a retry, so the cursor rewinds to the start of the packet for any
@@ -1037,9 +1123,11 @@ BOOL ami_sana2_copy_from_buff(register APTR to   __asm("a0"),
     if (len > slot->total)
         return FALSE;
 
+#ifdef AMINETXDUO_TCP_GSO
     /* A GSO child is cut from its parent as it is copied. */
     if (slot->gso != AMI_SANA2_GSO_NONE)
         return ami_sana2_gso_copy(slot, out, len);
+#endif
 
     /* Rewind on a restart, or when the cursor cannot cover the request. */
     if (slot->cursor == NULL || slot->consumed >= slot->total ||

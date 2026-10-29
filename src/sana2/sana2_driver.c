@@ -197,6 +197,7 @@ static UWORD ami_sana2_ether_type(NX_IP_DRIVER *req, NX_PACKET *packet)
 }
 
 /* ---------------------------------------------------------------- TCP GSO */
+#ifdef AMINETXDUO_TCP_GSO
 
 /*
  * The most segments a GSO block may carry on this interface, or 0 for none
@@ -295,6 +296,29 @@ UINT ami_sana2_gso_max_segs(NX_INTERFACE *interface_ptr)
     iface = (const AmiSana2If *)interface_ptr->nx_interface_additional_link_info;
     return (iface != NULL) ? (UINT)iface->gso_max_segs : 0;
 }
+#else /* !AMINETXDUO_TCP_GSO */
+
+/* Without the option no interface carries the capability: the core never
+   hands one a block, and asks for 1, a segment at a time. */
+static VOID ami_sana2_gso_advertise(AmiSana2If *iface,
+                                    NX_INTERFACE *interface_ptr, BOOL up)
+{
+    (VOID)iface;
+    (VOID)interface_ptr;
+    (VOID)up;
+}
+
+VOID ami_sana2_gso_free(AmiSana2If *iface)
+{
+    (VOID)iface;
+}
+
+UINT ami_sana2_gso_max_segs(NX_INTERFACE *interface_ptr)
+{
+    (VOID)interface_ptr;
+    return 1;
+}
+#endif /* AMINETXDUO_TCP_GSO */
 
 /* --------------------------------------------------------------- removal */
 

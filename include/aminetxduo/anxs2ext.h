@@ -52,6 +52,10 @@
    few more frames arrive, or its own backstop, so the frames leave the
    wire together.  Negotiated as ANXD_S2F_TX_MORE. */
 #define ANXD_S2_TXF_MORE        0x40
+/* This write is a batch (ANXD_S2F_TX_BATCH, TxBatch and TxChild below):
+   one request, several wire frames.  Never set without the bit accepted.
+   0x20 is not assigned: an experimental build used it. */
+#define ANXD_S2_TXF_BATCH       0x10
 
 /*
  * The callbacks below cross between separately built binaries, a driver from
@@ -81,6 +85,50 @@ typedef ANXD_S2_STDARGS UBYTE *(*AnxdS2RxDirect)(APTR ios2_data, ULONG len);
 typedef ANXD_S2_STDARGS VOID   (*AnxdS2RxFilled)(APTR ios2_data, ULONG len,
                                                  ULONG sum, UBYTE flags);
 typedef ANXD_S2_STDARGS UBYTE  (*AnxdS2TxFlags)(APTR ios2_data);
+
+/*
+ * TX_BATCH: one CMD_WRITE, several wire frames.
+ *
+ * A write whose TxFlags carries ANXD_S2_TXF_BATCH is `Count` frames, 2 to
+ * ANXD_S2_TX_BATCH_MAX, that leave the wire in order and back to back.  The
+ * driver asks TxBatch(ios2_data, info) for the shape: it fills *info and
+ * returns Count (0: not a batch after all, and the write is the ordinary
+ * one frame of ios2_DataLength).  Frames 0 .. Count-2 are SegLen bytes and
+ * the last is LastLen, each the payload of one frame as an ordinary
+ * cooked write's ios2_DataLength would be: link header excluded, Ethernet
+ * padding included, so neither is under 46.  ios2_DataLength is SegLen.
+ * Every frame has the request's ios2_DstAddr and ios2_PacketType.
+ *
+ * TxChild(ios2_data, index, dst, len) copies frame `index` (len = its
+ * length above) to `dst` and returns non-zero, or 0 when it cannot; it
+ * takes the place of S2_CopyFromBuff for a batch.  Any index of the
+ * request, in any order, any number of times: a second call for an index
+ * copies the same bytes again.  The frames' checksums are as TxFlags
+ * says, for every frame.
+ *
+ * Per-write state is the driver's and the request's, never the record's:
+ * the driver keeps the request, with its own cursor, until every frame is
+ * copied, then answers it once.  A ring that cannot take them all keeps the
+ * request where it is, at the head of the unit's write queue, so it
+ * resumes ahead of any later write.  AbortIO() and CloseDevice() answer it
+ * IOERR_ABORTED with the frames copied so far gone to the wire; the driver
+ * holds nothing of the opener's after its answer.  Statistics count frames,
+ * not batches.
+ */
+typedef struct AnxdS2TxBatchInfo
+{
+    UWORD   Count;
+    UWORD   SegLen;
+    UWORD   LastLen;
+    UWORD   Reserved;       /* 0 */
+} AnxdS2TxBatchInfo;
+
+#define ANXD_S2_TX_BATCH_MAX    16u
+
+typedef ANXD_S2_STDARGS ULONG  (*AnxdS2TxBatch)(APTR ios2_data,
+                                                AnxdS2TxBatchInfo *info);
+typedef ANXD_S2_STDARGS ULONG  (*AnxdS2TxChild)(APTR ios2_data, ULONG index,
+                                                UBYTE *dst, ULONG len);
 
 /*
  * ONE VERSIONED NEGOTIATION TAG.
@@ -129,6 +177,10 @@ typedef ANXD_S2_STDARGS UBYTE  (*AnxdS2TxFlags)(APTR ios2_data);
 #define ANXD_S2F_TX_QUICK       (1UL << 7)
 #define ANXD_S2F_RX_BATCH       (1UL << 8)
 #define ANXD_S2F_TX_MORE        (1UL << 9)
+/* Bit 10 is reserved and never assigned: an experimental build used it
+   with a different record.  TX_BATCH needs a record whose Size covers
+   TxChild (AnxdS2ExtensionTx below). */
+#define ANXD_S2F_TX_BATCH       (1UL << 11)
 #define ANXD_S2F_ALL            (ANXD_S2F_RX_DIRECT | \
                                  ANXD_S2F_RX_LINK_HDR | \
                                  ANXD_S2F_RX_VERIFIED | \
@@ -138,7 +190,8 @@ typedef ANXD_S2_STDARGS UBYTE  (*AnxdS2TxFlags)(APTR ios2_data);
                                  ANXD_S2F_RX_CAPACITY | \
                                  ANXD_S2F_TX_QUICK | \
                                  ANXD_S2F_RX_BATCH | \
-                                 ANXD_S2F_TX_MORE)
+                                 ANXD_S2F_TX_MORE | \
+                                 ANXD_S2F_TX_BATCH)
 
 /*
  * RxDirect(cookie, len): where the payload of the frame now being received
@@ -178,6 +231,23 @@ typedef struct AnxdS2Extension
  * minimum a driver accepts. */
 #define ANXD_S2_EXTENSION_SIZE \
     (offsetof(AnxdS2Extension, TxFlags) + sizeof(AnxdS2TxFlags))
+
+/* The version-3 record with the fields appended after it, for an opener
+ * that offers TX_BATCH: the frozen prefix unchanged, then two reserved
+ * pointers the opener leaves NULL and a driver never reads (an
+ * experimental build put other callbacks there), then the batch pair.  A
+ * driver reads TxBatch and TxChild only when Size is at least
+ * ANXD_S2_EXTENSION_BATCH_SIZE, 40 bytes on m68k. */
+typedef struct AnxdS2ExtensionTx
+{
+    AnxdS2Extension Base;           /*  0 */
+    APTR            Reserved[2];    /* 24 */
+    AnxdS2TxBatch   TxBatch;        /* 32 */
+    AnxdS2TxChild   TxChild;        /* 36 */
+} AnxdS2ExtensionTx;
+
+#define ANXD_S2_EXTENSION_BATCH_SIZE \
+    (offsetof(AnxdS2ExtensionTx, TxChild) + sizeof(AnxdS2TxChild))
 
 /* ANXD_CMD_RX_POLL: "hand over what you are holding for my reads".
  *

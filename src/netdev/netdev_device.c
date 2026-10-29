@@ -571,34 +571,6 @@ static VOID nd_time_report(VOID)
 }
 #endif
 
-/*
- * A 6-byte Ethernet address as a longword and a word.  Both ends must be even:
- * the staging buffer is AllocMem'd and ios2_DstAddr/ios2_SrcAddr sit at even
- * offsets in the request.
- */
-static VOID nd_addr6(UBYTE *to, const UBYTE *from)
-{
-    *(ULONG *)(APTR)to        = *(const ULONG *)(CONST_APTR)from;
-    *(UWORD *)(APTR)(to + 4)  = *(const UWORD *)(CONST_APTR)(from + 4);
-}
-
-static VOID nd_zero(UBYTE *p, ULONG n)
-{
-    /* The transmit pad is the hot caller and always lands on an even offset
-       of nu_TxBuf.  Everything else here is init-time and does not care. */
-    if ((((unsigned long)(APTR)p) & 1u) == 0)
-    {
-        while (n >= 2)
-        {
-            *(UWORD *)(APTR)p = 0;
-            p += 2;
-            n -= 2;
-        }
-    }
-    while (n-- != 0)
-        *p++ = 0;
-}
-
 /* NewList() lives in amiga.lib, which a -nostartfiles image does not link. */
 /*
  * netdev_reply(), netdev_rebuild_filter() and netdev_drop_writes() were here
@@ -832,134 +804,11 @@ static VOID netdev_rx(APTR arg, const UBYTE *frame, UWORD len)
 
 /* ------------------------------------------------------------- transmit --- */
 
-/*
- * Frame one CMD_WRITE into nu_TxBuf.  Returns the wire length, or 0 with the
- * request already answered.
- */
-static UWORD netdev_tx_build(NetdevUnit *unit, struct IOSana2Req *io,
-                             NetdevOpener *op)
-{
-    UBYTE *buf;
-    ULONG  len = io->ios2_DataLength;
-    UWORD  total;
-
-    /* A core whose transmit buffer the CPU can address takes the frame
-       directly.  Everything else is framed in the unit's own staging buffer
-       and copied across by ops->tx. */
-    buf = (unit->nu_Nic.tx_at != NULL) ? unit->nu_Nic.tx_at(&unit->nu_Nic)
-                                       : NULL;
-    if (buf == NULL)
-        buf = (UBYTE *)unit->nu_TxBuf;
-    unit->nu_TxAt = buf;
-
-    if (netdev_io_is_raw(op, io))
-    {
-        if (len < NETDEV_HDR_LEN || len > NETDEV_FRAME_MAX)
-        {
-            netdev_reply(io, S2ERR_MTU_EXCEEDED, S2WERR_GENERIC_ERROR);
-            netdev_event(unit, S2EVENT_ERROR | S2EVENT_TX);
-            return 0;
-        }
-        if (!netdev_copy_call(op->op_CopyFrom, buf, io->ios2_Data, len))
-        {
-            netdev_reply(io, S2ERR_NO_RESOURCES, S2WERR_BUFF_ERROR);
-            netdev_event(unit,
-                         S2EVENT_ERROR | S2EVENT_TX | S2EVENT_BUFF);
-            return 0;
-        }
-        total = (UWORD)len;
-    }
-    else
-    {
-        /*
-         * nu_TxBuf is the unit's last field, so an unbounded ios2_DataLength
-         * copies past the buffer and past the whole unit.
-         */
-        if (len > NETDEV_MTU)
-        {
-            netdev_reply(io, S2ERR_MTU_EXCEEDED, S2WERR_GENERIC_ERROR);
-            /* slip.device posts S2EVENT_TX for exactly this refusal and
-               cnet.device posts it from its .toobig arm. */
-            netdev_event(unit, S2EVENT_ERROR | S2EVENT_TX);
-            return 0;
-        }
-
-        /* Aligned moves, as on the receive side: nu_TxBuf is ULONG[] and both
-           addresses sit at even offsets. */
-        nd_addr6(buf, io->ios2_DstAddr);
-        nd_addr6(buf + NETDEV_ADDR_LEN, unit->nu_Nic.mac);
-        *(UWORD *)(APTR)(buf + 12) = (UWORD)io->ios2_PacketType;
-
-        if (len != 0 &&
-            !netdev_copy_call(op->op_CopyFrom, buf + NETDEV_HDR_LEN,
-                              io->ios2_Data, len))
-        {
-            netdev_reply(io, S2ERR_NO_RESOURCES, S2WERR_BUFF_ERROR);
-            netdev_event(unit, S2EVENT_ERROR | S2EVENT_TX | S2EVENT_BUFF);
-            return 0;
-        }
-        total = (UWORD)(len + NETDEV_HDR_LEN);
-    }
-
-    /*
-     * The chip pads a short frame to the Ethernet minimum out of whatever is in
-     * the buffer, so the padding must be written: left out, up to 46 bytes of
-     * the last frame go on the wire behind every ARP.
-     */
-    if (total < NETDEV_FRAME_MIN)
-    {
-        nd_zero(buf + total, (ULONG)(NETDEV_FRAME_MIN - total));
-        total = NETDEV_FRAME_MIN;
-    }
-
-    return total;
-}
-
-/* The chip half, and the only half that needs the mask. */
-static LONG netdev_tx_issue(NetdevUnit *unit, struct IOSana2Req *io,
-                            NetdevOpener *op, UWORD total)
-{
-    NetdevTrack *tr;
-    LONG         rc;
-
-    /* Per-write metadata comes through the versioned extension, never through
-       an unassigned bit in Exec/SANA-II's io_Flags.  The callback is a plain
-       load from the opener-owned request cookie and is safe when a queued
-       write advances from interrupt context. */
-    unit->nu_Nic.tx_csum = 0;
-    unit->nu_Nic.tx_more = 0;
-    /* Only when a transmit feature was accepted (ANX-013): an opener that
-       supplied TxFlags but was granted nothing it governs is not called. */
-    if (op->op_TxFlags != NULL &&
-        (op->op_Extensions & (ANXD_S2F_TX_CSUM_TCP | ANXD_S2F_TX_CSUM_UDP |
-                              ANXD_S2F_TX_MORE)) != 0)
-    {
-        UBYTE flags = ((AnxdS2TxFlags)op->op_TxFlags)(io->ios2_Data);
-
-        unit->nu_Nic.tx_csum = (UBYTE)(flags & op->op_TxCsum);
-        /* A run in progress: a core with a flush may hold its start. */
-        unit->nu_Nic.tx_more = (UBYTE)((op->op_Extensions &
-                                        ANXD_S2F_TX_MORE) != 0 &&
-                                       (flags & ANXD_S2_TXF_MORE) != 0 &&
-                                       unit->nu_Nic.tx_flush != NULL);
-    }
-    rc = unit->nu_Nic.ops->tx(&unit->nu_Nic, unit->nu_TxAt, total);
-    if (rc != 0)
-        return rc;
-
-    unit->nu_Stats.PacketsSent++;
-    tr = netdev_track_find(op, io->ios2_PacketType);
-    if (tr != NULL)
-    {
-        tr->st.PacketsSent++;
-        tr->st.BytesSent += total;
-    }
-
-    return 0;
-}
-
+/* The write path -- framing, issue, the queue pump and the task-level
+   transmit -- is netdev_tx.c, which a host test can compile.  The clock's
+   brackets around it stay here with the clock. */
 #ifdef NETDEV_TIME
-static UWORD netdev_tx_timed_build(NetdevUnit *unit, struct IOSana2Req *io,
+UWORD netdev_tx_timed_build(NetdevUnit *unit, struct IOSana2Req *io,
                                    NetdevOpener *op)
 {
     ULONG t = nd_now();
@@ -971,7 +820,7 @@ static UWORD netdev_tx_timed_build(NetdevUnit *unit, struct IOSana2Req *io,
     return n;
 }
 
-static LONG netdev_tx_timed_issue(NetdevUnit *unit, struct IOSana2Req *io,
+LONG netdev_tx_timed_issue(NetdevUnit *unit, struct IOSana2Req *io,
                                   NetdevOpener *op, UWORD total)
 {
     ULONG t  = nd_now();
@@ -983,244 +832,7 @@ static LONG netdev_tx_timed_issue(NetdevUnit *unit, struct IOSana2Req *io,
 
     return r;
 }
-#else
-#define netdev_tx_timed_build(u, i, o)      netdev_tx_build((u), (i), (o))
-#define netdev_tx_timed_issue(u, i, o, t)   netdev_tx_issue((u), (i), (o), (t))
 #endif
-
-/*
- * Drain the queue into whatever transmit buffers the chip has free.  The caller
- * holds Disable().  Stands off while a task-level build owns nu_TxBuf; that
- * builder pumps again once its own frame is issued, so nothing is stranded.
- */
-VOID netdev_tx_pump(NetdevUnit *unit)
-{
-    /* A task is mid-transmit under Forbid() (tx_task_lock): it pumps for
-       itself when it is done, and nothing here may touch the ring now. */
-    if (unit->nu_Nic.tx_busy)
-        return;
-
-    /* A ring that only looks full: let the core retire what the chip has
-       finished before this pump is judged to have nowhere to go. */
-    if (unit->nu_Nic.txb_inuse >= unit->nu_Nic.txb_cnt &&
-        unit->nu_Nic.tx_reclaim != NULL)
-        (VOID)unit->nu_Nic.tx_reclaim(&unit->nu_Nic);
-
-    while (unit->nu_Nic.txb_inuse < unit->nu_Nic.txb_cnt)
-    {
-        struct IOSana2Req *io;
-        NetdevOpener      *op;
-        UWORD              total;
-        LONG               rc;
-
-        if (unit->nu_TxBuilding || IsListEmpty(&unit->nu_Writes))
-            return;
-
-        io = (struct IOSana2Req *)RemHead(&unit->nu_Writes);
-        op = NETDEV_IO_OPENER(io);
-
-        total = netdev_tx_timed_build(unit, io, op);
-        if (total == 0)
-            continue;
-
-        rc = netdev_tx_timed_issue(unit, io, op, total);
-        if (rc == DP8390_TX_BUSY)
-        {
-            AddHead(&unit->nu_Writes, &io->ios2_Req.io_Message.mn_Node);
-            return;
-        }
-        if (rc != 0)
-        {
-            netdev_reply(io, S2ERR_TX_FAILURE, S2WERR_GENERIC_ERROR);
-            netdev_event(unit, S2EVENT_ERROR | S2EVENT_TX);
-            continue;
-        }
-
-        netdev_reply(io, 0, 0);
-    }
-}
-
-/*
- * From BeginIO at task level.  Claim nu_TxBuf under the mask, frame outside it,
- * take the mask again only for the chip: the opener's CopyFrom is 135 us of the
- * 219 us a transmit spends here and must not run with interrupts off.
- */
-#if NETDEV_HAS_TX_TASK_LOCK
-static VOID netdev_tx_direct_task(NetdevUnit *unit, struct IOSana2Req *io);
-#endif
-
-VOID netdev_tx_direct(NetdevUnit *unit, struct IOSana2Req *io)
-{
-    NetdevOpener *op = NETDEV_IO_OPENER(io);
-    UWORD         total;
-    LONG          rc;
-
-#if NETDEV_HAS_TX_TASK_LOCK
-    /* The GENET and ZZ9000 cores ask for this, and only their images carry
-       it: anxnet.device's cores keep the arm below and its image its size. */
-    if (unit->nu_Nic.tx_task_lock)
-    {
-        netdev_tx_direct_task(unit, io);
-        return;
-    }
-#endif
-
-    Disable();
-    /* The command-table check is outside this critical section.  If OFFLINE
-       drained the queue between that check and here, adding the write now
-       would strand it on a stopped unit with no completion left to pump it. */
-    if (!unit->nu_Online || !unit->nu_Nic.running)
-    {
-        Enable();
-        netdev_reply(io, S2ERR_OUTOFSERVICE, S2WERR_UNIT_OFFLINE);
-        return;
-    }
-
-    /* Same as the pump: a full-looking ring is asked about before a write
-       is queued behind it. */
-    if (unit->nu_Nic.txb_inuse >= unit->nu_Nic.txb_cnt &&
-        unit->nu_Nic.tx_reclaim != NULL)
-        (VOID)unit->nu_Nic.tx_reclaim(&unit->nu_Nic);
-
-    if (unit->nu_TxBuilding || !IsListEmpty(&unit->nu_Writes) ||
-        unit->nu_Nic.txb_inuse >= unit->nu_Nic.txb_cnt)
-    {
-        netdev_queue_tail(&unit->nu_Writes, io);
-        netdev_tx_pump(unit);
-        Enable();
-        return;
-    }
-    unit->nu_TxBuilding = 1;
-    if (!unit->nu_Nic.tx_short_build)
-    {
-        Enable();
-        total = netdev_tx_timed_build(unit, io, op);
-        Disable();
-    }
-    else
-    {
-        /* One section: the copy is cheaper than the mask on this machine. */
-        total = netdev_tx_timed_build(unit, io, op);
-    }
-    unit->nu_TxBuilding = 0;
-    if (total == 0)
-    {
-        netdev_tx_pump(unit);       /* the build failed and answered io */
-        Enable();
-        return;
-    }
-
-    rc = netdev_tx_timed_issue(unit, io, op, total);
-    if (rc == DP8390_TX_BUSY)
-    {
-        netdev_queue_head(&unit->nu_Writes, io);
-        Enable();
-        return;
-    }
-    netdev_tx_pump(unit);           /* anything queued while we built */
-    Enable();
-
-    if (rc != 0)
-    {
-        netdev_reply(io, S2ERR_TX_FAILURE, S2WERR_GENERIC_ERROR);
-        netdev_event(unit, S2EVENT_ERROR | S2EVENT_TX);
-    }
-    else
-    {
-        netdev_reply(io, 0, 0);
-    }
-}
-
-/*
- * The same write for a core whose interrupt never produces (tx_task_lock):
- * Forbid() keeps other tasks out, tx_busy keeps the interrupt's reclaim and
- * the blank's pump off the ring for the whole of the build and the issue,
- * and Disable() is taken only around the unit's write list, which the pump
- * shares -- the rare path, a ring that is full.  On Emu68 the Disable()
- * pair this replaces was a 5.5 us trap per frame against a 0.4 us copy.
- */
-#if NETDEV_HAS_TX_TASK_LOCK
-static VOID netdev_tx_direct_task(NetdevUnit *unit, struct IOSana2Req *io)
-{
-    NetdevOpener *op = NETDEV_IO_OPENER(io);
-    UWORD         total;
-    LONG          rc;
-    BOOL          queued = FALSE;
-
-    Forbid();
-    unit->nu_Nic.tx_busy = 1;
-
-    if (!unit->nu_Online || !unit->nu_Nic.running)
-    {
-        unit->nu_Nic.tx_busy = 0;
-        Permit();
-        netdev_reply(io, S2ERR_OUTOFSERVICE, S2WERR_UNIT_OFFLINE);
-        return;
-    }
-
-    /* A full-looking ring is asked about first: the reclaim is this task's
-       now, the interrupt's stands off. */
-    if (unit->nu_Nic.txb_inuse >= unit->nu_Nic.txb_cnt &&
-        unit->nu_Nic.tx_reclaim != NULL)
-        (VOID)unit->nu_Nic.tx_reclaim(&unit->nu_Nic);
-
-    /* Behind whatever the blank's pump still holds, or into a full ring:
-       onto the list, under the mask the pump takes for it. */
-    if (unit->nu_TxBuilding || !IsListEmpty(&unit->nu_Writes) ||
-        unit->nu_Nic.txb_inuse >= unit->nu_Nic.txb_cnt)
-    {
-        Disable();
-        netdev_queue_tail(&unit->nu_Writes, io);
-        unit->nu_Nic.tx_busy = 0;
-        netdev_tx_pump(unit);
-        Enable();
-        Permit();
-        return;
-    }
-
-    unit->nu_TxBuilding = 1;
-    total = netdev_tx_timed_build(unit, io, op);
-    if (total != 0)
-    {
-        rc = netdev_tx_timed_issue(unit, io, op, total);
-        if (rc == DP8390_TX_BUSY)
-        {
-            Disable();
-            netdev_queue_head(&unit->nu_Writes, io);
-            Enable();
-            queued = TRUE;
-        }
-    }
-    else
-    {
-        rc = 0;                     /* the build failed and answered io */
-        queued = TRUE;
-    }
-    unit->nu_TxBuilding = 0;
-    unit->nu_Nic.tx_busy = 0;
-
-    /* Anything the blank queued while this task held the ring. */
-    if (!IsListEmpty(&unit->nu_Writes))
-    {
-        Disable();
-        netdev_tx_pump(unit);
-        Enable();
-    }
-    Permit();
-
-    if (queued)
-        return;
-    if (rc != 0)
-    {
-        netdev_reply(io, S2ERR_TX_FAILURE, S2WERR_GENERIC_ERROR);
-        netdev_event(unit, S2EVENT_ERROR | S2EVENT_TX);
-    }
-    else
-    {
-        netdev_reply(io, 0, 0);
-    }
-}
-#endif /* NETDEV_HAS_TX_TASK_LOCK */
 
 /* ------------------------------------------------------------- the filter -- */
 
@@ -1307,6 +919,7 @@ static VOID netdev_set_offline(NetdevUnit *unit, ULONG event, BOOL stop)
     {
         struct IOSana2Req *io = (struct IOSana2Req *)RemHead(&unit->nu_Writes);
 
+        netdev_tx_forget(unit, io);
         netdev_reply(io, S2ERR_OUTOFSERVICE, S2WERR_UNIT_OFFLINE);
     }
     Enable();
@@ -1518,6 +1131,8 @@ ULONG netdev_soft_c(register NetdevUnit *unit __asm("a1"))
             unit->nu_IntSeen++;
             unit->nu_IntSilent = 0;
         }
+        /* The pump pass a budget-cut one owed (netdev_tx_owe). */
+        (VOID)netdev_tx_owed(unit);
         unit->nu_InIsr = 0;
     }
     Enable();
@@ -1604,6 +1219,10 @@ ULONG netdev_tick_c(register NetdevUnit *unit __asm("a1"))
         unit->nu_Nic.ops->tick != NULL &&
         unit->nu_Nic.ops->tick(&unit->nu_Nic))
         netdev_tx_pump(unit);
+    /* Writes waiting with a slot free and nothing else to run the pump:
+       the backstop for a pass cut at its budget on a quiet wire. */
+    else if (unit->nu_Online && unit->nu_InIsr == 0)
+        (VOID)netdev_tx_tick(unit);
 
     if (unit->nu_Online && unit->nu_IntSilent >= 10u && unit->nu_InIsr == 0 &&
         (!netdev_pcmcia_is_unit(unit) || unit->nu_Nic.running))

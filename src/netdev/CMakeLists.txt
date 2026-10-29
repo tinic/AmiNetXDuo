@@ -33,6 +33,7 @@ set(NETDEV_CORE_SOURCES
     netdev_direct.c     # claim/completion half of the single-copy RX path
     netdev_verify.c     # stateless IPv4/IPv6 checksum verdict
     netdev_queue.c      # queued IORequest invariants, host-testable
+    netdev_tx.c         # the write path and its pump, host-testable
     netdev_cmds.c       # the S2_* table
     netdev_event.c      # S2_ONEVENT delivery and S2_PacketFilter, host-testable
     netdev_watchdog.c   # progress clock for a full transmit ring
@@ -765,6 +766,29 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(test_netdev_direct PRIVATE -Wall -Wextra)
 
     add_test(NAME netdev_direct COMMAND test_netdev_direct)
+
+    # The write path and its pump, netdev_tx.c, against a fake ring: a batch
+    # write (ANXD_S2F_TX_BATCH) paused at the head of the queue and resumed
+    # in order, answered once, aborted by a close; and the masked pump pass
+    # held to NETDEV_PUMP_FRAMES with what it leaves still going out.
+    add_executable(test_netdev_tx
+        test/test_netdev_tx.c
+        netdev_tx.c
+        netdev_queue.c
+        netdev_unit.c
+        netdev_mcaf.c)
+
+    target_include_directories(test_netdev_tx PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_SOURCE_DIR}/src/sana2"
+        "${CMAKE_CURRENT_SOURCE_DIR}/test/shim"
+        "${CMAKE_SOURCE_DIR}/tests/sana2/host/shim"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+    target_compile_options(test_netdev_tx PRIVATE -Wall -Wextra)
+
+    add_test(NAME netdev_tx COMMAND test_netdev_tx)
 
     # The private ABI is one size/version-gated TAG_USER record.  Keep its
     # parser host-visible so a field addition cannot silently make an old or

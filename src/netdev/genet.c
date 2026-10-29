@@ -91,7 +91,16 @@ extern struct ExecBase *SysBase;
 #ifndef GE_RX_PASS_MAX
 #define GE_RX_PASS_MAX  32
 #endif
-#define GE_TX_RING      32
+/*
+ * Transmit descriptors, and the bounce buffers behind them.  64 and not
+ * 32: a GSO block arrives as one batch of up to 16 frames
+ * (ANXD_S2F_TX_BATCH), and with 32 a few blocks in flight filled the ring
+ * and every write behind them took the queued path (the 2026-10-29 TX
+ * profile, prof3: 1.0 us a frame in the full-ring path; prof4's 64-slot
+ * ring had none).  64 x GE_BUFSZ is 64 KB more of the core's allocation
+ * than 32 was.
+ */
+#define GE_TX_RING      64
 /*
  * How many writes of one run may wait for company before the ring is
  * kicked anyway (ANXD_S2_TXF_MORE, anxs2ext.h).  The peer acknowledges a
@@ -551,6 +560,28 @@ __asm__(
 "    bne 1b\n"
 "    rte\n"
 /*
+ * The same for two ranges in one supervisor entry, a0 = { first, pages,
+ * first, pages }, the second count possibly 0: a transmit kick whose frames
+ * wrap the ring's end is two ranges and one trap.
+ */
+"    .globl _ge_sup_cpushp2\n"
+"_ge_sup_cpushp2:\n"
+"    move.l %a0,%a1\n"
+"    move.l (%a1)+,%a0\n"
+"    move.l (%a1)+,%d0\n"
+"2:  cpushp %dc,(%a0)\n"
+"    add.l #4096,%a0\n"
+"    subq.l #1,%d0\n"
+"    bne 2b\n"
+"    move.l (%a1)+,%a0\n"
+"    move.l (%a1)+,%d0\n"
+"    beq 4f\n"
+"3:  cpushp %dc,(%a0)\n"
+"    add.l #4096,%a0\n"
+"    subq.l #1,%d0\n"
+"    bne 3b\n"
+"4:  rte\n"
+/*
  * VOID ge_sup_pages_call(first, pages, sysbase): Supervisor(ge_sup_cpushp)
  * with a0 = first, d0 = pages.  Out of line, saving a5 and a6 itself, for the
  * reason nd_super_call() in netdev_cache.c gives: a register variable pinned
@@ -566,8 +597,21 @@ __asm__(
 "    jsr -30(%a6)\n"                /* Supervisor() */
 "    movem.l (%sp)+,%a5-%a6\n"
 "    rts\n"
+/* VOID ge_sup_pages2_call(ranges, sysbase): Supervisor(ge_sup_cpushp2). */
+"    .globl _ge_sup_pages2_call\n"
+"_ge_sup_pages2_call:\n"
+"    movem.l %a5-%a6,-(%sp)\n"
+"    move.l 12(%sp),%a0\n"          /* ranges  */
+"    move.l 16(%sp),%a6\n"          /* sysbase */
+"    lea _ge_sup_cpushp2(%pc),%a5\n"
+"    jsr -30(%a6)\n"                /* Supervisor() */
+"    movem.l (%sp)+,%a5-%a6\n"
+"    rts\n"
 );
 extern VOID ge_sup_cpushp(VOID);
+extern VOID ge_sup_cpushp2(VOID);
+extern AMIGA_ASM_ARGS VOID ge_sup_pages2_call(const ULONG *ranges,
+                                              struct ExecBase *sysbase);
 /* The asm above reads its arguments at 12..20(sp), so the stack pin
    (aminetxduo/asm_abi.h). */
 extern AMIGA_ASM_ARGS VOID ge_sup_pages_call(ULONG first, ULONG pages,
@@ -594,6 +638,32 @@ static VOID ge_cache(NetdevNic *nic, APTR addr, ULONG len)
     }
 
     CacheClearE(addr, len, CACRF_ClearD);
+}
+
+/* Two ranges, one supervisor entry.  `len2` may be 0. */
+static VOID ge_cache2(NetdevNic *nic, APTR addr, ULONG len, APTR addr2,
+                      ULONG len2)
+{
+    GenetCore *c = GE(nic);
+    ULONG      r[4];
+
+    if (!c->cache)
+        return;
+    nic->core_stat[GE_ST_CACHE]++;
+
+    if (c->pageops)
+    {
+        r[0] = genet_page_first((ULONG)addr);
+        r[1] = genet_page_count((ULONG)addr, len);
+        r[2] = (len2 != 0) ? genet_page_first((ULONG)addr2) : 0;
+        r[3] = (len2 != 0) ? genet_page_count((ULONG)addr2, len2) : 0;
+        ge_sup_pages2_call(r, SysBase);
+        return;
+    }
+
+    CacheClearE(addr, len, CACRF_ClearD);
+    if (len2 != 0)
+        CacheClearE(addr2, len2, CACRF_ClearD);
 }
 
 /* ---------------------------------------------------------------- link --- */
@@ -1472,9 +1542,10 @@ static VOID ge_tx_kick(NetdevNic *nic)
         }
         else
         {
-            ge_cache(nic, c->tx_buf + (ULONG)first * GE_BUFSZ,
-                     (ULONG)room * GE_BUFSZ);
-            ge_cache(nic, c->tx_buf, (ULONG)(n - room) * GE_BUFSZ);
+            /* Across the ring's end: both ranges in one trap. */
+            ge_cache2(nic, c->tx_buf + (ULONG)first * GE_BUFSZ,
+                      (ULONG)room * GE_BUFSZ, c->tx_buf,
+                      (ULONG)(n - room) * GE_BUFSZ);
         }
         GE_P_ADD(nic, GE_ST_P_TXCACHE_US, pk);
     }
@@ -1600,6 +1671,102 @@ static LONG genet_tx_body(NetdevNic *nic, const UBYTE *frame, UWORD len)
         nic->core_stat[GE_ST_TX_HELD]++;
 
     return 0;
+}
+
+/*
+ * ANXD_S2F_TX_BATCH (nic->tx_run, netdev_nic.h): frames of one batch write
+ * built straight into the ring's buffers by the shell's fill, descriptors
+ * written as genet_tx_body() writes them, then one kick -- one page push
+ * over the span, one producer write -- for all of them.  The checksum
+ * block's word is worked out from the first frame and reused while the
+ * next frame's header has the same shape (genet_tx_csum_same): the
+ * children of a block differ only in lengths, IDs, sequence numbers and
+ * sums, none of which the word depends on, and a frame that differs gets
+ * its own.  Held frames of a run are kicked before the ring is called full
+ * (only a kicked frame can be retired).
+ */
+static UWORD genet_tx_run(NetdevNic *nic, UWORD first, UWORD count,
+                          UWORD (*fill)(APTR arg, UWORD index, UBYTE *buf),
+                          APTR arg, UBYTE *failed)
+{
+    GenetCore *c = GE(nic);
+    UBYTE      shape[GENET_TX_SHAPE_LEN];
+    ULONG      info = 0;
+    BOOL       have = FALSE;
+    UWORD      room;
+    UWORD      done = 0;
+
+    *failed = 0;
+    if (!nic->running)
+    {
+        *failed = 1;
+        return 0;
+    }
+
+    if (nic->txb_inuse >= GE_TX_RING)
+    {
+        ge_tx_kick(nic);
+        (VOID)ge_txintr(nic);
+    }
+    room = (UWORD)(GE_TX_RING - nic->txb_inuse);
+    if (count > room)
+        count = room;
+
+    while (done < count)
+    {
+        UWORD  idx  = genet_ring_slot(c->tx_pidx, GE_TX_RING);
+        UBYTE *slot = c->tx_buf + (ULONG)idx * GE_BUFSZ;
+        UBYTE *buf  = slot + GE_TX_HEAD;
+        UWORD  len  = fill(arg, (UWORD)(first + done), buf);
+        ULONG  status;
+
+        if (len < NETDEV_FRAME_MIN)
+        {
+            *failed = 1;            /* refused, or shorter than the shell
+                                       ever builds: not posted */
+            break;
+        }
+
+        status = genet_tx_desc_status(len);
+        if (nic->tx_csum != 0)
+        {
+            if (!have || !genet_tx_csum_same(buf, shape))
+            {
+                UWORD offset;
+                UBYTE flag = netdev_tx_csum4(buf, len, nic->tx_csum, &offset);
+
+                info = (flag != 0) ? genet_tx_csum_info(buf[14], offset, flag)
+                                   : 0;
+                genet_tx_csum_shape(buf, shape);
+                have = TRUE;
+            }
+            if (info != 0)
+            {
+                status |= GENET_TX_DESC_STATUS_CKSUM;
+                nic->core_stat[GE_ST_TX_CSUM]++;
+            }
+        }
+        {
+            ULONG  word = (info != 0) ? (info | GENET_TX_CSUM_LEN_VALID) : 0;
+            UWORD *w = (UWORD *)(slot + GE_TX_PAD + GENET_TX_STATUS64_CSUM_INFO);
+
+            w[0] = __builtin_bswap16((UWORD)(word & 0xffffUL));
+            w[1] = __builtin_bswap16((UWORD)(word >> 16));
+        }
+
+        ge_wr(nic, GENET_TX_DESC_ADDRESS_LO(idx), (ULONG)(slot + GE_TX_PAD));
+        ge_wr(nic, GENET_TX_DESC_ADDRESS_HI(idx), 0);
+        ge_wr(nic, GENET_TX_DESC_STATUS(idx), status);
+
+        c->tx_pidx++;
+        done++;
+    }
+
+    nic->txb_inuse = (UWORD)(c->tx_pidx - c->tx_cidx);
+    if (done != 0)
+        ge_tx_kick(nic);
+
+    return done;
 }
 
 /* TRUE when the chip retired frames. */
@@ -2005,6 +2172,7 @@ static LONG genet_attach(NetdevNic *nic)
     nic->rx_holds        = 1;           /* the ring keeps frames for a late read */
     nic->rx_batches      = 1;           /* a pass drains a burst: one reply each */
     nic->tx_flush        = ge_tx_flush;  /* runs may hold their start           */
+    nic->tx_run          = genet_tx_run; /* a batch write, one kick (TX_BATCH)  */
     /* A frame takes a whole buffer whatever its size, so what the ring holds
        is GE_RX_RING full frames, not GE_RX_RING * GE_BUFSZ bytes of them: the
        opener's page arithmetic (bsdsocket_window.h, ami_bsd_tcp_window_fit)

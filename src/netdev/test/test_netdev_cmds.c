@@ -1875,6 +1875,20 @@ static void r_abort_finds_each_list(void)
     expect(netdev_abort(&opener, &wr) == TRUE,
            "an aborted write is found on the unit's list");
 
+    /* A batch write paused at the head (ANXD_S2F_TX_BATCH): the abort
+       answers it and the device forgets its cursor, so the pump never
+       resumes a request the opener has back. */
+    req(&wr, CMD_WRITE);
+    AddHead(&unit.nu_Writes, &wr.ios2_Req.io_Message.mn_Node);
+    unit.nu_TxBatchIo   = &wr;
+    unit.nu_TxBatchNext = 3;
+    nreplies = 0;
+    expect(netdev_abort(&opener, &wr) == TRUE && nreplies == 1 &&
+           (UBYTE)wr.ios2_Req.io_Error == (UBYTE)IOERR_ABORTED,
+           "an aborted batch mid-way is answered once, aborted");
+    expect(unit.nu_TxBatchIo == NULL,
+           "and the device keeps no cursor into it");
+
     /* A request on no list of ours is not ours to complete. */
     req(&stranger, CMD_READ);
     nreplies = 0;

@@ -92,11 +92,54 @@ static void h_flush_reply(void)
 #define H_LOG       64
 #define H_FRAME     256
 static struct IORequest *h_sent_log[H_LOG];
+#ifdef AMINETXDUO_TCP_GSO
 static UBYTE             h_seg_log[H_LOG];
+#endif
 static ULONG             h_len_log[H_LOG];
 static UCHAR             h_frames[H_LOG][H_FRAME];
 static BOOL              h_frame_ok[H_LOG];
 static int               h_copy_on_begin;
+
+#ifdef AMINETXDUO_TCP_GSO
+/*
+ * A TX_BATCH device (anxs2ext.h) behind BeginIO(): a write flagged
+ * ANXD_S2_TXF_BATCH is asked its shape and h_batch_take of its frames are
+ * copied through TxChild at once, all of them for 0; a write left with
+ * frames to go is queued (IOF_QUICK cleared) and h_batch_more() copies the
+ * rest, as the device's pump would.  Every frame lands in h_bframes in the
+ * order it was copied.
+ */
+#define HB_MAX      40
+static int               h_batch_dev;
+static UWORD             h_batch_take;
+static UCHAR             h_bframes[HB_MAX][H_FRAME];
+static ULONG             h_blen[HB_MAX];
+static UWORD             h_bidx[HB_MAX];
+static BOOL              h_bok[HB_MAX];
+static ULONG             h_bn;
+static AnxdS2TxBatchInfo h_binfo;
+static ULONG             h_bcount;
+static UWORD             h_bnext;
+static struct IORequest *h_breq;
+
+static void h_batch_more(UWORD n)
+{
+    APTR data = ((struct IOSana2Req *)h_breq)->ios2_Data;
+
+    while (n-- != 0 && h_bnext < h_bcount && h_bn < HB_MAX)
+    {
+        UWORD i   = h_bnext++;
+        ULONG len = (i + 1u == h_bcount) ? h_binfo.LastLen : h_binfo.SegLen;
+
+        memset(h_bframes[h_bn], 0x5A, H_FRAME);
+        h_blen[h_bn] = len;
+        h_bidx[h_bn] = i;
+        h_bok[h_bn]  = (BOOL)(ami_sana2_tx_child(data, i, h_bframes[h_bn],
+                                                 len) != 0);
+        h_bn++;
+    }
+}
+#endif /* AMINETXDUO_TCP_GSO */
 
 VOID BeginIO(struct IORequest *req)
 {
@@ -122,7 +165,9 @@ VOID BeginIO(struct IORequest *req)
         AmiTxSlot         *slot = (AmiTxSlot *)s2->ios2_Data;
 
         h_sent_log[h_sends - 1] = req;
+#ifdef AMINETXDUO_TCP_GSO
         h_seg_log[h_sends - 1]  = slot->seg_index;
+#endif
         h_len_log[h_sends - 1]  = s2->ios2_DataLength;
         if (h_copy_on_begin)
         {
@@ -132,6 +177,20 @@ VOID BeginIO(struct IORequest *req)
                                          s2->ios2_DataLength);
         }
     }
+#ifdef AMINETXDUO_TCP_GSO
+    if (h_batch_dev &&
+        (ami_sana2_tx_flags(((struct IOSana2Req *)req)->ios2_Data) &
+         ANXD_S2_TXF_BATCH) != 0)
+    {
+        h_breq   = req;
+        h_bnext  = 0;
+        h_bcount = ami_sana2_tx_batch(((struct IOSana2Req *)req)->ios2_Data,
+                                      &h_binfo);
+        h_batch_more(h_batch_take != 0 ? h_batch_take : (UWORD)h_bcount);
+        if (h_bnext < h_bcount)
+            req->io_Flags &= (UBYTE)~IOF_QUICK;
+    }
+#endif
     if (!h_quick_kept)
         req->io_Flags &= (UBYTE)~IOF_QUICK;
 }
@@ -401,8 +460,10 @@ VOID ami_log(int level, const char *fmt, ...)
 
 static AmiSana2If iface;
 static NX_PACKET  pkt;
+#ifdef AMINETXDUO_TCP_GSO
 /* The GSO context table, as the driver allocates it at link-up. */
 static AmiTxGso   h_gso_table[AMI_SANA2_TX_SLOTS + AMI_SANA2_TX_PEND];
+#endif
 static UCHAR      pool[POOL_BYTES];
 
 static void fixture_init(BOOL raw, ULONG hw_type)
@@ -416,9 +477,11 @@ static void fixture_init(BOOL raw, ULONG hw_type)
     memcpy(iface.mac, "\x02\x41\x4d\x49\x00\x42", AMI_ETH_ADDR_SIZE);
 
     ami_sana2_tx_init(&iface);
+#ifdef AMINETXDUO_TCP_GSO
     memset(h_gso_table, 0, sizeof(h_gso_table));
     iface.gso       = h_gso_table;
     iface.gso_count = (UWORD)(AMI_SANA2_TX_SLOTS + AMI_SANA2_TX_PEND);
+#endif
 
     h_sent     = NULL;
     h_sends    = 0;
@@ -437,6 +500,14 @@ static void fixture_init(BOOL raw, ULONG hw_type)
     h_released       = NULL;
     h_forbids        = 0;
     memset(h_frame_ok, 0, sizeof(h_frame_ok));
+#ifdef AMINETXDUO_TCP_GSO
+    h_batch_dev      = 0;
+    h_batch_take     = 0;
+    h_bn             = 0;
+    h_bnext          = 0;
+    h_bcount         = 0;
+    h_breq           = NULL;
+#endif
 }
 
 static void packet_init(const UCHAR *body, ULONG len)
@@ -1372,6 +1443,7 @@ static void test_full_ring_queues_in_order(void)
 }
 
 /* ---------------------------------------------------------------- TCP GSO */
+#ifdef AMINETXDUO_TCP_GSO
 
 /*
  * A GSO parent as the core builds it (aminetxduo/tcpgso.h): the record at
@@ -2266,6 +2338,324 @@ static void test_gso_one_forbid_per_block(void)
     h_check(h_forbids == 4, "and one Forbid() per round of four slots");
 }
 
+/* -------------------------------------------------------------- TX_BATCH */
+
+/* Frame `n` the batch device copied against child h_bidx[n] of the block,
+   built from scratch, its pad zeroes and nothing past it. */
+static int batch_frame_ok(ULONG n, int offload)
+{
+    UCHAR want[H_FRAME];
+    ULONG len  = gso_expect(want, h_bidx[n], offload);
+    ULONG wire = (len < 46) ? 46 : len;
+
+    if (!h_bok[n] || h_blen[n] != wire || memcmp(h_bframes[n], want, len) != 0)
+        return 0;
+    for (; len < wire; len++)
+        if (h_bframes[n][len] != 0)
+            return 0;
+    return h_bframes[n][wire] == 0x5A;
+}
+
+/*
+ * One write for the block, and the frames TxChild cuts are byte for byte
+ * the ones the per-child writes carry: the same reference frames
+ * test_gso_children_fused() checks, and the per-child path's own copies,
+ * for a card that finishes the sum and one that does not, a short last
+ * child padded.
+ */
+static void test_batch_frames_identical(void)
+{
+    static UCHAR per_child[H_LOG][H_FRAME];
+    static ULONG per_len[H_LOG];
+    static const struct { ULONG thl, payload, first; } lay[] = {
+        { 32, 350, 37 },                    /* four, the last 50 bytes    */
+        { 20, 203, 37 },                    /* three, the last 43 + pad   */
+    };
+    NX_PACKET *p;
+    ULONG      l, n, k;
+    int        offload;
+
+    printf("sana2: a batch write's frames are the per-child writes' frames\n");
+
+    for (l = 0; l < 2; l++)
+    {
+        for (offload = 0; offload < 2; offload++)
+        {
+            /* The per-child path first, as a device that copies at once. */
+            fixture_init(FALSE, S2WireType_Ethernet);
+            iface.tx_csum_ok = offload ? ANXD_S2_TXF_TCP : 0;
+            h_copy_on_begin = 1;
+            p = gso_parent(lay[l].thl, lay[l].payload, 100, 0x99,
+                           0xFFFFFF60UL, 0xFFFE, lay[l].first, g_odd_cuts, 5);
+            (VOID)ami_sana2_tx_send(&iface, p, AMI_ETHERTYPE_IPV4, 0xBC24,
+                                    0x11EF103A);
+            k = h_sends;
+            for (n = 0; n < k; n++)
+            {
+                memcpy(per_child[n], h_frames[n], H_FRAME);
+                per_len[n] = h_len_log[n];
+            }
+
+            fixture_init(FALSE, S2WireType_Ethernet);
+            iface.tx_csum_ok  = offload ? ANXD_S2_TXF_TCP : 0;
+            iface.tx_batch_ok = 1;
+            h_batch_dev = 1;
+            p = gso_parent(lay[l].thl, lay[l].payload, 100, 0x99,
+                           0xFFFFFF60UL, 0xFFFE, lay[l].first, g_odd_cuts, 5);
+            gso_snapshot();
+            h_check(ami_sana2_tx_send(&iface, p, AMI_ETHERTYPE_IPV4, 0xBC24,
+                                      0x11EF103A) == NX_SUCCESS &&
+                    h_sends == 1, "the block is one write");
+            h_check(h_bcount == k && h_binfo.Count == k &&
+                    h_binfo.SegLen == per_len[0] &&
+                    h_binfo.LastLen == per_len[k - 1] &&
+                    h_len_log[0] == per_len[0],
+                    "its shape: the children's count and lengths");
+            h_check((ami_sana2_tx_flags(((struct IOSana2Req *)h_sent_log[0])
+                                            ->ios2_Data) &
+                     (ANXD_S2_TXF_BATCH | ANXD_S2_TXF_TCP)) ==
+                    (offload ? (ANXD_S2_TXF_BATCH | ANXD_S2_TXF_TCP)
+                             : ANXD_S2_TXF_BATCH),
+                    "flagged a batch, and for the card as the children were");
+            {
+                int same = (h_bn == k);
+
+                for (n = 0; n < h_bn && same; n++)
+                    if (h_bidx[n] != n || !batch_frame_ok(n, offload) ||
+                        h_blen[n] != per_len[n] ||
+                        memcmp(h_bframes[n], per_child[n], h_blen[n]) != 0)
+                        same = 0;
+                h_check(same, "every frame identical to its child's write: "
+                              "length, ID, sums, seq, flags, pad");
+            }
+            h_check(gso_untouched(), "and the parent is untouched");
+            gso_reply(0);
+            ami_sana2_tx_reap(&iface);
+            h_check(h_releases == 1 && h_released == p &&
+                    iface.gso[0].parent == NULL,
+                    "one reply releases the parent once");
+        }
+    }
+}
+
+/* Stats count frames; a refused shape and a wrong length get nothing. */
+static void test_batch_stats_and_bounds(void)
+{
+    NX_PACKET *p;
+    UCHAR      buf[H_FRAME];
+    APTR       data;
+    ULONG      want_bytes;
+
+    printf("sana2: a batch counts its frames and refuses what it is not\n");
+
+    fixture_init(FALSE, S2WireType_Ethernet);
+    iface.tx_batch_ok = 1;
+    h_batch_dev  = 1;
+    h_quick_kept = 1;
+    iface.tx_quick_ok = TRUE;
+    p = gso_parent(32, 350, 100, 0x18, 1, 1, 37, g_odd_cuts, 5);
+    (VOID)ami_sana2_tx_send(&iface, p, AMI_ETHERTYPE_IPV4, 0xBC24, 0x11EF103A);
+    want_bytes = 3UL * (52 + 100) + (52 + 50);
+    h_check(h_releases == 1 && iface.stats.packets_sent == 4 &&
+            iface.stats.tx_bytes == want_bytes && iface.stats.tx_errors == 0,
+            "quick: four frames sent, their bytes, the parent back once");
+
+    fixture_init(FALSE, S2WireType_Ethernet);
+    iface.tx_batch_ok = 1;
+    h_batch_dev  = 1;
+    h_batch_take = 1;
+    p = gso_parent(32, 350, 100, 0x18, 1, 1, 37, g_odd_cuts, 5);
+    (VOID)ami_sana2_tx_send(&iface, p, AMI_ETHERTYPE_IPV4, 0xBC24, 0x11EF103A);
+    data = ((struct IOSana2Req *)h_breq)->ios2_Data;
+    h_check(ami_sana2_tx_child(data, 4, buf, h_binfo.SegLen) == 0,
+            "an index past the batch is refused");
+    h_check(ami_sana2_tx_child(data, 1, buf, h_binfo.SegLen - 1) == 0 &&
+            ami_sana2_tx_child(data, 3, buf, h_binfo.SegLen) == 0,
+            "and a length that is not the child's");
+    h_check(ami_sana2_tx_flags(data) & ANXD_S2_TXF_BATCH,
+            "while the write is still a batch");
+    gso_reply(0);
+    ami_sana2_tx_reap(&iface);
+    h_check(ami_sana2_tx_batch(data, &h_binfo) == 0,
+            "and once answered the slot is no batch at all");
+}
+
+/* The device copies child 2 twice and goes back to child 1: each copy is
+   that child alone, and nothing else moves. */
+static void test_batch_child_restart(void)
+{
+    NX_PACKET *p;
+    APTR       data;
+    ULONG      n;
+    int        offload;
+
+    printf("sana2: a batch child copied again is that child again\n");
+
+    for (offload = 0; offload < 2; offload++)
+    {
+        fixture_init(FALSE, S2WireType_Ethernet);
+        iface.tx_csum_ok  = offload ? ANXD_S2_TXF_TCP : 0;
+        iface.tx_batch_ok = 1;
+        h_batch_dev  = 1;
+        h_batch_take = 3;
+        p = gso_parent(32, 350, 100, 0x99, 0xFFFFFF60UL, 9, 37, g_odd_cuts, 5);
+        (VOID)ami_sana2_tx_send(&iface, p, AMI_ETHERTYPE_IPV4, 0xBC24,
+                                0x11EF103A);
+        data = ((struct IOSana2Req *)h_breq)->ios2_Data;
+
+        /* Again: 2, then back to 1, then 3, the last. */
+        h_bnext = 2;
+        h_batch_more(1);
+        h_bnext = 1;
+        h_batch_more(1);
+        h_bnext = 3;
+        h_batch_more(1);
+        {
+            int ok = (h_bn == 6);
+
+            for (n = 0; n < h_bn && ok; n++)
+                if (!batch_frame_ok(n, offload))
+                    ok = 0;
+            h_check(ok, offload ? "offload: every copy, repeats included, "
+                                  "is its own child exactly"
+                                : "every copy, repeats included, is its own "
+                                  "child exactly");
+        }
+        h_check(((AmiTxSlot *)data)->batch_done == 4,
+                "and the high-water mark is the batch, not the copy count");
+        gso_reply(0);
+        ami_sana2_tx_reap(&iface);
+        h_check(h_releases == 1 && iface.stats.packets_sent == 4,
+                "four frames, the parent once");
+    }
+}
+
+/*
+ * The device answers with only some frames copied: AbortIO() at the head of
+ * its queue, CloseDevice(), or an offline.  The parent goes back once, the
+ * frames out count as sent and the rest as errors, and the block's loss is
+ * what TCP is told.
+ */
+static void test_batch_abort_mid_batch(void)
+{
+    NX_PACKET *p;
+
+    printf("sana2: a batch answered part way, aborted or dropped\n");
+
+    fixture_init(FALSE, S2WireType_Ethernet);
+    iface.tx_batch_ok = 1;
+    h_batch_dev  = 1;
+    h_batch_take = 2;
+    p = gso_parent(32, 350, 100, 0x18, 1, 1, 37, g_odd_cuts, 5);
+    (VOID)ami_sana2_tx_send(&iface, p, AMI_ETHERTYPE_IPV4, 0xBC24, 0x11EF103A);
+    h_check(h_sends == 1 && h_bn == 2 && h_releases == 0,
+            "two of four copied, the write held, the parent the block's");
+    ((struct IOSana2Req *)h_breq)->ios2_Req.io_Error = IOERR_ABORTED;
+    gso_reply(0);
+    ami_sana2_tx_reap(&iface);
+    h_check(h_releases == 1 && h_released == p && iface.gso[0].parent == NULL,
+            "aborted: the parent back once, its context free");
+    h_check(iface.stats.packets_sent == 2 && iface.stats.tx_errors == 2,
+            "two sent, two lost");
+    ami_sana2_tx_reap(&iface);
+    h_check(h_releases == 1, "and never again");
+
+    /* A batch behind a full ring, then the drain of a closing interface:
+       the queued block goes back once, its every frame lost. */
+    fixture_init(FALSE, S2WireType_Ethernet);
+    iface.tx_batch_ok = 1;
+    iface.tx_slots    = 1;
+    h_batch_dev  = 1;
+    h_batch_take = 1;
+    p = gso_parent(32, 350, 100, 0x18, 1, 1, 37, g_odd_cuts, 5);
+    (VOID)ami_sana2_tx_send(&iface, p, AMI_ETHERTYPE_IPV4, 0xBC24, 0x11EF103A);
+    packet_init((const UCHAR *)"\x45\x00\x00\x14", 4);
+    (VOID)ami_sana2_tx_send(&iface, &pkt, AMI_ETHERTYPE_IPV4, 0xBC24,
+                            0x11EF103A);
+    h_check(iface.tx_pend_count == 1, "an ordinary write waits behind it");
+    ((struct IOSana2Req *)h_breq)->ios2_Req.io_Error = IOERR_ABORTED;
+    gso_reply(0);
+    iface.online = FALSE;
+    ami_sana2_tx_drain(&iface);
+    h_check(h_releases == 2, "the drain: the batch's parent once, the "
+                             "waiting write once");
+    h_check(iface.stats.packets_sent == 1 && iface.stats.tx_errors == 4,
+            "one frame sent, three lost and the waiting write");
+}
+
+/* Blocks behind a full ring wait as one entry each, in order, and launch
+   as one batch each. */
+static void test_batch_queues_as_one(void)
+{
+    NX_PACKET *p;
+
+    printf("sana2: a batch behind a full ring waits as one entry\n");
+
+    fixture_init(FALSE, S2WireType_Ethernet);
+    iface.tx_batch_ok = 1;
+    iface.tx_slots    = 1;
+    h_batch_dev  = 1;
+    p = gso_parent(32, 350, 100, 0x18, 1, 1, 37, g_odd_cuts, 5);
+    (VOID)ami_sana2_tx_send(&iface, p, AMI_ETHERTYPE_IPV4, 0xBC24, 0x11EF103A);
+    /* The same parent again as a second block: only the counts matter. */
+    (VOID)ami_sana2_tx_send(&iface, p, AMI_ETHERTYPE_IPV4, 0xBC24,
+                            0x11EF103A);
+    h_check(h_sends == 1 && iface.tx_pend_count == 1 &&
+            iface.tx_pend[iface.tx_pend_head].gso == 2,
+            "the second block is one queue entry, not four");
+    gso_reply(0);
+    ami_sana2_tx_reap(&iface);
+    h_check(h_sends == 2 && h_bn == 8 && iface.tx_pend_count == 0,
+            "the completion launches it as one batch of four");
+    gso_reply(1);
+    ami_sana2_tx_reap(&iface);
+    h_check(h_releases == 2 && iface.stats.packets_sent == 8,
+            "two parents back, eight frames");
+    h_check(h_forbids >= 1, "and its Forbid() count is the ordinary one");
+}
+
+/* One Forbid() for the block and its one slot, as the per-child path takes
+   for the context and the claim. */
+static void test_batch_one_forbid(void)
+{
+    static const ULONG cuts[] = { 400, 400, 400, 400 };
+    NX_PACKET *p;
+
+    printf("sana2: a 16-child batch takes one Forbid() and one write\n");
+
+    fixture_init(FALSE, S2WireType_Ethernet);
+    iface.tx_batch_ok = 1;
+    h_batch_dev  = 1;
+    h_quick_kept = 1;
+    iface.tx_quick_ok = TRUE;
+    p = gso_parent(20, 1600, 100, 0x18, 1, 1, 37, cuts, 4);
+    h_check(ami_sana2_tx_send(&iface, p, AMI_ETHERTYPE_IPV4, 0xBC24,
+                              0x11EF103A) == NX_SUCCESS &&
+            h_sends == 1 && h_bn == 16, "one write, sixteen frames");
+    h_check(h_forbids == 1, "one Forbid()");
+    h_check(h_releases == 1 && iface.stats.packets_sent == 16,
+            "the parent back once, sixteen frames counted");
+}
+
+/* Past the batch limit, a lone repair child, or a device without the bit:
+   every child its own write, as before. */
+static void test_batch_not_taken(void)
+{
+    NX_PACKET *p;
+
+    printf("sana2: blocks a batch does not carry go child by child\n");
+
+    fixture_init(FALSE, S2WireType_Ethernet);
+    iface.tx_batch_ok = 0;
+    h_batch_dev = 1;
+    p = gso_parent(32, 350, 100, 0x18, 1, 1, 37, g_odd_cuts, 5);
+    (VOID)ami_sana2_tx_send(&iface, p, AMI_ETHERTYPE_IPV4, 0xBC24, 0x11EF103A);
+    h_check(h_sends == 4 && h_bn == 0 &&
+            ami_sana2_tx_flags(((struct IOSana2Req *)h_sent_log[0])->ios2_Data)
+            == 0, "not accepted: four plain writes");
+}
+#endif /* AMINETXDUO_TCP_GSO */
+
 int main(void)
 {
     frames_init();
@@ -2292,6 +2682,7 @@ int main(void)
     test_no_pad_off_ethernet();
     test_drain_reaps_final_sleep();
 
+#ifdef AMINETXDUO_TCP_GSO
     test_gso_children_fused();
     test_gso_children_offload();
     test_gso_pads_the_last();
@@ -2306,6 +2697,14 @@ int main(void)
     test_gso_record_v1();
     test_gso_repair();
     test_gso_record_refused();
+    test_batch_frames_identical();
+    test_batch_stats_and_bounds();
+    test_batch_child_restart();
+    test_batch_abort_mid_batch();
+    test_batch_queues_as_one();
+    test_batch_one_forbid();
+    test_batch_not_taken();
+#endif
 #ifdef AMINETXDUO_TX_RUN
     test_drain_waits_for_a_queued_flush();
 #endif

@@ -243,6 +243,23 @@ struct NetdevNic
        only on a core that sets tx_flush, the start it holds back. */
     UBYTE               tx_more;
     VOID              (*tx_flush)(struct NetdevNic *nic);
+    /*
+     * ANXD_S2F_TX_BATCH: up to `count` frames of one batch write, indices
+     * from `first`, into the ring's own buffers -- fill(arg, index, buf)
+     * writes frame `index` at buf and answers its length, header included,
+     * or 0 when it cannot -- with one kick and one cache push for all of
+     * them at the end.  Returns how many were posted, at most the ring's
+     * free slots; *failed is set when fill refused one, which is then not
+     * posted and nor is anything after it.  Under the caller's tx_busy
+     * (tx_task_lock) or Disable().  The shell's nic->tx_csum applies to
+     * every frame.  NULL for a core without it, and the shell then never
+     * accepts TX_BATCH.
+     */
+    UWORD             (*tx_run)(struct NetdevNic *nic, UWORD first,
+                                UWORD count,
+                                UWORD (*fill)(APTR arg, UWORD index,
+                                              UBYTE *buf),
+                                APTR arg, UBYTE *failed);
 
     /* Even, and stated rather than inherited from what precedes them:
        netdev_device.c copies both as a longword and a word, which is an

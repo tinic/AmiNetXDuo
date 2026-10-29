@@ -150,6 +150,9 @@ VOID netdev_drop_writes(NetdevUnit *unit, NetdevOpener *op)
         if (NETDEV_IO_OPENER(io) == op)
         {
             Remove(n);
+            /* A batch part way out: the frames in the ring are the
+               device's copies, and the request is answered now. */
+            netdev_tx_forget(unit, io);
             netdev_reply(io, IOERR_ABORTED, 0);
         }
         n = next;

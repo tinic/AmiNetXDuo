@@ -186,6 +186,44 @@ static void g_rx_line(void)
     line("released with DONE pending", 0, 1, WANTED, WANTED, 0, 0);
 }
 
+/* When genet_tx_run may reuse a checksum word: the next frame's header has
+   the first one's shape, and it is TCP. */
+static void h_tx_csum_shape(void)
+{
+    UBYTE a[128], b[128], shape[GENET_TX_SHAPE_LEN];
+    unsigned i;
+
+    for (i = 0; i < sizeof(a); i++)
+        a[i] = (UBYTE)i;
+    a[12] = 0x08; a[13] = 0x00;     /* IPv4 */
+    a[14] = 0x45;                   /* IHL 5 */
+    a[20] = 0x40; a[21] = 0x00;     /* DF */
+    a[23] = 6;                      /* TCP */
+    a[46] = 0x80;                   /* data offset 8: 32-byte TCP header */
+    for (i = 0; i < sizeof(b); i++)
+        b[i] = a[i];
+    genet_tx_csum_shape(a, shape);
+
+    b[16] = 0x12; b[18] = 0x34; b[24] = 0x56;   /* length, ID, sum */
+    b[38] = 0x9a;                               /* sequence */
+    expect_u32("shape: lengths, ID, sums and sequence do not matter",
+               genet_tx_csum_same(b, shape), 1);
+    b[14] = 0x46;
+    expect_u32("shape: another IHL does", genet_tx_csum_same(b, shape), 0);
+    b[14] = 0x45; b[46] = 0x50;
+    expect_u32("shape: another TCP data offset does",
+               genet_tx_csum_same(b, shape), 0);
+    b[46] = 0x80; b[21] = 0x08;
+    expect_u32("shape: a fragment offset does", genet_tx_csum_same(b, shape), 0);
+    b[21] = 0x00; b[13] = 0xdd;
+    expect_u32("shape: another EtherType does", genet_tx_csum_same(b, shape), 0);
+    b[13] = 0x00;
+    a[23] = 17; b[23] = 17;
+    genet_tx_csum_shape(a, shape);
+    expect_u32("shape: UDP is always worked out again",
+               genet_tx_csum_same(b, shape), 0);
+}
+
 int main(void)
 {
     a_fresh();
@@ -195,6 +233,7 @@ int main(void)
     e_tx_status();
     f_tx_csum();
     g_rx_line();
+    h_tx_csum_shape();
 
     if (failures != 0)
     {

@@ -1134,7 +1134,13 @@ BOOL netdev_abort(NetdevOpener *op, struct IOSana2Req *io)
     if (!found)
         was_event = found = cmd_dequeue(&op->op_Events, io);
     if (!found)
+    {
         found = cmd_dequeue(&unit->nu_Writes, io);
+        /* A batch paused at the head: what it posted is in the ring as the
+           device's own copies, and nothing of the opener's is kept. */
+        if (found)
+            netdev_tx_forget(unit, io);
+    }
     Enable();
 
     if (!found)
