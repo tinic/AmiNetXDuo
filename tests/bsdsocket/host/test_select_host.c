@@ -653,9 +653,17 @@ static void t_writability_byte_credit(void)
     CHECK(bsd_writable(s) == TRUE, "a byte of credit and room in entries");
 
     s->as_Nx.tcp.nx_tcp_socket_tx_outstanding_bytes = 800;
+#ifdef NX_DISABLE_TCP_GSO
+    /* A profile without GSO ignores even an advertised GSO capability:
+       each queue entry is still one ordinary segment. */
+    CHECK(bsd_writable(s) == TRUE,
+          "GSO disabled: bytes do not fill spare queue entries");
+    CHECK(s->as_TxWait == 0, "GSO disabled: no FD_WRITE wait is needed");
+#else
     CHECK(bsd_writable(s) == FALSE,
           "no credit is not writable, with entries to spare");
     CHECK(s->as_TxWait == 1, "and the FD_WRITE request is left behind");
+#endif
 
     /* The acknowledgment that gives credit back: the core calls the window
        notify (nx_tcp_socket_state_transmit_check.c), which posts. */
@@ -665,8 +673,13 @@ static void t_writability_byte_credit(void)
     CHECK(h_window_fn != NULL, "the window notify is armed");
     if (h_window_fn != NULL)
         h_window_fn(&s->as_Nx.tcp);
+#ifdef NX_DISABLE_TCP_GSO
+    CHECK((s->as_Events & FD_WRITE) == 0 && (h.signals & H_SIGIO_SIG) == 0,
+          "GSO disabled: an ACK does not notify a writer that never waited");
+#else
     CHECK((s->as_Events & FD_WRITE) != 0 && (h.signals & H_SIGIO_SIG) != 0,
           "the credit coming back posts FD_WRITE");
+#endif
     CHECK(bsd_writable(s) == TRUE && s->as_TxWait == 0,
           "and the socket is writable again");
 
