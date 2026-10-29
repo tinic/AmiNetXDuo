@@ -619,11 +619,7 @@ static void burst_hole(void)
     spurious = h_datagrams - before;
     printf("  partial acks        %u segment(s) resent during %u partial acknowledgments\n",
            spurious, H_HOLE_TO - H_HOLE_FROM - 1);
-    /* RFC 6675 NextSeg(4) intentionally permits one rescue after the first
-       repair is acknowledged. It must target the highest unsacked octet,
-       never restart a queue walk or allow another unclocked burst. */
-    h_check_eq(spurious, 1, "partial ACKs permit exactly one bounded rescue");
-    h_check_eq(h_resent(H_HOLE_TO - 1), 2, "rescue targets only the highest unsacked segment");
+    h_check_eq(spurious, 0, "a partial acknowledgment of a hole already resent resends nothing");
 
     (VOID)h_ack(H_FLIGHT, 0, 0, 0, 0);
     h_check_eq(h_sock.nx_tcp_socket_transmit_sent_count, 0, "the queue is empty");
@@ -631,7 +627,7 @@ static void burst_hole(void)
     h_check(h_sock.nx_tcp_socket_fast_recovery == NX_FALSE, "fast recovery left");
     for (s = H_HOLE_FROM; s < H_HOLE_TO; s++)
     {
-        if (h_resent(s) != (s == H_HOLE_TO - 1 ? 2U : 1U))
+        if (h_resent(s) != 1)
         {
             printf("  segment %u resent %u times\n", s, h_resent(s));
             h_failures++;
@@ -671,10 +667,7 @@ static void single_loss(void)
     /* It lands: the acknowledgment jumps over everything held. */
     before = h_datagrams;
     (VOID)h_ack(41, 0, 0, 0, 0);
-    h_check_eq(h_datagrams - before, 1, "first repair ACK allows one RFC 6675 rescue");
-    h_check_eq(h_resent(H_FLIGHT - 1), 1, "rescue targets the highest outstanding DATA segment");
-    h_check_eq(h_sock.nx_tcp_socket_tx_high_rxt, h_seq(11), "rescue does not advance HighRxt");
-    h_check_eq(h_sock.nx_tcp_socket_sack_rescue_rxt, h_seq(H_FLIGHT), "rescue is limited to one per RecoveryPoint");
+    h_check_eq(h_datagrams - before, 0, "the jump resends nothing");
     h_check_eq(h_sock.nx_tcp_socket_transmit_sent_count, H_FLIGHT - 41, "and releases the run");
 
     /* The rest arrives in order, acknowledged in a coalesced batch. */
@@ -721,6 +714,10 @@ static void second_loss_at_the_tail(void)
     h_check_eq(h_datagrams - before, 1,
                "the partial acknowledgment retransmits the sole tail segment");
     h_check(h_resent(9) == 1, "the tail does not wait for the RTO");
+#ifdef NX_ENABLE_TCP_SACK
+    h_check_eq(h_sock.nx_tcp_socket_tx_high_rxt, h_seq(3), "tail rescue does not advance HighRxt");
+    h_check_eq(h_sock.nx_tcp_socket_sack_rescue_rxt, h_seq(10), "tail rescue is bounded by RecoveryPoint");
+#endif
 }
 
 /*
