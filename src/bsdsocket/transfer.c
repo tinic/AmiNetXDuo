@@ -584,9 +584,14 @@ static LONG bsd_send_tcp_run(struct AmiSocketBase *base, AmiSocket *sock,
     {
         NX_PACKET *packet = NX_NULL;
         ULONG      chunk  = (ULONG)(len - sent);
-        ULONG      gso    = bsd_send_gso_bytes(sock, pool, chunk);
+        ULONG      gso;
         LONG       filled;
         UINT       status = NX_NO_PACKET;
+
+        /* What is still to be written, before the queue bound is read: the
+           transmit queue may grow to carry it (socket.c, autotune). */
+        bsd_tcp_tx_autotune(&sock->as_Nx.tcp, chunk);
+        gso = bsd_send_gso_bytes(sock, pool, chunk);
 
         if (chunk > mss)
             chunk = mss;
