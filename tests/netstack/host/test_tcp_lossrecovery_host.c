@@ -159,6 +159,8 @@ static NX_PACKET h_slice_packet;
 static union { ULONG align; UCHAR bytes[1600]; } h_slice_data;
 static UINT h_slice_used;
 static UINT h_slice_deny;
+static UINT h_spend_credit_in_append;
+static NX_TCP_SOCKET *h_credit_socket;
 #endif
 
 UINT _nx_packet_release(NX_PACKET *packet_ptr)
@@ -231,6 +233,19 @@ UINT _nx_packet_data_append(NX_PACKET *packet_ptr, VOID *data_start, ULONG data_
         memcpy(packet_ptr -> nx_packet_append_ptr, data_start, data_size);
         packet_ptr -> nx_packet_append_ptr += data_size;
         packet_ptr -> nx_packet_length += data_size;
+        if (h_spend_credit_in_append)
+        {
+            if (h_spend_credit_in_append == 2)
+            {
+                h_credit_socket -> nx_tcp_socket_state = NX_TCP_CLOSED;
+            }
+            else
+            {
+                h_credit_socket -> nx_tcp_socket_prr_out += h_credit_socket -> nx_tcp_socket_prr_credit;
+                h_credit_socket -> nx_tcp_socket_prr_credit = 0;
+            }
+            h_spend_credit_in_append = NX_FALSE;
+        }
     }
 #else
     (void)packet_ptr; (void)data_start; (void)data_size;
@@ -368,6 +383,8 @@ static void h_fixture(void)
     _nx_tcp_sack_recovery_reset(&h_sock);
     h_control_deny = NX_FALSE;
     h_slice_deny = NX_FALSE;
+    h_spend_credit_in_append = NX_FALSE;
+    h_credit_socket = &h_sock;
     h_check(!h_slice_used, "driver returned the prior transient slice");
     h_control_releases = 0;
 #endif
@@ -1112,6 +1129,48 @@ static void newreno_peer_unchanged(void)
     h_check_eq(h_control_used, NX_FALSE, "non-SACK peer allocates no scoreboard");
 }
 
+static void prr_credit_across_allocation(void)
+{
+    NX_PACKET source;
+    UCHAR data[3200];
+    UINT i, before;
+    UCHAR *prepend;
+    h_fixture();
+    for (i = 0; i < 10; i++) { (VOID)h_send(); }
+    h_sock.nx_tcp_socket_sack_block_count = 1;
+    h_sock.nx_tcp_socket_sack_left[0] = h_seq(4);
+    h_sock.nx_tcp_socket_sack_right[0] = h_seq(10);
+    _nx_tcp_sack_recovery_ack(&h_sock, H_ISN);
+    _nx_tcp_sack_recovery_begin(&h_sock);
+    memset(&source, 0, sizeof(source));
+    memset(data, 'd', sizeof(data));
+    source.nx_packet_data_start = data;
+    source.nx_packet_data_end = data + sizeof(data);
+    source.nx_packet_prepend_ptr = data + 80;
+    source.nx_packet_append_ptr = source.nx_packet_prepend_ptr + 2 * H_MSS;
+    source.nx_packet_length = 2 * H_MSS;
+    source.nx_packet_pool_owner = &h_control_pool;
+    prepend = source.nx_packet_prepend_ptr;
+    h_sock.nx_tcp_socket_prr_credit = H_MSS;
+    h_spend_credit_in_append = NX_TRUE;
+    before = h_logged;
+    h_check_eq(_nx_tcp_socket_send_internal(&h_sock, &source, NX_NO_WAIT), NX_WINDOW_OVERFLOW,
+               "credit spent across allocation yield returns normal nonblocking backpressure");
+    h_check_eq(h_logged, before, "sender cannot overspend credit consumed while IP mutex was released");
+    h_check_eq(h_sock.nx_tcp_socket_prr_out, H_MSS, "concurrent repair is charged once without a second DATA debit");
+    h_check(source.nx_packet_length == 2 * H_MSS && source.nx_packet_prepend_ptr == prepend,
+            "failed revalidation preserves caller packet ownership and DATA");
+    h_check_eq(h_slice_used, NX_FALSE, "failed revalidation releases only the prepared copy");
+    h_sock.nx_tcp_socket_prr_credit = H_MSS;
+    h_spend_credit_in_append = 2;
+    h_check_eq(_nx_tcp_socket_send_internal(&h_sock, &source, NX_NO_WAIT), NX_NOT_CONNECTED,
+               "teardown during allocation cannot enqueue prepared DATA");
+    h_check_eq(h_logged, before, "connection teardown sends no prepared DATA");
+    h_check(source.nx_packet_length == 2 * H_MSS && source.nx_packet_prepend_ptr == prepend && !h_slice_used,
+            "teardown preserves caller DATA and reclaims its transient copy");
+    _nx_tcp_sack_recovery_reset(&h_sock);
+}
+
 static void prr_partial_credit_slice(void)
 {
     UINT i, before;
@@ -1287,6 +1346,7 @@ int main(void)
     prr_burst_example();
     prr_receive_window_bound();
     newreno_peer_unchanged();
+    prr_credit_across_allocation();
     prr_partial_credit_slice();
     prr_delivery_conservation(NX_FALSE);
     prr_delivery_conservation(NX_TRUE);
