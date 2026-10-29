@@ -1185,6 +1185,75 @@ static void test_set_physical_address(void)
     ami_sana2_unbind(&iface);
 }
 
+/*
+ * TCP GSO is advertised at link-up only where a block can be cut and has
+ * room to overlap: cooked writes, four slots, a 256-packet pool.  The rest
+ * keep exactly the ordinary path, and the 94-packet A1200 is one of them.
+ */
+static void test_gso_advertised_with_the_link(void)
+{
+    static const struct
+    {
+        BOOL        raw;
+        UWORD       slots;
+        ULONG       pool;
+        UINT        want;
+        const char *what;
+    } c[] = {
+        { FALSE, 32, 1024, 16, "a big machine: 16 segments" },
+        { FALSE,  8, 1024,  8, "no more segments than write slots" },
+        { FALSE, 32,  256,  8, "no more than one per 32 pool packets" },
+        { FALSE, 32,  369, 11, "369 packets: 11" },
+        { FALSE,  4,  256,  4, "four slots and 256 packets: on, at 4" },
+        { FALSE, 32,   94,  0, "the 94-packet A1200: off" },
+        { FALSE, 32,  255,  0, "255 packets: off" },
+        { FALSE,  3, 1024,  0, "three slots: off" },
+        { TRUE,  32, 1024,  0, "raw writes: off" },
+    };
+    ULONG i;
+
+    printf("sana2: TCP GSO is advertised at link-up, and only where it fits\n");
+
+    for (i = 0; i < sizeof(c) / sizeof(c[0]); i++)
+    {
+        fixture_init(AMI_ETH_ADDR_SIZE);
+        ami_sana2_attach(&iface, &ip, 0);
+        iface.raw_mode = c[i].raw;
+        iface.tx_slots = c[i].slots;
+        iface.pool     = &pool;
+        pool.nx_packet_pool_total = c[i].pool;
+        interface_obj.nx_interface_capability_flag =
+            NX_INTERFACE_CAPABILITY_TCP_TX_CHECKSUM;
+
+        h_check(ami_sana2_gso_max_segs(&interface_obj) == 0,
+                "nothing is advertised before the link is up");
+
+        drive(NX_LINK_ENABLE);
+        h_check(ami_sana2_gso_max_segs(&interface_obj) == c[i].want &&
+                ((interface_obj.nx_interface_capability_flag &
+                  NX_INTERFACE_CAPABILITY_TCP_GSO) != 0) == (c[i].want != 0),
+                c[i].what);
+        h_check((interface_obj.nx_interface_capability_flag &
+                 NX_INTERFACE_CAPABILITY_TCP_TX_CHECKSUM) != 0,
+                "and the checksum bits are left as they were");
+
+        drive(NX_LINK_DISABLE);
+        h_check(ami_sana2_gso_max_segs(&interface_obj) == 0 &&
+                (interface_obj.nx_interface_capability_flag &
+                 NX_INTERFACE_CAPABILITY_TCP_GSO) == 0,
+                "and withdrawn with the link");
+
+        ami_sana2_unbind(&iface);
+    }
+
+    /* An interface that never carried the bit answers 0 without looking at
+       its link info, which need not be ours. */
+    memset(&interface_obj, 0, sizeof(interface_obj));
+    h_check(ami_sana2_gso_max_segs(&interface_obj) == 0 &&
+            ami_sana2_gso_max_segs(NULL) == 0,
+            "an interface without the bit answers 0");
+}
+
 int main(void)
 {
     test_lookup_and_memoise();
@@ -1202,6 +1271,7 @@ int main(void)
     test_initialize_publishes_the_mac();
     test_initialize_addressless();
     test_enable_unwinds_on_a_failed_reader();
+    test_gso_advertised_with_the_link();
     test_stack_disable_leaves_the_readers();
     test_alias_follows_its_interface();
     test_uninitialize();
