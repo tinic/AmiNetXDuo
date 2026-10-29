@@ -51,6 +51,7 @@ VOID ami_sana2_tx_init(AmiSana2If *iface)
 
         slot->hdr_len = 0;
         slot->pad_len = 0;
+        slot->gso     = AMI_SANA2_GSO_NONE;
 
 #ifdef AMINETXDUO_RXPROBE
         slot->write_at = 0UL;
@@ -281,6 +282,9 @@ VOID ami_sana2_tx_reap(AmiSana2If *iface)
  * replied, and from ami_sana2_tx_send() itself for one it completed inside
  * BeginIO() with IOF_QUICK kept (tx_quick_ok).
  */
+static VOID ami_sana2_gso_complete(AmiSana2If *iface, AmiTxSlot *slot,
+                                   LONG err);
+
 static VOID ami_sana2_tx_complete(AmiSana2If *iface, AmiTxSlot *slot)
 {
     LONG err = (LONG)(BYTE)slot->req.ios2_Req.io_Error;
@@ -333,7 +337,13 @@ static VOID ami_sana2_tx_complete(AmiSana2If *iface, AmiTxSlot *slot)
                                   slot->total - slot->hdr_len);
         }
 
-        if (slot->packet != NULL)
+        /* A GSO child counted above as the frame it is; the parent is the
+           block's, and goes back with its last child. */
+        if (slot->gso != AMI_SANA2_GSO_NONE)
+        {
+            ami_sana2_gso_complete(iface, slot, err);
+        }
+        else if (slot->packet != NULL)
         {
             /* Restore the packet to the shape NetX Duo handed over before
                releasing it. A queued TCP segment gets sent again. */
@@ -423,6 +433,54 @@ static VOID ami_sana2_tx_complete(AmiSana2If *iface, AmiTxSlot *slot)
     }
 }
 
+/* ------------------------------------------------------------- TCP GSO */
+
+/*
+ * `n` children of block `idx` are done with the parent: written, refused by
+ * the device, or never launched (`lost`).  Whichever is last releases it,
+ * once; the context is free from that store on.  Forbid() for the count,
+ * which the reader's reap and a sender's own completion both reach.
+ */
+static VOID ami_sana2_gso_put(AmiSana2If *iface, UWORD idx, UWORD n, BOOL lost)
+{
+    AmiTxGso  *g      = &iface->gso[idx - 1];
+    NX_PACKET *parent = NULL;
+    UWORD      dropped = 0;
+    UWORD      segs    = 0;
+
+    Forbid();
+    if (lost)
+        g->lost = (UBYTE)(g->lost + n);
+    g->outstanding = (UBYTE)(g->outstanding - n);
+    if (g->outstanding == 0)
+    {
+        parent  = g->parent;
+        dropped = g->lost;
+        segs    = g->segs;
+        g->parent = NULL;
+    }
+    Permit();
+
+    if (parent == NULL)
+        return;
+
+    if (dropped != 0)
+        AMI_WARN("sana2: a GSO block lost %ld of its %ld segments. TCP "
+                 "sends them again", (LONG)dropped, (LONG)segs);
+
+    nx_packet_transmit_release(parent);
+}
+
+static VOID ami_sana2_gso_complete(AmiSana2If *iface, AmiTxSlot *slot,
+                                   LONG err)
+{
+    UWORD idx = slot->gso;
+
+    slot->packet = NULL;
+    slot->gso    = AMI_SANA2_GSO_NONE;
+    ami_sana2_gso_put(iface, idx, 1, (BOOL)(err != 0));
+}
+
 /*
  * Abort anything still in flight and reap it.  AbortIO() is a request a driver
  * may decline; slot->req and its reply port live inside AmiSana2If, so
@@ -461,11 +519,13 @@ VOID ami_sana2_tx_drain(AmiSana2If *iface)
     for (;;)
     {
         NX_PACKET *packet = NULL;
+        UWORD      gso    = AMI_SANA2_GSO_NONE;
 
         Forbid();
         if (iface->tx_pend_count != 0)
         {
             packet = iface->tx_pend[iface->tx_pend_head].packet;
+            gso    = iface->tx_pend[iface->tx_pend_head].gso;
             iface->tx_pend_head = (UWORD)((iface->tx_pend_head + 1) %
                                           AMI_SANA2_TX_PEND);
             iface->tx_pend_count--;
@@ -474,7 +534,12 @@ VOID ami_sana2_tx_drain(AmiSana2If *iface)
 
         if (packet == NULL)
             break;
-        AMI_NX_CLEANUP(nx_packet_transmit_release(packet));
+        /* A GSO child owns only its share: the parent goes back once the
+           children in slots are done with it too. */
+        if (gso != AMI_SANA2_GSO_NONE)
+            ami_sana2_gso_put(iface, gso, 1, TRUE);
+        else
+            AMI_NX_CLEANUP(nx_packet_transmit_release(packet));
         iface->stats.tx_errors++;
     }
 
@@ -647,31 +712,41 @@ static UINT ami_sana2_tx_launch(AmiSana2If *iface, AmiTxSlot *slot,
  * Queue a write behind the ones already waiting.  FALSE when the queue is
  * full, and the caller drops the packet.  Un-parks the reply port: while
  * writes wait, every completion has to be collected at once, by the reader,
- * because the collection is what launches the next one.
+ * because the collection is what launches the next one.  `count` children
+ * of GSO block `gso` go in together or not at all, so a block never waits
+ * with a hole in it.
  */
 static BOOL ami_sana2_tx_enqueue(AmiSana2If *iface, NX_PACKET *packet,
                                  UWORD ether_type, ULONG dst_msw,
-                                 ULONG dst_lsw)
+                                 ULONG dst_lsw, UWORD gso, UWORD count)
 {
-    AmiTxPending *pend = NULL;
+    BOOL  queued = FALSE;
+    UWORD i;
 
     Forbid();
-    if (iface->tx_pend_count < (UWORD)AMI_SANA2_TX_PEND)
+    if ((UWORD)AMI_SANA2_TX_PEND - iface->tx_pend_count >= count)
     {
-        pend = &iface->tx_pend[(iface->tx_pend_head + iface->tx_pend_count) %
-                               AMI_SANA2_TX_PEND];
-        pend->packet     = packet;
-        pend->dst_msw    = dst_msw;
-        pend->dst_lsw    = dst_lsw;
-        pend->ether_type = ether_type;
-        iface->tx_pend_count++;
+        for (i = 0; i < count; i++)
+        {
+            AmiTxPending *pend =
+                &iface->tx_pend[(iface->tx_pend_head + iface->tx_pend_count) %
+                                AMI_SANA2_TX_PEND];
+
+            pend->packet     = packet;
+            pend->dst_msw    = (UWORD)dst_msw;
+            pend->dst_lsw    = dst_lsw;
+            pend->ether_type = ether_type;
+            pend->gso        = gso;
+            iface->tx_pend_count++;
+        }
+        queued = TRUE;
     }
     Permit();
 
-    if (pend == NULL)
+    if (!queued)
         return FALSE;
 
-    iface->stats.tx_queued++;
+    iface->stats.tx_queued += count;
 
 #ifdef AMINETXDUO_TX_LAZY_COLLECT
     if (iface->tx_lazy_parked)
@@ -728,15 +803,20 @@ VOID ami_sana2_tx_kick(AmiSana2If *iface)
 
         if (!iface->online)
         {
-            /* The interface went down while the write waited: teardown. */
+            /* The interface went down while the write waited: teardown.  A
+               GSO child gives back its share of the parent and no more. */
             slot->busy = FALSE;
-            AMI_NX_CLEANUP(nx_packet_transmit_release(pend.packet));
+            if (pend.gso != AMI_SANA2_GSO_NONE)
+                ami_sana2_gso_put(iface, pend.gso, 1, TRUE);
+            else
+                AMI_NX_CLEANUP(nx_packet_transmit_release(pend.packet));
             iface->stats.tx_errors++;
         }
         else
         {
             /* The verdict is the launch's own: a packet that fails here was
                released by it, as one from the direct path is. */
+            slot->gso = pend.gso;
             (VOID)ami_sana2_tx_launch(iface, slot, pend.packet, pend.ether_type,
                                       pend.dst_msw, pend.dst_lsw);
         }
@@ -821,6 +901,97 @@ VOID ami_sana2_tx_flush_replied(AmiSana2If *iface)
 }
 #endif /* AMINETXDUO_TX_RUN */
 
+/*
+ * A TCP GSO block (aminetxduo/tcpgso.h) as its k child writes, in order:
+ * into free slots while nothing waits, the rest queued behind them in one
+ * piece.  Owns the parent from here, success or failure; a context holds it
+ * until the last child is done with it (ami_sana2_gso_put).  Out of line:
+ * the ordinary write pays one flag test for it.
+ */
+static UINT __attribute__((noinline))
+ami_sana2_gso_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
+                   ULONG dst_msw, ULONG dst_lsw)
+{
+    AmiTxGso   blk;
+    AmiTxSlot *slot;
+    UWORD      idx = AMI_SANA2_GSO_NONE;
+    UWORD      at;
+    UWORD      i;
+
+    /* Cooked IPv4 only: the copy hook is what cuts the block, and neither a
+       raw write nor an IPv6 datagram is cut there.  The capability says
+       neither, so the core is not to send one; one that arrives is dropped
+       rather than put on the wire whole. */
+    if (iface->raw_mode || ether_type != AMI_ETHERTYPE_IPV4 ||
+        iface->gso == NULL || !ami_sana2_gso_parse(packet, iface->mtu, &blk))
+    {
+        nx_packet_transmit_release(packet);
+        iface->stats.tx_errors++;
+        return NX_INVALID_PACKET;
+    }
+
+    /* Blocks finish roughly in the order they started, so the search starts
+       after the last one taken and usually stops at once. */
+    Forbid();
+    at = iface->gso_next;
+    for (i = 0; i < iface->gso_count; i++)
+    {
+        if (at >= iface->gso_count)
+            at = 0;
+        if (iface->gso[at].parent == NULL)
+        {
+            blk.parent       = packet;
+            blk.outstanding  = blk.segs;
+            blk.lost         = 0;
+            blk.next_seg     = 0;
+            iface->gso[at]   = blk;
+            idx              = (UWORD)(at + 1);
+            iface->gso_next  = (UWORD)(at + 1);
+            break;
+        }
+        at++;
+    }
+    Permit();
+
+    /* Cannot happen: a block in flight holds a slot or a queue entry, and
+       there is a context for each.  Kept, counted as a full queue would be,
+       rather than trusted. */
+    if (idx == AMI_SANA2_GSO_NONE)
+    {
+        nx_packet_transmit_release(packet);
+        iface->stats.tx_errors += blk.segs;
+        iface->stats.tx_queue_full++;
+        return NX_TX_QUEUE_DEPTH;
+    }
+
+    for (i = 0; i < blk.segs; i++)
+    {
+        slot = (iface->tx_pend_count != 0) ? NULL : ami_sana2_tx_claim(iface);
+        if (slot == NULL)
+            break;
+
+        slot->gso = idx;
+        (VOID)ami_sana2_tx_launch(iface, slot, packet, ether_type, dst_msw,
+                                  dst_lsw);
+    }
+
+    if (i < blk.segs)
+    {
+        if (!ami_sana2_tx_enqueue(iface, packet, ether_type, dst_msw, dst_lsw,
+                                  idx, (UWORD)(blk.segs - i)))
+        {
+            /* The children already launched still own their share. */
+            iface->stats.tx_errors += (ULONG)(blk.segs - i);
+            iface->stats.tx_queue_full++;
+            ami_sana2_gso_put(iface, idx, (UWORD)(blk.segs - i), TRUE);
+            return (i == 0) ? NX_TX_QUEUE_DEPTH : NX_SUCCESS;
+        }
+        ami_sana2_tx_kick(iface);
+    }
+
+    return NX_SUCCESS;
+}
+
 UINT ami_sana2_tx_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
                        ULONG dst_msw, ULONG dst_lsw)
 {
@@ -866,6 +1037,11 @@ UINT ami_sana2_tx_send_now(AmiSana2If *iface, NX_PACKET *packet,
         return NX_NOT_ENABLED;
     }
 
+    /* A TCP GSO block goes out as several writes (ami_sana2_gso_send). */
+    if ((packet->nx_packet_interface_capability_flag &
+         NX_INTERFACE_CAPABILITY_TCP_GSO) != 0)
+        return ami_sana2_gso_send(iface, packet, ether_type, dst_msw, dst_lsw);
+
     /*
      * Behind whatever is already waiting, or straight into a slot.  A full
      * ring is not a wait any more (it was a 20 ms tx_thread_sleep per spin,
@@ -880,7 +1056,8 @@ UINT ami_sana2_tx_send_now(AmiSana2If *iface, NX_PACKET *packet,
 
     if (slot == NULL)
     {
-        if (!ami_sana2_tx_enqueue(iface, packet, ether_type, dst_msw, dst_lsw))
+        if (!ami_sana2_tx_enqueue(iface, packet, ether_type, dst_msw, dst_lsw,
+                                  AMI_SANA2_GSO_NONE, 1))
         {
             /* Congestion, not an error: drop and let the upper layers
                retransmit. */
@@ -907,6 +1084,74 @@ ami_sana2_tx_capture(AmiSana2If *iface, AmiTxSlot *slot, NX_PACKET *packet,
     ami_bpf_tap_tx(iface, packet, slot->hdr_len != 0, ether_type,
                    dst_msw, dst_lsw, iface->mac);
 }
+
+/*
+ * A GSO child as the wire sees it: the synthetic link header, the headers
+ * the copy hook will write and the payload slice in place.  Never the
+ * parent, which no wire ever carries.
+ */
+static VOID __attribute__((noinline))
+ami_sana2_gso_capture(AmiSana2If *iface, AmiTxSlot *slot, ULONG length,
+                      UWORD ether_type, ULONG dst_msw, ULONG dst_lsw)
+{
+    static const UBYTE zero[AMI_ETH_MIN_FRAME];
+    const AmiTxGso *g = &iface->gso[slot->gso - 1];
+    AmiBpfView      view;
+    UBYTE           eth[AMI_ETH_HEADER_SIZE];
+    UBYTE           hdr[120];
+    NX_PACKET      *cur = slot->seg_buf;
+    ULONG           off = slot->seg_buf_off;
+    ULONG           hlen;
+    ULONG           seg_len;
+    ULONG           left;
+
+    eth[0] = (UBYTE)(dst_msw >> 8);
+    eth[1] = (UBYTE)(dst_msw);
+    eth[2] = (UBYTE)(dst_lsw >> 24);
+    eth[3] = (UBYTE)(dst_lsw >> 16);
+    eth[4] = (UBYTE)(dst_lsw >> 8);
+    eth[5] = (UBYTE)(dst_lsw);
+    ami_sana2_copy_bytes(&eth[6], iface->mac, AMI_ETH_ADDR_SIZE);
+    eth[12] = (UBYTE)(ether_type >> 8);
+    eth[13] = (UBYTE)(ether_type);
+
+    hlen = ami_sana2_gso_header(slot, hdr);
+    (VOID)ami_sana2_gso_slice(g, slot->seg_index, &seg_len);
+    left = seg_len;
+
+    view.wirelen = AMI_ETH_HEADER_SIZE + length;
+    view.caplen  = 0;
+    view.nsegs   = 0;
+    (VOID)ami_bpf_view_add(&view, eth, AMI_ETH_HEADER_SIZE);
+    (VOID)ami_bpf_view_add(&view, hdr, hlen);
+
+    while (left != 0 && cur != NULL)
+    {
+        ULONG have = (ULONG)(cur->nx_packet_append_ptr -
+                             cur->nx_packet_prepend_ptr);
+        ULONG take;
+
+        if (off >= have)
+        {
+            cur = cur->nx_packet_next;
+            off = 0;
+            continue;
+        }
+        take = have - off;
+        if (take > left)
+            take = left;
+        if (ami_bpf_view_add(&view, cur->nx_packet_prepend_ptr + off,
+                             take) != 0)
+            break;          /* caplen < wirelen says so */
+        left -= take;
+        off  += take;
+    }
+
+    if (left == 0 && length > hlen + seg_len)
+        (VOID)ami_bpf_view_add(&view, zero, length - hlen - seg_len);
+
+    ami_bpf_tap_view(iface, &view);
+}
 #endif
 
 /*
@@ -927,6 +1172,26 @@ static UINT ami_sana2_tx_launch(AmiSana2If *iface, AmiTxSlot *slot,
 #endif
 
     slot->hdr_len = 0;
+
+    /* A GSO child: cooked, nothing written into the parent, the frame the
+       copy hook's.  The pad is the copy hook's zeroes too. */
+    if (slot->gso != AMI_SANA2_GSO_NONE)
+    {
+        raw_write = FALSE;
+        csum_hw   = (iface->tx_csum_ok & ANXD_S2_TXF_TCP) != 0;
+        slot->tx_flags = csum_hw ? ANXD_S2_TXF_TCP : 0;
+        slot->pad_len  = 0;
+        length    = ami_sana2_gso_prepare(slot, packet);
+        if (iface->hw_type == S2WireType_Ethernet &&
+            length < (ULONG)(AMI_ETH_MIN_FRAME - AMI_ETH_HEADER_SIZE))
+            length = (ULONG)(AMI_ETH_MIN_FRAME - AMI_ETH_HEADER_SIZE);
+#ifdef AMINETXDUO_BPF
+        if (ami_bpf_bound_channels != 0)
+            ami_sana2_gso_capture(iface, slot, length, ether_type, dst_msw,
+                                  dst_lsw);
+#endif
+        goto post;
+    }
 
     /*
      * ariadne.device 1.50 compares ios2_PacketType against 1500 SIGNED, so any
@@ -1009,6 +1274,7 @@ static UINT ami_sana2_tx_launch(AmiSana2If *iface, AmiTxSlot *slot,
 
     length = packet->nx_packet_length;
 
+post:
     slot->packet     = packet;
     slot->cursor     = NULL;      /* the copy hook rewinds on first call */
     slot->cursor_off = 0;

@@ -38,6 +38,7 @@
 #include "netmonitor.h"
 #include "aminetxduo/sana2.h"
 #include "nx_ip.h"
+#include "aminetxduo/tcpgso.h"
 
 #include <proto/dos.h>
 
@@ -45,6 +46,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* TCP GSO (transfer.c): no interface here advertises it, so transfer.c
+   never asks; linked because transfer.c names it. */
+UINT ami_sana2_gso_max_segs(NX_INTERFACE *interface_ptr)
+{
+    (VOID)interface_ptr;
+    return 0;
+}
 
 #ifndef AMINETXDUO_TCP_CORK
 #error "test_cork is the cork's test: build it with AMINETXDUO_TCP_CORK"
@@ -1420,6 +1429,19 @@ static void t_nonblocking(void)
     CHECK(bsd_writable(s) == TRUE, "room in the queue for it: writable");
     s->as_Nx.tcp.nx_tcp_socket_transmit_sent_count = 7;
     CHECK(bsd_writable(s) == FALSE, "sent_count + 1 == max: not writable");
+
+    /* On a GSO interface the queue is bounded in bytes too
+       (_nx_tcp_socket_queue_byte_credit): 8 entries of 100 bytes. */
+    h_eth.nx_interface_capability_flag = NX_INTERFACE_CAPABILITY_TCP_GSO;
+    s->as_Nx.tcp.nx_tcp_socket_connect_mss          = 100;
+    s->as_Nx.tcp.nx_tcp_socket_transmit_sent_count  = 0;
+    s->as_Nx.tcp.nx_tcp_socket_tx_outstanding_bytes = 800;
+    CHECK(bsd_writable(s) == FALSE && s->as_TxWait == 1,
+          "a full segment and no byte credit: not writable");
+    s->as_Nx.tcp.nx_tcp_socket_tx_outstanding_bytes = 700;
+    CHECK(bsd_writable(s) == TRUE, "credit again: writable");
+    h_eth.nx_interface_capability_flag = 0;
+    s->as_Nx.tcp.nx_tcp_socket_tx_outstanding_bytes = 0;
 }
 
 static void t_oob(void)

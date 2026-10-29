@@ -196,6 +196,106 @@ static UWORD ami_sana2_ether_type(NX_IP_DRIVER *req, NX_PACKET *packet)
                                                : AMI_ETHERTYPE_IPV6;
 }
 
+/* ---------------------------------------------------------------- TCP GSO */
+
+/*
+ * The most segments a GSO block may carry on this interface, or 0 for none
+ * (aminetxduo/tcpgso.h).  Cooked writes only: the copy hook is what cuts a
+ * block, and a raw write never reaches it.  At least four write slots, and
+ * a pool of 256 packets: below either a block has nothing to overlap with,
+ * and the 94-packet A1200 without Fast RAM keeps exactly today's path.  At
+ * most 16, the slots, and one per 32 pool packets.
+ */
+static UBYTE ami_sana2_gso_plan(const AmiSana2If *iface)
+{
+    ULONG pool;
+    ULONG segs = AMI_SANA2_GSO_SEGS;
+
+    if (iface->raw_mode || iface->tx_slots < AMI_SANA2_GSO_MIN_SLOTS ||
+        iface->pool == NULL)
+        return 0;
+
+    pool = iface->pool->nx_packet_pool_total;
+    if (pool < AMI_SANA2_GSO_MIN_POOL)
+        return 0;
+
+    if (segs > iface->tx_slots)
+        segs = iface->tx_slots;
+    if (segs > pool / AMI_SANA2_GSO_POOL_PER)
+        segs = pool / AMI_SANA2_GSO_POOL_PER;
+
+    return (UBYTE)segs;
+}
+
+/* Set or withdraw the capability with the link.  The context table comes
+   with the first advertisement and stays: blocks may still be in flight
+   when the link drops.  No table, no GSO.  The flag is written directly,
+   as the alias copy below does: the setter would replace the checksum bits
+   NX_LINK_INITIALIZE put there. */
+static VOID ami_sana2_gso_advertise(AmiSana2If *iface,
+                                    NX_INTERFACE *interface_ptr, BOOL up)
+{
+    iface->gso_max_segs = up ? ami_sana2_gso_plan(iface) : 0;
+
+    if (iface->gso_max_segs != 0 && iface->gso == NULL)
+    {
+        UWORD count = (UWORD)(iface->tx_slots + AMI_SANA2_TX_PEND);
+
+        iface->gso = (AmiTxGso *)ami_alloc((ULONG)count *
+                                           (ULONG)sizeof(AmiTxGso));
+        if (iface->gso != NULL)
+        {
+            iface->gso_count = count;
+            iface->gso_next  = 0;
+        }
+        else
+        {
+            iface->gso_max_segs = 0;
+        }
+    }
+
+#ifdef NX_ENABLE_INTERFACE_CAPABILITY
+    if (iface->gso_max_segs != 0)
+        interface_ptr->nx_interface_capability_flag |=
+            NX_INTERFACE_CAPABILITY_TCP_GSO;
+    else
+        interface_ptr->nx_interface_capability_flag &=
+            (ULONG)~NX_INTERFACE_CAPABILITY_TCP_GSO;
+#else
+    (VOID)interface_ptr;
+#endif
+}
+
+/* Only once nothing can reach it: the interface is being freed. */
+VOID ami_sana2_gso_free(AmiSana2If *iface)
+{
+    if (iface->gso != NULL)
+    {
+        ami_free(iface->gso);
+        iface->gso       = NULL;
+        iface->gso_count = 0;
+    }
+}
+
+UINT ami_sana2_gso_max_segs(NX_INTERFACE *interface_ptr)
+{
+    const AmiSana2If *iface;
+
+    if (interface_ptr == NULL)
+        return 0;
+
+#ifdef NX_ENABLE_INTERFACE_CAPABILITY
+    /* The bit first: only an interface of ours carries it, so only then is
+       additional_link_info an AmiSana2If. */
+    if ((interface_ptr->nx_interface_capability_flag &
+         NX_INTERFACE_CAPABILITY_TCP_GSO) == 0)
+        return 0;
+#endif
+
+    iface = (const AmiSana2If *)interface_ptr->nx_interface_additional_link_info;
+    return (iface != NULL) ? (UINT)iface->gso_max_segs : 0;
+}
+
 /* --------------------------------------------------------------- removal */
 
 /*
@@ -433,6 +533,7 @@ static VOID __attribute__((noinline, cold)) ami_sana2_driver_command(
         break;
 
     case NX_LINK_UNINITIALIZE:
+        ami_sana2_gso_advertise(iface, interface_ptr, FALSE);
         ami_sana2_rx_stop(iface);
         ami_sana2_tx_drain(iface);
         ami_sana2_offline(iface);
@@ -466,12 +567,14 @@ static VOID __attribute__((noinline, cold)) ami_sana2_driver_command(
 
         interface_ptr->nx_interface_link_up = NX_TRUE;
         iface->admin_up = TRUE;
+        ami_sana2_gso_advertise(iface, interface_ptr, TRUE);
         ami_sana2_refresh_stats(iface);
         break;
 
     case NX_LINK_DISABLE:
         interface_ptr->nx_interface_link_up = NX_FALSE;
         iface->admin_up = FALSE;
+        ami_sana2_gso_advertise(iface, interface_ptr, FALSE);
         ami_sana2_rx_stop(iface);
         ami_sana2_tx_drain(iface);
         ami_sana2_offline(iface);
@@ -489,6 +592,7 @@ static VOID __attribute__((noinline, cold)) ami_sana2_driver_command(
     case AMI_LINK_STACK_DISABLE:
         interface_ptr->nx_interface_link_up = NX_FALSE;
         iface->admin_up = FALSE;
+        ami_sana2_gso_advertise(iface, interface_ptr, FALSE);
         ami_sana2_tx_drain(iface);
         break;
 
@@ -498,6 +602,7 @@ static VOID __attribute__((noinline, cold)) ami_sana2_driver_command(
         interface_ptr->nx_interface_link_up = NX_FALSE;
         iface->admin_up  = FALSE;
         iface->detaching = TRUE;
+        ami_sana2_gso_advertise(iface, interface_ptr, FALSE);
         break;
 
     case NX_LINK_PACKET_BROADCAST:

@@ -20,6 +20,7 @@
 #include "aminetxduo/anxs2ext.h"
 #include "aminetxduo/anxnet.h"
 #include "aminetxduo/asm_abi.h"
+#include "aminetxduo/tcpgso.h"
 
 #include "sana2_device.h"
 
@@ -401,13 +402,79 @@
 #define AMI_SANA2_TX_PEND           (AMI_SANA2_TX_SLOTS * 16)
 #endif
 
+/* `gso` names the GSO block (AmiTxGso below) this entry is the next child
+   of, and `packet` is then its parent; AMI_SANA2_GSO_NONE for an ordinary
+   write.  Which child is the block's own count: they leave in order.
+   dst_msw is a UWORD so the index fits where the padding was: the queue is
+   512 entries in the full build. */
 typedef struct AmiTxPending
 {
     NX_PACKET  *packet;
-    ULONG       dst_msw;
     ULONG       dst_lsw;
+    UWORD       dst_msw;
     UWORD       ether_type;
+    UWORD       gso;
 } AmiTxPending;
+
+/*
+ * TCP GSO (aminetxduo/tcpgso.h): one block in flight as k child writes.  The
+ * context owns the parent until the last child is done with it; each child
+ * write is a slot carrying {gso, seg_index}, its payload slice found from
+ * the parent's chain by a cursor that only moves forward while the children
+ * launch in order.
+ *
+ * ONE CONTEXT PER WRITE SLOT AND PER QUEUE ENTRY.  Every block in flight
+ * holds at least one of either, so the table can never be what refuses a
+ * block while the transmit path has room: a drop there would be a
+ * retransmission this stack inflicted on itself.  Allocated the first time
+ * the interface advertises GSO (sana2_driver.c) and kept until the
+ * interface is freed, so a machine below the gates pays nothing.  Nothing
+ * in the NX_PACKET is touched -- TCP may hand the same parent back for
+ * retransmission.
+ */
+/* `gso` in a slot or a queue entry is the context's index plus one, so a
+   zeroed one is an ordinary write. */
+#define AMI_SANA2_GSO_NONE      0
+/* What the context fields and the child indices hold. */
+#define AMI_SANA2_GSO_MAX_SEGS  255
+/* The gates on advertising it (sana2_driver.c). */
+#define AMI_SANA2_GSO_MIN_SLOTS 4
+#define AMI_SANA2_GSO_MIN_POOL  256
+#define AMI_SANA2_GSO_SEGS      16
+#define AMI_SANA2_GSO_POOL_PER  32
+
+typedef struct AmiTxGso
+{
+    NX_PACKET  *parent;         /* NULL: free                               */
+    NX_PACKET  *cur_buf;        /* the forward cursor: the buffer, and the  */
+    LONG        cur_start;      /* payload offset its prepend_ptr is at     */
+    UWORD       base;           /* payload bytes the children span: from   */
+    UWORD       end;            /* here up to there; 0 and all for a block */
+    UWORD       mss;
+    UBYTE       ihl;
+    UBYTE       thl;
+    UBYTE       segs;           /* k                                        */
+    UBYTE       outstanding;    /* children not yet done with the parent    */
+    UBYTE       lost;           /* children refused, aborted or dropped     */
+    UBYTE       next_seg;       /* the child the next launch is             */
+    UBYTE       mode;           /* AMI_SANA2_GSO_REPAIR, _TAIL              */
+} AmiTxGso;
+
+/* A repair record's one child, and whether it ends the payload. */
+#define AMI_SANA2_GSO_REPAIR    0x01
+#define AMI_SANA2_GSO_TAIL      0x02
+
+/* Child `seg`'s payload offset, and its length in *len. */
+static inline ULONG ami_sana2_gso_slice(const AmiTxGso *g, UWORD seg,
+                                        ULONG *len)
+{
+    ULONG off = (ULONG)g->base + (ULONG)seg * g->mss;
+
+    *len = (ULONG)g->end - off;
+    if (*len > g->mss)
+        *len = g->mss;
+    return off;
+}
 
 /* ACKPACE (sana2_ackpace.c): a pure acknowledgment waiting for its turn,
    and the E-clock ticks the bytes it acknowledges take at the rate. */
@@ -827,6 +894,18 @@ typedef struct AmiTxSlot
     UBYTE               tx_flags;   /* per-write ANXD_S2_TXF_* metadata    */
     volatile BOOL       busy;
 
+    /* A GSO child (AmiTxGso): `packet` is the parent, the frame is its
+       headers patched for segment seg_index and the payload slice from
+       seg_buf/seg_buf_off, which is where a restart rewinds the cursor to.
+       seg_sum is the slice's TCP checksum once a copy in pieces needed it
+       before the bytes went past (seg_summed). */
+    UWORD               gso;        /* AMI_SANA2_GSO_NONE: ordinary write  */
+    UBYTE               seg_index;
+    UBYTE               seg_summed;
+    UWORD               seg_sum;
+    NX_PACKET          *seg_buf;
+    ULONG               seg_buf_off;
+
 #ifdef AMINETXDUO_RXPROBE
     /* The ack leg's opening stamp: E-Clock at BeginIO, 0 when unarmed.  The
        reply's reaper closes the pair; per slot, not latest-stamp, because
@@ -1050,6 +1129,15 @@ struct AmiSana2If
     UWORD               tx_pend_count;
     volatile BOOL       tx_kicking;
 
+    /* GSO blocks in flight, under Forbid() with the slots: gso_count of
+       them, NULL until GSO is first advertised; gso_next is where the
+       search for a free one starts.  gso_max_segs is the most segments one
+       block may carry here, 0 = not advertised (sana2_driver.c). */
+    AmiTxGso           *gso;
+    UWORD               gso_count;
+    UWORD               gso_next;
+    UBYTE               gso_max_segs;
+
 #ifdef AMINETXDUO_TX_LAZY_COLLECT
     /*
      * Lazy completion collection, see ami_sana2_tx_lazy_tick().  Parking only
@@ -1112,6 +1200,15 @@ BOOL ami_sana2_copy_to_buff(register APTR to    __asm("a0"),
                             register APTR from  __asm("a1"),
                             register ULONG len  __asm("d0"));
 BOOL ami_sana2_tx_pseudo_sum(NX_PACKET *pkt);
+/* TCP GSO, the copy side (sana2_copy.c).  _parse checks a block against
+   the contract and fills in everything of `g` but the ownership fields;
+   _prepare places a child's slice in the chain and answers its frame
+   length before any pad; _header is the child's headers as its copy writes
+   them, checksum included, into `out` (60 + 60 bytes at most), for the
+   capture tap. */
+BOOL  ami_sana2_gso_parse(NX_PACKET *packet, ULONG mtu, AmiTxGso *g);
+ULONG ami_sana2_gso_prepare(AmiTxSlot *slot, NX_PACKET *parent);
+ULONG ami_sana2_gso_header(AmiTxSlot *slot, UCHAR *out);
 AMIGA_ASM_ARGS UBYTE ami_sana2_tx_flags(APTR ios2_data);
 #ifdef AMINETXDUO_TX_RUN
 /* The flush request came back on tx_port: the device queued it rather than
@@ -1141,6 +1238,8 @@ VOID ami_sana2_capacity_changed(AmiSana2If *iface);
 
 /* sana2_driver.c */
 VOID ami_sana2_unbind(AmiSana2If *iface);
+/* The GSO context table, with the interface (sana2_device.c). */
+VOID ami_sana2_gso_free(AmiSana2If *iface);
 
 /* sana2_rx.c */
 LONG ami_sana2_rx_start(AmiSana2If *iface);

@@ -85,6 +85,17 @@ static void h_flush_reply(void)
     }
 }
 
+/* For the GSO tests: every write posted, its slot's segment, and the frame a
+   device that copies at BeginIO() time would have taken. */
+#define H_LOG       64
+#define H_FRAME     256
+static struct IORequest *h_sent_log[H_LOG];
+static UBYTE             h_seg_log[H_LOG];
+static ULONG             h_len_log[H_LOG];
+static UCHAR             h_frames[H_LOG][H_FRAME];
+static BOOL              h_frame_ok[H_LOG];
+static int               h_copy_on_begin;
+
 VOID BeginIO(struct IORequest *req)
 {
     if (req->io_Command == ANXD_CMD_TX_FLUSH)
@@ -103,6 +114,22 @@ VOID BeginIO(struct IORequest *req)
     }
     h_sent = req;
     h_sends++;
+    if (h_sends <= H_LOG)
+    {
+        struct IOSana2Req *s2   = (struct IOSana2Req *)req;
+        AmiTxSlot         *slot = (AmiTxSlot *)s2->ios2_Data;
+
+        h_sent_log[h_sends - 1] = req;
+        h_seg_log[h_sends - 1]  = slot->seg_index;
+        h_len_log[h_sends - 1]  = s2->ios2_DataLength;
+        if (h_copy_on_begin)
+        {
+            memset(h_frames[h_sends - 1], 0x5A, H_FRAME);
+            h_frame_ok[h_sends - 1] =
+                ami_sana2_copy_from_buff(h_frames[h_sends - 1], slot,
+                                         s2->ios2_DataLength);
+        }
+    }
     if (!h_quick_kept)
         req->io_Flags &= (UBYTE)~IOF_QUICK;
 }
@@ -175,15 +202,20 @@ AMIGA_ASM_ARGS VOID n68k_copy_bytes(UCHAR *to, const UCHAR *from, ULONG len)
         memcpy(to, from, (size_t)len);
 }
 
+/* Summed as the 68k loads them, big-endian, as in test_sana2_copy_netx: the
+   GSO children's checksums below are compared with one computed from
+   scratch, which a little-endian sum would not match. */
 AMIGA_ASM_ARGS ULONG n68k_copy_sum_longwords(ULONG *to, const ULONG *from, ULONG count)
 {
     ULONG acc = 0;
 
     while (count != 0UL)
     {
-        ULONG w = *from++;
+        const UCHAR *b = (const UCHAR *)from;
+        ULONG w = ((ULONG)b[0] << 24) | ((ULONG)b[1] << 16) |
+                  ((ULONG)b[2] << 8) | (ULONG)b[3];
 
-        *to++ = w;
+        *to++ = *from++;
 
         acc += w;
         if (acc < w)
@@ -214,12 +246,20 @@ VOID _nx_ip_driver_deferred_processing(NX_IP *ip_ptr)
 /* The reap releases the packet. Counted, and the packet is left alone: every
    assertion after a reap is about the shape it was handed back in. */
 static unsigned long h_releases;
+static NX_PACKET    *h_released;
 
 /* The error-checking entry points, because nx_api.h maps the nx_ names to
    them when NX_DISABLE_ERROR_CHECKING is not set, which is the host build. */
+/* The fill test's parents, counted one by one. */
+#define G_FILL_MAX  (1 + (2 + AMI_SANA2_TX_PEND) / 2)
+static NX_PACKET g_fill[G_FILL_MAX];
+static UBYTE     g_fill_released[G_FILL_MAX];
+
 UINT _nxe_packet_transmit_release(NX_PACKET **packet_ptr_ptr)
 {
-    (VOID)packet_ptr_ptr;
+    h_released = *packet_ptr_ptr;
+    if (h_released >= &g_fill[0] && h_released < &g_fill[G_FILL_MAX])
+        g_fill_released[h_released - &g_fill[0]]++;
     h_releases++;
     return NX_SUCCESS;
 }
@@ -329,6 +369,8 @@ VOID ami_log(int level, const char *fmt, ...)
 
 static AmiSana2If iface;
 static NX_PACKET  pkt;
+/* The GSO context table, as the driver allocates it at link-up. */
+static AmiTxGso   h_gso_table[AMI_SANA2_TX_SLOTS + AMI_SANA2_TX_PEND];
 static UCHAR      pool[POOL_BYTES];
 
 static void fixture_init(BOOL raw, ULONG hw_type)
@@ -342,6 +384,9 @@ static void fixture_init(BOOL raw, ULONG hw_type)
     memcpy(iface.mac, "\x02\x41\x4d\x49\x00\x42", AMI_ETH_ADDR_SIZE);
 
     ami_sana2_tx_init(&iface);
+    memset(h_gso_table, 0, sizeof(h_gso_table));
+    iface.gso       = h_gso_table;
+    iface.gso_count = (UWORD)(AMI_SANA2_TX_SLOTS + AMI_SANA2_TX_PEND);
 
     h_sent     = NULL;
     h_sends    = 0;
@@ -356,6 +401,9 @@ static void fixture_init(BOOL raw, ULONG hw_type)
     h_flush_reply_on_sleep = 0;
     h_current      = &h_thread_a;
     h_before_disable = NULL;
+    h_copy_on_begin  = 0;
+    h_released       = NULL;
+    memset(h_frame_ok, 0, sizeof(h_frame_ok));
 }
 
 static void packet_init(const UCHAR *body, ULONG len)
@@ -1290,6 +1338,768 @@ static void test_full_ring_queues_in_order(void)
             "and released every write that waited");
 }
 
+/* ---------------------------------------------------------------- TCP GSO */
+
+/*
+ * A GSO parent as the core builds it (aminetxduo/tcpgso.h): the record at
+ * data_start, the first segment's IPv4 and TCP headers (twelve bytes of
+ * timestamp option, so the TCP header is 32) and the payload of the whole
+ * block, chained at the cuts given.  Every expectation below is built from
+ * scratch from g_stream and the template, not from what the code under test
+ * wrote.
+ */
+#define G_BUFS      8
+#define G_MEM       512
+#define G_IHL       20
+
+static NX_PACKET g_buf[G_BUFS];
+static UCHAR     g_mem[G_BUFS][G_MEM];
+static UCHAR     g_stream[2048];
+static UCHAR     g_tmpl[60];
+static ULONG     g_thl;
+static ULONG     g_payload;
+static ULONG     g_mss;
+
+/* RFC 1071 over big-endian words, an odd tail padded with zero; not folded. */
+static ULONG ref_sum(const UCHAR *p, ULONG n)
+{
+    ULONG sum = 0, i;
+
+    for (i = 0; i + 1 < n; i += 2)
+        sum += ((ULONG)p[i] << 8) | p[i + 1];
+    if (n & 1UL)
+        sum += (ULONG)p[n - 1] << 8;
+    return sum;
+}
+
+static ULONG ref_fold(ULONG sum)
+{
+    while (sum >> 16)
+        sum = (sum & 0xFFFFUL) + (sum >> 16);
+    return sum;
+}
+
+/* `first` payload bytes share the header buffer; then `cuts`, the rest in a
+   last buffer.  Odd buffers start at an odd address. */
+static NX_PACKET *gso_parent(ULONG thl, ULONG payload, ULONG mss, UBYTE flags,
+                             ULONG seq, UWORD id, ULONG first,
+                             const ULONG *cuts, ULONG ncuts)
+{
+    NX_TCP_GSO_INFO *info;
+    ULONG            hlen = G_IHL + thl;
+    ULONG            at, i, n;
+    UCHAR           *ip  = g_tmpl;
+    UCHAR           *tcp = g_tmpl + G_IHL;
+    ULONG            sum;
+
+    memset(g_buf, 0, sizeof(g_buf));
+    memset(g_mem, 0xEE, sizeof(g_mem));
+    for (i = 0; i < sizeof(g_stream); i++)
+        g_stream[i] = (UCHAR)((i * 13 + 5) ^ (i >> 8));
+
+    g_thl = thl;
+    g_payload = payload;
+    g_mss = mss;
+
+    memset(g_tmpl, 0, sizeof(g_tmpl));
+    ip[0] = 0x45;
+    ip[2] = (UCHAR)((hlen + payload) >> 8);
+    ip[3] = (UCHAR)(hlen + payload);
+    ip[4] = (UCHAR)(id >> 8);
+    ip[5] = (UCHAR)id;
+    ip[6] = 0x40;                           /* DF                           */
+    ip[8] = 64;
+    ip[9] = 6;
+    ip[12] = 10; ip[15] = 1;
+    ip[16] = 10; ip[19] = 2;
+    sum = ~ref_fold(ref_sum(ip, G_IHL)) & 0xFFFFUL;
+    ip[10] = (UCHAR)(sum >> 8);
+    ip[11] = (UCHAR)sum;
+
+    tcp[0] = 0x30; tcp[1] = 0x39; tcp[2] = 0x00; tcp[3] = 0x50;
+    tcp[4] = (UCHAR)(seq >> 24); tcp[5] = (UCHAR)(seq >> 16);
+    tcp[6] = (UCHAR)(seq >> 8);  tcp[7] = (UCHAR)seq;
+    tcp[8] = 0x01; tcp[9] = 0x02; tcp[10] = 0x03; tcp[11] = 0x04;
+    tcp[12] = (UCHAR)((thl / 4) << 4);
+    tcp[13] = flags;
+    tcp[14] = 0xFF; tcp[15] = 0xF0;
+    for (i = 20; i < thl; i++)
+        tcp[i] = (UCHAR)(0xA0 + i);         /* options, copied per child    */
+
+    /* The header buffer: record, headroom, headers, the first payload. */
+    g_buf[0].nx_packet_data_start  = g_mem[0];
+    g_buf[0].nx_packet_data_end    = g_mem[0] + G_MEM;
+    g_buf[0].nx_packet_prepend_ptr = g_mem[0] + 4 + NX_PHYSICAL_HEADER;
+    memcpy(g_buf[0].nx_packet_prepend_ptr, g_tmpl, hlen);
+    n = (first < payload) ? first : payload;
+    memcpy(g_buf[0].nx_packet_prepend_ptr + hlen, g_stream, n);
+    g_buf[0].nx_packet_append_ptr = g_buf[0].nx_packet_prepend_ptr + hlen + n;
+    at = n;
+
+    info = (NX_TCP_GSO_INFO *)(VOID *)g_buf[0].nx_packet_data_start;
+    info->version = NX_TCP_GSO_VERSION;
+    info->flags   = 0;
+    info->mss     = (USHORT)mss;
+    info->offset  = 0;
+    info->length  = 0;
+
+    for (i = 1; i < G_BUFS && at < payload; i++)
+    {
+        n = (i - 1 < ncuts) ? cuts[i - 1] : payload - at;
+        if (n > payload - at)
+            n = payload - at;
+        g_buf[i].nx_packet_data_start  = g_mem[i];
+        g_buf[i].nx_packet_data_end    = g_mem[i] + G_MEM;
+        g_buf[i].nx_packet_prepend_ptr = g_mem[i] + (i & 1);
+        memcpy(g_buf[i].nx_packet_prepend_ptr, g_stream + at, n);
+        g_buf[i].nx_packet_append_ptr  = g_buf[i].nx_packet_prepend_ptr + n;
+        g_buf[i - 1].nx_packet_next    = &g_buf[i];
+        at += n;
+    }
+
+    g_buf[0].nx_packet_length = hlen + payload;
+    g_buf[0].nx_packet_interface_capability_flag =
+        NX_INTERFACE_CAPABILITY_TCP_GSO |
+        NX_INTERFACE_CAPABILITY_TCP_TX_CHECKSUM;
+
+    return &g_buf[0];
+}
+
+/* The frame for payload bytes [off, off + len) with IPv4 ID base + `id_add`
+   and TCP flags `flags`, as the wire must carry it.  `offload`: the field
+   holds the pseudo-header sum, folded and not complemented. */
+static ULONG gso_expect_at(UCHAR *out, ULONG off, ULONG len, ULONG id_add,
+                           UBYTE flags, int offload)
+{
+    ULONG  hlen  = G_IHL + g_thl;
+    UCHAR *ip    = out;
+    UCHAR *tcp   = out + G_IHL;
+    ULONG  id, seq, sum, pseudo;
+
+    memcpy(out, g_tmpl, hlen);
+    memcpy(out + hlen, g_stream + off, len);
+
+    ip[2] = (UCHAR)((hlen + len) >> 8);
+    ip[3] = (UCHAR)(hlen + len);
+    id = (((ULONG)g_tmpl[4] << 8) | g_tmpl[5]) + id_add;
+    ip[4] = (UCHAR)(id >> 8);
+    ip[5] = (UCHAR)id;
+    ip[10] = ip[11] = 0;
+    sum = ~ref_fold(ref_sum(ip, G_IHL)) & 0xFFFFUL;
+    ip[10] = (UCHAR)(sum >> 8);
+    ip[11] = (UCHAR)sum;
+
+    seq = (((ULONG)g_tmpl[G_IHL + 4] << 24) | ((ULONG)g_tmpl[G_IHL + 5] << 16) |
+           ((ULONG)g_tmpl[G_IHL + 6] << 8) | g_tmpl[G_IHL + 7]) + off;
+    tcp[4] = (UCHAR)(seq >> 24); tcp[5] = (UCHAR)(seq >> 16);
+    tcp[6] = (UCHAR)(seq >> 8);  tcp[7] = (UCHAR)seq;
+    tcp[13] = flags;
+    tcp[16] = tcp[17] = 0;
+
+    pseudo = ref_sum(ip + 12, 8) + 6UL + g_thl + len;
+    if (offload)
+        sum = ref_fold(pseudo);
+    else
+    {
+        sum = ~ref_fold(pseudo + ref_sum(tcp, g_thl + len)) & 0xFFFFUL;
+        if (sum == 0)
+            sum = 0xFFFFUL;
+    }
+    tcp[16] = (UCHAR)(sum >> 8);
+    tcp[17] = (UCHAR)sum;
+
+    return hlen + len;
+}
+
+/* Child `i` of the whole block. */
+static ULONG gso_expect(UCHAR *out, ULONG i, int offload)
+{
+    ULONG k     = (g_payload + g_mss - 1) / g_mss;
+    ULONG off   = i * g_mss;
+    ULONG len   = (g_payload - off < g_mss) ? g_payload - off : g_mss;
+    UBYTE flags = g_tmpl[G_IHL + 13];
+
+    if (i + 1 < k)
+        flags &= (UBYTE)~0x09;              /* FIN, PSH: the last only      */
+    if (i != 0)
+        flags &= (UBYTE)~0x80;              /* CWR: the first only          */
+    return gso_expect_at(out, off, len, i, flags, offload);
+}
+
+/* The parent, buffers and descriptors both, as it was handed over. */
+static NX_PACKET g_buf_before[G_BUFS];
+static UCHAR     g_mem_before[G_BUFS][G_MEM];
+
+static void gso_snapshot(void)
+{
+    memcpy(g_buf_before, g_buf, sizeof(g_buf));
+    memcpy(g_mem_before, g_mem, sizeof(g_mem));
+}
+
+static int gso_untouched(void)
+{
+    return memcmp(g_buf_before, g_buf, sizeof(g_buf)) == 0 &&
+           memcmp(g_mem_before, g_mem, sizeof(g_mem)) == 0;
+}
+
+static void gso_reply(ULONG n)
+{
+    ReplyMsg(&h_sent_log[n]->io_Message);
+}
+
+/* Each child frame the device took at BeginIO() against the reference.  The
+   lengths are the logged ones: a request is its slot, reused once done. */
+static int gso_frames_match(ULONG nsent, int offload)
+{
+    UCHAR  want[H_FRAME];
+    ULONG  n;
+
+    for (n = 0; n < nsent; n++)
+    {
+        ULONG len = gso_expect(want, h_seg_log[n], offload);
+        ULONG wire = (len < 46) ? 46 : len;
+
+        if (!h_frame_ok[n] || h_len_log[n] != wire ||
+            memcmp(h_frames[n], want, len) != 0)
+        {
+            printf("  child %lu (segment %u) differs\n", (unsigned long)n,
+                   (unsigned)h_seg_log[n]);
+            return 0;
+        }
+        for (; len < wire; len++)
+            if (h_frames[n][len] != 0)
+                return 0;
+        if (h_frames[n][wire] != 0x5A)
+            return 0;
+    }
+    return 1;
+}
+
+static const ULONG g_odd_cuts[] = { 61, 3, 150, 1, 77 };
+
+static void test_gso_children_fused(void)
+{
+    NX_PACKET *p;
+    ULONG      n;
+
+    printf("sana2: a GSO block goes out as its segments, checksummed in the copy\n");
+
+    fixture_init(FALSE, S2WireType_Ethernet);
+    h_copy_on_begin = 1;
+    /* Four segments, the last short; the sequence wraps 2^32 in the third;
+       the slice boundaries fall at odd offsets and odd addresses. */
+    p = gso_parent(32, 350, 100, 0x99 /* CWR ACK PSH FIN */, 0xFFFFFF60UL,
+                   0xFFFE, 37, g_odd_cuts, 5);
+    gso_snapshot();
+
+    h_check(ami_sana2_tx_send(&iface, p, AMI_ETHERTYPE_IPV4, 0xBC24,
+                              0x11EF103A) == NX_SUCCESS, "the block is taken");
+    h_check(h_sends == 4, "as four writes");
+    h_check(h_seg_log[0] == 0 && h_seg_log[1] == 1 && h_seg_log[2] == 2 &&
+            h_seg_log[3] == 3, "in order");
+    h_check(gso_frames_match(4, 0),
+            "each one the block's segment: lengths, IDs, sums, seq, flags");
+    h_check(h_frames[0][G_IHL + 13] == 0x90 && h_frames[1][G_IHL + 13] == 0x10 &&
+            h_frames[3][G_IHL + 13] == 0x19,
+            "CWR on the first, FIN and PUSH on the last alone");
+    h_check(h_frames[2][G_IHL + 4] == 0x00 && h_frames[2][G_IHL + 7] == 0x28,
+            "and the sequence number wrapped past 2^32");
+    h_check(ami_sana2_tx_flags(((struct IOSana2Req *)h_sent_log[0])->ios2_Data)
+            == 0, "and no device is asked for a checksum");
+
+    for (n = 0; n < 3; n++)
+        gso_reply(n);
+    ami_sana2_tx_reap(&iface);
+    h_check(h_releases == 0, "three done: the parent is still the block's");
+
+    gso_reply(3);
+    ami_sana2_tx_reap(&iface);
+    h_check(h_releases == 1 && h_released == p,
+            "the last one releases the parent, once");
+    h_check(iface.stats.packets_sent == 4 && iface.stats.tx_errors == 0,
+            "and four frames count as sent");
+    h_check(gso_untouched(), "and the parent is byte for byte as it came");
+    h_check(iface.gso[0].parent == NULL, "and its context is free");
+}
+
+static void test_gso_children_offload(void)
+{
+    NX_PACKET *p;
+
+    printf("sana2: a GSO block to a device that finishes the TCP checksum\n");
+
+    fixture_init(FALSE, S2WireType_Ethernet);
+    iface.tx_csum_ok = ANXD_S2_TXF_TCP;
+    h_copy_on_begin = 1;
+    p = gso_parent(32, 350, 100, 0x18, 0x10000000UL, 7, 37, g_odd_cuts, 5);
+    gso_snapshot();
+
+    (VOID)ami_sana2_tx_send(&iface, p, AMI_ETHERTYPE_IPV4, 0xBC24, 0x11EF103A);
+    h_check(h_sends == 4, "four writes");
+    h_check(gso_frames_match(4, 1),
+            "each carries the pseudo-header sum of its own length");
+    h_check(ami_sana2_tx_flags(((struct IOSana2Req *)h_sent_log[2])->ios2_Data)
+            == ANXD_S2_TXF_TCP, "and each write is flagged for the card");
+    h_check(gso_untouched(), "and the parent is untouched");
+}
+
+/* A short last segment on Ethernet: zeroes from the copy, not the parent. */
+static void test_gso_pads_the_last(void)
+{
+    NX_PACKET *p;
+
+    printf("sana2: a GSO child under 60 bytes is padded by the copy\n");
+
+    fixture_init(FALSE, S2WireType_Ethernet);
+    h_copy_on_begin = 1;
+    p = gso_parent(20, 203, 100, 0x18, 1000, 1, 203, NULL, 0);
+    gso_snapshot();
+
+    (VOID)ami_sana2_tx_send(&iface, p, AMI_ETHERTYPE_IPV4, 0xBC24, 0x11EF103A);
+    h_check(h_sends == 3, "three writes");
+    h_check(gso_frames_match(3, 0), "the last is 43 bytes and 3 of zeroes");
+
+    /* The same frame taken in two pieces, the second carrying the pad. */
+    {
+        struct IOSana2Req *req = (struct IOSana2Req *)h_sent_log[2];
+        UCHAR              want[H_FRAME];
+        UCHAR              got[H_FRAME];
+        ULONG              len = gso_expect(want, 2, 0);
+
+        memset(got, 0x5A, sizeof(got));
+        h_check(ami_sana2_copy_from_buff(got, req->ios2_Data, 30) == TRUE &&
+                ami_sana2_copy_from_buff(got + 30, req->ios2_Data, 16) == TRUE,
+                "copied again in two pieces");
+        h_check(memcmp(got, want, len) == 0 && got[43] == 0 && got[44] == 0 &&
+                got[45] == 0 && got[46] == 0x5A,
+                "the pieces end in the same three zeroes");
+    }
+    h_check(gso_untouched(), "and nothing was appended to the parent");
+}
+
+/* A device that takes the frame in pieces, and one that starts over. */
+static void test_gso_pieces_and_restart(void)
+{
+    static const ULONG pieces[] = { 7, 13, 1, 50, 2 };
+    NX_PACKET         *p;
+    struct IOSana2Req *req;
+    UCHAR              want[H_FRAME];
+    UCHAR              got[H_FRAME];
+    ULONG              len, at, i;
+    int                arm;
+
+    printf("sana2: a GSO child copied in pieces, and restarted mid-way\n");
+
+    for (arm = 0; arm < 2; arm++)
+    {
+        fixture_init(FALSE, S2WireType_Ethernet);
+        iface.tx_csum_ok = arm ? ANXD_S2_TXF_TCP : 0;
+        p = gso_parent(32, 350, 100, 0x99, 0xFFFFFF60UL, 9, 37, g_odd_cuts, 5);
+
+        (VOID)ami_sana2_tx_send(&iface, p, AMI_ETHERTYPE_IPV4, 0xBC24,
+                                0x11EF103A);
+        req = (struct IOSana2Req *)h_sent_log[2];
+        len = gso_expect(want, 2, arm);
+
+        memset(got, 0x5A, sizeof(got));
+        at = 0;
+        for (i = 0; i < 5; i++)
+        {
+            h_check(ami_sana2_copy_from_buff(got + at, req->ios2_Data,
+                                             pieces[i]) == TRUE,
+                    "each piece is handed over");
+            at += pieces[i];
+        }
+        h_check(ami_sana2_copy_from_buff(got + at, req->ios2_Data,
+                                         len - at) == TRUE,
+                "and the rest");
+        h_check(memcmp(got, want, len) == 0 && got[len] == 0x5A,
+                arm ? "pieces, offload: the frame exactly"
+                    : "pieces, checksum before the bytes: the frame exactly");
+
+        /* 70 bytes in, the device asks for the whole frame again. */
+        memset(got, 0x5A, sizeof(got));
+        h_check(ami_sana2_copy_from_buff(got, req->ios2_Data, 70) == TRUE,
+                "a partial copy");
+        memset(got, 0x5A, sizeof(got));
+        h_check(ami_sana2_copy_from_buff(got, req->ios2_Data, len) == TRUE,
+                "then the whole frame from the start");
+        h_check(memcmp(got, want, len) == 0,
+                "rewinds to this child's slice, not the parent's start");
+
+        /* And once more after it has all gone out. */
+        memset(got, 0x5A, sizeof(got));
+        h_check(ami_sana2_copy_from_buff(got, req->ios2_Data, len) == TRUE &&
+                memcmp(got, want, len) == 0, "a retry copies it again");
+    }
+}
+
+/* More children than free slots: they wait in order, and the parent is the
+   block's until the last of them is done. */
+static void test_gso_queues_in_order(void)
+{
+    NX_PACKET *p;
+
+    printf("sana2: GSO children over too few slots wait in order\n");
+
+    fixture_init(FALSE, S2WireType_Ethernet);
+    iface.tx_slots = 2;
+    h_copy_on_begin = 1;
+    p = gso_parent(32, 350, 100, 0x99, 0xFFFFFF60UL, 0xFFFE, 37, g_odd_cuts, 5);
+    gso_snapshot();
+
+    (VOID)ami_sana2_tx_send(&iface, p, AMI_ETHERTYPE_IPV4, 0xBC24, 0x11EF103A);
+    h_check(h_sends == 2 && iface.tx_pend_count == 2,
+            "two go out, two wait");
+    h_check(iface.tx_pend[iface.tx_pend_head].gso == 1 &&
+            iface.tx_pend[(iface.tx_pend_head + 1) % AMI_SANA2_TX_PEND]
+                .gso == 1 && iface.tx_pend[iface.tx_pend_head].packet == p,
+            "and they wait as the block's own");
+
+    /* A middle child fails at the device. */
+    ((struct IOSana2Req *)h_sent_log[1])->ios2_Req.io_Error = S2ERR_TX_FAILURE;
+    gso_reply(1);
+    ami_sana2_tx_reap(&iface);
+    h_check(h_sends == 3 && h_seg_log[2] == 2,
+            "a completion launches the next in order");
+    h_check(iface.stats.tx_errors == 1, "the failed child is counted");
+    h_check(h_releases == 0, "and the parent is still held");
+
+    gso_reply(0);
+    gso_reply(2);
+    ami_sana2_tx_reap(&iface);
+    h_check(h_sends == 4 && h_seg_log[3] == 3, "then the last");
+    h_check(h_releases == 0, "still held while the last is out");
+
+    gso_reply(3);
+    ami_sana2_tx_reap(&iface);
+    h_check(h_releases == 1 && h_released == p, "released once, at the end");
+    h_check(iface.stats.packets_sent == 3 && iface.stats.tx_errors == 1,
+            "three sent, one lost");
+    h_check(gso_frames_match(4, 0), "and the frames are the segments");
+    h_check(gso_untouched(), "and the parent is untouched");
+}
+
+/* Down with children waiting: the queue gives back its share, the slots
+   theirs, and the parent goes once. */
+static void test_gso_offline_mid_block(void)
+{
+    NX_PACKET *p;
+
+    printf("sana2: an interface going down mid-block\n");
+
+    fixture_init(FALSE, S2WireType_Ethernet);
+    iface.tx_slots = 2;
+    p = gso_parent(32, 350, 100, 0x18, 1, 1, 37, g_odd_cuts, 5);
+
+    (VOID)ami_sana2_tx_send(&iface, p, AMI_ETHERTYPE_IPV4, 0xBC24, 0x11EF103A);
+    iface.online = FALSE;
+    gso_reply(0);
+    ami_sana2_tx_reap(&iface);
+    h_check(iface.tx_pend_count == 0 && h_sends == 2,
+            "the waiting children are not launched");
+    h_check(iface.stats.tx_errors == 2, "and count as lost");
+    h_check(h_releases == 0, "while one child still holds the parent");
+
+    gso_reply(1);
+    ami_sana2_tx_reap(&iface);
+    h_check(h_releases == 1 && h_released == p, "which its completion releases");
+
+    /* The same, torn down by the drain. */
+    fixture_init(FALSE, S2WireType_Ethernet);
+    iface.tx_slots = 2;
+    p = gso_parent(32, 350, 100, 0x18, 1, 1, 37, g_odd_cuts, 5);
+    (VOID)ami_sana2_tx_send(&iface, p, AMI_ETHERTYPE_IPV4, 0xBC24, 0x11EF103A);
+    gso_reply(0);
+    gso_reply(1);
+    iface.online = FALSE;
+    ami_sana2_tx_drain(&iface);
+    h_check(iface.tx_pend_count == 0 && h_releases == 1 && h_released == p,
+            "the drain releases the parent once");
+    h_check(iface.stats.tx_errors == 2 && iface.stats.packets_sent == 2,
+            "two sent, two lost");
+}
+
+/* An interface that never advertised GSO has no table, and a block that
+   reaches it anyway is dropped, not sent whole. */
+static void test_gso_no_table(void)
+{
+    NX_PACKET *p;
+
+    printf("sana2: a GSO block to an interface that never advertised it\n");
+
+    fixture_init(FALSE, S2WireType_Ethernet);
+    iface.gso       = NULL;
+    iface.gso_count = 0;
+    p = gso_parent(32, 350, 100, 0x18, 1, 1, 37, g_odd_cuts, 5);
+
+    h_check(ami_sana2_tx_send(&iface, p, AMI_ETHERTYPE_IPV4, 0xBC24,
+                              0x11EF103A) != NX_SUCCESS &&
+            h_sends == 0 && h_releases == 1 && h_released == p,
+            "released at once, nothing posted");
+    h_check(iface.stats.tx_errors == 1 && iface.stats.tx_queue_full == 0,
+            "as a refused packet, not as congestion");
+}
+
+/*
+ * The table is never what refuses a block.  Two-segment blocks over every
+ * write slot and every queue entry: each is accepted, each parent goes back
+ * exactly once, and the one after them is refused by the full queue, with
+ * contexts still free.
+ */
+#define G_FILL  ((2 + AMI_SANA2_TX_PEND) / 2)
+
+static void test_gso_fills_slots_and_queue(void)
+{
+    NX_PACKET *p;
+    ULONG      n, rounds;
+    UINT       st;
+    int        ok = 1;
+
+    printf("sana2: GSO blocks filling every slot and queue entry are all taken\n");
+
+    fixture_init(FALSE, S2WireType_Ethernet);
+    iface.tx_slots  = 2;
+    iface.gso_count = (UWORD)(iface.tx_slots + AMI_SANA2_TX_PEND);
+    p = gso_parent(20, 200, 100, 0x18, 1, 1, 200, NULL, 0);
+    memset(g_fill_released, 0, sizeof(g_fill_released));
+
+    for (n = 0; n <= G_FILL; n++)
+        g_fill[n] = *p;                     /* the same bytes, its own packet */
+
+    for (n = 0; n < G_FILL; n++)
+    {
+        st = ami_sana2_tx_send(&iface, &g_fill[n], AMI_ETHERTYPE_IPV4,
+                               0xBC24, 0x11EF103A);
+        if (st != NX_SUCCESS)
+            ok = 0;
+    }
+    h_check(ok, "every block is taken");
+    h_check(h_sends == 2 && iface.tx_pend_count == AMI_SANA2_TX_PEND,
+            "the slots and the queue are full");
+    h_check(iface.stats.tx_queue_full == 0 && iface.stats.tx_errors == 0,
+            "and nothing was dropped");
+
+    st = ami_sana2_tx_send(&iface, &g_fill[G_FILL], AMI_ETHERTYPE_IPV4,
+                           0xBC24, 0x11EF103A);
+    h_check(st == NX_TX_QUEUE_DEPTH && iface.stats.tx_queue_full == 1 &&
+            h_released == &g_fill[G_FILL],
+            "one more is refused by the full queue");
+
+    /* Complete whatever is out, again and again, until everything is. */
+    for (rounds = 0; rounds < 4 * G_FILL; rounds++)
+    {
+        ULONG busy = 0;
+
+        for (n = 0; n < iface.tx_slots; n++)
+        {
+            if (iface.tx[n].busy)
+            {
+                ReplyMsg(&iface.tx[n].req.ios2_Req.io_Message);
+                busy++;
+            }
+        }
+        if (busy == 0)
+            break;
+        ami_sana2_tx_reap(&iface);
+    }
+
+    h_check(iface.tx_pend_count == 0 && h_sends == 2 * G_FILL,
+            "every child went out");
+    h_check(iface.stats.packets_sent == 2 * G_FILL &&
+            iface.stats.tx_errors == 2, "all sent; the refused block's two lost");
+    for (n = 0; n <= G_FILL; n++)
+        if (g_fill_released[n] != 1)
+            ok = 0;
+    h_check(ok && h_releases == G_FILL + 1,
+            "and every parent was released exactly once");
+    for (n = 0; n < iface.gso_count; n++)
+        if (iface.gso[n].parent != NULL)
+            ok = 0;
+    h_check(ok, "and every context is free");
+}
+
+/* A version 1 record is its first four bytes: whatever follows them in
+   the headroom is not read, and it means the whole block. */
+static void test_gso_record_v1(void)
+{
+    NX_PACKET       *p;
+    NX_TCP_GSO_INFO *info;
+
+    printf("sana2: a version 1 GSO record keeps its meaning\n");
+
+    fixture_init(FALSE, S2WireType_Ethernet);
+    h_copy_on_begin = 1;
+    p = gso_parent(32, 350, 100, 0x99, 0xFFFFFF60UL, 0xFFFE, 37, g_odd_cuts, 5);
+    info = (NX_TCP_GSO_INFO *)(VOID *)p->nx_packet_data_start;
+    info->version = 1;
+    memset(p->nx_packet_data_start + 4, 0xEE, 4);
+
+    h_check(ami_sana2_tx_send(&iface, p, AMI_ETHERTYPE_IPV4, 0xBC24,
+                              0x11EF103A) == NX_SUCCESS && h_sends == 4,
+            "the whole block, as four writes");
+    h_check(gso_frames_match(4, 0), "each one its segment");
+}
+
+/*
+ * REPAIR: exactly one frame for [offset, offset + length), seq + offset, the
+ * header's IPv4 ID, PUSH only where it ends the payload, never FIN or CWR.
+ * The template carries all four flags, so each one dropped is visible.
+ */
+static void test_gso_repair(void)
+{
+    static const struct
+    {
+        ULONG       off;
+        ULONG       len;
+        UBYTE       flags;
+        const char *what;
+    } c[] = {
+        {   0, 100, 0x10, "at the start: no CWR, no PUSH, no FIN" },
+        { 137,  61, 0x10, "in the middle, at an odd offset across buffers" },
+        { 300,  50, 0x18, "at the end: PUSH, still no FIN" },
+        { 349,   1, 0x18, "the last byte alone" },
+    };
+    NX_PACKET       *p;
+    NX_TCP_GSO_INFO *info;
+    UCHAR            want[H_FRAME];
+    ULONG            i, len;
+    int              arm;
+
+    printf("sana2: a GSO repair record is one frame of the payload\n");
+
+    for (arm = 0; arm < 2; arm++)
+    {
+        for (i = 0; i < sizeof(c) / sizeof(c[0]); i++)
+        {
+            fixture_init(FALSE, S2WireType_Ethernet);
+            iface.tx_csum_ok = arm ? ANXD_S2_TXF_TCP : 0;
+            h_copy_on_begin = 1;
+            p = gso_parent(32, 350, 100, 0x99, 0xFFFFFF60UL, 0xFFFE, 37,
+                           g_odd_cuts, 5);
+            info = (NX_TCP_GSO_INFO *)(VOID *)p->nx_packet_data_start;
+            info->flags  = NX_TCP_GSO_REPAIR;
+            info->offset = (USHORT)c[i].off;
+            info->length = (USHORT)c[i].len;
+            gso_snapshot();
+
+            h_check(ami_sana2_tx_send(&iface, p, AMI_ETHERTYPE_IPV4, 0xBC24,
+                                      0x11EF103A) == NX_SUCCESS &&
+                    h_sends == 1 && h_frame_ok[0],
+                    "one write, copied");
+
+            len = gso_expect_at(want, c[i].off, c[i].len, 0, c[i].flags, arm);
+            h_check(h_len_log[0] == (len < 46 ? 46 : len) &&
+                    memcmp(h_frames[0], want, len) == 0, c[i].what);
+            h_check(arm == 0 ||
+                    ami_sana2_tx_flags(((struct IOSana2Req *)h_sent_log[0])
+                                           ->ios2_Data) == ANXD_S2_TXF_TCP,
+                    "and on the offload arm the write is flagged");
+
+            gso_reply(0);
+            ami_sana2_tx_reap(&iface);
+            h_check(h_releases == 1 && h_released == p &&
+                    iface.stats.packets_sent == 1,
+                    "its completion releases the parent, once");
+            h_check(gso_untouched(), "and the parent is untouched");
+        }
+    }
+}
+
+/* What a version 2 record may not say. */
+static void test_gso_record_refused(void)
+{
+    static const struct
+    {
+        UBYTE       version;
+        UBYTE       flags;
+        USHORT      off;
+        USHORT      len;
+        const char *what;
+    } c[] = {
+        { 2, 0, 1,   0,   "a whole block with an offset" },
+        { 2, 0, 0,   1,   "a whole block with a length" },
+        { 2, 1, 0,   0,   "a repair of nothing" },
+        { 2, 1, 0,   101, "a repair longer than a segment" },
+        { 2, 1, 300, 51,  "a repair past the payload" },
+        { 2, 1, 350, 1,   "a repair starting at the end" },
+        { 2, 2, 0,   0,   "an unknown flag" },
+        { 2, 3, 0,   10,  "REPAIR with an unknown flag" },
+        { 3, 0, 0,   0,   "version 3" },
+        { 0, 0, 0,   0,   "version 0" },
+        { 1, 1, 0,   10,  "REPAIR in a version 1 record" },
+    };
+    NX_PACKET       *p;
+    NX_TCP_GSO_INFO *info;
+    ULONG            i;
+
+    printf("sana2: GSO records that say something else are dropped\n");
+
+    for (i = 0; i < sizeof(c) / sizeof(c[0]); i++)
+    {
+        fixture_init(FALSE, S2WireType_Ethernet);
+        p = gso_parent(32, 350, 100, 0x99, 1, 1, 37, g_odd_cuts, 5);
+        gso_snapshot();
+        info = (NX_TCP_GSO_INFO *)(VOID *)p->nx_packet_data_start;
+        info->version = c[i].version;
+        info->flags   = c[i].flags;
+        info->offset  = c[i].off;
+        info->length  = c[i].len;
+
+        h_check(ami_sana2_tx_send(&iface, p, AMI_ETHERTYPE_IPV4, 0xBC24,
+                                  0x11EF103A) != NX_SUCCESS &&
+                h_sends == 0 && h_releases == 1 && h_released == p &&
+                iface.stats.tx_errors == 1, c[i].what);
+    }
+
+    /* A version 2 record needs all eight bytes in front of the headers.  Six
+       here: what would be its length is the first word of the IPv4 header. */
+    fixture_init(FALSE, S2WireType_Ethernet);
+    p = gso_parent(32, 350, 100, 0x99, 1, 1, 37, g_odd_cuts, 5);
+    p->nx_packet_data_start = p->nx_packet_prepend_ptr - 6;
+    info = (NX_TCP_GSO_INFO *)(VOID *)p->nx_packet_data_start;
+    info->version = NX_TCP_GSO_VERSION;
+    info->flags   = NX_TCP_GSO_REPAIR;
+    info->mss     = 100;
+    info->offset  = 0;
+    h_check(ami_sana2_tx_send(&iface, p, AMI_ETHERTYPE_IPV4, 0xBC24,
+                              0x11EF103A) != NX_SUCCESS &&
+            h_sends == 0 && h_releases == 1,
+            "a version 2 record without its eight bytes of headroom");
+}
+
+/* What is not a block this interface can cut is never put on the wire. */
+static void test_gso_refused(void)
+{
+    NX_PACKET       *p;
+    NX_TCP_GSO_INFO *info;
+    int              c;
+
+    printf("sana2: GSO packets that cannot be cut are dropped, not sent whole\n");
+
+    for (c = 0; c < 6; c++)
+    {
+        fixture_init(c == 1, S2WireType_Ethernet);
+        p = gso_parent(32, 350, 100, 0x18, 1, 1, 37, g_odd_cuts, 5);
+        info = (NX_TCP_GSO_INFO *)(VOID *)p->nx_packet_data_start;
+        if (c == 2)
+            info->version = 9;
+        if (c == 3)
+            info->flags = 1;
+        if (c == 4)
+            p->nx_packet_prepend_ptr[G_IHL + 13] |= 0x02;      /* SYN */
+        if (c == 5)
+            info->mss = 1481;               /* 52 + 1481 over a 1500 MTU    */
+
+        h_check(ami_sana2_tx_send(&iface, p, (c == 0) ? AMI_ETHERTYPE_IPV6
+                                                       : AMI_ETHERTYPE_IPV4,
+                                  0xBC24, 0x11EF103A) != NX_SUCCESS &&
+                h_sends == 0 && h_releases == 1 && iface.stats.tx_errors == 1,
+                c == 0 ? "IPv6" : c == 1 ? "raw mode" : c == 2 ? "version 9" :
+                c == 3 ? "flags set" : c == 4 ? "SYN" : "MSS over the MTU");
+    }
+}
+
 int main(void)
 {
     frames_init();
@@ -1315,6 +2125,19 @@ int main(void)
     test_no_pad_when_long_enough();
     test_no_pad_off_ethernet();
     test_drain_reaps_final_sleep();
+
+    test_gso_children_fused();
+    test_gso_children_offload();
+    test_gso_pads_the_last();
+    test_gso_pieces_and_restart();
+    test_gso_queues_in_order();
+    test_gso_offline_mid_block();
+    test_gso_no_table();
+    test_gso_fills_slots_and_queue();
+    test_gso_refused();
+    test_gso_record_v1();
+    test_gso_repair();
+    test_gso_record_refused();
 #ifdef AMINETXDUO_TX_RUN
     test_drain_waits_for_a_queued_flush();
 #endif

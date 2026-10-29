@@ -356,10 +356,13 @@ UINT _nxe_tcp_socket_receive_notify(NX_TCP_SOCKET *socket_ptr,
     (VOID)socket_ptr; (VOID)fn; h.notifies++; return NX_SUCCESS;
 }
 
+/* Kept, so a test can play the acknowledgment that frees room. */
+static VOID (*h_window_fn)(NX_TCP_SOCKET *socket_ptr);
+
 UINT _nxe_tcp_socket_window_update_notify_set(NX_TCP_SOCKET *socket_ptr,
                                               VOID (*fn)(NX_TCP_SOCKET *socket_ptr))
 {
-    (VOID)socket_ptr; (VOID)fn; h.notifies++; return NX_SUCCESS;
+    (VOID)socket_ptr; h_window_fn = fn; h.notifies++; return NX_SUCCESS;
 }
 
 UINT _nxe_tcp_socket_establish_notify(NX_TCP_SOCKET *socket_ptr,
@@ -622,6 +625,54 @@ static void t_writability(void)
     s->as_Flags |= ASF_WRSHUT;
     CHECK(bsd_writable(s) == TRUE,
           "after shutdown(SHUT_WR) the write fails immediately, so it is writable");
+}
+
+/*
+ * A GSO connection (nx_tcp.h, _nx_tcp_socket_queue_byte_credit) bounds its
+ * transmit queue in bytes as well as entries: 8 entries of a 100-byte
+ * segment are 800 bytes, and a queue holding 800 unacknowledged bytes in
+ * fewer entries is full all the same.
+ */
+static void t_writability_byte_credit(void)
+{
+    static NX_INTERFACE nxif;
+    AmiSocket          *s;
+
+    printf("bsd_writable(): the transmit queue's byte credit\n");
+
+    h_reset();
+    s = h_tcp(0, NX_TCP_ESTABLISHED);
+    memset(&nxif, 0, sizeof(nxif));
+    nxif.nx_interface_capability_flag = NX_INTERFACE_CAPABILITY_TCP_GSO;
+    s->as_Nx.tcp.nx_tcp_socket_connect_interface = &nxif;
+    s->as_Nx.tcp.nx_tcp_socket_connect_mss        = 100;
+    s->as_Nx.tcp.nx_tcp_socket_transmit_sent_count = 2;
+    s->as_Nx.tcp.nx_tcp_socket_tx_outstanding_bytes = 799;
+    CHECK(bsd_writable(s) == TRUE, "a byte of credit and room in entries");
+
+    s->as_Nx.tcp.nx_tcp_socket_tx_outstanding_bytes = 800;
+    CHECK(bsd_writable(s) == FALSE,
+          "no credit is not writable, with entries to spare");
+    CHECK(s->as_TxWait == 1, "and the FD_WRITE request is left behind");
+
+    /* The acknowledgment that gives credit back: the core calls the window
+       notify (nx_tcp_socket_state_transmit_check.c), which posts. */
+    bsd_events_attach(s);
+    s->as_Nx.tcp.nx_tcp_socket_tx_outstanding_bytes = 300;
+    h.signals = 0;
+    CHECK(h_window_fn != NULL, "the window notify is armed");
+    if (h_window_fn != NULL)
+        h_window_fn(&s->as_Nx.tcp);
+    CHECK((s->as_Events & FD_WRITE) != 0 && (h.signals & H_SIGIO_SIG) != 0,
+          "the credit coming back posts FD_WRITE");
+    CHECK(bsd_writable(s) == TRUE && s->as_TxWait == 0,
+          "and the socket is writable again");
+
+    /* Without the capability the bytes are no bound, as before. */
+    nxif.nx_interface_capability_flag = 0;
+    s->as_Nx.tcp.nx_tcp_socket_tx_outstanding_bytes = 100000;
+    CHECK(bsd_writable(s) == TRUE,
+          "an interface without GSO is bounded by entries alone");
 }
 
 static void t_exception(void)
@@ -1489,6 +1540,7 @@ int main(void)
     t_udp_readability();
     t_tcp_readability();
     t_writability();
+    t_writability_byte_credit();
     t_exception();
     t_waitselect_count();
     t_waitselect_refusals();

@@ -9,6 +9,8 @@
 #include "aminetxduo/nxstatus.h"
 #include "connfail.h"
 
+#include "nx_tcp.h"
+
 #include <proto/exec.h>
 #include <proto/timer.h>
 
@@ -534,8 +536,9 @@ BOOL bsd_writable(AmiSocket *sock)
     if (sock->as_CorkPkt != NULL)
     {
         if (bsd_cork_room(sock) > 0 ||
-            sock->as_Nx.tcp.nx_tcp_socket_transmit_sent_count + 1UL <
-            sock->as_Nx.tcp.nx_tcp_socket_transmit_queue_maximum)
+            (sock->as_Nx.tcp.nx_tcp_socket_transmit_sent_count + 1UL <
+             sock->as_Nx.tcp.nx_tcp_socket_transmit_queue_maximum &&
+             _nx_tcp_socket_queue_byte_credit(&sock->as_Nx.tcp) != 0))
         {
             sock->as_TxWait = 0;
             return TRUE;
@@ -543,8 +546,12 @@ BOOL bsd_writable(AmiSocket *sock)
         return FALSE;
     }
 #endif
+    /* Room in entries AND in bytes: a GSO entry is many segments, and the
+       core bounds the queue by both (_nx_tcp_socket_queue_byte_credit). This
+       is the pool's backpressure, not the window's. */
     if (sock->as_Nx.tcp.nx_tcp_socket_transmit_sent_count <
-        sock->as_Nx.tcp.nx_tcp_socket_transmit_queue_maximum)
+        sock->as_Nx.tcp.nx_tcp_socket_transmit_queue_maximum &&
+        _nx_tcp_socket_queue_byte_credit(&sock->as_Nx.tcp) != 0)
     {
         sock->as_TxWait = 0;
         return TRUE;

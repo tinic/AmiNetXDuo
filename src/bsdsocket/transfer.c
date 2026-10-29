@@ -9,6 +9,7 @@
 #include "aminetxduo/nxstatus.h"
 #include "aminetxduo/budget.h"
 #include "aminetxduo/sana2.h"
+#include "aminetxduo/tcpgso.h"
 #include "netmonitor.h"
 #include "packet_extract.h"
 #include "udp_queue.h"
@@ -389,6 +390,142 @@ static ULONG bsd_budget_left(const BsdWaitBudget *b)
     return (spent >= b->bwb_Wait) ? NX_NO_WAIT : b->bwb_Wait - spent;
 }
 
+/*
+ * TCP GSO (aminetxduo/tcpgso.h).  A long write on an interface that cuts
+ * blocks itself goes to NetX Duo as blocks of whole segments rather than one
+ * packet a segment: the core and the per-segment walk through it run once a
+ * block, and the SANA-II copy cuts the wire frames.  Everything else -- a
+ * short write, IPv6, an interface without it, a pool near its end -- is the
+ * one-segment path, unchanged.
+ *
+ * THE POOL'S LAST PACKETS ARE NEVER A BLOCK'S.  A block takes several pool
+ * packets at once; the acknowledgments, the repairs and the receive path
+ * need some free whatever the sender is doing.  Nothing names that reserve
+ * today -- the readers' posted reads are already off the free count -- so
+ * it is named here: an eighth of the pool, as one socket's receive window
+ * share (BSD_TCP_WINDOW_POOL_SHARE), and never fewer than sixteen.  A block
+ * that would leave less is the one-segment path, which waits as it always
+ * has.
+ */
+#define BSD_GSO_BLOCK_MAX       32768UL     /* the core's own bound          */
+#define BSD_GSO_RESERVE_SHARE   8
+#define BSD_GSO_RESERVE_MIN     16
+
+/*
+ * The window the core sends into now, the expression
+ * _nx_tcp_socket_send_internal() uses (nx_tcp_socket_send_internal.c, "Pick
+ * up the min(cwnd, swnd)") spelled the same way: min(cwnd, rwnd), cwnd
+ * widened by two segments on the first two duplicate ACKs, less what is in
+ * flight, and under SACK recovery the peer's window held to the PRR credit.
+ * A block wider than this is cut there into new packets and copied a second
+ * time, on the one path GSO is for.  Read without the IP mutex, as the
+ * credit is: it sizes a block, the core still decides.
+ */
+static ULONG bsd_send_gso_window(const NX_TCP_SOCKET *tcp)
+{
+    ULONG win;
+
+    if (tcp->nx_tcp_socket_tx_window_advertised >
+        tcp->nx_tcp_socket_tx_window_congestion)
+    {
+        win = tcp->nx_tcp_socket_tx_window_congestion;
+        if (tcp->nx_tcp_socket_duplicated_ack_received == 1 ||
+            tcp->nx_tcp_socket_duplicated_ack_received == 2)
+        {
+            win += tcp->nx_tcp_socket_connect_mss << 1;
+            if (win > tcp->nx_tcp_socket_tx_window_advertised)
+                win = tcp->nx_tcp_socket_tx_window_advertised;
+        }
+    }
+    else
+    {
+        win = tcp->nx_tcp_socket_tx_window_advertised;
+    }
+
+    win = (win > tcp->nx_tcp_socket_tx_outstanding_bytes)
+              ? win - tcp->nx_tcp_socket_tx_outstanding_bytes : 0;
+
+#ifdef NX_ENABLE_TCP_SACK
+    if (NX_TCP_SACK_RECOVERY_ACTIVE(tcp))
+    {
+        win = tcp->nx_tcp_socket_tx_window_advertised;
+        win = (win > tcp->nx_tcp_socket_tx_outstanding_bytes)
+                  ? win - tcp->nx_tcp_socket_tx_outstanding_bytes : 0;
+        if (win > tcp->nx_tcp_socket_prr_credit)
+            win = tcp->nx_tcp_socket_prr_credit;
+    }
+#endif
+
+    return win;
+}
+
+/* How many payload bytes the next block carries, or 0 for the one-segment
+   path.  Whole segments only; at least two. */
+static ULONG bsd_send_gso_bytes(AmiSocket *sock, NX_PACKET_POOL *pool,
+                                ULONG left)
+{
+    NX_TCP_SOCKET *tcp  = &sock->as_Nx.tcp;
+    NX_INTERFACE  *nxif = tcp->nx_tcp_socket_connect_interface;
+    ULONG          mss, bytes, credit, win, payload, need, reserve;
+
+    if (nxif == NX_NULL ||
+        (nxif->nx_interface_capability_flag &
+         NX_INTERFACE_CAPABILITY_TCP_GSO) == 0 ||
+        tcp->nx_tcp_socket_connect_ip.nxd_ip_version != NX_IP_VERSION_V4)
+        return 0;
+
+    /* The core takes a block only at the segment it would cut itself. */
+    mss = _nx_tcp_socket_payload_mss(tcp);
+    if (mss == 0 || mss > 0xFFFFUL || left < 2UL * mss)
+        return 0;
+
+    /* An interface that takes one segment a block, or none, falls under
+       two segments below. */
+    bytes = (ULONG)ami_sana2_gso_max_segs(nxif) * mss;
+    if (bytes > BSD_GSO_BLOCK_MAX)
+        bytes = BSD_GSO_BLOCK_MAX;
+    if (bytes > left)
+        bytes = left;
+    credit = _nx_tcp_socket_queue_byte_credit(tcp);
+    if (bytes > credit)
+        bytes = credit;
+    win = bsd_send_gso_window(tcp);
+    if (bytes > win)
+        bytes = win;
+    bytes -= bytes % mss;
+    if (bytes < 2UL * mss)
+        return 0;
+
+    /* The packets the block may take, the header packet's headroom and a
+       partial last one counted in, against what must stay free. */
+    payload = pool->nx_packet_pool_payload_size;
+    if (payload <= (ULONG)NX_TCP_GSO_PACKET)
+        return 0;
+    need    = (bytes + (ULONG)NX_TCP_GSO_PACKET + payload - 1UL) / payload + 1UL;
+    reserve = pool->nx_packet_pool_total / BSD_GSO_RESERVE_SHARE;
+    if (reserve < BSD_GSO_RESERVE_MIN)
+        reserve = BSD_GSO_RESERVE_MIN;
+    if (pool->nx_packet_pool_available < need + reserve)
+        return 0;
+
+    return bytes;
+}
+
+/* The record in the headroom the allocation left for it, and the mark. */
+static VOID bsd_send_gso_mark(NX_PACKET *packet, ULONG mss)
+{
+    NX_TCP_GSO_INFO *info =
+        (NX_TCP_GSO_INFO *)(VOID *)packet->nx_packet_data_start;
+
+    info->version = (UCHAR)NX_TCP_GSO_VERSION;
+    info->flags   = 0;
+    info->mss     = (USHORT)mss;
+    info->offset  = 0;
+    info->length  = 0;
+    packet->nx_packet_interface_capability_flag |=
+        NX_INTERFACE_CAPABILITY_TCP_GSO;
+}
+
 /* Successful sends call NetX directly.  Keep the sliced wait machinery on
    the resource-shortage path, and the owner's break check before each actor. */
 static inline BOOL __attribute__((always_inline)) bsd_send_aborted(
@@ -427,8 +564,9 @@ static LONG bsd_send_tcp_run(struct AmiSocketBase *base, AmiSocket *sock,
     {
         NX_PACKET *packet = NX_NULL;
         ULONG      chunk  = (ULONG)(len - sent);
+        ULONG      gso    = bsd_send_gso_bytes(sock, pool, chunk);
         LONG       filled;
-        UINT       status;
+        UINT       status = NX_NO_PACKET;
 
         if (chunk > mss)
             chunk = mss;
@@ -439,7 +577,23 @@ static LONG bsd_send_tcp_run(struct AmiSocketBase *base, AmiSocket *sock,
             if (bsd_send_aborted(base, left))
                 return (sent > 0) ? sent : bsd_fail(base, AMI_EINTR);
 
-            status = nx_packet_allocate(pool, &packet, NX_TCP_PACKET, NX_NO_WAIT);
+            /* A block never waits for its packet: without one now, this is
+               the one-segment path and its waits. */
+            if (gso != 0)
+                status = nx_packet_allocate(pool, &packet, NX_TCP_GSO_PACKET,
+                                            NX_NO_WAIT);
+            if (status == NX_SUCCESS)
+            {
+                chunk = gso;
+                bsd_send_gso_mark(packet,
+                                  _nx_tcp_socket_payload_mss(&sock->as_Nx.tcp));
+            }
+            else
+            {
+                gso    = 0;
+                status = nx_packet_allocate(pool, &packet, NX_TCP_PACKET,
+                                            NX_NO_WAIT);
+            }
             if (status == NX_NO_PACKET && left != NX_NO_WAIT)
             {
                 BsdAllocArgs aargs = { pool, &packet, run };
@@ -457,8 +611,10 @@ static LONG bsd_send_tcp_run(struct AmiSocketBase *base, AmiSocket *sock,
             break;
         }
 
+        /* A block's chain comes out of the room counted above, without a
+           wait; a short one still goes, as the bytes it holds. */
         filled = bsd_packet_append_iov(packet, cur, chunk, pool,
-                                       (wait == NX_NO_WAIT)
+                                       (wait == NX_NO_WAIT || gso != 0)
                                            ? NX_NO_WAIT : bsd_budget_left(tb),
                                        &why);
         if (filled <= 0)

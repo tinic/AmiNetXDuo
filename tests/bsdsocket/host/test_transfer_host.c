@@ -35,6 +35,8 @@
 #include "udp_queue.h"
 #include "netmonitor.h"
 #include "aminetxduo/sana2.h"
+#include "aminetxduo/tcpgso.h"
+#include "nx_tcp.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -117,7 +119,7 @@ static struct
     ULONG       append_calls;
     UINT        append_status;
     ULONG       appended;           /* bytes accepted across all calls       */
-    UBYTE       wire[256];          /* and the bytes themselves, in order    */
+    UBYTE       wire[2048];         /* and the bytes themselves, in order    */
     ULONG       wire_len;
 
     /* nx_tcp_socket_send(): one status per call, then the last one repeats.
@@ -174,7 +176,22 @@ static struct
     unsigned    rx_packets, recvs;
     ULONG       rx_len;
     BOOL        extract_real;
+
+    /* TCP GSO: what ami_sana2_gso_max_segs() answers, and per call the
+       allocation's header type and each send's length, mark and record. */
+    UINT        gso_segs;
+    ULONG       alloc_types[32];
+    ULONG       alloc_type_waits[32];
+    ULONG       send_lens[32];
+    ULONG       send_marks[32];
+    NX_TCP_GSO_INFO send_recs[32];
 } h;
+
+UINT ami_sana2_gso_max_segs(NX_INTERFACE *interface_ptr)
+{
+    (VOID)interface_ptr;
+    return h.gso_segs;
+}
 
 ULONG _tx_time_get(VOID) { return h.clock; }
 
@@ -642,8 +659,12 @@ UINT _nxe_packet_allocate(NX_PACKET_POOL *pool_ptr, NX_PACKET **packet_ptr,
     UINT     status;
 
     (VOID)pool_ptr;
-    (VOID)packet_type;
 
+    if (h.allocs < 32)
+    {
+        h.alloc_types[h.allocs]      = packet_type;
+        h.alloc_type_waits[h.allocs] = wait_option;
+    }
     if (h.allocs < H_PLAN)
         h.alloc_waits[h.allocs] = wait_option;
     h_spend(wait_option);
@@ -677,6 +698,15 @@ UINT _nxe_packet_allocate(NX_PACKET_POOL *pool_ptr, NX_PACKET **packet_ptr,
             h_pkt[i].nx.nx_packet_data_end = h_pkt[i].data + h.packet_room;
             if (h.packet_chain)
                 h_pkt[i].nx.nx_packet_next = &h_pkt[H_PKTS - 1].nx;
+            /* A GSO block's record is in front of the headroom: keep its
+               eight bytes out of the payload's way. */
+            if (packet_type == NX_TCP_GSO_PACKET)
+            {
+                memset(h_pkt[i].data, 0xEE, sizeof(NX_TCP_GSO_INFO));
+                h_pkt[i].nx.nx_packet_prepend_ptr += sizeof(NX_TCP_GSO_INFO);
+                h_pkt[i].nx.nx_packet_append_ptr  += sizeof(NX_TCP_GSO_INFO);
+                h_pkt[i].nx.nx_packet_data_end    += sizeof(NX_TCP_GSO_INFO);
+            }
             *packet_ptr     = &h_pkt[i].nx;
 
             return NX_SUCCESS;
@@ -771,6 +801,15 @@ UINT _nxe_tcp_socket_send(NX_TCP_SOCKET *socket_ptr, NX_PACKET **packet_ptr_ptr,
     h_spend(wait_option);
     if (wait_option != NX_NO_WAIT && h_sock[0].as_Nx.tcp.nx_tcp_socket_connect_interface)
         CHECK(h.run_flushes >= 2, "the held run is flushed before send waits");
+
+    if (h.sends < 32 && p != NULL)
+    {
+        h.send_lens[h.sends]  = h_len(p);
+        h.send_marks[h.sends] = p->nx.nx_packet_interface_capability_flag &
+                                NX_INTERFACE_CAPABILITY_TCP_GSO;
+        memcpy(&h.send_recs[h.sends], p->nx.nx_packet_data_start,
+               sizeof(NX_TCP_GSO_INFO));
+    }
 
     status = (h.send_pressure && wait_option == NX_NO_WAIT)
                  ? NX_WINDOW_OVERFLOW : h_plan(h.send_plan, h.send_planned, h.sends);
@@ -1990,6 +2029,348 @@ static void t_immediate_send_break(void)
           "a pending break does not interrupt a non-blocking send");
 }
 
+/* ---------------------------------------------------------------- TCP GSO */
+
+/*
+ * A connection on an interface that cuts GSO blocks itself: segment 100,
+ * four segments a block, a 1024-packet pool all free, a queue of 100
+ * entries and so 10,000 bytes of credit.  Socket 1, not 0: socket 0 with an
+ * interface is what the run-flush checks above look for.
+ */
+static NX_INTERFACE h_gso_if;
+
+static AmiSocket *h_gso_tcp(void)
+{
+    AmiSocket *s = h_tcp(1);
+
+    memset(&h_gso_if, 0, sizeof(h_gso_if));
+    h_gso_if.nx_interface_capability_flag = NX_INTERFACE_CAPABILITY_TCP_GSO;
+    s->as_Nx.tcp.nx_tcp_socket_connect_interface = &h_gso_if;
+    s->as_Nx.tcp.nx_tcp_socket_connect_ip.nxd_ip_version = NX_IP_VERSION_V4;
+    s->as_Nx.tcp.nx_tcp_socket_connect_mss = 100;
+    s->as_Nx.tcp.nx_tcp_socket_transmit_queue_maximum = 100;
+    s->as_Nx.tcp.nx_tcp_socket_tx_window_advertised   = 1000000;
+    s->as_Nx.tcp.nx_tcp_socket_tx_window_congestion   = 1000000;
+    h.mss      = 100;
+    h.gso_segs = 4;
+    h_pool.nx_packet_pool_payload_size = 1568;
+    h_pool.nx_packet_pool_total        = 1024;
+    h_pool.nx_packet_pool_available    = 1024;
+    return s;
+}
+
+static UBYTE h_gso_buf[1000];
+
+static void h_gso_fill(void)
+{
+    ULONG i;
+
+    for (i = 0; i < sizeof(h_gso_buf); i++)
+        h_gso_buf[i] = (UBYTE)(i * 7 + 3);
+}
+
+/* Every send a block of `bytes`, marked, with a whole version 2 record. */
+static int h_gso_block(unsigned n, ULONG bytes)
+{
+    const NX_TCP_GSO_INFO *r = &h.send_recs[n];
+
+    return h.send_lens[n] == bytes &&
+           h.send_marks[n] == NX_INTERFACE_CAPABILITY_TCP_GSO &&
+           r->version == NX_TCP_GSO_VERSION && r->flags == 0 &&
+           r->mss == 100 && r->offset == 0 && r->length == 0;
+}
+
+/* Today's path: `n` sends of one segment each, none of them marked. */
+static int h_gso_none(unsigned n)
+{
+    unsigned i;
+
+    if (h.sends != n)
+        return 0;
+    for (i = 0; i < n && i < 32; i++)
+    {
+        if (h.send_marks[i] != 0 || h.send_lens[i] > 100 ||
+            h.alloc_types[i] != NX_TCP_PACKET)
+            return 0;
+    }
+    return 1;
+}
+
+static void t_gso_blocks(void)
+{
+    printf("transfer: a long write on a GSO interface goes as blocks\n");
+
+    h_reset();
+    (VOID)h_gso_tcp();
+    h_gso_fill();
+
+    CHECK(bsd_send(1, h_gso_buf, 1000, 0, &h_base) == 1000, "all of it is sent");
+    CHECK(h.sends == 3, "as three packets");
+    CHECK(h_gso_block(0, 400) && h_gso_block(1, 400) && h_gso_block(2, 200),
+          "blocks of four, four and two segments, each with its record");
+    CHECK(h.alloc_types[0] == NX_TCP_GSO_PACKET &&
+          h.alloc_type_waits[0] == NX_NO_WAIT,
+          "allocated with room for the record, without waiting");
+    CHECK(h.wire_len == 1000 && memcmp(h.wire, h_gso_buf, 1000) == 0,
+          "and the bytes are the caller's, in order");
+
+    /* A tail under two segments is today's path. */
+    h_reset();
+    (VOID)h_gso_tcp();
+    CHECK(bsd_send(1, h_gso_buf, 550, 0, &h_base) == 550 &&
+          h.sends == 3 && h_gso_block(0, 400) && h.send_marks[1] == 0 &&
+          h.send_lens[1] == 100 && h.send_lens[2] == 50,
+          "a block of four, then one segment and the half");
+
+    /* The block is bounded by what the queue may still take in bytes. */
+    h_reset();
+    (VOID)h_gso_tcp();
+    h_sock[1].as_Nx.tcp.nx_tcp_socket_tx_outstanding_bytes = 10000 - 250;
+    CHECK(bsd_send(1, h_gso_buf, 400, 0, &h_base) == 400 &&
+          h_gso_block(0, 200),
+          "250 bytes of credit: a block of two segments");
+}
+
+static void t_gso_declined(void)
+{
+    printf("transfer: where GSO does not apply, today's segments\n");
+
+    h_reset();
+    (VOID)h_gso_tcp();
+    h_gso_if.nx_interface_capability_flag = 0;
+    CHECK(bsd_send(1, h_gso_buf, 1000, 0, &h_base) == 1000 && h_gso_none(10),
+          "an interface without the capability");
+
+    h_reset();
+    (VOID)h_gso_tcp();
+    h.gso_segs = 1;
+    CHECK(bsd_send(1, h_gso_buf, 1000, 0, &h_base) == 1000 && h_gso_none(10),
+          "an interface that takes one segment a block");
+
+    h_reset();
+    (VOID)h_gso_tcp();
+    h_sock[1].as_Nx.tcp.nx_tcp_socket_connect_ip.nxd_ip_version =
+        NX_IP_VERSION_V6;
+    CHECK(bsd_send(1, h_gso_buf, 1000, 0, &h_base) == 1000 && h_gso_none(10),
+          "an IPv6 connection");
+
+    h_reset();
+    (VOID)h_gso_tcp();
+    CHECK(bsd_send(1, h_gso_buf, 199, 0, &h_base) == 199 && h_gso_none(2),
+          "a write under two segments");
+
+    h_reset();
+    (VOID)h_gso_tcp();
+    h_sock[1].as_Nx.tcp.nx_tcp_socket_tx_outstanding_bytes = 10000 - 199;
+    CHECK(bsd_send(1, h_gso_buf, 400, 0, &h_base) == 400 && h_gso_none(4),
+          "credit for less than two segments");
+
+    /* A small pool: 94 packets is the A1200 without Fast RAM, and the
+       interface would not advertise; asked anyway, the reserve says no. */
+    h_reset();
+    (VOID)h_gso_tcp();
+    h_pool.nx_packet_pool_total     = 94;
+    h_pool.nx_packet_pool_available = 17;
+    CHECK(bsd_send(1, h_gso_buf, 1000, 0, &h_base) == 1000 && h_gso_none(10),
+          "a small pool near its reserve");
+
+    /* No packet with the record's room right now: never a wait for one. */
+    h_reset();
+    (VOID)h_gso_tcp();
+    h.alloc_plan[0] = NX_NO_PACKET;
+    h.alloc_plan[1] = NX_SUCCESS;
+    h.alloc_planned = 2;
+    CHECK(bsd_send(1, h_gso_buf, 400, 0, &h_base) == 400 &&
+          h.alloc_type_waits[0] == NX_NO_WAIT &&
+          h.alloc_types[1] == NX_TCP_PACKET && h.send_marks[0] == 0,
+          "a block without its packet now is a segment, not a wait");
+}
+
+/*
+ * The reserve: a block of four takes at most two 1568-byte packets, and an
+ * eighth of 1024 stays free.  130 free is exactly enough; 129 is not.
+ */
+static void t_gso_reserve(void)
+{
+    printf("transfer: a block never takes the pool's last packets\n");
+
+    h_reset();
+    (VOID)h_gso_tcp();
+    h_pool.nx_packet_pool_available = 128 + 2;
+    CHECK(bsd_send(1, h_gso_buf, 400, 0, &h_base) == 400 && h_gso_block(0, 400),
+          "the reserve and the block's packets free: a block");
+
+    h_reset();
+    (VOID)h_gso_tcp();
+    h_pool.nx_packet_pool_available = 128 + 1;
+    CHECK(bsd_send(1, h_gso_buf, 400, 0, &h_base) == 400 && h_gso_none(4),
+          "one short: segments, and the reserve stays whole");
+
+    /* Sixteen at least, however small the pool. */
+    h_reset();
+    (VOID)h_gso_tcp();
+    h_pool.nx_packet_pool_total     = 64;
+    h_pool.nx_packet_pool_available = 16 + 1;
+    CHECK(bsd_send(1, h_gso_buf, 400, 0, &h_base) == 400 && h_gso_none(4),
+          "a 64-packet pool keeps sixteen");
+}
+
+/*
+ * The block fits the window the core will send it into: a wider one is cut
+ * there into new packets, a second copy.  The stub moves no window, so every
+ * block of the write sees the same one.
+ */
+static int h_gso_sizes(const ULONG *lens, const ULONG *marked, unsigned n)
+{
+    unsigned i;
+
+    if (h.sends != n)
+        return 0;
+    for (i = 0; i < n; i++)
+    {
+        if (h.send_lens[i] != lens[i] ||
+            (h.send_marks[i] != 0) != (marked[i] != 0) ||
+            (marked[i] && !h_gso_block(i, lens[i])))
+            return 0;
+    }
+    return 1;
+}
+
+static void t_gso_window(void)
+{
+    static const ULONG l300[] = { 300, 300, 300, 100 };
+    static const ULONG m300[] = { 1, 1, 1, 0 };
+    static const ULONG l200[] = { 200, 200, 200, 200, 200 };
+    static const ULONG m200[] = { 1, 1, 1, 1, 1 };
+    NX_TCP_SOCKET     *tcp;
+
+    printf("transfer: a GSO block fits the open send window\n");
+
+    /* cwnd 300 of a wide peer window: three segments a block, and the
+       tail segment the ordinary way. */
+    h_reset();
+    tcp = &h_gso_tcp()->as_Nx.tcp;
+    tcp->nx_tcp_socket_tx_window_congestion = 300;
+    CHECK(bsd_send(1, h_gso_buf, 1000, 0, &h_base) == 1000 &&
+          h_gso_sizes(l300, m300, 4),
+          "cwnd 300: blocks of 300, never wider than the window");
+
+    /* The peer's window narrower than cwnd, with bytes in flight. */
+    h_reset();
+    tcp = &h_gso_tcp()->as_Nx.tcp;
+    tcp->nx_tcp_socket_tx_window_advertised = 650;
+    tcp->nx_tcp_socket_tx_outstanding_bytes = 300;
+    CHECK(bsd_send(1, h_gso_buf, 1000, 0, &h_base) == 1000 &&
+          h_gso_sizes(l300, m300, 4),
+          "a 650-byte peer window with 300 in flight: blocks of 300");
+
+    /* Exactly two segments open. */
+    h_reset();
+    tcp = &h_gso_tcp()->as_Nx.tcp;
+    tcp->nx_tcp_socket_tx_window_congestion = 200;
+    CHECK(bsd_send(1, h_gso_buf, 1000, 0, &h_base) == 1000 &&
+          h_gso_sizes(l200, m200, 5),
+          "a window of two segments: two-segment blocks");
+
+    /* One segment open, or one and a half: the ordinary path. */
+    h_reset();
+    tcp = &h_gso_tcp()->as_Nx.tcp;
+    tcp->nx_tcp_socket_tx_window_congestion = 100;
+    CHECK(bsd_send(1, h_gso_buf, 1000, 0, &h_base) == 1000 && h_gso_none(10),
+          "a window of one segment: no block, no record");
+
+    h_reset();
+    tcp = &h_gso_tcp()->as_Nx.tcp;
+    tcp->nx_tcp_socket_tx_window_congestion = 199;
+    CHECK(bsd_send(1, h_gso_buf, 1000, 0, &h_base) == 1000 && h_gso_none(10),
+          "199 bytes open: no block");
+
+    /* Nothing open: segments, which the core queues to wait. */
+    h_reset();
+    tcp = &h_gso_tcp()->as_Nx.tcp;
+    tcp->nx_tcp_socket_tx_outstanding_bytes = 1000000;
+    CHECK(bsd_send(1, h_gso_buf, 1000, 0, &h_base) == 1000 && h_gso_none(10),
+          "a closed window: no block");
+
+    /* RFC 5681 3.2: the first duplicate ACK opens two more segments. */
+    h_reset();
+    tcp = &h_gso_tcp()->as_Nx.tcp;
+    tcp->nx_tcp_socket_tx_window_congestion   = 100;
+    tcp->nx_tcp_socket_duplicated_ack_received = 1;
+    CHECK(bsd_send(1, h_gso_buf, 1000, 0, &h_base) == 1000 &&
+          h_gso_sizes(l300, m300, 4),
+          "cwnd 100 on the first duplicate ACK: blocks of 300");
+
+    /* And no wider than the peer's window for it. */
+    h_reset();
+    tcp = &h_gso_tcp()->as_Nx.tcp;
+    tcp->nx_tcp_socket_tx_window_congestion    = 100;
+    tcp->nx_tcp_socket_tx_window_advertised    = 250;
+    tcp->nx_tcp_socket_duplicated_ack_received = 2;
+    CHECK(bsd_send(1, h_gso_buf, 1000, 0, &h_base) == 1000 &&
+          h_gso_sizes(l200, m200, 5),
+          "the second duplicate ACK under a 250-byte peer window: blocks of 200");
+
+#ifdef NX_ENABLE_TCP_SACK
+    /* SACK recovery: the peer's window held to the PRR credit, cwnd aside. */
+    h_reset();
+    tcp = &h_gso_tcp()->as_Nx.tcp;
+    tcp->nx_tcp_socket_tx_window_congestion = 100;
+    tcp->nx_tcp_socket_sack_permitted       = NX_TRUE;
+    tcp->nx_tcp_socket_fast_recovery        = NX_TRUE;
+    tcp->nx_tcp_socket_prr_recover_fs       = 1000;
+    tcp->nx_tcp_socket_prr_credit           = 300;
+    CHECK(bsd_send(1, h_gso_buf, 1000, 0, &h_base) == 1000 &&
+          h_gso_sizes(l300, m300, 4),
+          "in SACK recovery: blocks of the PRR credit, 300");
+#endif
+}
+
+/* What a block that did not all go credits: what went, as for a segment. */
+static void t_gso_short_and_break(void)
+{
+    printf("transfer: a GSO write cut short reports what went\n");
+
+    h_reset();
+    h_gso_tcp()->as_Flags |= ASF_NONBLOCK;
+    h.send_plan[0] = NX_SUCCESS;
+    h.send_plan[1] = NX_WINDOW_OVERFLOW;
+    h.send_planned = 2;
+    h.send_trim    = 130;
+    CHECK(bsd_send(1, h_gso_buf, 1000, 0, &h_base) == 530,
+          "a block, then 130 bytes of the second, are credited");
+    CHECK(h.sent_bytes == 530 && h.releases == 1,
+          "the wire agrees, and the rest of the block is released");
+    CHECK(h_sock[1].as_TxWait == 1, "and the next room posts FD_WRITE");
+
+    h_reset();
+    (VOID)h_gso_tcp();
+    h.send_plan[0] = NX_WINDOW_OVERFLOW;
+    h.send_planned = 1;
+    h.send_trim    = 0;
+    h_sock[1].as_Flags |= ASF_NONBLOCK;
+    CHECK(bsd_send(1, h_gso_buf, 1000, 0, &h_base) == -1 &&
+          h.errno_value == AMI_EWOULDBLOCK && h.releases == 1,
+          "a first block refused whole is EWOULDBLOCK, as a segment's is");
+
+    h_reset();
+    (VOID)h_gso_tcp();
+    h_base.sb_BreakMask = 1UL << 12;
+    h.break_at_send = 1;
+    CHECK(bsd_send(1, h_gso_buf, 1000, 0, &h_base) == 400 && h.sends == 1,
+          "a break after the first block returns the block");
+
+    h_reset();
+    (VOID)h_gso_tcp();
+    h_base.sb_BreakMask = 1UL << 12;
+    h.send_plan[0] = NX_WINDOW_OVERFLOW;
+    h.send_planned = 1;
+    h.send_trim    = 150;
+    h.break_at_send = 1;
+    CHECK(bsd_send(1, h_gso_buf, 1000, 0, &h_base) == 150 && h.releases == 1,
+          "a break while a block waits credits what of it went");
+}
+
 int main(void)
 {
     printf("transfer.c host checks\n\n");
@@ -2016,6 +2397,11 @@ int main(void)
 #endif
     t_recvmsg_outputs();
     t_send_monitor();
+    t_gso_blocks();
+    t_gso_declined();
+    t_gso_reserve();
+    t_gso_window();
+    t_gso_short_and_break();
 
     printf("\n%lu checks, %lu failures\n", h_checks, h_failures);
 
