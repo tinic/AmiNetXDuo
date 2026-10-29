@@ -292,6 +292,17 @@ ULONG SetSignal(ULONG new_signals, ULONG signal_set)
     return old;
 }
 
+/* bsd_break_signals() reads the caller's tc_SigRecvd; the caller's signals
+   are h.signals, read at the moment of the call. */
+struct Task *FindTask(const char *name)
+{
+    static struct Task me;
+
+    (VOID)name;
+    me.tc_SigRecvd = h.signals;
+    return &me;
+}
+
 ULONG bsd_wait_option(AmiSocket *sock, ULONG timeout_ticks, LONG flags)
 {
     (VOID)timeout_ticks;

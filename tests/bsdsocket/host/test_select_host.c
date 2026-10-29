@@ -180,8 +180,13 @@ ULONG SetSignal(ULONG newSignals, ULONG signalSet)
  */
 struct Task *FindTask(const char *name)
 {
+    struct Task *me = (h_me != NULL) ? h_me : &h_task;
+
     (VOID)name;
-    return (h_me != NULL) ? h_me : &h_task;
+    /* bsd_break_signals() reads the caller's tc_SigRecvd: h.signals at the
+       moment of the call. */
+    me->tc_SigRecvd = h.signals;
+    return me;
 }
 
 VOID Signal(struct Task *task, ULONG signalSet)
