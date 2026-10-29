@@ -1327,6 +1327,82 @@ static void prr_repeated_ack_and_shared_credit(UINT deny)
 }
 #endif
 
+/* The queue owns buffers, while SND.UNA and cwnd count cumulative DATA.
+   A large immutable buffer must make progress on each wire-segment ACK. */
+static UINT h_ack_bytes(ULONG bytes)
+{
+    NX_TCP_HEADER hdr;
+    memset(&hdr, 0, sizeof(hdr));
+    hdr.nx_tcp_sequence_number = h_sock.nx_tcp_socket_rx_sequence;
+    hdr.nx_tcp_acknowledgment_number = H_ISN + bytes;
+    hdr.nx_tcp_header_word_3 = NX_TCP_HEADER_SIZE | NX_TCP_ACK_BIT | 65535UL;
+    return _nx_tcp_socket_state_ack_check(&h_sock, &hdr);
+}
+
+static void cumulative_bytes_before_retirement(UINT driver_owned)
+{
+    UCHAR data[4 * H_MSS + 128];
+    NX_PACKET *p;
+    ULONG window;
+    UCHAR *prepend;
+    h_fixture();
+    (VOID)h_send();
+    p = &h_pkt[0];
+    memset(data, 'a', sizeof(data));
+    memcpy(data + 80, p -> nx_packet_prepend_ptr, sizeof(NX_TCP_HEADER));
+    p -> nx_packet_data_start = data;
+    p -> nx_packet_data_end = data + sizeof(data);
+    p -> nx_packet_prepend_ptr = data + 80;
+    p -> nx_packet_append_ptr = p -> nx_packet_prepend_ptr + sizeof(NX_TCP_HEADER) + 4 * H_MSS;
+    p -> nx_packet_length = sizeof(NX_TCP_HEADER) + 4 * H_MSS;
+    if (driver_owned)
+    {
+        p -> nx_packet_ip_header = p -> nx_packet_prepend_ptr - 20;
+        p -> nx_packet_ip_header_length = 20;
+        p -> nx_packet_prepend_ptr -= 20;
+        p -> nx_packet_length += 20;
+        p -> nx_packet_queue_next = NX_NULL;
+    }
+    prepend = p -> nx_packet_prepend_ptr;
+    h_sock.nx_tcp_socket_tx_sequence = H_ISN + 4 * H_MSS;
+    h_sock.nx_tcp_socket_tx_outstanding_bytes = 4 * H_MSS;
+    h_sock.nx_tcp_socket_tx_slow_start_threshold = 800000;
+    h_sock.nx_tcp_socket_timeout_retries = 3;
+    h_sock.nx_tcp_socket_stall_ticks = 20;
+    window = h_sock.nx_tcp_socket_tx_window_congestion;
+    h_check_eq(h_ack_bytes(333), NX_TRUE, "ACK inside a buffer is valid");
+    h_check_eq(h_sock.nx_tcp_socket_tx_outstanding_bytes, 4 * H_MSS - 333,
+               "partial cumulative ACK immediately releases DATA byte credit");
+    h_check_eq(h_sock.nx_tcp_socket_tx_window_congestion, window + 333,
+               "partial cumulative ACK earns only its DATA congestion credit");
+    h_check_eq(h_sock.nx_tcp_socket_timeout_retries, 0, "partial ACK restarts retry progress");
+    h_check_eq(h_sock.nx_tcp_socket_stall_ticks, 0, "partial ACK restarts stall progress");
+    h_check_eq(h_sock.nx_tcp_socket_transmit_sent_count, 1, "partial ACK retains immutable buffer");
+    h_check(p -> nx_packet_prepend_ptr == prepend, "partial ACK never trims driver-visible storage");
+    (VOID)h_ack_bytes(333);
+    (VOID)h_ack_bytes(100);
+    h_check_eq(h_sock.nx_tcp_socket_tx_outstanding_bytes, 4 * H_MSS - 333,
+               "duplicate and old ACKs cannot release credit again");
+    h_check_eq(h_ack_bytes(4 * H_MSS + 1), NX_FALSE, "future ACK is rejected");
+    h_check_eq(h_sock.nx_tcp_socket_tx_outstanding_bytes, 4 * H_MSS - 333,
+               "future ACK grants no DATA credit");
+    (VOID)h_ack_bytes(2 * H_MSS);
+    h_check_eq(h_sock.nx_tcp_socket_tx_outstanding_bytes, 2 * H_MSS,
+               "successive partial ACKs measure from the advanced SND.UNA");
+    h_check_eq(h_sock.nx_tcp_socket_tx_window_congestion, window + 333 + H_MSS,
+               "one delayed ACK grows slow-start cwnd by at most one MSS");
+    h_sock.nx_tcp_socket_duplicated_ack_received = 0;
+    (VOID)h_ack_bytes(4 * H_MSS);
+    h_check_eq(h_sock.nx_tcp_socket_tx_outstanding_bytes, 0,
+               "final retirement does not subtract acknowledged bytes twice");
+    h_check_eq(h_sock.nx_tcp_socket_transmit_sent_count, 0, "final ACK retires the buffer");
+    h_check(p -> nx_packet_union_next.nx_packet_tcp_queue_next == (NX_PACKET *)NX_PACKET_ALLOCATED,
+            "driver can release its buffer after full ACK without a queue owner");
+#ifdef NX_ENABLE_TCP_SACK
+    _nx_tcp_sack_recovery_reset(&h_sock);
+#endif
+}
+
 int main(void)
 {
     _nx_tcp_fast_timer_rate     = (NX_IP_PERIODIC_RATE + (NX_TCP_FAST_TIMER_RATE - 1)) / NX_TCP_FAST_TIMER_RATE;
@@ -1335,6 +1411,8 @@ int main(void)
 
     printf("RFC 6675 loss recovery, against a socket rather than a network\n");
 
+    cumulative_bytes_before_retirement(NX_FALSE);
+    cumulative_bytes_before_retirement(NX_TRUE);
     single_loss();
     second_loss_at_the_tail();
     burst_hole();
