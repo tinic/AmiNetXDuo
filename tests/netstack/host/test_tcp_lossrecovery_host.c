@@ -1433,7 +1433,7 @@ static void cumulative_bytes_before_retirement(UINT driver_owned)
 #endif
 }
 
-#if defined(NX_ENABLE_INTERFACE_CAPABILITY) && defined(NX_ENABLE_TCP_SACK)
+#if defined(NX_ENABLE_INTERFACE_CAPABILITY) && defined(NX_ENABLE_TCP_SACK) && !defined(NX_DISABLE_TCP_GSO)
 static UCHAR h_gso_data[8 * H_MSS + 128];
 
 static NX_PACKET *h_gso_send(UINT segments)
@@ -1621,6 +1621,61 @@ static void gso_bounded_recovery(void)
 }
 #endif
 
+#if defined(NX_ENABLE_INTERFACE_CAPABILITY) && defined(NX_DISABLE_TCP_GSO)
+static void segmentation_disabled_fallback(void)
+{
+    static UCHAR data[H_MSS + 128];
+    NX_PACKET *p = &h_pkt[0];
+    NX_TCP_GSO_INFO *info = (NX_TCP_GSO_INFO *)data;
+    UINT i, before;
+
+    h_fixture();
+    memset(p, 0, sizeof(*p));
+    memset(data, 'g', sizeof(data));
+    info -> version = NX_TCP_GSO_VERSION;
+    info -> flags = 0;
+    info -> mss = H_MSS;
+    info -> offset = info -> length = 0;
+    h_iface.nx_interface_capability_flag |= NX_INTERFACE_CAPABILITY_TCP_GSO;
+    h_iface.nx_interface_ip_mtu_size = 1500;
+    p -> nx_packet_pool_owner = &h_control_pool;
+    p -> nx_packet_data_start = data;
+    p -> nx_packet_data_end = data + sizeof(data);
+    p -> nx_packet_prepend_ptr = data + 80;
+    p -> nx_packet_append_ptr = p -> nx_packet_prepend_ptr + H_MSS;
+    p -> nx_packet_length = H_MSS;
+    p -> nx_packet_interface_capability_flag = NX_INTERFACE_CAPABILITY_TCP_GSO;
+    h_pkt_next = 1;
+
+    h_check_eq(_nx_tcp_socket_send_internal(&h_sock, p, NX_NO_WAIT), NX_SUCCESS,
+               "GSO-disabled build accepts the marked write through ordinary TCP");
+    h_check_eq(h_send(), NX_SUCCESS, "ordinary second write progresses without GSO");
+    h_check_eq(h_send(), NX_SUCCESS, "ordinary third write progresses without GSO");
+    h_check_eq(h_logged, 3, "disabled segmentation emits three ordinary MSS packets");
+    for (i = 0; i < h_logged; i++)
+    {
+        h_check_eq(h_log[i], H_ISN + i * H_MSS, "fallback preserves sequence order");
+        h_check_eq(h_log_bytes[i], H_MSS, "fallback obeys wire MSS");
+        h_check_eq(h_log_first[i], i == 0 ? 'g' : 'x', "fallback preserves DATA");
+        h_check((h_log_capabilities[i] & NX_INTERFACE_CAPABILITY_TCP_GSO) == 0,
+                "ordinary wire packets never retain the segmentation flag");
+    }
+    (VOID)h_ack_bytes(333);
+    before = h_logged;
+    _nx_tcp_socket_retransmit(&h_ip, &h_sock, NX_FALSE);
+    h_check_eq(h_logged - before, 1, "partial-ACK repair still makes progress");
+    h_check_eq(h_log[before], H_ISN + 333, "disabled-mode repair starts at SND.UNA");
+    h_check_eq(h_log_bytes[before], H_MSS - 333,
+               "disabled-mode repair preserves the unacknowledged packet tail");
+    (VOID)h_ack_bytes(3 * H_MSS);
+    h_check_eq(h_sock.nx_tcp_socket_tx_outstanding_bytes, 0,
+               "fallback cumulative ACK returns all DATA credit");
+#ifdef NX_ENABLE_TCP_SACK
+    _nx_tcp_sack_recovery_reset(&h_sock);
+#endif
+}
+#endif
+
 #ifdef NX_ENABLE_TCP_SACK
 static void prr_full_pool_tiny_hole(void)
 {
@@ -1689,13 +1744,15 @@ int main(void)
 
     printf("RFC 6675 loss recovery, against a socket rather than a network\n");
 
-#if defined(NX_ENABLE_INTERFACE_CAPABILITY) && defined(NX_ENABLE_TCP_SACK)
+#if defined(NX_ENABLE_INTERFACE_CAPABILITY) && defined(NX_ENABLE_TCP_SACK) && !defined(NX_DISABLE_TCP_GSO)
     ordinary_partial_ack_full_pool();
     gso_capability_withdrawal();
     gso_async_rto_cursor();
     gso_one_repair_owner();
     gso_queue_byte_bound();
     gso_bounded_recovery();
+#elif defined(NX_ENABLE_INTERFACE_CAPABILITY) && defined(NX_DISABLE_TCP_GSO)
+    segmentation_disabled_fallback();
 #endif
 #ifdef NX_ENABLE_TCP_SACK
     prr_full_pool_tiny_hole();

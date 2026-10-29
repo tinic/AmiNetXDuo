@@ -631,8 +631,9 @@ VOID bsd_tcp_tx_autotune(NX_TCP_SOCKET *tcp, ULONG pending_bytes)
         AmiSocket *os = bsd_tcp_auto_socket(other);
         if (other != tcp && os != NULL && os->as_SndBuf == 0 && os->as_AutoTxDepth != 0UL)
         {
+            ULONG smss = _nx_tcp_socket_payload_mss(other);
             ULONG used = bsd_tcp_packet_credit(other->nx_tcp_socket_tx_outstanding_bytes,
-                              _nx_tcp_socket_payload_mss(other), total);
+                                                smss, total);
             ULONG grant = os->as_AutoTxDepth;
             if (used == 0UL && other->nx_tcp_socket_transmit_suspension_list == NX_NULL)
             {
@@ -669,7 +670,8 @@ VOID bsd_tcp_tx_autotune(NX_TCP_SOCKET *tcp, ULONG pending_bytes)
         tcp->nx_tcp_socket_transmit_queue_maximum_default = depth;
         sock->as_AutoTxDepth = depth;
     }
-    tx_mutex_put(&ip->nx_ip_protection);
+    /* The successful nonblocking get above still belongs to this thread. */
+    AMI_NX_ONLY_SUCCESS(tx_mutex_put(&ip->nx_ip_protection));
 }
 
 static VOID bsd_tcp_seed_isn(NX_TCP_SOCKET *tcp)
