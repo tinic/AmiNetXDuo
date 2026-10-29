@@ -1432,6 +1432,7 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
         if (port == NULL)
         {
             ami_sana2_rx_free_slots(iface);
+            ami_sana2_gso_free(iface);
             ami_free(iface);
             if (err != NULL)
                 *err = AMI_NET_ERR_NOMEM;
@@ -1513,6 +1514,7 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
             AMI_ERROR("sana2: cannot open %s unit %ld (%ld)", iface->device,
                       (long)iface->unit, (long)status);
         ami_sana2_rx_free_slots(iface);
+        ami_sana2_gso_free(iface);
         ami_free(iface);
         if (err != NULL)
             *err = AMI_NET_ERR_NODEV;
@@ -1725,6 +1727,7 @@ static VOID ami_sana2_release(AmiSana2If *iface)
     ami_sana2_detach(iface);
 
     ami_sana2_rx_free_slots(iface);
+    ami_sana2_gso_free(iface);
     ami_free(iface);
 }
 
