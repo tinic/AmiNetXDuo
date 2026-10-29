@@ -849,9 +849,13 @@ static BOOL ami_sana2_gso_walk(NX_PACKET **cur_io, ULONG *off_io, UCHAR *to,
 }
 
 /* The child's TCP checksum: its own header (seq and flags patched, the
-   field zero), the payload sum and the pseudo-header. */
-static ULONG ami_sana2_gso_finish(const AmiTxGso *g, const UCHAR *ip,
-                                  const AmiGsoFields *f, ULONG payload_sum)
+   field zero), the payload sum and the pseudo-header.  always_inline for
+   the reason the pseudo-header's is: left to LTO it went out of line right
+   after ami_sana2_copy_to_buff() with no symbol of its own, and the
+   hot-call gate read its two call sites as calls into that. */
+static inline ULONG __attribute__((always_inline)) ami_sana2_gso_finish(
+    const AmiTxGso *g, const UCHAR *ip, const AmiGsoFields *f,
+    ULONG payload_sum)
 {
     const UCHAR *tcp = ip + g->ihl;
     ULONG        sum = ami_sana2_gso_fold(payload_sum);
