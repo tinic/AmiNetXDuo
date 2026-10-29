@@ -15,6 +15,7 @@
 #include "udp_queue.h"
 
 #include "nx_ip.h"
+#include "nx_packet.h"
 #include "nx_tcp.h"
 #include "nx_ipv4.h"
 #include "tx_thread.h"
@@ -169,6 +170,15 @@ static VOID bsd_drop_pending(AmiSocket *sock)
 /*
  * Append up to `want` bytes from the cursor onto `packet`, coalescing across
  * iovec boundaries. Returns the number appended, or -1 on failure.
+ *
+ * _nx_ and not nx_ for a chunk past the first buffer, as bsd_send_once() is:
+ * every test the _nxe_ wrapper makes is proved here.  `pool` just allocated
+ * `packet` through the checked nx_packet_allocate(), so both are valid and
+ * the packet's pointers are inside its buffer; the only write since is the
+ * bounded copy below, or this append.  `src` is non-NULL and `chunk` non-zero
+ * by bsd_iov_chunk(): bsd_iov_total() and send()'s buf test refuse a NULL
+ * base under a non-zero length.  A waiting call is a thread's, for
+ * bsd_nx_enter()'s reason; a GSO block's chunk never waits.
  */
 static LONG bsd_packet_append_iov(NX_PACKET *packet, BsdIovCursor *cur,
                                   ULONG want, NX_PACKET_POOL *pool, ULONG wait,
@@ -208,7 +218,7 @@ static LONG bsd_packet_append_iov(NX_PACKET *packet, BsdIovCursor *cur,
         }
         else
 #endif
-            status = nx_packet_data_append(packet, src, chunk, pool, wait);
+            status = _nx_packet_data_append(packet, src, chunk, pool, wait);
         if (status != NX_SUCCESS)
         {
             if (why != NULL)
