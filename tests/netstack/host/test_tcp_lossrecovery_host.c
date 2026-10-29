@@ -1517,6 +1517,32 @@ static void gso_one_repair_owner(void)
     _nx_tcp_sack_recovery_reset(&h_sock);
 }
 
+static void gso_async_rto_cursor(void)
+{
+    NX_PACKET *p = h_gso_send(8);
+    ULONG cursor;
+    UINT before;
+    h_check_eq(h_send(), NX_SUCCESS, "queue DATA after an aggregate for RTO cursor coverage");
+    (VOID)h_ack_bytes(333);
+    _nx_tcp_socket_retransmit(&h_ip, &h_sock, NX_FALSE);
+    cursor = h_sock.nx_tcp_socket_tx_rto_next;
+    before = h_logged;
+    h_sock.nx_tcp_socket_tx_window_congestion = 4 * H_MSS;
+    h_hold_gso_repair = NX_TRUE;
+    _nx_tcp_socket_retransmit_after_timeout(&h_ip, &h_sock);
+    h_check_eq(h_sock.nx_tcp_socket_tx_rto_next, cursor + H_MSS,
+               "async repair stops RTO cursor inside its retained aggregate");
+    h_check_eq(h_logged - before, 1, "pending aggregate repair cannot skip to the next queue entry");
+    h_check_eq(h_log[before], cursor, "async RTO range begins at first unrepaired DATA");
+    p -> nx_packet_queue_next = (NX_PACKET *)NX_DRIVER_TX_DONE;
+    h_hold_gso_repair = NX_FALSE;
+    before = h_logged;
+    _nx_tcp_socket_retransmit_after_timeout(&h_ip, &h_sock);
+    h_check(h_logged > before && h_log[before] == cursor + H_MSS,
+            "completion resumes the same aggregate without a skipped hole");
+    _nx_tcp_sack_recovery_reset(&h_sock);
+}
+
 static void gso_bounded_recovery(void)
 {
     NX_PACKET *p = h_gso_send(4);
@@ -1590,6 +1616,7 @@ int main(void)
 
 #if defined(NX_ENABLE_INTERFACE_CAPABILITY) && defined(NX_ENABLE_TCP_SACK)
     ordinary_partial_ack_full_pool();
+    gso_async_rto_cursor();
     gso_one_repair_owner();
     gso_queue_byte_bound();
     gso_bounded_recovery();
