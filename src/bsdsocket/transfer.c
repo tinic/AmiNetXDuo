@@ -441,6 +441,7 @@ static ULONG bsd_budget_left(const BsdWaitBudget *b)
  * time, on the one path GSO is for.  Read without the IP mutex, as the
  * credit is: it sizes a block, the core still decides.
  */
+#ifdef AMINETXDUO_TCP_GSO
 static ULONG bsd_send_gso_window(const NX_TCP_SOCKET *tcp)
 {
     ULONG win;
@@ -478,12 +479,19 @@ static ULONG bsd_send_gso_window(const NX_TCP_SOCKET *tcp)
 
     return win;
 }
+#endif
 
 /* How many payload bytes the next block carries, or 0 for the one-segment
    path.  Whole segments only; at least two. */
 static ULONG bsd_send_gso_bytes(AmiSocket *sock, NX_PACKET_POOL *pool,
                                 ULONG left)
 {
+#ifndef AMINETXDUO_TCP_GSO
+    (VOID)sock;
+    (VOID)pool;
+    (VOID)left;
+    return 0;
+#else
     NX_TCP_SOCKET *tcp  = &sock->as_Nx.tcp;
     NX_INTERFACE  *nxif = tcp->nx_tcp_socket_connect_interface;
     ULONG          mss, bytes, credit, win, payload, need, reserve;
@@ -529,6 +537,7 @@ static ULONG bsd_send_gso_bytes(AmiSocket *sock, NX_PACKET_POOL *pool,
         return 0;
 
     return bytes;
+#endif
 }
 
 /* The record in the headroom the allocation left for it, and the mark. */
