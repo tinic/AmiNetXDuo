@@ -274,9 +274,13 @@ static void h_safe(void)
         h.unsafe++;
 }
 
+/* bsd_break_signals() reads the caller's tc_SigRecvd: h.signals at the
+   moment of the call, whichever task is asking. */
 struct Task *FindTask(const char *name)
 {
     (VOID)name;
+    if (h.me != NULL)
+        h.me->tc_SigRecvd = h.signals;
     return h.me;
 }
 

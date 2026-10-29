@@ -750,11 +750,18 @@ VOID  bsd_nx_release(struct AmiSocketBase *base);
 
 /*
  * The break bits pending for this base's owner, observed without consuming.
+ *
+ * A read of the caller's own tc_SigRecvd, not SetSignal(0, 0): the answer is
+ * the same longword, but SetSignal() takes Disable()/Enable() to change it,
+ * and a blocking TCP send asks twice per segment.  On the PiStorm A1200 the
+ * two calls were 27.5% of an AmiSpeedTest upload (about 6 us each,
+ * 2026-10-29).  An aligned longword read cannot tear, and a bit an interrupt
+ * sets after it is seen on the next look, as it would be after SetSignal().
  */
 static __inline ULONG bsd_break_signals(struct AmiSocketBase *base)
 {
     (VOID)base;
-    return SetSignal(0UL, 0UL);
+    return FindTask(NULL)->tc_SigRecvd;
 }
 
 static __inline BOOL bsd_nx_orphan(struct AmiSocketBase *base)
