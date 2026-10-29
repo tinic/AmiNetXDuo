@@ -1543,6 +1543,21 @@ static void gso_async_rto_cursor(void)
     _nx_tcp_sack_recovery_reset(&h_sock);
 }
 
+static void gso_capability_withdrawal(void)
+{
+    UINT before;
+    (VOID)h_gso_send(4);
+    h_iface.nx_interface_capability_flag &= ~NX_INTERFACE_CAPABILITY_TCP_GSO;
+    (VOID)h_ack_bytes(333);
+    before = h_logged;
+    _nx_tcp_socket_retransmit(&h_ip, &h_sock, NX_FALSE);
+    h_check_eq(h_logged - before, 1, "withdrawn GSO capability retains ordinary repair progress");
+    h_check((h_log_capabilities[before] & NX_INTERFACE_CAPABILITY_TCP_GSO) == 0,
+            "legacy route receives an ordinary copy, never a segmentation template");
+    h_check_eq(h_log_bytes[before], H_MSS, "legacy route repair remains within physical MSS");
+    _nx_tcp_sack_recovery_reset(&h_sock);
+}
+
 static void gso_bounded_recovery(void)
 {
     NX_PACKET *p = h_gso_send(4);
@@ -1616,6 +1631,7 @@ int main(void)
 
 #if defined(NX_ENABLE_INTERFACE_CAPABILITY) && defined(NX_ENABLE_TCP_SACK)
     ordinary_partial_ack_full_pool();
+    gso_capability_withdrawal();
     gso_async_rto_cursor();
     gso_one_repair_owner();
     gso_queue_byte_bound();
