@@ -147,6 +147,13 @@ AmiNetStack *tool_require_stack(VOID);
  */
 struct Library *tool_open_library(const char *name, ULONG version);
 
+/* Run a companion command beside this program, in its C drawer, or in C:.
+   One argument is quoted literally; options must be a constant string.
+   Waits for completion, returning the command's DOS result, or -1 on failure.
+   silent redirects both streams to NIL: for Workbench callers. */
+LONG tool_run_companion(const char *command, const char *argument,
+                        const char *options, BOOL silent);
+
 /* Interface index in config order, or -1 after printing a message. */
 LONG tool_find_interface(const char *name);
 
