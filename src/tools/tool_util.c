@@ -6,6 +6,7 @@
 
 #include "tools.h"
 #include "toolquiet.h"
+#include <dos/dostags.h>
 
 /* ----------------------------------------------------------------- output */
 
@@ -457,6 +458,91 @@ struct Library *tool_open_library(const char *name, ULONG version)
         base = OpenLibrary((CONST_STRPTR)name, version);
 
     return base;
+}
+
+/* SystemTagList's Shell has its own PROGDIR:. Resolve the companion before
+   launching it, and quote both path and argument (AmigaDOS escapes with *).
+   Static buffers keep this off a Shell command's small stack. */
+static BOOL companion_quote(char *out, ULONG cap, ULONG *used,
+                             const char *text)
+{
+    if (*used + 2 >= cap) return FALSE;
+    out[(*used)++] = '"';
+    while (*text != '\0')
+    {
+        char c = *text++;
+        if ((UBYTE)c < 32 || (UBYTE)c == 127 || *used + 3 >= cap)
+            return FALSE;
+        if (c == '*' || c == '"' || c == '$' || c == '`')
+            out[(*used)++] = '*';
+        out[(*used)++] = c;
+    }
+    out[(*used)++] = '"';
+    out[*used] = '\0';
+    return TRUE;
+}
+
+LONG tool_run_companion(const char *command, const char *argument,
+                        const char *options, BOOL silent)
+{
+    static char path[512], line[1600];
+    struct Process *me = (struct Process *)FindTask(NULL);
+    APTR saved = me->pr_WindowPtr;
+    BPTR home = GetProgramDir(), lock;
+    BPTR input, output = (BPTR)0;
+    ULONG i, used = 0;
+    LONG rc;
+
+    /* No volume requesters when resident or installed without siblings. */
+    me->pr_WindowPtr = (APTR)-1L;
+    for (i = 0; i < 3; i++)
+    {
+        if (i < 2)
+        {
+            if (home == (BPTR)0 ||
+                !NameFromLock(home, (STRPTR)path, sizeof(path))) continue;
+            if (i == 1 && !AddPart((STRPTR)path, (STRPTR)"C", sizeof(path)))
+                continue;
+        }
+        else tool_copy_string(path, sizeof(path), "C:");
+        if (!AddPart((STRPTR)path, (STRPTR)command, sizeof(path))) continue;
+        lock = Lock((CONST_STRPTR)path, ACCESS_READ);
+        if (lock != (BPTR)0) { UnLock(lock); break; }
+    }
+    me->pr_WindowPtr = saved;
+    if (i == 3 || !companion_quote(line, sizeof(line), &used, path))
+        return -1;
+    line[used++] = ' ';
+    if (!companion_quote(line, sizeof(line), &used, argument)) return -1;
+    if (options != NULL && options[0] != '\0')
+    {
+        ULONG n = 0;
+        while (options[n] != '\0') n++;
+        if (used + n + 2 >= sizeof(line)) return -1;
+        line[used++] = ' ';
+        tool_copy_string(line + used, sizeof(line) - used, options);
+    }
+
+    input = Open((CONST_STRPTR)"NIL:", MODE_OLDFILE);
+    if (silent) output = Open((CONST_STRPTR)"NIL:", MODE_NEWFILE);
+    if (input == (BPTR)0 || (silent && output == (BPTR)0))
+    {
+        if (input != (BPTR)0) Close(input);
+        if (output != (BPTR)0) Close(output);
+        return -1;
+    }
+    rc = SystemTags((CONST_STRPTR)line,
+                    SYS_Input, (ULONG)input,
+                    silent ? SYS_Output : TAG_IGNORE, (ULONG)output,
+                    NP_StackSize, 8192UL,
+                    TAG_DONE);
+    /* DOS owns these handles after a successful launch. */
+    if (rc == -1)
+    {
+        Close(input);
+        if (output != (BPTR)0) Close(output);
+    }
+    return rc;
 }
 
 const char *tool_basename(const char *path)
