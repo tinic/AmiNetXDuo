@@ -472,8 +472,21 @@ static void burst_hole(void)
     h_check(first_walk >= 2,
             "the third duplicate acknowledgment retransmits more than one segment");
 
+    /* The retransmitted copies are still in the network. The next SACK
+       removes one original segment from the pipe and inflates cwnd by one
+       MSS, so it permits at most two more copies, not another whole window.
+       No retransmitted byte has been cumulatively acknowledged yet. */
+    before = h_datagrams;
+    (VOID)h_ack(H_HOLE_FROM, H_HOLE_TO, H_HOLE_TO + 4, 0, 0);
+    h_check(h_datagrams - before <= 2,
+            "the next SACK counts retransmissions already in flight");
+    h_check((H_FLIGHT - H_HOLE_TO - 4 +
+             h_sent_in(H_FLIGHT, H_HOLE_FROM, H_HOLE_TO)) * H_MSS <=
+                h_sock.nx_tcp_socket_tx_window_congestion,
+            "original and retransmitted copies together stay within cwnd");
+
     /* The rest of the delivered flight is reported, one block growing. */
-    for (i = H_HOLE_TO + 4; i <= H_FLIGHT; i++)
+    for (i = H_HOLE_TO + 5; i <= H_FLIGHT; i++)
     {
         (VOID)h_ack(H_HOLE_FROM, H_HOLE_TO, i, 0, 0);
     }
