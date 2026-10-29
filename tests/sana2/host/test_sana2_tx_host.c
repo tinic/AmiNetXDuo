@@ -250,9 +250,16 @@ static NX_PACKET    *h_released;
 
 /* The error-checking entry points, because nx_api.h maps the nx_ names to
    them when NX_DISABLE_ERROR_CHECKING is not set, which is the host build. */
+/* The fill test's parents, counted one by one. */
+#define G_FILL_MAX  (1 + (2 + AMI_SANA2_TX_PEND) / 2)
+static NX_PACKET g_fill[G_FILL_MAX];
+static UBYTE     g_fill_released[G_FILL_MAX];
+
 UINT _nxe_packet_transmit_release(NX_PACKET **packet_ptr_ptr)
 {
     h_released = *packet_ptr_ptr;
+    if (h_released >= &g_fill[0] && h_released < &g_fill[G_FILL_MAX])
+        g_fill_released[h_released - &g_fill[0]]++;
     h_releases++;
     return NX_SUCCESS;
 }
@@ -362,6 +369,8 @@ VOID ami_log(int level, const char *fmt, ...)
 
 static AmiSana2If iface;
 static NX_PACKET  pkt;
+/* The GSO context table, as the driver allocates it at link-up. */
+static AmiTxGso   h_gso_table[AMI_SANA2_TX_SLOTS + AMI_SANA2_TX_PEND];
 static UCHAR      pool[POOL_BYTES];
 
 static void fixture_init(BOOL raw, ULONG hw_type)
@@ -375,6 +384,9 @@ static void fixture_init(BOOL raw, ULONG hw_type)
     memcpy(iface.mac, "\x02\x41\x4d\x49\x00\x42", AMI_ETH_ADDR_SIZE);
 
     ami_sana2_tx_init(&iface);
+    memset(h_gso_table, 0, sizeof(h_gso_table));
+    iface.gso       = h_gso_table;
+    iface.gso_count = (UWORD)(AMI_SANA2_TX_SLOTS + AMI_SANA2_TX_PEND);
 
     h_sent     = NULL;
     h_sends    = 0;
@@ -1728,9 +1740,10 @@ static void test_gso_queues_in_order(void)
     (VOID)ami_sana2_tx_send(&iface, p, AMI_ETHERTYPE_IPV4, 0xBC24, 0x11EF103A);
     h_check(h_sends == 2 && iface.tx_pend_count == 2,
             "two go out, two wait");
-    h_check(iface.tx_pend[iface.tx_pend_head].seg_index == 2 &&
+    h_check(iface.tx_pend[iface.tx_pend_head].gso == 1 &&
             iface.tx_pend[(iface.tx_pend_head + 1) % AMI_SANA2_TX_PEND]
-                .seg_index == 3, "and they wait as segments 2 and 3");
+                .gso == 1 && iface.tx_pend[iface.tx_pend_head].packet == p,
+            "and they wait as the block's own");
 
     /* A middle child fails at the device. */
     ((struct IOSana2Req *)h_sent_log[1])->ios2_Req.io_Error = S2ERR_TX_FAILURE;
@@ -1796,26 +1809,103 @@ static void test_gso_offline_mid_block(void)
             "two sent, two lost");
 }
 
-/* Every context in use: the block is dropped as a full queue drops. */
-static void test_gso_no_context(void)
+/* An interface that never advertised GSO has no table, and a block that
+   reaches it anyway is dropped, not sent whole. */
+static void test_gso_no_table(void)
 {
-    static NX_PACKET other;
-    NX_PACKET       *p;
+    NX_PACKET *p;
 
-    printf("sana2: a GSO block with no context free\n");
+    printf("sana2: a GSO block to an interface that never advertised it\n");
 
     fixture_init(FALSE, S2WireType_Ethernet);
-    iface.tx_slots = 1;
+    iface.gso       = NULL;
+    iface.gso_count = 0;
     p = gso_parent(32, 350, 100, 0x18, 1, 1, 37, g_odd_cuts, 5);
-    (VOID)ami_sana2_tx_send(&iface, p, AMI_ETHERTYPE_IPV4, 0xBC24, 0x11EF103A);
 
-    other = *p;                            /* same headers, its own packet */
-    h_check(ami_sana2_tx_send(&iface, &other, AMI_ETHERTYPE_IPV4, 0xBC24,
-                              0x11EF103A) == NX_TX_QUEUE_DEPTH,
-            "the second block is refused");
-    h_check(h_releases == 1 && h_released == &other &&
-            iface.stats.tx_queue_full == 1 && iface.stats.tx_errors == 4,
-            "released at once, its four segments counted lost");
+    h_check(ami_sana2_tx_send(&iface, p, AMI_ETHERTYPE_IPV4, 0xBC24,
+                              0x11EF103A) != NX_SUCCESS &&
+            h_sends == 0 && h_releases == 1 && h_released == p,
+            "released at once, nothing posted");
+    h_check(iface.stats.tx_errors == 1 && iface.stats.tx_queue_full == 0,
+            "as a refused packet, not as congestion");
+}
+
+/*
+ * The table is never what refuses a block.  Two-segment blocks over every
+ * write slot and every queue entry: each is accepted, each parent goes back
+ * exactly once, and the one after them is refused by the full queue, with
+ * contexts still free.
+ */
+#define G_FILL  ((2 + AMI_SANA2_TX_PEND) / 2)
+
+static void test_gso_fills_slots_and_queue(void)
+{
+    NX_PACKET *p;
+    ULONG      n, rounds;
+    UINT       st;
+    int        ok = 1;
+
+    printf("sana2: GSO blocks filling every slot and queue entry are all taken\n");
+
+    fixture_init(FALSE, S2WireType_Ethernet);
+    iface.tx_slots  = 2;
+    iface.gso_count = (UWORD)(iface.tx_slots + AMI_SANA2_TX_PEND);
+    p = gso_parent(20, 200, 100, 0x18, 1, 1, 200, NULL, 0);
+    memset(g_fill_released, 0, sizeof(g_fill_released));
+
+    for (n = 0; n <= G_FILL; n++)
+        g_fill[n] = *p;                     /* the same bytes, its own packet */
+
+    for (n = 0; n < G_FILL; n++)
+    {
+        st = ami_sana2_tx_send(&iface, &g_fill[n], AMI_ETHERTYPE_IPV4,
+                               0xBC24, 0x11EF103A);
+        if (st != NX_SUCCESS)
+            ok = 0;
+    }
+    h_check(ok, "every block is taken");
+    h_check(h_sends == 2 && iface.tx_pend_count == AMI_SANA2_TX_PEND,
+            "the slots and the queue are full");
+    h_check(iface.stats.tx_queue_full == 0 && iface.stats.tx_errors == 0,
+            "and nothing was dropped");
+
+    st = ami_sana2_tx_send(&iface, &g_fill[G_FILL], AMI_ETHERTYPE_IPV4,
+                           0xBC24, 0x11EF103A);
+    h_check(st == NX_TX_QUEUE_DEPTH && iface.stats.tx_queue_full == 1 &&
+            h_released == &g_fill[G_FILL],
+            "one more is refused by the full queue");
+
+    /* Complete whatever is out, again and again, until everything is. */
+    for (rounds = 0; rounds < 4 * G_FILL; rounds++)
+    {
+        ULONG busy = 0;
+
+        for (n = 0; n < iface.tx_slots; n++)
+        {
+            if (iface.tx[n].busy)
+            {
+                ReplyMsg(&iface.tx[n].req.ios2_Req.io_Message);
+                busy++;
+            }
+        }
+        if (busy == 0)
+            break;
+        ami_sana2_tx_reap(&iface);
+    }
+
+    h_check(iface.tx_pend_count == 0 && h_sends == 2 * G_FILL,
+            "every child went out");
+    h_check(iface.stats.packets_sent == 2 * G_FILL &&
+            iface.stats.tx_errors == 2, "all sent; the refused block's two lost");
+    for (n = 0; n <= G_FILL; n++)
+        if (g_fill_released[n] != 1)
+            ok = 0;
+    h_check(ok && h_releases == G_FILL + 1,
+            "and every parent was released exactly once");
+    for (n = 0; n < iface.gso_count; n++)
+        if (iface.gso[n].parent != NULL)
+            ok = 0;
+    h_check(ok, "and every context is free");
 }
 
 /* What is not a block this interface can cut is never put on the wire. */
@@ -1882,7 +1972,8 @@ int main(void)
     test_gso_pieces_and_restart();
     test_gso_queues_in_order();
     test_gso_offline_mid_block();
-    test_gso_no_context();
+    test_gso_no_table();
+    test_gso_fills_slots_and_queue();
     test_gso_refused();
 #ifdef AMINETXDUO_TX_RUN
     test_drain_waits_for_a_queued_flush();

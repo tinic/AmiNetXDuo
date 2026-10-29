@@ -548,17 +548,21 @@ BOOL ami_sana2_gso_parse(NX_PACKET *packet, ULONG mtu, AmiTxGso *g)
 }
 
 /*
- * The children launch in order, one launcher at a time (sana2_tx.c), so the
- * block's cursor only moves forward and the whole block costs one walk of
- * the chain.  One that arrives out of order starts the walk again.
+ * The children launch in order, one launcher at a time (sana2_tx.c): this
+ * launch is the block's next child, and the block's cursor only moves
+ * forward, so the whole block costs one walk of the chain.
  */
 ULONG ami_sana2_gso_prepare(AmiTxSlot *slot, NX_PACKET *parent)
 {
-    AmiTxGso  *g       = &slot->iface->gso[slot->gso - 1];
-    ULONG      seg_off = (ULONG)slot->seg_index * g->mss;
-    ULONG      seg_len = g->payload - seg_off;
+    AmiTxGso  *g = &slot->iface->gso[slot->gso - 1];
+    ULONG      seg_off;
+    ULONG      seg_len;
     NX_PACKET *buf;
     LONG       start;
+
+    slot->seg_index = g->next_seg++;
+    seg_off = (ULONG)slot->seg_index * g->mss;
+    seg_len = g->payload - seg_off;
 
     if (seg_len > g->mss)
         seg_len = g->mss;

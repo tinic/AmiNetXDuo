@@ -227,13 +227,32 @@ static UBYTE ami_sana2_gso_plan(const AmiSana2If *iface)
     return (UBYTE)segs;
 }
 
-/* Set or withdraw the capability with the link.  The flag is written
-   directly, as the alias copy below does: the setter would replace the
-   checksum bits NX_LINK_INITIALIZE put there. */
+/* Set or withdraw the capability with the link.  The context table comes
+   with the first advertisement and stays: blocks may still be in flight
+   when the link drops.  No table, no GSO.  The flag is written directly,
+   as the alias copy below does: the setter would replace the checksum bits
+   NX_LINK_INITIALIZE put there. */
 static VOID ami_sana2_gso_advertise(AmiSana2If *iface,
                                     NX_INTERFACE *interface_ptr, BOOL up)
 {
     iface->gso_max_segs = up ? ami_sana2_gso_plan(iface) : 0;
+
+    if (iface->gso_max_segs != 0 && iface->gso == NULL)
+    {
+        UWORD count = (UWORD)(iface->tx_slots + AMI_SANA2_TX_PEND);
+
+        iface->gso = (AmiTxGso *)ami_alloc((ULONG)count *
+                                           (ULONG)sizeof(AmiTxGso));
+        if (iface->gso != NULL)
+        {
+            iface->gso_count = count;
+            iface->gso_next  = 0;
+        }
+        else
+        {
+            iface->gso_max_segs = 0;
+        }
+    }
 
 #ifdef NX_ENABLE_INTERFACE_CAPABILITY
     if (iface->gso_max_segs != 0)
@@ -245,6 +264,17 @@ static VOID ami_sana2_gso_advertise(AmiSana2If *iface,
 #else
     (VOID)interface_ptr;
 #endif
+}
+
+/* Only once nothing can reach it: the interface is being freed. */
+VOID ami_sana2_gso_free(AmiSana2If *iface)
+{
+    if (iface->gso != NULL)
+    {
+        ami_free(iface->gso);
+        iface->gso       = NULL;
+        iface->gso_count = 0;
+    }
 }
 
 UINT ami_sana2_gso_max_segs(NX_INTERFACE *interface_ptr)

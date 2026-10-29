@@ -402,18 +402,18 @@
 #define AMI_SANA2_TX_PEND           (AMI_SANA2_TX_SLOTS * 16)
 #endif
 
-/* `gso` and `seg_index` name one child of a GSO block (AmiTxGso below), and
-   `packet` is then its parent; AMI_SANA2_GSO_NONE for an ordinary write.
-   dst_msw is a UWORD so the two bytes fit where the padding was: the queue
-   is 512 entries in the full build. */
+/* `gso` names the GSO block (AmiTxGso below) this entry is the next child
+   of, and `packet` is then its parent; AMI_SANA2_GSO_NONE for an ordinary
+   write.  Which child is the block's own count: they leave in order.
+   dst_msw is a UWORD so the index fits where the padding was: the queue is
+   512 entries in the full build. */
 typedef struct AmiTxPending
 {
     NX_PACKET  *packet;
     ULONG       dst_lsw;
     UWORD       dst_msw;
     UWORD       ether_type;
-    UBYTE       gso;
-    UBYTE       seg_index;
+    UWORD       gso;
 } AmiTxPending;
 
 /*
@@ -421,9 +421,16 @@ typedef struct AmiTxPending
  * context owns the parent until the last child is done with it; each child
  * write is a slot carrying {gso, seg_index}, its payload slice found from
  * the parent's chain by a cursor that only moves forward while the children
- * launch in order.  One per write slot: a block holds at least one slot or
- * waits in the queue behind one that does.  Nothing in the NX_PACKET is
- * touched -- TCP may hand the same parent back for retransmission.
+ * launch in order.
+ *
+ * ONE CONTEXT PER WRITE SLOT AND PER QUEUE ENTRY.  Every block in flight
+ * holds at least one of either, so the table can never be what refuses a
+ * block while the transmit path has room: a drop there would be a
+ * retransmission this stack inflicted on itself.  Allocated the first time
+ * the interface advertises GSO (sana2_driver.c) and kept until the
+ * interface is freed, so a machine below the gates pays nothing.  Nothing
+ * in the NX_PACKET is touched -- TCP may hand the same parent back for
+ * retransmission.
  */
 /* `gso` in a slot or a queue entry is the context's index plus one, so a
    zeroed one is an ordinary write. */
@@ -448,6 +455,7 @@ typedef struct AmiTxGso
     UBYTE       segs;           /* k                                        */
     UBYTE       outstanding;    /* children not yet done with the parent    */
     UBYTE       lost;           /* children refused, aborted or dropped     */
+    UBYTE       next_seg;       /* the child the next launch is             */
 } AmiTxGso;
 
 /* ACKPACE (sana2_ackpace.c): a pure acknowledgment waiting for its turn,
@@ -873,7 +881,7 @@ typedef struct AmiTxSlot
        seg_buf/seg_buf_off, which is where a restart rewinds the cursor to.
        seg_sum is the slice's TCP checksum once a copy in pieces needed it
        before the bytes went past (seg_summed). */
-    UBYTE               gso;        /* AMI_SANA2_GSO_NONE: ordinary write  */
+    UWORD               gso;        /* AMI_SANA2_GSO_NONE: ordinary write  */
     UBYTE               seg_index;
     UBYTE               seg_summed;
     UWORD               seg_sum;
@@ -1103,9 +1111,13 @@ struct AmiSana2If
     UWORD               tx_pend_count;
     volatile BOOL       tx_kicking;
 
-    /* GSO blocks in flight, under Forbid() with the slots, and the most
-       segments one may carry here: 0 = not advertised (sana2_driver.c). */
-    AmiTxGso            gso[AMI_SANA2_TX_SLOTS];
+    /* GSO blocks in flight, under Forbid() with the slots: gso_count of
+       them, NULL until GSO is first advertised; gso_next is where the
+       search for a free one starts.  gso_max_segs is the most segments one
+       block may carry here, 0 = not advertised (sana2_driver.c). */
+    AmiTxGso           *gso;
+    UWORD               gso_count;
+    UWORD               gso_next;
     UBYTE               gso_max_segs;
 
 #ifdef AMINETXDUO_TX_LAZY_COLLECT
@@ -1208,6 +1220,8 @@ VOID ami_sana2_capacity_changed(AmiSana2If *iface);
 
 /* sana2_driver.c */
 VOID ami_sana2_unbind(AmiSana2If *iface);
+/* The GSO context table, with the interface (sana2_device.c). */
+VOID ami_sana2_gso_free(AmiSana2If *iface);
 
 /* sana2_rx.c */
 LONG ami_sana2_rx_start(AmiSana2If *iface);

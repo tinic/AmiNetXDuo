@@ -56,8 +56,6 @@ VOID ami_sana2_tx_init(AmiSana2If *iface)
 #ifdef AMINETXDUO_RXPROBE
         slot->write_at = 0UL;
 #endif
-
-        iface->gso[i].parent = NULL;
     }
 
     iface->tx_pend_head  = 0;
@@ -443,7 +441,7 @@ static VOID ami_sana2_tx_complete(AmiSana2If *iface, AmiTxSlot *slot)
  * once; the context is free from that store on.  Forbid() for the count,
  * which the reader's reap and a sender's own completion both reach.
  */
-static VOID ami_sana2_gso_put(AmiSana2If *iface, UBYTE idx, UWORD n, BOOL lost)
+static VOID ami_sana2_gso_put(AmiSana2If *iface, UWORD idx, UWORD n, BOOL lost)
 {
     AmiTxGso  *g      = &iface->gso[idx - 1];
     NX_PACKET *parent = NULL;
@@ -476,7 +474,7 @@ static VOID ami_sana2_gso_put(AmiSana2If *iface, UBYTE idx, UWORD n, BOOL lost)
 static VOID ami_sana2_gso_complete(AmiSana2If *iface, AmiTxSlot *slot,
                                    LONG err)
 {
-    UBYTE idx = slot->gso;
+    UWORD idx = slot->gso;
 
     slot->packet = NULL;
     slot->gso    = AMI_SANA2_GSO_NONE;
@@ -521,7 +519,7 @@ VOID ami_sana2_tx_drain(AmiSana2If *iface)
     for (;;)
     {
         NX_PACKET *packet = NULL;
-        UBYTE      gso    = AMI_SANA2_GSO_NONE;
+        UWORD      gso    = AMI_SANA2_GSO_NONE;
 
         Forbid();
         if (iface->tx_pend_count != 0)
@@ -715,13 +713,12 @@ static UINT ami_sana2_tx_launch(AmiSana2If *iface, AmiTxSlot *slot,
  * full, and the caller drops the packet.  Un-parks the reply port: while
  * writes wait, every completion has to be collected at once, by the reader,
  * because the collection is what launches the next one.  `count` children
- * of GSO block `gso` from `first` on go in together or not at all, so a
- * block never waits with a hole in it.
+ * of GSO block `gso` go in together or not at all, so a block never waits
+ * with a hole in it.
  */
 static BOOL ami_sana2_tx_enqueue(AmiSana2If *iface, NX_PACKET *packet,
                                  UWORD ether_type, ULONG dst_msw,
-                                 ULONG dst_lsw, UBYTE gso, UWORD first,
-                                 UWORD count)
+                                 ULONG dst_lsw, UWORD gso, UWORD count)
 {
     BOOL  queued = FALSE;
     UWORD i;
@@ -740,7 +737,6 @@ static BOOL ami_sana2_tx_enqueue(AmiSana2If *iface, NX_PACKET *packet,
             pend->dst_lsw    = dst_lsw;
             pend->ether_type = ether_type;
             pend->gso        = gso;
-            pend->seg_index  = (UBYTE)(first + i);
             iface->tx_pend_count++;
         }
         queued = TRUE;
@@ -820,8 +816,7 @@ VOID ami_sana2_tx_kick(AmiSana2If *iface)
         {
             /* The verdict is the launch's own: a packet that fails here was
                released by it, as one from the direct path is. */
-            slot->gso       = pend.gso;
-            slot->seg_index = pend.seg_index;
+            slot->gso = pend.gso;
             (VOID)ami_sana2_tx_launch(iface, slot, pend.packet, pend.ether_type,
                                       pend.dst_msw, pend.dst_lsw);
         }
@@ -919,7 +914,8 @@ ami_sana2_gso_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
 {
     AmiTxGso   blk;
     AmiTxSlot *slot;
-    UBYTE      idx = AMI_SANA2_GSO_NONE;
+    UWORD      idx = AMI_SANA2_GSO_NONE;
+    UWORD      at;
     UWORD      i;
 
     /* Cooked IPv4 only: the copy hook is what cuts the block, and neither a
@@ -927,31 +923,41 @@ ami_sana2_gso_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
        neither, so the core is not to send one; one that arrives is dropped
        rather than put on the wire whole. */
     if (iface->raw_mode || ether_type != AMI_ETHERTYPE_IPV4 ||
-        !ami_sana2_gso_parse(packet, iface->mtu, &blk))
+        iface->gso == NULL || !ami_sana2_gso_parse(packet, iface->mtu, &blk))
     {
         nx_packet_transmit_release(packet);
         iface->stats.tx_errors++;
         return NX_INVALID_PACKET;
     }
 
+    /* Blocks finish roughly in the order they started, so the search starts
+       after the last one taken and usually stops at once. */
     Forbid();
-    for (i = 0; i < iface->tx_slots; i++)
+    at = iface->gso_next;
+    for (i = 0; i < iface->gso_count; i++)
     {
-        if (iface->gso[i].parent == NULL)
+        if (at >= iface->gso_count)
+            at = 0;
+        if (iface->gso[at].parent == NULL)
         {
             blk.parent       = packet;
             blk.outstanding  = blk.segs;
             blk.lost         = 0;
-            iface->gso[i]    = blk;
-            idx              = (UBYTE)(i + 1);
+            blk.next_seg     = 0;
+            iface->gso[at]   = blk;
+            idx              = (UWORD)(at + 1);
+            iface->gso_next  = (UWORD)(at + 1);
             break;
         }
+        at++;
     }
     Permit();
 
+    /* Cannot happen: a block in flight holds a slot or a queue entry, and
+       there is a context for each.  Kept, counted as a full queue would be,
+       rather than trusted. */
     if (idx == AMI_SANA2_GSO_NONE)
     {
-        /* As a full queue: congestion, and TCP sends it again. */
         nx_packet_transmit_release(packet);
         iface->stats.tx_errors += blk.segs;
         iface->stats.tx_queue_full++;
@@ -964,8 +970,7 @@ ami_sana2_gso_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
         if (slot == NULL)
             break;
 
-        slot->gso       = idx;
-        slot->seg_index = (UBYTE)i;
+        slot->gso = idx;
         (VOID)ami_sana2_tx_launch(iface, slot, packet, ether_type, dst_msw,
                                   dst_lsw);
     }
@@ -973,7 +978,7 @@ ami_sana2_gso_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
     if (i < blk.segs)
     {
         if (!ami_sana2_tx_enqueue(iface, packet, ether_type, dst_msw, dst_lsw,
-                                  idx, i, (UWORD)(blk.segs - i)))
+                                  idx, (UWORD)(blk.segs - i)))
         {
             /* The children already launched still own their share. */
             iface->stats.tx_errors += (ULONG)(blk.segs - i);
@@ -1052,7 +1057,7 @@ UINT ami_sana2_tx_send_now(AmiSana2If *iface, NX_PACKET *packet,
     if (slot == NULL)
     {
         if (!ami_sana2_tx_enqueue(iface, packet, ether_type, dst_msw, dst_lsw,
-                                  AMI_SANA2_GSO_NONE, 0, 1))
+                                  AMI_SANA2_GSO_NONE, 1))
         {
             /* Congestion, not an error: drop and let the upper layers
                retransmit. */

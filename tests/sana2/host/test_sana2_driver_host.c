@@ -9,6 +9,7 @@
 #include "aminetxduo/netstack.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "aminetxduo/asm_abi.h"
 
@@ -91,6 +92,26 @@ UINT _nxe_ip_interface_capability_set(NX_IP *ip_ptr, UINT interface_index,
     return NX_SUCCESS;
 }
 #endif
+
+/* The GSO context table's allocation at link-up. */
+static int h_allocs;
+static int h_frees;
+static int h_alloc_fail;
+
+APTR ami_alloc(ULONG size)
+{
+    if (h_alloc_fail)
+        return NULL;
+    h_allocs++;
+    return calloc(1, (size_t)size);
+}
+
+VOID ami_free(APTR ptr)
+{
+    if (ptr != NULL)
+        h_frees++;
+    free(ptr);
+}
 
 UINT _nxe_packet_transmit_release(NX_PACKET **packet_ptr_ptr)
 {
@@ -1228,7 +1249,13 @@ static void test_gso_advertised_with_the_link(void)
         h_check(ami_sana2_gso_max_segs(&interface_obj) == 0,
                 "nothing is advertised before the link is up");
 
+        h_allocs = h_frees = 0;
         drive(NX_LINK_ENABLE);
+        h_check((iface.gso != NULL) == (c[i].want != 0) && h_allocs ==
+                    (c[i].want != 0 ? 1 : 0) &&
+                iface.gso_count == (c[i].want != 0
+                    ? (UWORD)(c[i].slots + AMI_SANA2_TX_PEND) : 0),
+                "a context per slot and queue entry where on, none where off");
         h_check(ami_sana2_gso_max_segs(&interface_obj) == c[i].want &&
                 ((interface_obj.nx_interface_capability_flag &
                   NX_INTERFACE_CAPABILITY_TCP_GSO) != 0) == (c[i].want != 0),
@@ -1242,9 +1269,35 @@ static void test_gso_advertised_with_the_link(void)
                 (interface_obj.nx_interface_capability_flag &
                  NX_INTERFACE_CAPABILITY_TCP_GSO) == 0,
                 "and withdrawn with the link");
+        h_check((iface.gso != NULL) == (c[i].want != 0) && h_frees == 0,
+                "the table outlives the link: blocks may still be out");
+
+        drive(NX_LINK_ENABLE);
+        h_check(h_allocs == (c[i].want != 0 ? 1 : 0),
+                "and serves the next link-up without a second allocation");
+
+        ami_sana2_gso_free(&iface);
+        h_check(iface.gso == NULL && iface.gso_count == 0 &&
+                h_frees == (c[i].want != 0 ? 1 : 0),
+                "and goes with the interface");
 
         ami_sana2_unbind(&iface);
     }
+
+    /* No memory for the table: no GSO. */
+    fixture_init(AMI_ETH_ADDR_SIZE);
+    ami_sana2_attach(&iface, &ip, 0);
+    iface.tx_slots = 32;
+    iface.pool     = &pool;
+    pool.nx_packet_pool_total = 1024;
+    h_alloc_fail = 1;
+    drive(NX_LINK_ENABLE);
+    h_alloc_fail = 0;
+    h_check(iface.gso == NULL && ami_sana2_gso_max_segs(&interface_obj) == 0 &&
+            (interface_obj.nx_interface_capability_flag &
+             NX_INTERFACE_CAPABILITY_TCP_GSO) == 0,
+            "no table, nothing advertised");
+    ami_sana2_unbind(&iface);
 
     /* An interface that never carried the bit answers 0 without looking at
        its link info, which need not be ours. */

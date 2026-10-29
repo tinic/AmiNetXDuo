@@ -459,6 +459,13 @@ VOID ami_free(APTR ptr)
 
 VOID ami_log(int level, const char *fmt, ...) { (VOID)level; (VOID)fmt; }
 
+/* sana2_driver.c's, with the interface: no case here advertises GSO, so
+   there is never a table to free. */
+VOID ami_sana2_gso_free(AmiSana2If *iface)
+{
+    (VOID)iface;
+}
+
 VOID ami_random_arrival(VOID) { }
 ULONG ami_config_rx_batch(ULONG fallback) { return fallback; }
 ULONG ami_config_tx_run(ULONG fallback)   { return fallback; }
