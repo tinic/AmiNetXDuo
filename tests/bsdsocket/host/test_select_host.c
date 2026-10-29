@@ -120,6 +120,7 @@ static void h_reset(void)
 
     h.open_result = 0;              /* timer.device opens                    */
     h_me = NULL;
+    h_task.tc_SigRecvd = 0;
 }
 
 static AmiSocket *h_udp(LONG fd, UINT peer)
@@ -193,6 +194,7 @@ VOID Signal(struct Task *task, ULONG signalSet)
 {
     h.last_signal_task = task;
     h.signals       |= signalSet;
+    task->tc_SigRecvd |= signalSet;
     h.signal_calls++;
     h.last_signalled = signalSet;
 }
@@ -1472,7 +1474,7 @@ static void t_events(void)
           "a pending accept uses its listener's current event owner");
     listener.as_Owner = NULL;
     s->as_Owner = &h_base;
-    h.signals = 0;
+    h.signals = h_task.tc_SigRecvd = 0;
     bsd_event_post(s, FD_CLOSE);
     CHECK(h.signals == 0,
           "a parked listener cannot fall back to the child's earlier owner");
@@ -1533,6 +1535,47 @@ static void t_events(void)
           "a raw socket has no NetX control block to hang one on");
 }
 
+/*
+ * One Signal() per pending event bit, not one per segment.  A receive posts
+ * FD_READ for every segment; while the base's event bit is still pending on
+ * the task, a second Signal() is a Disable()/Enable() pair that changes
+ * nothing.  Once the task takes the bit, the next post signals again.
+ */
+static void t_event_signal_once(void)
+{
+    AmiSocket *s;
+
+    printf("bsd_event_post(): no Signal() for a bit already pending\n");
+
+    h_reset();
+    h_base.sb_SigIOMask = 0;        /* no SBTC_SIGIOMASK, as most callers */
+    s = h_tcp(0, NX_TCP_ESTABLISHED);
+
+    bsd_event_post(s, FD_READ);
+    CHECK(h.signal_calls == 1, "the first segment signals the task");
+    bsd_event_post(s, FD_READ);
+    bsd_event_post(s, FD_READ);
+    CHECK(h.signal_calls == 1,
+          "the next two, with the bit still pending, do not");
+    CHECK((s->as_Events & FD_READ) != 0, "the event is latched on the socket");
+
+    /* WaitSelect() takes the bit, then polls. */
+    (VOID)SetSignal(0UL, H_EVENT_SIG);
+    h_task.tc_SigRecvd = h.signals;
+    bsd_event_post(s, FD_READ);
+    CHECK(h.signal_calls == 2, "once the task took the bit, a post signals");
+    CHECK((h.signals & H_EVENT_SIG) != 0, "and the bit is pending again");
+
+    /* An application's SBTC_SIGIOMASK is signalled on every post. */
+    h_reset();
+    s = h_tcp(0, NX_TCP_ESTABLISHED);
+    bsd_event_post(s, FD_READ);
+    bsd_event_post(s, FD_READ);
+    CHECK(h.signal_calls == 2, "an application mask is signalled each time");
+    CHECK(h.last_signalled == H_SIGIO_SIG,
+          "with only its own bit once the event bit is pending");
+}
+
 int main(void)
 {
     printf("select.c host tests\n");
@@ -1550,6 +1593,7 @@ int main(void)
     t_waitselect_rearm_overflow();
     t_waitselect_terminal();
     t_events();
+    t_event_signal_once();
 
     printf("%lu checks, %lu failures\n", h_checks, h_failures);
     return h_failures == 0 ? 0 : 1;

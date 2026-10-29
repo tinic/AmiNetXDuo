@@ -610,10 +610,10 @@ static void h_wire(const UBYTE *from, ULONG n)
     h.wire_len += n;
 }
 
-UINT _nxe_tcp_socket_send(NX_TCP_SOCKET *socket_ptr, NX_PACKET **packet_ptr_ptr,
-                          ULONG wait_option)
+UINT _nx_tcp_socket_send(NX_TCP_SOCKET *socket_ptr, NX_PACKET *packet_ptr,
+                         ULONG wait_option)
 {
-    NX_PACKET *pkt = *packet_ptr_ptr;
+    NX_PACKET *pkt = packet_ptr;
     HPacket   *p   = h_from_nx(pkt);
     UINT       status;
     ULONG      take;
@@ -655,6 +655,13 @@ UINT _nxe_tcp_socket_send(NX_TCP_SOCKET *socket_ptr, NX_PACKET **packet_ptr_ptr,
     pkt->nx_packet_length      -= take;
 
     return status;
+}
+
+/* cork.c's spelling; transfer.c calls _nx_tcp_socket_send() directly. */
+UINT _nxe_tcp_socket_send(NX_TCP_SOCKET *socket_ptr, NX_PACKET **packet_ptr_ptr,
+                          ULONG wait_option)
+{
+    return _nx_tcp_socket_send(socket_ptr, *packet_ptr_ptr, wait_option);
 }
 
 UINT _nx_tcp_socket_receive(NX_TCP_SOCKET *socket_ptr, NX_PACKET **packet_ptr,

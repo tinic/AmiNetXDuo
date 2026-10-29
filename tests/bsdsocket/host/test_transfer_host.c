@@ -126,6 +126,7 @@ static struct
        NX_SUCCESS means the whole packet went. */
     UINT        send_plan[H_PLAN];
     unsigned    send_planned, sends;
+    unsigned    nxe_sends;          /* sends through the _nxe_ wrapper       */
     ULONG       sent_bytes;         /* what the successful sends carried     */
 
     ULONG       releases;
@@ -788,10 +789,10 @@ UINT _nxe_tcp_socket_mss_get(NX_TCP_SOCKET *socket_ptr, ULONG *mss)
  * else leaves it with the caller, which is the case transfer.c credits with
  * bsd_send_consumed().
  */
-UINT _nxe_tcp_socket_send(NX_TCP_SOCKET *socket_ptr, NX_PACKET **packet_ptr_ptr,
-                          ULONG wait_option)
+UINT _nx_tcp_socket_send(NX_TCP_SOCKET *socket_ptr, NX_PACKET *packet_ptr,
+                         ULONG wait_option)
 {
-    HPacket *p = h_from_nx(*packet_ptr_ptr);
+    HPacket *p = h_from_nx(packet_ptr);
     UINT     status;
 
     (VOID)socket_ptr;
@@ -839,6 +840,15 @@ UINT _nxe_tcp_socket_send(NX_TCP_SOCKET *socket_ptr, NX_PACKET **packet_ptr_ptr,
     }
 
     return status;
+}
+
+/* The wrapper is what cork.c and the rest of NetX Duo reach; bsd_send_tcp_run()
+   calls _nx_tcp_socket_send() directly, and t_send_direct() counts this. */
+UINT _nxe_tcp_socket_send(NX_TCP_SOCKET *socket_ptr, NX_PACKET **packet_ptr_ptr,
+                          ULONG wait_option)
+{
+    h.nxe_sends++;
+    return _nx_tcp_socket_send(socket_ptr, *packet_ptr_ptr, wait_option);
 }
 
 /* bsd_recv_once() calls the _nx_ entry point directly -- bsdsocket has
@@ -1954,6 +1964,36 @@ static void t_call_budget(void)
           "each receive waits only for what is left of the one budget");
 }
 
+/*
+ * A TCP send calls _nx_tcp_socket_send(), not the _nxe_ wrapper: bsd_nx_enter()
+ * has supplied the thread context the wrapper's THREADS_ONLY check looks for
+ * (a Forbid/FindTask/Permit per segment), ASF_CONNECTED stands for its socket
+ * and address tests, and the packet is one this path allocated with
+ * NX_TCP_PACKET headroom.  Both the immediate send and the waiting one.
+ */
+static void t_send_direct(void)
+{
+    UBYTE buf[64];
+
+    printf("transfer: TCP sends skip the _nxe_ wrapper\n");
+
+    h_reset();
+    h_tcp(0);
+    h.mss = 10;
+    CHECK(bsd_send(0, buf, 24, 0, &h_base) == 24 && h.sends == 3,
+          "three segments go out");
+    CHECK(h.nxe_sends == 0, "none of them through the wrapper");
+
+    h_reset();
+    h_tcp(0);
+    h.mss = 10;
+    h.forever = TRUE;
+    h.send_pressure = TRUE;
+    CHECK(bsd_send(0, buf, 24, 0, &h_base) == 24, "a send that waits for room");
+    CHECK(h.sends > 3 && h.nxe_sends == 0,
+          "and its waiting attempts skip the wrapper too");
+}
+
 static void t_immediate_send_break(void)
 {
     UBYTE buf[24];
@@ -2376,6 +2416,7 @@ int main(void)
     printf("transfer.c host checks\n\n");
 
     t_call_budget();
+    t_send_direct();
     t_immediate_send_break();
     t_abi();
     t_refusals();

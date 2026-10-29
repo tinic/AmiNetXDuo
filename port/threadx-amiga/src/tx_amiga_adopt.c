@@ -325,8 +325,14 @@ UINT         wake;
     }
 
     /* Anything that latched on the run signal while we were dispatched is
-       spent; leaving it set would turn the next park into a spin.  */
-    SetSignal(0UL, sigmask);
+       spent; leaving it set would turn the next park into a spin.  SetSignal()
+       is a Disable()/Enable() pair, so read tc_SigRecvd first and call it only
+       when the bit is set: a bit set after the read is left for the next park,
+       as one set after the SetSignal() always was.  */
+    if ((me -> tc_SigRecvd & sigmask) != 0UL)
+    {
+        SetSignal(0UL, sigmask);
+    }
 
     return(TX_SUCCESS);
 }

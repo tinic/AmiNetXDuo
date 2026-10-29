@@ -58,7 +58,19 @@ VOID bsd_event_post(AmiSocket *sock, ULONG events)
     if (base == NULL || base->sb_Task == NULL)
         return;
 
-    signals = base->sb_EventSigMask;
+    /*
+     * The library's own bit only when it is not already pending.  Signal() is
+     * a Disable()/Enable() pair, and a receive posts once per segment.  The
+     * event is in as_Events above before this read.  If the bit is set here,
+     * the task has not yet taken it: its consumers (WaitSelect, the rx-direct
+     * park) clear it BEFORE they look at the sockets, so a clear after this
+     * read is followed by a look that finds the event.  The application's
+     * masks below are signalled as before: their consumers are not ours.
+     */
+    signals = 0UL;
+    if ((base->sb_Task->tc_SigRecvd & base->sb_EventSigMask) !=
+        base->sb_EventSigMask)
+        signals = base->sb_EventSigMask;
 
     if ((sock->as_EventMask & events) != 0)
         signals |= base->sb_SigEventMask;
