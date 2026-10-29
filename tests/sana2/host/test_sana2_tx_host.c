@@ -42,7 +42,9 @@ VOID Disable(VOID)
         fn();
 }
 VOID Enable(VOID)  { }
-VOID Forbid(VOID)  { }
+/* Counted: the GSO path's scheduling regions per block. */
+static unsigned long h_forbids;
+VOID Forbid(VOID)  { h_forbids++; }
 /* ACKPACE stays off here (ack_tpkb 0); the hold is test_sana2_ackpace's. */
 BOOL ami_sana2_ack_hold(AmiSana2If *iface, NX_PACKET *packet,
                         ULONG dst_msw, ULONG dst_lsw)
@@ -227,6 +229,36 @@ AMIGA_ASM_ARGS ULONG n68k_copy_sum_longwords(ULONG *to, const ULONG *from, ULONG
     return acc;
 }
 
+/* Counted: which GSO sums take the longword routine, and how much of them. */
+static unsigned long h_sum_calls;
+static unsigned long h_sum_words;
+static unsigned long h_sum_odd;         /* a 68000 address error            */
+
+/* The same, summed alone: a GSO child's sum when its frame is copied in
+   pieces. */
+AMIGA_ASM_ARGS ULONG n68k_sum_longwords(const ULONG *p, ULONG count)
+{
+    ULONG acc = 0;
+
+    h_sum_calls++;
+    h_sum_words += count;
+    if (((ALIGN_TYPE)p & 1) != 0)
+        h_sum_odd++;
+    while (count != 0UL)
+    {
+        const UCHAR *b = (const UCHAR *)p++;
+        ULONG w = ((ULONG)b[0] << 24) | ((ULONG)b[1] << 16) |
+                  ((ULONG)b[2] << 8) | (ULONG)b[3];
+
+        acc += w;
+        if (acc < w)
+            acc++;
+        count--;
+    }
+
+    return acc;
+}
+
 /* Where the packet's prepend pointer was when the deferred checksum was asked
    for. The real one reads the IP header from there, so an Ethernet header in
    front of it is a checksum computed over the wrong bytes. */
@@ -403,6 +435,7 @@ static void fixture_init(BOOL raw, ULONG hw_type)
     h_before_disable = NULL;
     h_copy_on_begin  = 0;
     h_released       = NULL;
+    h_forbids        = 0;
     memset(h_frame_ok, 0, sizeof(h_frame_ok));
 }
 
@@ -1734,6 +1767,90 @@ static void test_gso_pieces_and_restart(void)
     }
 }
 
+/*
+ * A GSO child copied in two pieces to a device that does not finish the
+ * checksum: the sum is walked alone, through the longword routine, before the
+ * bytes.  Every child of several layouts -- buffers at odd addresses, runs of
+ * odd length, an odd MSS so children start at odd payload offsets -- against
+ * the reference built from scratch, at several cut points.
+ */
+static void test_gso_sum_alone_two_pieces(void)
+{
+    static const ULONG even_cuts[] = { 100, 60, 200 };
+    static const ULONG one_cuts[]  = { 1, 1, 1, 2, 3 };
+    static const struct
+    {
+        ULONG        mss, first;
+        const ULONG *cuts;
+        ULONG        ncuts;
+    } lay[] = {
+        { 100, 37, g_odd_cuts, 5 },
+        { 101, 37, g_odd_cuts, 5 },
+        { 99,  40, even_cuts,  3 },
+        { 101, 1,  one_cuts,   5 },
+        { 100, 350, NULL,      0 },
+    };
+    static const ULONG firsts[] = { 1, 7, 52, 53, 58 };
+    UCHAR              want[H_FRAME];
+    UCHAR              got[H_FRAME];
+    ULONG              l, c, f, k, len, wire;
+    unsigned long      calls = 0, words = 0, payload = 0;
+    int                ok = 1, ok_aligned = 1;
+
+    printf("sana2: a GSO child summed alone, copied in two pieces\n");
+
+    for (l = 0; l < sizeof(lay) / sizeof(lay[0]); l++)
+    {
+        for (f = 0; f < sizeof(firsts) / sizeof(firsts[0]); f++)
+        {
+            NX_PACKET *p;
+
+            fixture_init(FALSE, S2WireType_Ethernet);
+            p = gso_parent(32, 350, lay[l].mss, 0x99, 0xFFFFFF60UL, 9,
+                           lay[l].first, lay[l].cuts, lay[l].ncuts);
+            (VOID)ami_sana2_tx_send(&iface, p, AMI_ETHERTYPE_IPV4, 0xBC24,
+                                    0x11EF103A);
+            k = (350 + lay[l].mss - 1) / lay[l].mss;
+            if (h_sends != k)
+                ok = 0;
+
+            h_sum_calls = 0;
+            h_sum_words = 0;
+            h_sum_odd   = 0;
+            for (c = 0; c < k && c < h_sends; c++)
+            {
+                struct IOSana2Req *req = (struct IOSana2Req *)h_sent_log[c];
+
+                len  = gso_expect(want, h_seg_log[c], 0);
+                wire = req->ios2_DataLength;
+                memset(got, 0x5A, sizeof(got));
+                if (!ami_sana2_copy_from_buff(got, req->ios2_Data, firsts[f]) ||
+                    !ami_sana2_copy_from_buff(got + firsts[f], req->ios2_Data,
+                                              wire - firsts[f]) ||
+                    memcmp(got, want, len) != 0 || got[wire] != 0x5A)
+                {
+                    printf("  layout %lu, first piece %lu, child %lu differs\n",
+                           (unsigned long)l, (unsigned long)firsts[f],
+                           (unsigned long)c);
+                    ok = 0;
+                }
+                payload += len - (G_IHL + 32);
+            }
+            calls += h_sum_calls;
+            words += h_sum_words;
+            if (h_sum_odd != 0)
+                ok_aligned = 0;
+        }
+    }
+
+    h_check(ok, "every child, every layout, every cut: the frame exactly");
+    h_check(calls != 0, "summed by the longword routine");
+    h_check(ok_aligned, "never from an odd address");
+    printf("  summed %lu of %lu payload bytes as longwords\n", words * 4,
+           payload);
+    h_check(words * 4 > payload / 2, "and it carried most of the payload");
+}
+
 /* More children than free slots: they wait in order, and the parent is the
    block's until the last of them is done. */
 static void test_gso_queues_in_order(void)
@@ -2100,6 +2217,55 @@ static void test_gso_refused(void)
     }
 }
 
+/* Sixteen children: one Forbid() for the context and all their slots, and
+   none per child after that, whether the device queues or finishes inside
+   BeginIO(). */
+static void test_gso_one_forbid_per_block(void)
+{
+    static const ULONG cuts[] = { 400, 400, 400, 400 };
+    NX_PACKET *p;
+    ULONG      n;
+    int        quick;
+
+    printf("sana2: a 16-child GSO block takes one Forbid(), not one per child\n");
+
+    for (quick = 0; quick < 2; quick++)
+    {
+        fixture_init(FALSE, S2WireType_Ethernet);
+        h_quick_kept      = quick;
+        iface.tx_quick_ok = (BOOL)quick;
+        p = gso_parent(20, 1600, 100, 0x18, 1, 1, 37, cuts, 4);
+
+        h_check(ami_sana2_tx_send(&iface, p, AMI_ETHERTYPE_IPV4, 0xBC24,
+                                  0x11EF103A) == NX_SUCCESS && h_sends == 16,
+                quick ? "quick: sixteen writes" : "queued: sixteen writes");
+        if (!quick)
+        {
+            h_check(h_releases == 0, "queued: the parent is the block's");
+            for (n = 0; n < 16; n++)
+                gso_reply(n);
+            ami_sana2_tx_reap(&iface);
+        }
+        h_check(h_releases == 1 && h_released == p &&
+                iface.gso[0].parent == NULL,
+                "the parent goes back once, its context free");
+        h_check(h_forbids == 1, quick ? "quick: one Forbid() for the block"
+                                      : "queued: one Forbid() for the block");
+    }
+
+    /* Four slots and a device that finishes inside BeginIO(): one region
+       per round of four, never one per child. */
+    fixture_init(FALSE, S2WireType_Ethernet);
+    h_quick_kept      = 1;
+    iface.tx_quick_ok = TRUE;
+    iface.tx_slots    = 4;
+    p = gso_parent(20, 1600, 100, 0x18, 1, 1, 37, cuts, 4);
+    (VOID)ami_sana2_tx_send(&iface, p, AMI_ETHERTYPE_IPV4, 0xBC24, 0x11EF103A);
+    h_check(h_sends == 16 && h_releases == 1 && iface.tx_pend_count == 0,
+            "four slots: sixteen writes, the parent back once");
+    h_check(h_forbids == 4, "and one Forbid() per round of four slots");
+}
+
 int main(void)
 {
     frames_init();
@@ -2130,10 +2296,12 @@ int main(void)
     test_gso_children_offload();
     test_gso_pads_the_last();
     test_gso_pieces_and_restart();
+    test_gso_sum_alone_two_pieces();
     test_gso_queues_in_order();
     test_gso_offline_mid_block();
     test_gso_no_table();
     test_gso_fills_slots_and_queue();
+    test_gso_one_forbid_per_block();
     test_gso_refused();
     test_gso_record_v1();
     test_gso_repair();

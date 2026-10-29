@@ -37,6 +37,7 @@
 #include "aminetxduo/sana2.h"
 #include "aminetxduo/tcpgso.h"
 #include "nx_tcp.h"
+#include "nx_packet.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -127,6 +128,7 @@ static struct
     UINT        send_plan[H_PLAN];
     unsigned    send_planned, sends;
     unsigned    nxe_sends;          /* sends through the _nxe_ wrapper       */
+    unsigned    nxe_appends;        /* appends through the _nxe_ wrapper     */
     ULONG       sent_bytes;         /* what the successful sends carried     */
 
     ULONG       releases;
@@ -717,9 +719,9 @@ UINT _nxe_packet_allocate(NX_PACKET_POOL *pool_ptr, NX_PACKET **packet_ptr,
     return NX_NO_PACKET;
 }
 
-UINT _nxe_packet_data_append(NX_PACKET *packet_ptr, VOID *data_start,
-                             ULONG data_size, NX_PACKET_POOL *pool_ptr,
-                             ULONG wait_option)
+UINT _nx_packet_data_append(NX_PACKET *packet_ptr, VOID *data_start,
+                            ULONG data_size, NX_PACKET_POOL *pool_ptr,
+                            ULONG wait_option)
 {
     HPacket *p = h_from_nx(packet_ptr);
 
@@ -742,6 +744,17 @@ UINT _nxe_packet_data_append(NX_PACKET *packet_ptr, VOID *data_start,
     }
 
     return NX_SUCCESS;
+}
+
+/* transfer.c calls _nx_packet_data_append() directly, and t_append_direct()
+   counts this. */
+UINT _nxe_packet_data_append(NX_PACKET *packet_ptr, VOID *data_start,
+                             ULONG data_size, NX_PACKET_POOL *pool_ptr,
+                             ULONG wait_option)
+{
+    h.nxe_appends++;
+    return _nx_packet_data_append(packet_ptr, data_start, data_size, pool_ptr,
+                                  wait_option);
 }
 
 UINT _nxe_packet_length_get(NX_PACKET *packet_ptr, ULONG *length)
@@ -2171,6 +2184,46 @@ static void t_gso_blocks(void)
           "250 bytes of credit: a block of two segments");
 }
 
+/*
+ * A chunk the packet's one buffer cannot hold goes to _nx_packet_data_append(),
+ * not the _nxe_ wrapper, whose caller check is a Forbid/FindTask/Permit when
+ * the call may wait.  A GSO block's chunk, a send's into a chained packet,
+ * and an ordinary segment's.
+ */
+static void t_append_direct(void)
+{
+    struct iovec  iov[2] = { { "abc", 3 }, { "defgh", 5 } };
+    struct msghdr m;
+    UBYTE         buf[64];
+
+    printf("transfer: an append past the first buffer skips the _nxe_ wrapper\n");
+
+    h_reset();
+    (VOID)h_gso_tcp();
+    h_gso_fill();
+    CHECK(bsd_send(1, h_gso_buf, 1000, 0, &h_base) == 1000 &&
+          h_gso_block(0, 400) && h.append_calls == 3,
+          "three GSO blocks, each appended past the buffer");
+    CHECK(h.nxe_appends == 0, "none of them through the wrapper");
+
+    memset(&m, 0, sizeof(m));
+    m.msg_iov    = iov;
+    m.msg_iovlen = 2;
+    h_reset();
+    (VOID)h_tcp(0);
+    h.packet_room  = 8;
+    h.packet_chain = TRUE;
+    CHECK(bsd_sendmsg(0, &m, 0, &h_base) == 8 && h.append_calls == 2,
+          "a send into a chained packet appends twice");
+    CHECK(h.nxe_appends == 0, "and skips the wrapper too");
+
+    h_reset();
+    (VOID)h_tcp(0);
+    h.mss = 10;
+    CHECK(bsd_send(0, buf, 24, 0, &h_base) == 24 && h.append_calls == 3 &&
+          h.nxe_appends == 0, "segments with no buffer room: direct as well");
+}
+
 static void t_gso_declined(void)
 {
     printf("transfer: where GSO does not apply, today's segments\n");
@@ -2417,6 +2470,7 @@ int main(void)
 
     t_call_budget();
     t_send_direct();
+    t_append_direct();
     t_immediate_send_break();
     t_abi();
     t_refusals();

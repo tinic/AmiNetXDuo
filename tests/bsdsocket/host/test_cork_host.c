@@ -38,6 +38,7 @@
 #include "netmonitor.h"
 #include "aminetxduo/sana2.h"
 #include "nx_ip.h"
+#include "nx_packet.h"
 #include "aminetxduo/tcpgso.h"
 
 #include <proto/dos.h>
@@ -560,9 +561,9 @@ UINT _nxe_packet_allocate(NX_PACKET_POOL *pool_ptr, NX_PACKET **packet_ptr,
     return NX_NO_PACKET;
 }
 
-UINT _nxe_packet_data_append(NX_PACKET *packet_ptr, VOID *data_start,
-                             ULONG data_size, NX_PACKET_POOL *pool_ptr,
-                             ULONG wait_option)
+UINT _nx_packet_data_append(NX_PACKET *packet_ptr, VOID *data_start,
+                            ULONG data_size, NX_PACKET_POOL *pool_ptr,
+                            ULONG wait_option)
 {
     (VOID)pool_ptr; (VOID)wait_option;
     h_safe();
@@ -571,6 +572,16 @@ UINT _nxe_packet_data_append(NX_PACKET *packet_ptr, VOID *data_start,
     packet_ptr->nx_packet_append_ptr += data_size;
     packet_ptr->nx_packet_length     += data_size;
     return NX_SUCCESS;
+}
+
+/* transfer.c calls _nx_packet_data_append() directly; the wrapper is for
+   anything else that reaches it. */
+UINT _nxe_packet_data_append(NX_PACKET *packet_ptr, VOID *data_start,
+                             ULONG data_size, NX_PACKET_POOL *pool_ptr,
+                             ULONG wait_option)
+{
+    return _nx_packet_data_append(packet_ptr, data_start, data_size, pool_ptr,
+                                  wait_option);
 }
 
 UINT _nxe_packet_length_get(NX_PACKET *packet_ptr, ULONG *length)

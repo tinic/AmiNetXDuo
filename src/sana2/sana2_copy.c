@@ -721,14 +721,40 @@ static VOID ami_sana2_gso_emit(const AmiTxGso *g, const UCHAR *ip,
 /*
  * Copy (when `to` is not NULL) and sum one run, as if it started at an even
  * offset of the segment: big-endian 16-bit words, folded.  The longword
- * routine where both ends allow it, bytes otherwise and for the tail.
+ * routines where both ends allow it, bytes otherwise and for the tail.
+ *
+ * Summed alone (`to` NULL: a copy in pieces with no card to finish the sum),
+ * an odd `from` takes its first byte by hand and the rest from the even
+ * address after it.  The rest starts one byte into the run, so its sum comes
+ * out byte-swapped, and swapping a ones-complement sum back is exact (RFC
+ * 1071, byte order independence).
  */
 static ULONG ami_sana2_gso_copy_sum(UCHAR *to, const UCHAR *from, ULONG len)
 {
-    ULONG sum = 0UL;
-    ULONG i   = 0UL;
+    ULONG sum  = 0UL;
+    ULONG lead = 0UL;
+    ULONG i    = 0UL;
+    BOOL  odd  = FALSE;
 
-    if (to != NULL && (((ALIGN_TYPE)to | (ALIGN_TYPE)from) & 1) == 0)
+    if (to == NULL)
+    {
+        ULONG words;
+
+        if (((ALIGN_TYPE)from & 1) != 0 && len != 0)
+        {
+            lead = (ULONG)from[0] << 8;
+            from++;
+            len--;
+            odd = TRUE;
+        }
+
+        words = len >> 2;
+        if (words != 0)
+            sum = N68K_SUM_LONGWORDS((const ULONG *)(const void *)from,
+                                     words);
+        i = words << 2;
+    }
+    else if ((((ALIGN_TYPE)to | (ALIGN_TYPE)from) & 1) == 0)
     {
         ULONG words = len >> 2;
 
@@ -750,7 +776,12 @@ static ULONG ami_sana2_gso_copy_sum(UCHAR *to, const UCHAR *from, ULONG len)
             sum++;                      /* end-around carry                  */
     }
 
-    return ami_sana2_gso_fold(sum);
+    sum = ami_sana2_gso_fold(sum);
+    if (odd)
+        sum = ami_sana2_gso_fold(lead +
+                                 (((sum << 8) | (sum >> 8)) & 0xFFFFUL));
+
+    return sum;
 }
 
 /*
