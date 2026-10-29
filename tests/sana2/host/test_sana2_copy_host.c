@@ -58,6 +58,25 @@ AMIGA_ASM_ARGS ULONG n68k_copy_sum_longwords(ULONG *to, const ULONG *from, ULONG
     return acc;
 }
 
+/* The same, summed alone, for the GSO walk this file links but does not
+   drive. */
+AMIGA_ASM_ARGS ULONG n68k_sum_longwords(const ULONG *p, ULONG count)
+{
+    ULONG acc = 0;
+
+    while (count != 0UL)
+    {
+        ULONG w = *p++;
+
+        acc += w;
+        if (acc < w)
+            acc++;
+        count--;
+    }
+
+    return acc;
+}
+
 /* NetX Duo's deferred checksum path, which ami_sana2_copy_from_buff() hands a
    packet the fusion declined.  Counted rather than performed: what the tests
    below assert is WHICH packets end up here. */

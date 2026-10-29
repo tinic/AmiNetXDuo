@@ -272,6 +272,25 @@ AMIGA_ASM_ARGS ULONG n68k_copy_sum_longwords(ULONG *to, const ULONG *from, ULONG
     return acc;
 }
 
+/* The same, summed alone, for the GSO walk this file links but does not
+   drive. */
+AMIGA_ASM_ARGS ULONG n68k_sum_longwords(const ULONG *p, ULONG count)
+{
+    ULONG acc = 0;
+
+    while (count != 0UL)
+    {
+        ULONG w = *p++;
+
+        acc += w;
+        if (acc < w)
+            acc++;
+        count--;
+    }
+
+    return acc;
+}
+
 VOID _nx_ip_packet_checksum_compute(NX_PACKET *packet_ptr)
 {
     packet_ptr->nx_packet_interface_capability_flag = 0;
