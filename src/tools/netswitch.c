@@ -13,6 +13,7 @@
 #include "netswitch_banner.h"
 
 #include <exec/memory.h>
+#include <dos/var.h>
 #include <graphics/gfxbase.h>
 #include <graphics/rastport.h>
 #include <graphics/text.h>
@@ -39,6 +40,10 @@ struct Library       *GadToolsBase;
 #define NS_STATE_CHARS  12      /* "not attached" */
 #define NS_ROW_CHARS    (NS_NAME_CHARS + 2 + NS_STATE_CHARS + 2 + 15)
 #define NS_LIST_ROWS    6
+
+/* Simple global settings use ENV:/ENVARC:, as HOSTNAME and the ANXD dials
+   do. Keep the name specific to this UI: Online still requires SYNCTIME. */
+#define NS_SYNC_VAR     "ANXDNETSWITCHSYNCTIME"
 
 /* Spacing in pixels, as NetPrefs has it; everything else is the font's. */
 #define MARGIN_X        8
@@ -82,7 +87,7 @@ static struct
     ULONG               count;
     LONG                selected;
     ULONG               click_secs, click_micros;
-    BOOL                sync_time; /* opt-in, for this window only */
+    BOOL                sync_time;
 } ns = { .selected = -1 };
 
 /* The live snapshot; static, as onoff.c keeps it. */
@@ -108,6 +113,34 @@ static VOID set_attr(struct Gadget *g, ULONG tag, ULONG value)
     struct TagItem tags[2] = { { tag, value }, { TAG_DONE, 0 } };
 
     GT_SetGadgetAttrsA(g, ns.window, NULL, tags);
+}
+
+static BOOL load_sync_time(VOID)
+{
+    char value[8];
+
+    /* Global only: a launching Shell's local variable must not hide the
+       saved preference. Missing or invalid values retain the opt-in default. */
+    return GetVar((CONST_STRPTR)NS_SYNC_VAR, (STRPTR)value, sizeof(value),
+                   LV_VAR | GVF_GLOBAL_ONLY) == 1 && value[0] == '1';
+}
+
+static BOOL save_sync_time(BOOL enabled)
+{
+    const char *value = enabled ? "1" : "0";
+    BPTR file;
+    BOOL ok;
+
+    /* GVF_SAVE_VAR, used by hostname, is ignored by DOS V37. NetSwitch
+       supports OS 2.04 too, so write the archive explicitly on every OS and
+       check it before updating the active global variable. */
+    file = Open((CONST_STRPTR)"ENVARC:" NS_SYNC_VAR, MODE_NEWFILE);
+    if (file == (BPTR)0) return FALSE;
+    ok = Write(file, (APTR)value, 1) == 1;
+    if (!Close(file)) ok = FALSE;
+    if (!ok) return FALSE;
+    return SetVar((CONST_STRPTR)NS_SYNC_VAR, (CONST_STRPTR)value, 1,
+                   LV_VAR | GVF_GLOBAL_ONLY) != 0;
 }
 
 /* `text` left-justified in a column of `width`, cut at the width, then a
@@ -611,7 +644,19 @@ static VOID event_loop(VOID)
                 if (id == GID_LIST) list_clicked(&m);
                 else if (id == GID_ONLINE) act(TRUE);
                 else if (id == GID_OFFLINE) act(FALSE);
-                else if (id == GID_SYNCTIME) ns.sync_time = (BOOL)m.Code;
+                else if (id == GID_SYNCTIME)
+                {
+                    BOOL enabled = m.Code != 0;
+                    if (enabled != ns.sync_time)
+                    {
+                        ns.sync_time = enabled;
+                        if (!save_sync_time(enabled))
+                            requester("Time synchronization preference could not\n"
+                                      "be saved completely to ENV: and ENVARC:.\n"
+                                      "The current choice remains in this window.",
+                                      NULL);
+                    }
+                }
             }
         }
     }
@@ -667,6 +712,7 @@ static int netswitch_run(void)
 
     if (IntuitionBase != NULL && GfxBase != NULL && GadToolsBase != NULL)
     {
+        ns.sync_time = load_sync_time();
         empty_list();
         refresh();
         if (open_ui())

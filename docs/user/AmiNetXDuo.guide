@@ -1493,7 +1493,12 @@
   In NetSwitch, tick "Synchronize time" before pressing Online (or
   double-clicking an offline interface). It uses pool.ntp.org and waits
   for the link, DHCP and synchronization to finish, with a busy pointer.
-  The checkbox starts off and applies only while that window remains open.
+  The checkbox starts off on a new installation. Changing it saves 1 (on)
+  or 0 (off) in ENV:ANXDNETSWITCHSYNCTIME and
+  ENVARC:ANXDNETSWITCHSYNCTIME, so the choice survives closing NetSwitch
+  and rebooting. A save failure opens a requester. This is a global
+  NetSwitch preference, shared by all its interfaces; it does not enable
+  SYNCTIME implicitly for Shell commands or change S:Network-Startup.
   Online and sntp must be installed beside NetSwitch, in its C drawer or
   in C:. A failure opens a requester; the interface may still be online.
   Leave the box clear to keep the usual immediate Online action.

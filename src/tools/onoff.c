@@ -635,7 +635,9 @@ static int onoff_run(int argc, char **argv)
 {
     LONG           args[ARG_COUNT];
     struct RDArgs *rda;
-    AmiIfConfig    ifc;
+    /* Command-private state, like resolved/other below. Keep the definition
+       off the Shell's 4 KB stack, including the main -> onoff_run path. */
+    static AmiIfConfig ifc;
     static char    resolved[TOOL_NAME_LEN];
     const char    *given;
     const char    *name;
