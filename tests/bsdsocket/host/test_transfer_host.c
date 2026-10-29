@@ -2191,13 +2191,36 @@ static void t_gso_blocks(void)
     CHECK(h.wire_len == 1000 && memcmp(h.wire, h_gso_buf, 1000) == 0,
           "and the bytes are the caller's, in order");
 
-    /* A tail under two segments is today's path. */
+    /* The whole remainder fits: its short last wire segment belongs in
+       the block, rather than needing a separate ordinary send. */
     h_reset();
     (VOID)h_gso_tcp();
     CHECK(bsd_send(1, h_gso_buf, 550, 0, &h_base) == 550 &&
-          h.sends == 3 && h_gso_block(0, 400) && h.send_marks[1] == 0 &&
-          h.send_lens[1] == 100 && h.send_lens[2] == 50,
-          "a block of four, then one segment and the half");
+          h.sends == 2 && h_gso_block(0, 400) && h_gso_block(1, 150),
+          "a block of four, then a block with a full and a half segment");
+    CHECK(h.wire_len == 550 && memcmp(h.wire, h_gso_buf, 550) == 0,
+          "the retained tail is sent once, in order");
+
+    h_reset();
+    (VOID)h_gso_tcp();
+    CHECK(bsd_send(1, h_gso_buf, 650, 0, &h_base) == 650 &&
+          h.sends == 2 && h_gso_block(0, 400) && h_gso_block(1, 250),
+          "two full segments and a short tail remain one final block");
+    CHECK(h.wire_len == 650 && memcmp(h.wire, h_gso_buf, 650) == 0,
+          "the final block preserves every caller byte");
+
+    h_reset();
+    (VOID)h_gso_tcp();
+    CHECK(bsd_send(1, h_gso_buf, 199, 0, &h_base) == 199 &&
+          h.sends == 1 && h_gso_block(0, 199),
+          "a complete write of one full segment and a short tail is one block");
+
+    h_reset();
+    (VOID)h_gso_tcp();
+    CHECK(bsd_send(1, h_gso_buf, 101, 0, &h_base) == 101 &&
+          h.sends == 1 && h_gso_block(0, 101) && h.wire_len == 101 &&
+          memcmp(h.wire, h_gso_buf, 101) == 0,
+          "even a one-byte final segment is retained without extra caller bytes");
 
     /* The block is bounded by what the queue may still take in bytes. */
     h_reset();
@@ -2273,8 +2296,8 @@ static void t_gso_declined(void)
 
     h_reset();
     (VOID)h_gso_tcp();
-    CHECK(bsd_send(1, h_gso_buf, 199, 0, &h_base) == 199 && h_gso_none(2),
-          "a write under two segments");
+    CHECK(bsd_send(1, h_gso_buf, 100, 0, &h_base) == 100 && h_gso_none(1),
+          "a write of one segment");
 
     h_reset();
     (VOID)h_gso_tcp();

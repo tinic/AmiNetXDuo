@@ -412,7 +412,7 @@ static ULONG bsd_budget_left(const BsdWaitBudget *b)
 
 /*
  * TCP GSO (aminetxduo/tcpgso.h).  A long write on an interface that cuts
- * blocks itself goes to NetX Duo as blocks of whole segments rather than one
+ * blocks itself goes to NetX Duo as blocks of wire segments rather than one
  * packet a segment: the core and the per-segment walk through it run once a
  * block, and the SANA-II copy cuts the wire frames.  Everything else -- a
  * short write, IPv6, an interface without it, a pool near its end -- is the
@@ -482,7 +482,7 @@ static ULONG bsd_send_gso_window(const NX_TCP_SOCKET *tcp)
 #endif
 
 /* How many payload bytes the next block carries, or 0 for the one-segment
-   path.  Whole segments only; at least two. */
+   path.  At least two wire segments; the write's final segment may be short. */
 static ULONG bsd_send_gso_bytes(AmiSocket *sock, NX_PACKET_POOL *pool,
                                 ULONG left)
 {
@@ -504,7 +504,7 @@ static ULONG bsd_send_gso_bytes(AmiSocket *sock, NX_PACKET_POOL *pool,
 
     /* The core takes a block only at the segment it would cut itself. */
     mss = _nx_tcp_socket_payload_mss(tcp);
-    if (mss == 0 || mss > 0xFFFFUL || left < 2UL * mss)
+    if (mss == 0 || mss > 0xFFFFUL || left <= mss)
         return 0;
 
     /* An interface that takes one segment a block, or none, falls under
@@ -520,8 +520,13 @@ static ULONG bsd_send_gso_bytes(AmiSocket *sock, NX_PACKET_POOL *pool,
     win = bsd_send_gso_window(tcp);
     if (bytes > win)
         bytes = win;
-    bytes -= bytes % mss;
-    if (bytes < 2UL * mss)
+    /* A limit in the middle of a write cuts at an MSS boundary.  When the
+       entire remainder fits, retain its short last segment in this block:
+       the core and segmenter count it with ceil(payload / MSS).  Rounding
+       that tail off would need another allocation, core send and SANA write. */
+    if (bytes < left)
+        bytes -= bytes % mss;
+    if (bytes <= mss)
         return 0;
 
     /* The packets the block may take, the header packet's headroom and a
