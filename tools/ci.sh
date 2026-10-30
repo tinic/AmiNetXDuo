@@ -530,7 +530,9 @@ host_test_targets() { # builddir
 #      retransmission was lost in (all hosts).
 #      591 with netsim_tcp_wan (#354): 300 Mbit/s at 40 ms both ways, the
 #      receive window autotuning grows (all hosts).
-HOST_TESTS_EXPECTED=591
+#      592 with tooltz_locale_zone (#362): the zone sntp takes from Locale,
+#      never saved, saved east and saved west (all hosts).
+HOST_TESTS_EXPECTED=592
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,
