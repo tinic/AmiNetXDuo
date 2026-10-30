@@ -1386,6 +1386,33 @@ static void t_dup2_target_rollback(void)
           "a reserved target is put back reserved");
 }
 
+static void t_automatic_send_buffer(void)
+{
+    AmiSocket *s;
+    LONG value;
+    socklen_t len;
+    h_reset();
+    s = h_tcp(0);
+    s->as_Nx.tcp.nx_tcp_socket_connect_mss = 1448;
+    s->as_AutoTxDepth = 2048;
+    value = 0;
+    len = sizeof(value);
+    CHECK(bsd_getsockopt(0, SOL_SOCKET, SO_SNDBUF, &value, &len, &h_base) == 0 &&
+          value == 2048L * 1448L, "SO_SNDBUF reports the actual automatic grant");
+    value = 32768;
+    s->as_AutoTxNext = 1234;
+    CHECK(bsd_setsockopt(0, SOL_SOCKET, SO_SNDBUF, &value, sizeof(value), &h_base) == 0,
+          "an explicit send-buffer limit is accepted after automatic growth");
+    CHECK(s->as_AutoTxDepth == 0 && s->as_AutoTxNext == 0 && s->as_SndBuf == 32768,
+          "the explicit option disables automatic growth and its retry state");
+    CHECK(s->as_Nx.tcp.nx_tcp_socket_transmit_queue_maximum == 23,
+          "the explicit queue remains within the requested byte limit mapping");
+    value = 0;
+    len = sizeof(value);
+    CHECK(bsd_getsockopt(0, SOL_SOCKET, SO_SNDBUF, &value, &len, &h_base) == 0 &&
+          value == 32768, "the explicit preference reads back unchanged");
+}
+
 int main(void)
 {
     printf("options.c host tests\n");
@@ -1402,6 +1429,7 @@ int main(void)
     t_ioctls();
     t_dup2_interleave();
     t_dup2_target_rollback();
+    t_automatic_send_buffer();
 
     printf("%lu checks, %lu failures\n", h_checks, h_failures);
     return h_failures == 0 ? 0 : 1;

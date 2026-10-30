@@ -64,6 +64,8 @@ ULONG _nx_tcp_ack_timer_rate;
 ULONG _nx_tcp_transmit_timer_rate;
 
 static UINT h_datagrams;
+static ULONG h_probe_sequence;
+static UCHAR h_probe_data;
 
 UINT _tx_mutex_get(TX_MUTEX *mutex_ptr, ULONG wait_option)
 {
@@ -148,24 +150,108 @@ VOID _nx_tcp_transmit_cleanup(TX_THREAD *thread_ptr NX_CLEANUP_PARAMETER)
     (void)thread_ptr;
 }
 
+#ifdef NX_ENABLE_TCP_SACK
+static NX_PACKET_POOL h_control_pool;
+static NX_PACKET h_control_packet;
+static union { ULONG align; UCHAR bytes[1600]; } h_control_data;
+static UINT h_control_used;
+static UINT h_control_deny;
+static UINT h_control_releases;
+static NX_PACKET h_slice_packet;
+static union { ULONG align; UCHAR bytes[1600]; } h_slice_data;
+static UINT h_slice_used;
+static UINT h_slice_deny;
+static UINT h_spend_credit_in_append;
+static NX_TCP_SOCKET *h_credit_socket;
+#endif
+
 UINT _nx_packet_release(NX_PACKET *packet_ptr)
 {
+#ifdef NX_ENABLE_TCP_SACK
+    if (packet_ptr == &h_slice_packet)
+    {
+        h_check(h_slice_used, "transient slice is released only once");
+        h_slice_used = NX_FALSE;
+    }
+    if (packet_ptr == &h_control_packet)
+    {
+        h_check(h_control_used, "control packet is released only once");
+        h_control_used = NX_FALSE;
+        h_control_releases++;
+    }
+#else
     (void)packet_ptr;
+#endif
     return NX_SUCCESS;
 }
 
 UINT _nx_packet_allocate(NX_PACKET_POOL *pool_ptr, NX_PACKET **packet_ptr,
                          ULONG packet_type, ULONG wait_option)
 {
-    (void)pool_ptr; (void)packet_ptr; (void)packet_type; (void)wait_option;
+    (void)packet_type; (void)wait_option;
+#ifdef NX_ENABLE_TCP_SACK
+    if (pool_ptr == &h_control_pool && packet_type != 0 && !h_control_deny && !h_slice_deny && !h_slice_used)
+    {
+        memset(&h_slice_packet, 0, sizeof(h_slice_packet));
+        h_slice_packet.nx_packet_data_start = h_slice_data.bytes;
+        h_slice_packet.nx_packet_data_end = h_slice_data.bytes + sizeof(h_slice_data.bytes);
+        h_slice_packet.nx_packet_prepend_ptr = h_slice_data.bytes + packet_type;
+        h_slice_packet.nx_packet_append_ptr = h_slice_packet.nx_packet_prepend_ptr;
+        h_slice_packet.nx_packet_pool_owner = pool_ptr;
+        h_slice_packet.nx_packet_union_next.nx_packet_tcp_queue_next = (NX_PACKET *)NX_PACKET_ALLOCATED;
+        h_slice_used = NX_TRUE;
+        *packet_ptr = &h_slice_packet;
+        return NX_SUCCESS;
+    }
+    if (pool_ptr == &h_control_pool && packet_type == 0 && !h_control_deny && !h_control_used)
+    {
+        memset(&h_control_packet, 0, sizeof(h_control_packet));
+        h_control_packet.nx_packet_data_start = h_control_data.bytes;
+        h_control_packet.nx_packet_data_end = h_control_data.bytes + sizeof(h_control_data.bytes);
+        h_control_packet.nx_packet_prepend_ptr = h_control_data.bytes;
+        h_control_packet.nx_packet_append_ptr = h_control_data.bytes;
+        h_control_packet.nx_packet_pool_owner = pool_ptr;
+        h_control_used = NX_TRUE;
+        *packet_ptr = &h_control_packet;
+        return NX_SUCCESS;
+    }
+#else
+    (void)pool_ptr; (void)packet_ptr;
+#endif
     return NX_NO_PACKET;
 }
 
 UINT _nx_packet_data_append(NX_PACKET *packet_ptr, VOID *data_start, ULONG data_size,
                             NX_PACKET_POOL *pool_ptr, ULONG wait_option)
 {
-    (void)packet_ptr; (void)data_start; (void)data_size;
     (void)pool_ptr; (void)wait_option;
+#ifdef NX_ENABLE_TCP_SACK
+    if (packet_ptr == &h_slice_packet)
+    {
+        if ((ULONG)(packet_ptr -> nx_packet_data_end - packet_ptr -> nx_packet_append_ptr) < data_size)
+        {
+            return NX_NO_PACKET;
+        }
+        memcpy(packet_ptr -> nx_packet_append_ptr, data_start, data_size);
+        packet_ptr -> nx_packet_append_ptr += data_size;
+        packet_ptr -> nx_packet_length += data_size;
+        if (h_spend_credit_in_append)
+        {
+            if (h_spend_credit_in_append == 2)
+            {
+                h_credit_socket -> nx_tcp_socket_state = NX_TCP_CLOSED;
+            }
+            else
+            {
+                h_credit_socket -> nx_tcp_socket_prr_out += h_credit_socket -> nx_tcp_socket_prr_credit;
+                h_credit_socket -> nx_tcp_socket_prr_credit = 0;
+            }
+            h_spend_credit_in_append = NX_FALSE;
+        }
+    }
+#else
+    (void)packet_ptr; (void)data_start; (void)data_size;
+#endif
     return NX_SUCCESS;
 }
 
@@ -205,7 +291,12 @@ static UINT           h_pkt_next;
    its segment: the first H_PACKETS are the original sends, the rest are
    retransmissions. */
 static ULONG          h_log[H_LOG];
+static ULONG          h_log_bytes[H_LOG];
+static ULONG          h_log_capabilities[H_LOG];
+static NX_INTERFACE  *h_log_interface[H_LOG];
+static UCHAR          h_log_first[H_LOG];
 static UINT           h_logged;
+static UINT           h_hold_gso_repair;
 
 VOID _nx_ip_packet_send(NX_IP *ip_ptr, NX_PACKET *packet_ptr,
                         ULONG destination_ip, ULONG type_of_service,
@@ -222,13 +313,50 @@ VOID _nx_ip_packet_send(NX_IP *ip_ptr, NX_PACKET *packet_ptr,
     NX_CHANGE_ULONG_ENDIAN(seq);
     if (h_logged < H_LOG)
     {
-        h_log[h_logged++] = seq;
+        ULONG word = ((NX_TCP_HEADER *)packet_ptr -> nx_packet_prepend_ptr) -> nx_tcp_header_word_3;
+        NX_CHANGE_ULONG_ENDIAN(word);
+        h_log[h_logged] = seq;
+#ifdef NX_ENABLE_INTERFACE_CAPABILITY
+        h_log_capabilities[h_logged] = packet_ptr -> nx_packet_interface_capability_flag;
+#endif
+        h_log_interface[h_logged] = packet_ptr -> nx_packet_address.nx_packet_interface_ptr;
+        h_log_bytes[h_logged] = packet_ptr -> nx_packet_length - (word >> NX_TCP_HEADER_SHIFT) * (ULONG)sizeof(ULONG);
+        h_log_first[h_logged] = packet_ptr -> nx_packet_prepend_ptr[(word >> NX_TCP_HEADER_SHIFT) * (ULONG)sizeof(ULONG)];
+#ifdef NX_ENABLE_INTERFACE_CAPABILITY
+        if (_nx_packet_tcp_gso_mss(packet_ptr) != 0)
+        {
+            NX_TCP_GSO_INFO *info = (NX_TCP_GSO_INFO *)packet_ptr -> nx_packet_data_start;
+            if (info -> flags == NX_TCP_GSO_REPAIR)
+            {
+                h_log[h_logged] += info -> offset;
+                h_log_bytes[h_logged] = info -> length;
+                h_log_first[h_logged] = packet_ptr -> nx_packet_prepend_ptr[
+                    (word >> NX_TCP_HEADER_SHIFT) * (ULONG)sizeof(ULONG) + info -> offset];
+            }
+        }
+#endif
+        h_logged++;
     }
 
     /* What a SANA-II transmit completion leaves behind, and what the
        retransmit path needs to see before it will send a queued segment
        again.  */
     packet_ptr -> nx_packet_queue_next = (NX_PACKET *)NX_DRIVER_TX_DONE;
+#ifdef NX_ENABLE_INTERFACE_CAPABILITY
+    if (h_hold_gso_repair && _nx_packet_tcp_gso_mss(packet_ptr) != 0 &&
+        ((NX_TCP_GSO_INFO *)packet_ptr -> nx_packet_data_start) -> flags == NX_TCP_GSO_REPAIR)
+    {
+        packet_ptr -> nx_packet_ip_header = packet_ptr -> nx_packet_prepend_ptr - 20;
+        packet_ptr -> nx_packet_ip_header_length = 20;
+        packet_ptr -> nx_packet_queue_next = NX_NULL;
+    }
+#endif
+#ifdef NX_ENABLE_TCP_SACK
+    if (packet_ptr == &h_slice_packet)
+    {
+        _nx_packet_release(packet_ptr);
+    }
+#endif
 }
 
 VOID _nx_tcp_packet_send_ack(NX_TCP_SOCKET *socket_ptr, ULONG tx_sequence)
@@ -240,8 +368,8 @@ VOID _nx_tcp_packet_send_ack(NX_TCP_SOCKET *socket_ptr, ULONG tx_sequence)
 VOID _nx_tcp_packet_send_probe(NX_TCP_SOCKET *socket_ptr, ULONG tx_sequence, UCHAR data)
 {
     (void)socket_ptr;
-    (void)tx_sequence;
-    (void)data;
+    h_probe_sequence = tx_sequence;
+    h_probe_data = data;
 }
 
 VOID _nx_tcp_packet_send_syn(NX_TCP_SOCKET *socket_ptr, ULONG tx_sequence)
@@ -282,6 +410,15 @@ static ULONG h_seq(UINT segment)
 
 static void h_fixture(void)
 {
+#ifdef NX_ENABLE_TCP_SACK
+    _nx_tcp_sack_recovery_reset(&h_sock);
+    h_control_deny = NX_FALSE;
+    h_slice_deny = NX_FALSE;
+    h_spend_credit_in_append = NX_FALSE;
+    h_credit_socket = &h_sock;
+    h_check(!h_slice_used, "driver returned the prior transient slice");
+    h_control_releases = 0;
+#endif
     memset(&h_ip, 0, sizeof(h_ip));
     memset(&h_iface, 0, sizeof(h_iface));
 
@@ -289,7 +426,11 @@ static void h_fixture(void)
     h_datagrams = 0;
     h_pkt_next  = 0;
     h_logged    = 0;
+    h_hold_gso_repair = NX_FALSE;
 
+#ifdef NX_ENABLE_TCP_SACK
+    h_ip.nx_ip_default_packet_pool = &h_control_pool;
+#endif
     h_iface.nx_interface_ip_address = 0xC0A80102UL;
 
     _nx_tcp_socket_create(&h_ip, &h_sock, "host loss recovery", NX_IP_NORMAL,
@@ -307,6 +448,10 @@ static void h_fixture(void)
     h_sock.nx_tcp_socket_connect_mss2 = H_MSS * H_MSS;
 
     /* The peer's window and our congestion window both hold the flight. */
+#ifdef NX_ENABLE_TCP_WINDOW_SCALING
+    /* h_ack sends 65535 wire units; this flight deliberately has a 1 MiB rwnd. */
+    h_sock.nx_tcp_snd_win_scale_value = 4;
+#endif
     h_sock.nx_tcp_socket_tx_window_advertised    = 1048576UL;
     h_sock.nx_tcp_socket_tx_window_advertised_max = 1048576UL;
     h_sock.nx_tcp_socket_tx_window_congestion    = 400000UL;
@@ -472,8 +617,21 @@ static void burst_hole(void)
     h_check(first_walk >= 2,
             "the third duplicate acknowledgment retransmits more than one segment");
 
+    /* The retransmitted copies are still in the network. The next SACK
+       removes one original segment from the pipe and grants bounded PRR-SSRB
+       credit, so it permits at most two more copies, not another whole window.
+       No retransmitted byte has been cumulatively acknowledged yet. */
+    before = h_datagrams;
+    (VOID)h_ack(H_HOLE_FROM, H_HOLE_TO, H_HOLE_TO + 4, 0, 0);
+    h_check(h_datagrams - before <= 2,
+            "the next SACK counts retransmissions already in flight");
+    h_check((H_FLIGHT - H_HOLE_TO - 4 +
+             h_sent_in(H_FLIGHT, H_HOLE_FROM, H_HOLE_TO)) * H_MSS <=
+                h_sock.nx_tcp_socket_tx_window_congestion,
+            "original and retransmitted copies together stay within cwnd");
+
     /* The rest of the delivered flight is reported, one block growing. */
-    for (i = H_HOLE_TO + 4; i <= H_FLIGHT; i++)
+    for (i = H_HOLE_TO + 5; i <= H_FLIGHT; i++)
     {
         (VOID)h_ack(H_HOLE_FROM, H_HOLE_TO, i, 0, 0);
     }
@@ -588,6 +746,10 @@ static void second_loss_at_the_tail(void)
     h_check_eq(h_datagrams - before, 1,
                "the partial acknowledgment retransmits the sole tail segment");
     h_check(h_resent(9) == 1, "the tail does not wait for the RTO");
+#ifdef NX_ENABLE_TCP_SACK
+    h_check_eq(h_sock.nx_tcp_socket_tx_high_rxt, h_seq(3), "tail rescue does not advance HighRxt");
+    h_check_eq(h_sock.nx_tcp_socket_sack_rescue_rxt, h_seq(10), "tail rescue is bounded by RecoveryPoint");
+#endif
 }
 
 /*
@@ -925,6 +1087,700 @@ static void fin_partial_ack_sequence(void)
 }
 #endif /* NX_ENABLE_TCP_SACK */
 
+#ifdef NX_ENABLE_TCP_SACK
+static void prr_burst_example(void)
+{
+    UINT i, before;
+    h_fixture();
+    for (i = 0; i < 20; i++) { (VOID)h_send(); }
+    (VOID)h_ack(0, 15, 16, 0, 0);
+    (VOID)h_ack(0, 15, 17, 0, 0);
+    before = h_datagrams;
+    (VOID)h_ack(0, 15, 18, 0, 0);
+    h_check_eq(h_datagrams - before, 2, "RFC 6937 20-flight/15-loss example sends two repairs on entry");
+    before = h_datagrams;
+    (VOID)h_ack(0, 15, 19, 0, 0);
+    h_check_eq(h_datagrams - before, 2, "PRR-SSRB clocks two repairs on the fourth ACK");
+    before = h_datagrams;
+    (VOID)h_ack(0, 15, 20, 0, 0);
+    h_check_eq(h_datagrams - before, 2, "PRR-SSRB clocks two repairs on the fifth ACK");
+    for (i = 1; i < 15; i++)
+    {
+        (VOID)h_ack(i, 15, 20, 0, 0);
+        h_check_eq(h_sock.nx_tcp_socket_tx_window_congestion, 10 * H_MSS,
+                   "partial ACKs preserve the recovery target instead of NewReno deflation");
+    }
+    for (i = 0; i < 15; i++)
+    {
+        h_check(h_resent(i) >= 1, "every burst-loss hole is repaired without another timeout");
+    }
+    h_check_eq(h_sock.nx_tcp_socket_timeout_retries, 0, "ACK-clocked repairs are not RTO retries");
+    (VOID)h_ack(20, 0, 0, 0, 0);
+    h_check(!NX_TCP_SACK_RECOVERY_ACTIVE(&h_sock), "RecoveryPoint ACK exits PRR");
+    h_check_eq(h_control_used, NX_FALSE, "completed flight returns its scoreboard packet");
+}
+
+static void prr_receive_window_bound(void)
+{
+    UINT i, before;
+    h_fixture();
+    for (i = 0; i < 20; i++) { (VOID)h_send(); }
+    (VOID)h_ack(0, 10, 11, 0, 0);
+    (VOID)h_ack(0, 10, 12, 0, 0);
+    h_sock.nx_tcp_socket_tx_window_advertised = 2 * H_MSS;
+    before = h_logged;
+    (VOID)h_ack(0, 10, 13, 0, 0);
+    for (i = before; i < h_logged; i++)
+    {
+        h_check((ULONG)(h_log[i] - H_ISN) + h_log_bytes[i] <= 2 * H_MSS,
+                "retransmission honors the current peer window edge");
+    }
+    _nx_tcp_sack_recovery_reset(&h_sock);
+}
+
+static void newreno_peer_unchanged(void)
+{
+    UINT i;
+    ULONG window;
+    h_fixture();
+    h_sock.nx_tcp_socket_sack_permitted = NX_FALSE;
+    for (i = 0; i < 10; i++) { (VOID)h_send(); }
+    for (i = 0; i < 3; i++) { (VOID)h_ack(0, 0, 0, 0, 0); }
+    h_check(h_sock.nx_tcp_socket_fast_recovery, "non-SACK peer still enters NewReno");
+    window = h_sock.nx_tcp_socket_tx_window_congestion;
+    (VOID)h_ack(0, 0, 0, 0, 0);
+    h_check_eq(h_sock.nx_tcp_socket_tx_window_congestion, window + H_MSS,
+               "non-SACK duplicate ACK retains NewReno inflation");
+    window += H_MSS;
+    (VOID)h_ack(3, 0, 0, 0, 0);
+    h_check_eq(h_sock.nx_tcp_socket_tx_window_congestion, window - 2 * H_MSS,
+               "non-SACK partial ACK retains NewReno deflation");
+    h_check_eq(h_control_used, NX_FALSE, "non-SACK peer allocates no scoreboard");
+}
+
+static void prr_credit_across_allocation(void)
+{
+    NX_PACKET source;
+    UCHAR data[3200];
+    UINT i, before;
+    UCHAR *prepend;
+    h_fixture();
+    for (i = 0; i < 10; i++) { (VOID)h_send(); }
+    h_sock.nx_tcp_socket_sack_block_count = 1;
+    h_sock.nx_tcp_socket_sack_left[0] = h_seq(4);
+    h_sock.nx_tcp_socket_sack_right[0] = h_seq(10);
+    _nx_tcp_sack_recovery_ack(&h_sock, H_ISN);
+    _nx_tcp_sack_recovery_begin(&h_sock);
+    memset(&source, 0, sizeof(source));
+    memset(data, 'd', sizeof(data));
+    source.nx_packet_data_start = data;
+    source.nx_packet_data_end = data + sizeof(data);
+    source.nx_packet_prepend_ptr = data + 80;
+    source.nx_packet_append_ptr = source.nx_packet_prepend_ptr + 2 * H_MSS;
+    source.nx_packet_length = 2 * H_MSS;
+    source.nx_packet_pool_owner = &h_control_pool;
+    prepend = source.nx_packet_prepend_ptr;
+    h_sock.nx_tcp_socket_prr_credit = H_MSS;
+    h_spend_credit_in_append = NX_TRUE;
+    before = h_logged;
+    h_check_eq(_nx_tcp_socket_send_internal(&h_sock, &source, NX_NO_WAIT), NX_WINDOW_OVERFLOW,
+               "credit spent across allocation yield returns normal nonblocking backpressure");
+    h_check_eq(h_logged, before, "sender cannot overspend credit consumed while IP mutex was released");
+    h_check_eq(h_sock.nx_tcp_socket_prr_out, H_MSS, "concurrent repair is charged once without a second DATA debit");
+    h_check(source.nx_packet_length == 2 * H_MSS && source.nx_packet_prepend_ptr == prepend,
+            "failed revalidation preserves caller packet ownership and DATA");
+    h_check_eq(h_slice_used, NX_FALSE, "failed revalidation releases only the prepared copy");
+    h_sock.nx_tcp_socket_prr_credit = H_MSS;
+    h_spend_credit_in_append = 2;
+    h_check_eq(_nx_tcp_socket_send_internal(&h_sock, &source, NX_NO_WAIT), NX_NOT_CONNECTED,
+               "teardown during allocation cannot enqueue prepared DATA");
+    h_check_eq(h_logged, before, "connection teardown sends no prepared DATA");
+    h_check(source.nx_packet_length == 2 * H_MSS && source.nx_packet_prepend_ptr == prepend && !h_slice_used,
+            "teardown preserves caller DATA and reclaims its transient copy");
+    _nx_tcp_sack_recovery_reset(&h_sock);
+}
+
+static void prr_partial_credit_slice(void)
+{
+    UINT i, before;
+    ULONG sent, sequence;
+    NX_PACKET extra;
+    UCHAR extra_data[1000];
+    UCHAR *original_prepend;
+    h_fixture();
+    for (i = 0; i < 10; i++) { (VOID)h_send(); }
+    h_sock.nx_tcp_socket_sack_block_count = 1;
+    h_sock.nx_tcp_socket_sack_left[0] = h_seq(4);
+    h_sock.nx_tcp_socket_sack_right[0] = h_seq(10);
+    _nx_tcp_sack_recovery_ack(&h_sock, H_ISN);
+    _nx_tcp_sack_recovery_begin(&h_sock);
+    original_prepend = h_pkt[0].nx_packet_prepend_ptr;
+    for (i = 0; i < 2; i++)
+    {
+        h_sock.nx_tcp_socket_prr_credit = 333;
+        before = h_logged;
+        sent = h_sock.nx_tcp_socket_prr_out;
+        _nx_tcp_socket_retransmit(&h_ip, &h_sock, NX_FALSE);
+        h_check_eq(h_logged - before, 1, "partial PRR credit produces one bounded slice");
+        h_check_eq(h_log[before], H_ISN + 333 * i, "successive slices advance through the same queued segment");
+        h_check_eq(h_log_bytes[before], 333, "slice never exceeds actual PRR byte credit");
+        h_check(h_log_interface[before] == &h_iface,
+                "partial repair retains the original IPv4 egress interface");
+        h_check_eq(h_sock.nx_tcp_socket_prr_out - sent, 333, "actual slice bytes debit shared credit");
+        h_check_eq(h_sock.nx_tcp_socket_prr_credit, 0, "partial slice consumes its exact budget");
+        h_check(h_pkt[0].nx_packet_prepend_ptr == original_prepend &&
+                h_pkt[0].nx_packet_length == H_MSS + sizeof(NX_TCP_HEADER),
+                "transient slice preserves queued original bytes and headers");
+    }
+    h_slice_deny = NX_TRUE;
+    h_sock.nx_tcp_socket_prr_credit = 333;
+    before = h_logged;
+    sent = h_sock.nx_tcp_socket_prr_out;
+    sequence = h_sock.nx_tcp_socket_tx_high_rxt;
+    _nx_tcp_socket_retransmit(&h_ip, &h_sock, NX_FALSE);
+    h_check_eq(h_logged, before, "slice allocation failure does not send or wait");
+    h_check_eq(h_sock.nx_tcp_socket_prr_out, sent, "allocation failure spends no output credit");
+    h_check_eq(h_sock.nx_tcp_socket_tx_high_rxt, sequence, "allocation failure preserves retransmission progress");
+    h_slice_deny = NX_FALSE;
+    memset(&extra, 0, sizeof(extra));
+    memset(extra_data, 'c', sizeof(extra_data));
+    extra.nx_packet_prepend_ptr = extra_data;
+    extra.nx_packet_append_ptr = extra_data + (H_MSS - 500);
+    h_pkt[0].nx_packet_append_ptr = original_prepend + sizeof(NX_TCP_HEADER) + 500;
+    h_pkt[0].nx_packet_next = &extra;
+    _nx_tcp_socket_retransmit(&h_ip, &h_sock, NX_FALSE);
+    h_check_eq(h_logged - before, 1, "retry with available storage resumes the unspent slice");
+    h_check_eq(h_log[before], H_ISN + 666, "chained source uses correct byte offset");
+    h_check_eq(h_log_first[before], 'c', "slice copies DATA from the chained buffer");
+    h_check_eq(h_log_bytes[before], 333, "chained slice preserves exact credit bound");
+    h_check(h_log_interface[before] == &h_iface,
+            "chained repair retains the original IPv4 egress interface");
+    h_pkt[0].nx_packet_next = NX_NULL;
+    _nx_tcp_sack_recovery_reset(&h_sock);
+}
+
+static void prr_delivery_conservation(UINT deny)
+{
+    UINT i;
+    ULONG delivered = 0, failures;
+    h_fixture();
+    h_control_deny = deny;
+    for (i = 0; i < 12; i++) { (VOID)h_send(); }
+    failures = _nx_tcp_sack_scoreboard_allocation_failures;
+    _nx_tcp_sack_recovery_ack(&h_sock, H_ISN);
+    h_sock.nx_tcp_socket_sack_block_count = 1;
+    h_sock.nx_tcp_socket_sack_left[0] = h_seq(1) + 100;
+    h_sock.nx_tcp_socket_sack_right[0] = h_seq(1) + 500;
+    _nx_tcp_sack_recovery_ack(&h_sock, H_ISN);
+    delivered += h_sock.nx_tcp_socket_sack_delivered_data;
+    h_check_eq(delivered, 400, "partial-byte SACK credits exactly its byte range");
+    h_check_eq(h_control_used, !deny, "scoreboard uses one packet, or safe exhausted-pool fallback");
+    _nx_tcp_sack_recovery_ack(&h_sock, H_ISN);
+    h_check_eq(h_sock.nx_tcp_socket_sack_delivered_data, 0, "duplicate SACK earns no repeated delivery");
+    h_sock.nx_tcp_socket_sack_left[0] = h_seq(3);
+    h_sock.nx_tcp_socket_sack_right[0] = h_seq(4);
+    _nx_tcp_sack_recovery_ack(&h_sock, H_ISN);
+    delivered += h_sock.nx_tcp_socket_sack_delivered_data;
+    h_check_eq(delivered, deny ? H_MSS : H_MSS + 400,
+               "replaced SACK blocks retain exact history or conservative fallback credit");
+    h_sock.nx_tcp_socket_sack_block_count = 0;
+    _nx_tcp_sack_recovery_ack(&h_sock, h_seq(2));
+    delivered += h_sock.nx_tcp_socket_sack_delivered_data;
+    h_check(delivered <= 4 * H_MSS, "cumulative and selective delivery do not double count");
+    _nx_tcp_sack_recovery_ack(&h_sock, h_seq(12));
+    delivered += h_sock.nx_tcp_socket_sack_delivered_data;
+    h_check_eq(delivered, 12 * H_MSS, "final cumulative ACK exactly conserves DATA delivery");
+    h_check_eq(_nx_tcp_sack_scoreboard_allocation_failures - failures, deny ? 1 : 0,
+               "exhausted pool is counted once per flight, without allocation retries per ACK");
+    _nx_tcp_socket_block_cleanup(&h_sock);
+    h_check_eq(h_control_used, NX_FALSE, "teardown reclaims scoreboard storage");
+    h_check_eq(h_control_releases, deny ? 0 : 1, "teardown releases one owned control packet");
+}
+
+static void prr_bounded_scoreboard(void)
+{
+    UINT i;
+    ULONG delivered = 0;
+    h_fixture();
+    for (i = 0; i < 160; i++) { (VOID)h_send(); }
+    _nx_tcp_sack_recovery_ack(&h_sock, H_ISN);
+    for (i = 0; i < 75; i++)
+    {
+        h_sock.nx_tcp_socket_sack_block_count = 1;
+        h_sock.nx_tcp_socket_sack_left[0] = h_seq(2 * i + 1);
+        h_sock.nx_tcp_socket_sack_right[0] = h_seq(2 * i + 2);
+        _nx_tcp_sack_recovery_ack(&h_sock, H_ISN);
+        delivered += h_sock.nx_tcp_socket_sack_delivered_data;
+        h_check(h_sock.nx_tcp_socket_sack_hole_count <= h_sock.nx_tcp_socket_sack_hole_capacity,
+                "fragmented SACK history stays inside bounded storage");
+        h_check(delivered <= (i + 1) * H_MSS, "overflow cannot invent delivery credit");
+    }
+    h_check_eq(h_sock.nx_tcp_socket_sack_hole_capacity, 64, "scoreboard cap is independent of TX queue depth");
+    h_sock.nx_tcp_socket_sack_block_count = 0;
+    _nx_tcp_sack_recovery_ack(&h_sock, h_seq(160));
+    delivered += h_sock.nx_tcp_socket_sack_delivered_data;
+    h_check_eq(delivered, 160 * H_MSS, "capacity overflow still conserves final cumulative delivery");
+    _nx_tcp_sack_recovery_reset(&h_sock);
+    h_check_eq(h_control_used, NX_FALSE, "reset reclaims bounded scoreboard");
+}
+
+static void prr_repeated_ack_and_shared_credit(UINT deny)
+{
+    UINT i, before;
+    ULONG credit, sent, threshold;
+    h_fixture();
+    h_control_deny = deny;
+    for (i = 0; i < 20; i++) { (VOID)h_send(); }
+    (VOID)h_ack(0, 1, 2, 0, 0);
+    (VOID)h_ack(0, 1, 3, 0, 0);
+    (VOID)h_ack(0, 1, 4, 0, 0);
+    h_check(NX_TCP_SACK_RECOVERY_ACTIVE(&h_sock), "SACK enters the shared PRR controller");
+    before = h_datagrams;
+    credit = h_sock.nx_tcp_socket_prr_credit;
+    threshold = h_sock.nx_tcp_socket_tx_slow_start_threshold;
+    for (i = 0; i < 20; i++) { (VOID)h_ack(0, 1, 4, 0, 0); }
+    h_check_eq(h_datagrams, before, "identical duplicate ACKs cannot clock more retransmissions");
+    h_check_eq(h_sock.nx_tcp_socket_prr_credit, credit, "identical ACKs cannot mint PRR credit");
+    h_check_eq(h_sock.nx_tcp_socket_tx_window_congestion, threshold, "duplicate ACKs do not inflate SACK cwnd");
+    /* A sender with no eligible retransmission can use the same budget for
+       new DATA even when SACKed bytes keep total outstanding above cwnd. */
+    h_sock.nx_tcp_socket_prr_credit = H_MSS;
+    sent = h_sock.nx_tcp_socket_prr_out;
+    h_check_eq(h_send(), NX_SUCCESS, "new DATA uses PRR/rwnd instead of cwnd minus SACKed outstanding");
+    h_check_eq(h_sock.nx_tcp_socket_prr_out - sent, H_MSS, "new DATA spends aggregate PRR output");
+    h_check_eq(h_sock.nx_tcp_socket_prr_credit, 0, "new DATA consumes the retransmission-shared credit");
+    h_check(h_send() != NX_SUCCESS, "no sender bypasses the exhausted PRR budget");
+    h_sock.nx_tcp_socket_timeout = _nx_tcp_fast_timer_rate;
+    _nx_tcp_fast_periodic_processing(&h_ip);
+    h_check_eq(h_sock.nx_tcp_socket_prr_recover_fs, 0, "RTO terminates PRR recovery");
+    h_check_eq(h_control_used, NX_FALSE, "RTO releases advisory SACK storage");
+}
+#endif
+
+/* The queue owns buffers, while SND.UNA and cwnd count cumulative DATA.
+   A large immutable buffer must make progress on each wire-segment ACK. */
+static UINT h_ack_bytes(ULONG bytes)
+{
+    NX_TCP_HEADER hdr;
+    memset(&hdr, 0, sizeof(hdr));
+    hdr.nx_tcp_sequence_number = h_sock.nx_tcp_socket_rx_sequence;
+    hdr.nx_tcp_acknowledgment_number = H_ISN + bytes;
+    hdr.nx_tcp_header_word_3 = NX_TCP_HEADER_SIZE | NX_TCP_ACK_BIT | 65535UL;
+    return _nx_tcp_socket_state_ack_check(&h_sock, &hdr);
+}
+
+static void cumulative_bytes_before_retirement(UINT driver_owned)
+{
+    UCHAR data[4 * H_MSS + 128];
+    NX_PACKET *p;
+    ULONG window;
+    UCHAR *prepend;
+    h_fixture();
+    (VOID)h_send();
+    p = &h_pkt[0];
+    memset(data, 'a', sizeof(data));
+    memcpy(data + 80, p -> nx_packet_prepend_ptr, sizeof(NX_TCP_HEADER));
+    p -> nx_packet_data_start = data;
+    p -> nx_packet_data_end = data + sizeof(data);
+    p -> nx_packet_prepend_ptr = data + 80;
+    p -> nx_packet_append_ptr = p -> nx_packet_prepend_ptr + sizeof(NX_TCP_HEADER) + 4 * H_MSS;
+    p -> nx_packet_length = sizeof(NX_TCP_HEADER) + 4 * H_MSS;
+    if (driver_owned)
+    {
+        p -> nx_packet_ip_header = p -> nx_packet_prepend_ptr - 20;
+        p -> nx_packet_ip_header_length = 20;
+        p -> nx_packet_prepend_ptr -= 20;
+        p -> nx_packet_length += 20;
+        p -> nx_packet_queue_next = NX_NULL;
+    }
+    prepend = p -> nx_packet_prepend_ptr;
+    h_sock.nx_tcp_socket_tx_sequence = H_ISN + 4 * H_MSS;
+    h_sock.nx_tcp_socket_tx_outstanding_bytes = 4 * H_MSS;
+    h_sock.nx_tcp_socket_tx_slow_start_threshold = 800000;
+    h_sock.nx_tcp_socket_timeout_retries = 3;
+    h_sock.nx_tcp_socket_stall_ticks = 20;
+    window = h_sock.nx_tcp_socket_tx_window_congestion;
+    h_check_eq(h_ack_bytes(333), NX_TRUE, "ACK inside a buffer is valid");
+    h_check_eq(h_sock.nx_tcp_socket_tx_outstanding_bytes, 4 * H_MSS - 333,
+               "partial cumulative ACK immediately releases DATA byte credit");
+    h_check_eq(h_sock.nx_tcp_socket_tx_window_congestion, window + 333,
+               "partial cumulative ACK earns only its DATA congestion credit");
+    h_check_eq(h_sock.nx_tcp_socket_timeout_retries, 0, "partial ACK restarts retry progress");
+    h_check_eq(h_sock.nx_tcp_socket_stall_ticks, 0, "partial ACK restarts stall progress");
+    h_check_eq(h_sock.nx_tcp_socket_transmit_sent_count, 1, "partial ACK retains immutable buffer");
+    h_check(p -> nx_packet_prepend_ptr == prepend, "partial ACK never trims driver-visible storage");
+    (VOID)h_ack_bytes(333);
+    (VOID)h_ack_bytes(100);
+    h_check_eq(h_sock.nx_tcp_socket_tx_outstanding_bytes, 4 * H_MSS - 333,
+               "duplicate and old ACKs cannot release credit again");
+    h_check_eq(h_ack_bytes(4 * H_MSS + 1), NX_FALSE, "future ACK is rejected");
+    h_check_eq(h_sock.nx_tcp_socket_tx_outstanding_bytes, 4 * H_MSS - 333,
+               "future ACK grants no DATA credit");
+    (VOID)h_ack_bytes(2 * H_MSS);
+    h_check_eq(h_sock.nx_tcp_socket_tx_outstanding_bytes, 2 * H_MSS,
+               "successive partial ACKs measure from the advanced SND.UNA");
+    h_check_eq(h_sock.nx_tcp_socket_tx_window_congestion, window + 333 + H_MSS,
+               "one delayed ACK grows slow-start cwnd by at most one MSS");
+    h_sock.nx_tcp_socket_duplicated_ack_received = 0;
+    (VOID)h_ack_bytes(4 * H_MSS);
+    h_check_eq(h_sock.nx_tcp_socket_tx_outstanding_bytes, 0,
+               "final retirement does not subtract acknowledged bytes twice");
+    h_check_eq(h_sock.nx_tcp_socket_transmit_sent_count, 0, "final ACK retires the buffer");
+    h_check(p -> nx_packet_union_next.nx_packet_tcp_queue_next == (NX_PACKET *)NX_PACKET_ALLOCATED,
+            "driver can release its buffer after full ACK without a queue owner");
+#ifdef NX_ENABLE_TCP_SACK
+    _nx_tcp_sack_recovery_reset(&h_sock);
+#endif
+}
+
+#if defined(NX_ENABLE_INTERFACE_CAPABILITY) && defined(NX_ENABLE_TCP_SACK) && !defined(NX_DISABLE_TCP_GSO)
+static UCHAR h_gso_data[8 * H_MSS + 128];
+
+static NX_PACKET *h_gso_send(UINT segments)
+{
+    NX_PACKET *p = &h_pkt[0];
+    NX_TCP_GSO_INFO *info = (NX_TCP_GSO_INFO *)h_gso_data;
+    h_fixture();
+    memset(p, 0, sizeof(*p));
+    memset(h_gso_data, 'a', sizeof(h_gso_data));
+    info -> version = NX_TCP_GSO_VERSION;
+    info -> flags = 0;
+    info -> mss = H_MSS;
+    info -> offset = 0;
+    info -> length = 0;
+    h_iface.nx_interface_capability_flag |= NX_INTERFACE_CAPABILITY_TCP_GSO;
+    h_iface.nx_interface_ip_mtu_size = 1500;
+    p -> nx_packet_pool_owner = &h_control_pool;
+    p -> nx_packet_data_start = h_gso_data;
+    p -> nx_packet_data_end = h_gso_data + sizeof(h_gso_data);
+    p -> nx_packet_prepend_ptr = h_gso_data + 80;
+    p -> nx_packet_append_ptr = p -> nx_packet_prepend_ptr + segments * H_MSS;
+    p -> nx_packet_length = segments * H_MSS;
+    p -> nx_packet_interface_capability_flag = NX_INTERFACE_CAPABILITY_TCP_GSO;
+    h_pkt_next = 1;
+    h_check_eq(_nx_tcp_socket_send_internal(&h_sock, p, NX_NO_WAIT), NX_SUCCESS,
+               "an explicitly marked capable aggregate is accepted");
+    h_check_eq(h_logged, 1, "one aggregate traverses the core once");
+    h_check_eq(h_log_bytes[0], segments * H_MSS, "aggregate preserves its exact DATA byte count");
+    return p;
+}
+
+static void ordinary_partial_ack_full_pool(void)
+{
+    UINT before;
+    h_fixture();
+    (VOID)h_send();
+    (VOID)h_ack_bytes(333);
+    h_slice_deny = NX_TRUE;
+    before = h_logged;
+    _nx_tcp_socket_retransmit(&h_ip, &h_sock, NX_FALSE);
+    h_check_eq(h_logged - before, 1, "ordinary partial ACK can recover with no spare packet");
+    h_check_eq(h_log[before], H_ISN, "full-pool ordinary repair can repeat an ACKed prefix");
+    h_check_eq(h_log_bytes[before], H_MSS, "full-pool escape stays within one wire MSS");
+    h_check_eq(h_sock.nx_tcp_socket_tx_rto_next, H_ISN + H_MSS, "full-pool escape advances recovery cursor");
+    h_slice_deny = NX_FALSE;
+}
+
+static void gso_queue_byte_bound(void)
+{
+    (VOID)h_gso_send(4);
+    h_sock.nx_tcp_socket_transmit_queue_maximum = 4;
+    h_check(h_send() != NX_SUCCESS, "one four-segment aggregate exhausts four-segment byte bound");
+    h_check_eq(h_sock.nx_tcp_socket_transmit_sent_count, 1, "queue entry count cannot bypass SO_SNDBUF resource bound");
+    (VOID)h_ack_bytes(H_MSS);
+    h_check_eq(h_send(), NX_SUCCESS, "cumulative DATA credit reopens bounded queue for one segment");
+    h_check_eq(h_sock.nx_tcp_socket_tx_outstanding_bytes, 4 * H_MSS,
+               "aggregate and ordinary sends share the same bounded DATA flight");
+    _nx_tcp_sack_recovery_reset(&h_sock);
+}
+
+/* A final short wire segment stays in the aggregate.  An ACK inside that
+   tail must leave only its remaining DATA eligible for a repair. */
+static void gso_short_final_segment(void)
+{
+    static UCHAR data[3 * H_MSS + 128];
+    NX_PACKET *p = &h_pkt[0];
+    NX_TCP_GSO_INFO *info = (NX_TCP_GSO_INFO *)data;
+    UINT before;
+
+    h_fixture();
+    memset(p, 0, sizeof(*p));
+    memset(data, 't', sizeof(data));
+    info -> version = NX_TCP_GSO_VERSION;
+    info -> flags = 0;
+    info -> mss = H_MSS;
+    info -> offset = info -> length = 0;
+    h_iface.nx_interface_capability_flag |= NX_INTERFACE_CAPABILITY_TCP_GSO;
+    h_iface.nx_interface_ip_mtu_size = 1500;
+    p -> nx_packet_pool_owner = &h_control_pool;
+    p -> nx_packet_data_start = data;
+    p -> nx_packet_data_end = data + sizeof(data);
+    p -> nx_packet_prepend_ptr = data + 80;
+    p -> nx_packet_length = 2 * H_MSS + 37;
+    p -> nx_packet_append_ptr = p -> nx_packet_prepend_ptr + p -> nx_packet_length;
+    p -> nx_packet_interface_capability_flag = NX_INTERFACE_CAPABILITY_TCP_GSO;
+    h_pkt_next = 1;
+
+    h_check_eq(_nx_tcp_socket_send_internal(&h_sock, p, NX_NO_WAIT), NX_SUCCESS,
+               "a short final GSO segment is accepted without an extra send");
+    h_check_eq(h_logged, 1, "one core send carries full segments and the short tail");
+    h_check_eq(h_log_bytes[0], 2 * H_MSS + 37, "the aggregate retains the exact final DATA length");
+    (VOID)h_ack_bytes(2 * H_MSS + 13);
+    h_check_eq(h_sock.nx_tcp_socket_tx_outstanding_bytes, 24,
+               "a partial tail ACK credits all the preceding DATA");
+    before = h_logged;
+    _nx_tcp_socket_retransmit(&h_ip, &h_sock, NX_FALSE);
+    h_check_eq(h_logged - before, 1, "the short tail has one repair");
+    h_check_eq(h_log[before], H_ISN + 2 * H_MSS + 13, "the repair starts inside the short tail");
+    h_check_eq(h_log_bytes[before], 24, "the repair never reads beyond the final DATA byte");
+    (VOID)h_ack_bytes(2 * H_MSS + 37);
+    h_check_eq(h_sock.nx_tcp_socket_transmit_sent_count, 0, "the final ACK retires the aggregate");
+    h_check_eq(h_sock.nx_tcp_socket_tx_outstanding_bytes, 0, "the final ACK returns all byte credit");
+    _nx_tcp_sack_recovery_reset(&h_sock);
+}
+
+static void gso_one_repair_owner(void)
+{
+    NX_PACKET *p = h_gso_send(8);
+    NX_TCP_GSO_INFO saved;
+    UINT before;
+    h_hold_gso_repair = NX_TRUE;
+    (VOID)h_ack(0, 2, 3, 0, 0);
+    (VOID)h_ack(0, 2, 4, 0, 0);
+    (VOID)h_ack(0, 2, 5, 0, 0);
+    before = h_logged;
+    saved = *(NX_TCP_GSO_INFO *)p -> nx_packet_data_start;
+    (VOID)h_ack(0, 2, 6, 0, 0);
+    _nx_tcp_socket_retransmit(&h_ip, &h_sock, NX_FALSE);
+    h_check_eq(h_logged, before, "pending driver repair prevents overlapping use of original block");
+    h_check(memcmp(&saved, p -> nx_packet_data_start, sizeof(saved)) == 0,
+            "pending repair metadata stays immutable across new ACK credit");
+    p -> nx_packet_queue_next = (NX_PACKET *)NX_DRIVER_TX_DONE;
+    h_hold_gso_repair = NX_FALSE;
+    _nx_tcp_socket_retransmit(&h_ip, &h_sock, NX_FALSE);
+    h_check(h_logged > before, "driver completion permits the next eligible repair range");
+    _nx_tcp_sack_recovery_reset(&h_sock);
+}
+
+static void gso_async_rto_cursor(void)
+{
+    NX_PACKET *p = h_gso_send(8);
+    ULONG cursor;
+    UINT before;
+    h_check_eq(h_send(), NX_SUCCESS, "queue DATA after an aggregate for RTO cursor coverage");
+    (VOID)h_ack_bytes(333);
+    _nx_tcp_socket_retransmit(&h_ip, &h_sock, NX_FALSE);
+    cursor = h_sock.nx_tcp_socket_tx_rto_next;
+    before = h_logged;
+    h_sock.nx_tcp_socket_tx_window_congestion = 4 * H_MSS;
+    h_hold_gso_repair = NX_TRUE;
+    _nx_tcp_socket_retransmit_after_timeout(&h_ip, &h_sock);
+    h_check_eq(h_sock.nx_tcp_socket_tx_rto_next, cursor + H_MSS,
+               "async repair stops RTO cursor inside its retained aggregate");
+    h_check_eq(h_logged - before, 1, "pending aggregate repair cannot skip to the next queue entry");
+    h_check_eq(h_log[before], cursor, "async RTO range begins at first unrepaired DATA");
+    p -> nx_packet_queue_next = (NX_PACKET *)NX_DRIVER_TX_DONE;
+    h_hold_gso_repair = NX_FALSE;
+    before = h_logged;
+    _nx_tcp_socket_retransmit_after_timeout(&h_ip, &h_sock);
+    h_check(h_logged > before && h_log[before] == cursor + H_MSS,
+            "completion resumes the same aggregate without a skipped hole");
+    _nx_tcp_sack_recovery_reset(&h_sock);
+}
+
+static void gso_capability_withdrawal(void)
+{
+    UINT before;
+    (VOID)h_gso_send(4);
+    h_iface.nx_interface_capability_flag &= ~NX_INTERFACE_CAPABILITY_TCP_GSO;
+    (VOID)h_ack_bytes(333);
+    before = h_logged;
+    _nx_tcp_socket_retransmit(&h_ip, &h_sock, NX_FALSE);
+    h_check_eq(h_logged - before, 1, "withdrawn GSO capability retains ordinary repair progress");
+    h_check((h_log_capabilities[before] & NX_INTERFACE_CAPABILITY_TCP_GSO) == 0,
+            "legacy route receives an ordinary copy, never a segmentation template");
+    h_check_eq(h_log_bytes[before], H_MSS, "legacy route repair remains within physical MSS");
+    _nx_tcp_sack_recovery_reset(&h_sock);
+}
+
+static void gso_bounded_recovery(void)
+{
+    NX_PACKET *p = h_gso_send(4);
+    UCHAR *prepend = p -> nx_packet_prepend_ptr;
+    UINT before;
+    ULONG cursor;
+    (VOID)h_ack_bytes(333);
+    before = h_logged;
+    _nx_tcp_socket_retransmit(&h_ip, &h_sock, NX_FALSE);
+    h_check_eq(h_logged - before, 1, "RTO sends one wire segment from a retained aggregate");
+    h_check_eq(h_log[before], H_ISN + 333, "RTO starts at current SND.UNA inside aggregate");
+    h_check_eq(h_log_bytes[before], H_MSS, "RTO repair never exceeds wire MSS");
+    h_check((h_log_capabilities[before] & NX_INTERFACE_CAPABILITY_TCP_GSO) != 0 &&
+            ((NX_TCP_GSO_INFO *)p -> nx_packet_data_start) -> flags == NX_TCP_GSO_REPAIR,
+            "explicit range hands exactly one wire repair to the segmenter");
+    h_check(h_log_interface[before] == &h_iface, "aggregate repair retains egress metadata");
+    h_check(p -> nx_packet_prepend_ptr == prepend && p -> nx_packet_length == 4 * H_MSS + sizeof(NX_TCP_HEADER),
+            "ordinary repair preserves original aggregate and ownership");
+    cursor = h_sock.nx_tcp_socket_tx_rto_next;
+    h_slice_deny = NX_TRUE;
+    h_sock.nx_tcp_socket_tx_window_congestion = 4 * H_MSS;
+    _nx_tcp_socket_retransmit_after_timeout(&h_ip, &h_sock);
+    h_check((INT)(h_sock.nx_tcp_socket_tx_rto_next - cursor) > 0,
+            "explicit range repairs advance even when pool allocation is denied");
+    h_check(h_logged - before > 1 && !h_slice_used,
+            "full-pool recovery sends ordinary wire repairs without temporary buffers");
+    h_slice_deny = NX_FALSE;
+    while (++before < h_logged)
+    {
+        h_check(h_log_bytes[before] <= H_MSS, "every ACK-clocked repair obeys wire MSS");
+    }
+    /* Zero-window persistence must probe the advanced byte, not its prefix. */
+    p -> nx_packet_prepend_ptr[sizeof(NX_TCP_HEADER) + 333] = 'z';
+    h_sock.nx_tcp_socket_tx_window_advertised = 0;
+    _nx_tcp_socket_retransmit(&h_ip, &h_sock, NX_FALSE);
+    h_check_eq(h_probe_sequence, H_ISN + 333, "persist probe names first unacknowledged byte");
+    h_check_eq(h_probe_data, 'z', "persist probe copies DATA after the acknowledged prefix");
+    _nx_tcp_sack_recovery_reset(&h_sock);
+
+    p = h_gso_send(8);
+    before = h_logged;
+    (VOID)h_ack(0, 2, 3, 0, 0);
+    (VOID)h_ack(0, 2, 4, 0, 0);
+    h_check_eq(h_logged, before, "one host buffer does not falsely lower wire duplicate-ACK threshold");
+    (VOID)h_ack(0, 2, 5, 0, 0);
+    h_check(h_logged > before, "third duplicate ACK recovers an aggregate hole");
+    while (before < h_logged)
+    {
+        h_check(h_log_bytes[before++] <= H_MSS, "SACK repairs split only missing MSS-sized DATA");
+    }
+    _nx_tcp_sack_recovery_reset(&h_sock);
+#if defined(NX_ENABLE_TCP_LOSS_PROBE) && defined(NX_ENABLE_TCP_RTT_ESTIMATOR)
+    p = h_gso_send(4);
+    before = h_logged;
+    _nx_tcp_socket_retransmit_tail(&h_ip, &h_sock);
+    h_check_eq(h_logged - before, 1, "tail probe emits one segment from a large buffer");
+    h_check_eq(h_log[before], H_ISN + 3 * H_MSS, "tail probe sends final wire segment");
+    h_check_eq(h_log_bytes[before], H_MSS, "tail probe never repeats whole aggregate");
+    (VOID)p;
+#endif
+}
+#endif
+
+#if defined(NX_ENABLE_INTERFACE_CAPABILITY) && defined(NX_DISABLE_TCP_GSO)
+static void segmentation_disabled_fallback(void)
+{
+    static UCHAR data[H_MSS + 128];
+    NX_PACKET *p = &h_pkt[0];
+    NX_TCP_GSO_INFO *info = (NX_TCP_GSO_INFO *)data;
+    UINT i, before;
+
+    h_fixture();
+    memset(p, 0, sizeof(*p));
+    memset(data, 'g', sizeof(data));
+    info -> version = NX_TCP_GSO_VERSION;
+    info -> flags = 0;
+    info -> mss = H_MSS;
+    info -> offset = info -> length = 0;
+    h_iface.nx_interface_capability_flag |= NX_INTERFACE_CAPABILITY_TCP_GSO;
+    h_iface.nx_interface_ip_mtu_size = 1500;
+    p -> nx_packet_pool_owner = &h_control_pool;
+    p -> nx_packet_data_start = data;
+    p -> nx_packet_data_end = data + sizeof(data);
+    p -> nx_packet_prepend_ptr = data + 80;
+    p -> nx_packet_append_ptr = p -> nx_packet_prepend_ptr + H_MSS;
+    p -> nx_packet_length = H_MSS;
+    p -> nx_packet_interface_capability_flag = NX_INTERFACE_CAPABILITY_TCP_GSO;
+    h_pkt_next = 1;
+
+    h_check_eq(_nx_tcp_socket_send_internal(&h_sock, p, NX_NO_WAIT), NX_SUCCESS,
+               "GSO-disabled build accepts the marked write through ordinary TCP");
+    h_check_eq(h_send(), NX_SUCCESS, "ordinary second write progresses without GSO");
+    h_check_eq(h_send(), NX_SUCCESS, "ordinary third write progresses without GSO");
+    h_check_eq(h_logged, 3, "disabled segmentation emits three ordinary MSS packets");
+    for (i = 0; i < h_logged; i++)
+    {
+        h_check_eq(h_log[i], H_ISN + i * H_MSS, "fallback preserves sequence order");
+        h_check_eq(h_log_bytes[i], H_MSS, "fallback obeys wire MSS");
+        h_check_eq(h_log_first[i], i == 0 ? 'g' : 'x', "fallback preserves DATA");
+        h_check((h_log_capabilities[i] & NX_INTERFACE_CAPABILITY_TCP_GSO) == 0,
+                "ordinary wire packets never retain the segmentation flag");
+    }
+    (VOID)h_ack_bytes(333);
+    before = h_logged;
+    _nx_tcp_socket_retransmit(&h_ip, &h_sock, NX_FALSE);
+    h_check_eq(h_logged - before, 1, "partial-ACK repair still makes progress");
+    h_check_eq(h_log[before], H_ISN + 333, "disabled-mode repair starts at SND.UNA");
+    h_check_eq(h_log_bytes[before], H_MSS - 333,
+               "disabled-mode repair preserves the unacknowledged packet tail");
+    (VOID)h_ack_bytes(3 * H_MSS);
+    h_check_eq(h_sock.nx_tcp_socket_tx_outstanding_bytes, 0,
+               "fallback cumulative ACK returns all DATA credit");
+#ifdef NX_ENABLE_TCP_SACK
+    _nx_tcp_sack_recovery_reset(&h_sock);
+#endif
+}
+#endif
+
+#ifdef NX_ENABLE_TCP_SACK
+static void prr_full_pool_tiny_hole(void)
+{
+    UINT i, before;
+    h_fixture();
+    for (i = 0; i < 8; i++) { (VOID)h_send(); }
+    h_control_deny = NX_TRUE;
+    h_slice_deny = NX_TRUE;
+    h_sock.nx_tcp_socket_sack_block_count = 1;
+    h_sock.nx_tcp_socket_sack_left[0] = H_ISN + 1;
+    h_sock.nx_tcp_socket_sack_right[0] = h_seq(6);
+    before = h_logged;
+    for (i = 0; i < NX_TCP_FAST_RETRANSMIT_THRESHOLD; i++)
+    {
+        (VOID)h_ack_with_current_sack(0);
+    }
+    h_check_eq(h_logged - before, 1, "full pool cannot suppress mandatory first repair of a one-byte hole");
+    h_check_eq(h_log[before], H_ISN, "full-pool repair uses the queued original at SND.UNA");
+    h_check_eq(h_log_bytes[before], H_MSS, "full-pool SACK escape sends no more than one MSS");
+    h_check_eq(h_sock.nx_tcp_socket_prr_out, H_MSS, "full original spends every repeated wire byte");
+    h_check_eq(h_sock.nx_tcp_socket_prr_credit, 0, "whole original cannot overspend remaining PRR credit");
+    h_check_eq(h_sock.nx_tcp_socket_tx_high_rxt, h_seq(1), "full original advances actual retransmission coverage");
+    _nx_tcp_sack_recovery_reset(&h_sock);
+}
+#endif
+
+static void prr_proportional_math(void)
+{
+    static const ULONG values[] = {0, 1, 2, 3, 333, 5840, 5841, 65535, 65536,
+                                  0x7fffffffUL, 0x80000001UL, 0xfffffffeUL, 0xffffffffUL};
+    ULONG seed = 17, a, b, d, expected;
+    ULONG64 reference;
+    UINT i, j, k;
+    for (i = 0; i < sizeof(values) / sizeof(values[0]); i++)
+    {
+        for (j = 0; j < sizeof(values) / sizeof(values[0]); j++)
+        {
+            a = values[i]; d = values[j];
+            for (k = 0; k < 3; k++)
+            {
+                b = k == 0 ? d / 2 : k == 1 ? d : 2920;
+                reference = d == 0 ? 0 : ((ULONG64)a * b + d - 1) / d;
+                expected = reference > 0xffffffffUL ? 0xffffffffUL : (ULONG)reference;
+                h_check_eq(_nx_tcp_prr_proportional_credit(a, b, d), expected,
+                           "32-bit PRR credit matches independent wide reference at boundaries");
+            }
+        }
+    }
+    for (i = 0; i < 2048; i++)
+    {
+        seed = seed * 1664525UL + 1013904223UL; a = seed;
+        seed = seed * 1664525UL + 1013904223UL; b = seed;
+        seed = seed * 1664525UL + 1013904223UL; d = seed;
+        reference = d == 0 ? 0 : ((ULONG64)a * b + d - 1) / d;
+        expected = reference > 0xffffffffUL ? 0xffffffffUL : (ULONG)reference;
+        h_check_eq(_nx_tcp_prr_proportional_credit(a, b, d), expected,
+                   "overflow-safe PRR ratio matches independent wide reference");
+    }
+}
+
 int main(void)
 {
     _nx_tcp_fast_timer_rate     = (NX_IP_PERIODIC_RATE + (NX_TCP_FAST_TIMER_RATE - 1)) / NX_TCP_FAST_TIMER_RATE;
@@ -933,6 +1789,23 @@ int main(void)
 
     printf("RFC 6675 loss recovery, against a socket rather than a network\n");
 
+#if defined(NX_ENABLE_INTERFACE_CAPABILITY) && defined(NX_ENABLE_TCP_SACK) && !defined(NX_DISABLE_TCP_GSO)
+    ordinary_partial_ack_full_pool();
+    gso_capability_withdrawal();
+    gso_async_rto_cursor();
+    gso_one_repair_owner();
+    gso_queue_byte_bound();
+    gso_short_final_segment();
+    gso_bounded_recovery();
+#elif defined(NX_ENABLE_INTERFACE_CAPABILITY) && defined(NX_DISABLE_TCP_GSO)
+    segmentation_disabled_fallback();
+#endif
+#ifdef NX_ENABLE_TCP_SACK
+    prr_full_pool_tiny_hole();
+#endif
+    prr_proportional_math();
+    cumulative_bytes_before_retirement(NX_FALSE);
+    cumulative_bytes_before_retirement(NX_TRUE);
     single_loss();
     second_loss_at_the_tail();
     burst_hole();
@@ -944,6 +1817,17 @@ int main(void)
     fin_sack_option_sequence();
     fin_partial_ack_sequence();
     timeout_fresh_sack_tail();
+    prr_burst_example();
+    prr_receive_window_bound();
+    newreno_peer_unchanged();
+    prr_credit_across_allocation();
+    prr_partial_credit_slice();
+    prr_delivery_conservation(NX_FALSE);
+    prr_delivery_conservation(NX_TRUE);
+    prr_bounded_scoreboard();
+    prr_repeated_ack_and_shared_credit(NX_FALSE);
+    prr_repeated_ack_and_shared_credit(NX_TRUE);
+    _nx_tcp_sack_recovery_reset(&h_sock);
 #endif /* NX_ENABLE_TCP_SACK */
 
     printf("%lu checks, %lu failures, %s\n",

@@ -751,6 +751,34 @@ static void k_the_transmit_queue_is_a_quarter_of_the_pool(void)
 }
 
 
+static void l_tx_growth_is_backed_and_path_bounded(void)
+{
+    ULONG n;
+    h_check(ami_bsd_tcp_tx_free_packets(94, 94, 0) == 0,
+            "small-RAM machines retain their existing queue policy");
+    h_check(ami_bsd_tcp_tx_free_packets(4096, 3100, 720) == 1868,
+            "growth leaves control and receive-window credit unspent");
+    h_check(ami_bsd_tcp_tx_free_packets(4096, 512, 0) == 0 &&
+            ami_bsd_tcp_tx_free_packets(4096, 600, 720) == 0,
+            "pressure cannot wrap a reserved pool into free capacity");
+    for (n = 0; n <= 4096; n++)
+    {
+        ULONG free = ami_bsd_tcp_tx_free_packets(4096, n, 720);
+        h_check(free == 0 || free + 512 + 720 <= n,
+                "every granted packet is beyond both reservations");
+    }
+    h_check(ami_bsd_tcp_tx_flight_depth(1000000000UL, 30, 1448, 2868) == 2868,
+            "a measured long path can grow past the old1024-MSS ceiling");
+    h_check(ami_bsd_tcp_tx_flight_depth(1000000000UL, 1, 1000, 4096) == 250,
+            "a small flight does not claim all available memory");
+    h_check(ami_bsd_tcp_tx_flight_depth(1000000000UL, 0, 1448, 4096) == 0 &&
+            ami_bsd_tcp_tx_flight_depth(0, 30, 1448, 4096) == 0 &&
+            ami_bsd_tcp_tx_flight_depth(1000000000UL, 30, 0, 4096) == 0,
+            "unmeasured or invalid inputs do not request automatic growth");
+    h_check(ami_bsd_tcp_tx_flight_depth(0xFFFFFFFFUL, 0xFFFFFFFFUL, 1, 4096) == 4096,
+            "large bandwidth-delay products saturate at real capacity");
+}
+
 int main(void)
 {
     printf("packet pool sizing and the window it backs, v0.25.5\n");
@@ -766,6 +794,7 @@ int main(void)
     i_the_window_settles_for_the_path_and_the_link();
     j_the_pool_is_sized_from_the_fastest_class();
     k_the_transmit_queue_is_a_quarter_of_the_pool();
+    l_tx_growth_is_backed_and_path_bounded();
 
     printf("%lu checks, %lu failures, %s\n",
            h_checks, h_failures, (h_failures == 0UL) ? "PASS" : "FAIL");

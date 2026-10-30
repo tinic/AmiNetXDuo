@@ -360,6 +360,8 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
                 if (value < 0)
                     return bsd_fail(SocketBase, AMI_EINVAL);
                 sock->as_SndBuf = value;
+                sock->as_AutoTxDepth = 0UL;
+                sock->as_AutoTxNext = 0UL;
                 if ((sock->as_Flags & (ASF_TCP | ASF_DELETED)) == ASF_TCP &&
                     value > 0)
                 {
@@ -677,10 +679,18 @@ LONG bsd_getsockopt(register LONG sock_fd     __asm("d0"),
             }
 
             case SO_SNDBUF:
+            {
+                LONG sndbuf = sock->as_SndBuf;
+                if (sndbuf == 0 && sock->as_AutoTxDepth != 0UL)
+                {
+                    ULONG mss = _nx_tcp_socket_payload_mss(&sock->as_Nx.tcp);
+                    ULONG bytes = (mss != 0UL && sock->as_AutoTxDepth <= 0x7FFFFFFFUL / mss)
+                                  ? sock->as_AutoTxDepth * mss : 0x7FFFFFFFUL;
+                    sndbuf = (LONG)bytes;
+                }
                 return bsd_opt_get_long(SocketBase, optval, optlen,
-                                        (sock->as_SndBuf != 0)
-                                            ? sock->as_SndBuf
-                                            : BSD_TCP_WINDOW);
+                                        (sndbuf != 0) ? sndbuf : BSD_TCP_WINDOW);
+            }
 
             case SO_LINGER:
             {

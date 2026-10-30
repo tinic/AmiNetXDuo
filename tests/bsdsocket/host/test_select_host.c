@@ -120,6 +120,7 @@ static void h_reset(void)
 
     h.open_result = 0;              /* timer.device opens                    */
     h_me = NULL;
+    h_task.tc_SigRecvd = 0;
 }
 
 static AmiSocket *h_udp(LONG fd, UINT peer)
@@ -193,6 +194,7 @@ VOID Signal(struct Task *task, ULONG signalSet)
 {
     h.last_signal_task = task;
     h.signals       |= signalSet;
+    task->tc_SigRecvd |= signalSet;
     h.signal_calls++;
     h.last_signalled = signalSet;
 }
@@ -356,10 +358,13 @@ UINT _nxe_tcp_socket_receive_notify(NX_TCP_SOCKET *socket_ptr,
     (VOID)socket_ptr; (VOID)fn; h.notifies++; return NX_SUCCESS;
 }
 
+/* Kept, so a test can play the acknowledgment that frees room. */
+static VOID (*h_window_fn)(NX_TCP_SOCKET *socket_ptr);
+
 UINT _nxe_tcp_socket_window_update_notify_set(NX_TCP_SOCKET *socket_ptr,
                                               VOID (*fn)(NX_TCP_SOCKET *socket_ptr))
 {
-    (VOID)socket_ptr; (VOID)fn; h.notifies++; return NX_SUCCESS;
+    (VOID)socket_ptr; h_window_fn = fn; h.notifies++; return NX_SUCCESS;
 }
 
 UINT _nxe_tcp_socket_establish_notify(NX_TCP_SOCKET *socket_ptr,
@@ -622,6 +627,67 @@ static void t_writability(void)
     s->as_Flags |= ASF_WRSHUT;
     CHECK(bsd_writable(s) == TRUE,
           "after shutdown(SHUT_WR) the write fails immediately, so it is writable");
+}
+
+/*
+ * A GSO connection (nx_tcp.h, _nx_tcp_socket_queue_byte_credit) bounds its
+ * transmit queue in bytes as well as entries: 8 entries of a 100-byte
+ * segment are 800 bytes, and a queue holding 800 unacknowledged bytes in
+ * fewer entries is full all the same.
+ */
+static void t_writability_byte_credit(void)
+{
+    static NX_INTERFACE nxif;
+    AmiSocket          *s;
+
+    printf("bsd_writable(): the transmit queue's byte credit\n");
+
+    h_reset();
+    s = h_tcp(0, NX_TCP_ESTABLISHED);
+    memset(&nxif, 0, sizeof(nxif));
+    nxif.nx_interface_capability_flag = NX_INTERFACE_CAPABILITY_TCP_GSO;
+    s->as_Nx.tcp.nx_tcp_socket_connect_interface = &nxif;
+    s->as_Nx.tcp.nx_tcp_socket_connect_mss        = 100;
+    s->as_Nx.tcp.nx_tcp_socket_transmit_sent_count = 2;
+    s->as_Nx.tcp.nx_tcp_socket_tx_outstanding_bytes = 799;
+    CHECK(bsd_writable(s) == TRUE, "a byte of credit and room in entries");
+
+    s->as_Nx.tcp.nx_tcp_socket_tx_outstanding_bytes = 800;
+#ifdef NX_DISABLE_TCP_GSO
+    /* A profile without GSO ignores even an advertised GSO capability:
+       each queue entry is still one ordinary segment. */
+    CHECK(bsd_writable(s) == TRUE,
+          "GSO disabled: bytes do not fill spare queue entries");
+    CHECK(s->as_TxWait == 0, "GSO disabled: no FD_WRITE wait is needed");
+#else
+    CHECK(bsd_writable(s) == FALSE,
+          "no credit is not writable, with entries to spare");
+    CHECK(s->as_TxWait == 1, "and the FD_WRITE request is left behind");
+#endif
+
+    /* The acknowledgment that gives credit back: the core calls the window
+       notify (nx_tcp_socket_state_transmit_check.c), which posts. */
+    bsd_events_attach(s);
+    s->as_Nx.tcp.nx_tcp_socket_tx_outstanding_bytes = 300;
+    h.signals = 0;
+    CHECK(h_window_fn != NULL, "the window notify is armed");
+    if (h_window_fn != NULL)
+        h_window_fn(&s->as_Nx.tcp);
+#ifdef NX_DISABLE_TCP_GSO
+    CHECK((s->as_Events & FD_WRITE) == 0 && (h.signals & H_SIGIO_SIG) == 0,
+          "GSO disabled: an ACK does not notify a writer that never waited");
+#else
+    CHECK((s->as_Events & FD_WRITE) != 0 && (h.signals & H_SIGIO_SIG) != 0,
+          "the credit coming back posts FD_WRITE");
+#endif
+    CHECK(bsd_writable(s) == TRUE && s->as_TxWait == 0,
+          "and the socket is writable again");
+
+    /* Without the capability the bytes are no bound, as before. */
+    nxif.nx_interface_capability_flag = 0;
+    s->as_Nx.tcp.nx_tcp_socket_tx_outstanding_bytes = 100000;
+    CHECK(bsd_writable(s) == TRUE,
+          "an interface without GSO is bounded by entries alone");
 }
 
 static void t_exception(void)
@@ -1421,7 +1487,7 @@ static void t_events(void)
           "a pending accept uses its listener's current event owner");
     listener.as_Owner = NULL;
     s->as_Owner = &h_base;
-    h.signals = 0;
+    h.signals = h_task.tc_SigRecvd = 0;
     bsd_event_post(s, FD_CLOSE);
     CHECK(h.signals == 0,
           "a parked listener cannot fall back to the child's earlier owner");
@@ -1482,6 +1548,47 @@ static void t_events(void)
           "a raw socket has no NetX control block to hang one on");
 }
 
+/*
+ * One Signal() per pending event bit, not one per segment.  A receive posts
+ * FD_READ for every segment; while the base's event bit is still pending on
+ * the task, a second Signal() is a Disable()/Enable() pair that changes
+ * nothing.  Once the task takes the bit, the next post signals again.
+ */
+static void t_event_signal_once(void)
+{
+    AmiSocket *s;
+
+    printf("bsd_event_post(): no Signal() for a bit already pending\n");
+
+    h_reset();
+    h_base.sb_SigIOMask = 0;        /* no SBTC_SIGIOMASK, as most callers */
+    s = h_tcp(0, NX_TCP_ESTABLISHED);
+
+    bsd_event_post(s, FD_READ);
+    CHECK(h.signal_calls == 1, "the first segment signals the task");
+    bsd_event_post(s, FD_READ);
+    bsd_event_post(s, FD_READ);
+    CHECK(h.signal_calls == 1,
+          "the next two, with the bit still pending, do not");
+    CHECK((s->as_Events & FD_READ) != 0, "the event is latched on the socket");
+
+    /* WaitSelect() takes the bit, then polls. */
+    (VOID)SetSignal(0UL, H_EVENT_SIG);
+    h_task.tc_SigRecvd = h.signals;
+    bsd_event_post(s, FD_READ);
+    CHECK(h.signal_calls == 2, "once the task took the bit, a post signals");
+    CHECK((h.signals & H_EVENT_SIG) != 0, "and the bit is pending again");
+
+    /* An application's SBTC_SIGIOMASK is signalled on every post. */
+    h_reset();
+    s = h_tcp(0, NX_TCP_ESTABLISHED);
+    bsd_event_post(s, FD_READ);
+    bsd_event_post(s, FD_READ);
+    CHECK(h.signal_calls == 2, "an application mask is signalled each time");
+    CHECK(h.last_signalled == H_SIGIO_SIG,
+          "with only its own bit once the event bit is pending");
+}
+
 int main(void)
 {
     printf("select.c host tests\n");
@@ -1489,6 +1596,7 @@ int main(void)
     t_udp_readability();
     t_tcp_readability();
     t_writability();
+    t_writability_byte_credit();
     t_exception();
     t_waitselect_count();
     t_waitselect_refusals();
@@ -1498,6 +1606,7 @@ int main(void)
     t_waitselect_rearm_overflow();
     t_waitselect_terminal();
     t_events();
+    t_event_signal_once();
 
     printf("%lu checks, %lu failures\n", h_checks, h_failures);
     return h_failures == 0 ? 0 : 1;

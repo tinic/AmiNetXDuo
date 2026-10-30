@@ -519,9 +519,11 @@ host_test_targets() { # builddir
 #      source-aware ordering of A/AAAA answers (x86_64 shim only).
 #      576 with arp_lan_chatter (#354): ARP between other hosts leaves the
 #      peer's entry in place (all hosts).
-#      581 with netsim_tcp_clean, _bottleneck, _loss, _reverse and _shallow
+#      578 with adopt_suspend_clean and adopt_suspend_latched: the suspend
+#      clears the run signal with SetSignal() only when it is latched.
+#      584 with netsim_tcp_clean, _bottleneck, _loss, _reverse and _shallow
 #      (#354): two NetX Duo stacks over a simulated link (all hosts).
-HOST_TESTS_EXPECTED=581
+HOST_TESTS_EXPECTED=584
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,
@@ -534,14 +536,14 @@ case "$(uname -m)" in
     # test_unbracketed_close (F-059), test_raw_hdrincl6 (F-061),
     # test_deferred_release (F-059), test_hostsource (F-088),
     # test_raw_v6_lock (N-036), test_netstatus_order (N-077), and
-    # test_addrinfo_dns, all
+    # test_addrinfo_dns and test_tcp_autotune, all
     # x86_64-only for
     # the reason in
     # tests/bsdsocket/CMakeLists.txt:
     # elsewhere the host's LONG is eight bytes and no structure in them has
     # the target's shape.
     # Subtract the x86_64-only bsdsocket fixtures here.
-    *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 31)) ;;
+    *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 32)) ;;
 esac
 # The conflict-drain fixture uses Linux's MAP_32BIT, not merely x86_64.
 # Darwin arm64 registers 543; Darwin x86_64 registers 574 on this tree.

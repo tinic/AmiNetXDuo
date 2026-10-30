@@ -366,6 +366,16 @@ static void h_fixture(void)
     /*lint -e{923} suppress cast of ULONG to pointer.  */
     h_seg.nx_packet_union_next.nx_packet_tcp_queue_next = (NX_PACKET *)NX_PACKET_ENQUEUED;
 
+    /* Model the actual queued TCP wire header. Recovery now derives byte
+       ranges from it; an all-zero header describes no valid DATA segment. */
+    {
+        NX_TCP_HEADER *header = (NX_TCP_HEADER *)h_seg.nx_packet_prepend_ptr;
+        header -> nx_tcp_sequence_number = H_ISN;
+        header -> nx_tcp_header_word_3 = NX_TCP_HEADER_SIZE | NX_TCP_ACK_BIT | NX_TCP_PSH_BIT;
+        NX_CHANGE_ULONG_ENDIAN(header -> nx_tcp_sequence_number);
+        NX_CHANGE_ULONG_ENDIAN(header -> nx_tcp_header_word_3);
+    }
+
     h_sock.nx_tcp_socket_transmit_sent_head  = &h_seg;
     h_sock.nx_tcp_socket_transmit_sent_tail  = &h_seg;
     h_sock.nx_tcp_socket_transmit_sent_count = 1;
