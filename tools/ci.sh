@@ -523,7 +523,9 @@ host_test_targets() { # builddir
 #      clears the run signal with SetSignal() only when it is latched.
 #      584 with netsim_tcp_clean, _bottleneck, _loss, _reverse and _shallow
 #      (#354): two NetX Duo stacks over a simulated link (all hosts).
-HOST_TESTS_EXPECTED=584
+#      585 with netsim_tcp_shallow150k (#354): the 150 KB queue a repair
+#      retransmission was lost in (all hosts).
+HOST_TESTS_EXPECTED=585
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,

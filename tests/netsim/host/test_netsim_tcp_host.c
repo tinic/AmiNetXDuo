@@ -146,6 +146,15 @@ static const NsScenario ns_scenarios[] =
       { 150000000ULL, 10 * NS_MS, 65536, 0 },
       { 150000000ULL, 10 * NS_MS, 0, 0 },
       32UL * 1024UL * 1024UL, 0, 0, 500 * NS_MS, 1050 },
+
+    /* The same at 150 KB, with the bottleneck's goodput floor: where
+       d4d683ce lost a repair retransmission to the queue and waited out the
+       RTO (rx_gap 957 ms; e1d5764e fixed it).  shallow 150000 on the command
+       line, as a row so that it carries its own floor. */
+    { "shallow150k",
+      { 150000000ULL, 10 * NS_MS, 150000, 0 },
+      { 150000000ULL, 10 * NS_MS, 0, 0 },
+      32UL * 1024UL * 1024UL, 0, 850, 500 * NS_MS, 1050 },
 };
 
 /* Slow start, printed and not yet asserted: two NetX Duo stacks at their
@@ -708,7 +717,8 @@ int main(int argc, char **argv)
     if (ns_sc == NULL)
     {
         printf("netsim=FAIL reason=usage"
-               " want=clean|bottleneck|loss|reverse|shallow [queue_bytes]\n");
+               " want=clean|bottleneck|loss|reverse|shallow|shallow150k"
+               " [queue_bytes]\n");
         return 2;
     }
 

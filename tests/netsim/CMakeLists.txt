@@ -69,7 +69,7 @@ set_target_properties(test_netsim_tcp PROPERTIES C_STANDARD 11)
 
 # A wall-clock bound as well: a runnable busy loop stops the virtual clock,
 # and the deadline inside the test never comes.
-foreach(_scenario clean bottleneck loss reverse shallow)
+foreach(_scenario clean bottleneck loss reverse shallow shallow150k)
     add_test(NAME netsim_tcp_${_scenario} COMMAND test_netsim_tcp ${_scenario})
     set_tests_properties(netsim_tcp_${_scenario} PROPERTIES TIMEOUT 60)
 endforeach()
