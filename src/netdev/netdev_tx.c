@@ -143,14 +143,18 @@ netdev_tx_meta(NetdevUnit *unit, struct IOSana2Req *io, NetdevOpener *op)
     return flags;
 }
 
-/* The chip half, and the only half that needs the mask. */
+/* The chip half, and the only half that needs the mask.  The metadata is
+   read here, except for an opener granted TX_BATCH: the pump and the
+   task-level write read it before the build for every write of such an
+   opener, so its TxFlags callback runs once a write either way. */
 LONG netdev_tx_issue(NetdevUnit *unit, struct IOSana2Req *io,
                      NetdevOpener *op, UWORD total)
 {
     NetdevTrack *tr;
     LONG         rc;
 
-    (VOID)netdev_tx_meta(unit, io, op);
+    if ((op->op_Extensions & ANXD_S2F_TX_BATCH) == 0)
+        (VOID)netdev_tx_meta(unit, io, op);
     rc = unit->nu_Nic.ops->tx(&unit->nu_Nic, unit->nu_TxAt, total);
     if (rc != 0)
         return rc;

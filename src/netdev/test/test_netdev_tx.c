@@ -324,9 +324,13 @@ typedef struct
 
 static ULONG child_calls;
 
+static int txflags_calls;
+
 static UBYTE t_txflags(APTR data)
 {
     const Write *w = (const Write *)data;
+
+    txflags_calls++;
 
     return (UBYTE)((w->count != 0) ? ANXD_S2_TXF_BATCH : 0);
 }
@@ -398,6 +402,7 @@ static void fixture(UWORD ring)
     flushed_before_reclaim = 0;
     disable_depth = forbid_depth = forbids = replies = causes = events = 0;
     child_calls = 0;
+    txflags_calls = 0;
     intr_mine = intr_calls = 0;
 
     NewList(&unit.nu_Writes);
@@ -883,6 +888,27 @@ static void test_ordinary_unchanged(void)
                arm ? "no batches agreed: one frame by CopyFromBuff"
                    : "batches agreed: one frame by CopyFromBuff");
     }
+
+    /* The metadata is read once a write, whether the opener has batches
+       (read before the build) or only a checksum (read at the issue), on
+       the direct path and from the queue. */
+    fixture(64);
+    io = mk(0, 0);
+    netdev_tx_direct(&unit, io);
+    expect(nposted == 1 && txflags_calls == 1,
+           "batches agreed: one ordinary write, one TxFlags call");
+    fixture(64);
+    opener.op_Extensions = ANXD_S2F_TX_QUICK | ANXD_S2F_TX_CSUM_TCP;
+    io = mk(0, 0);
+    netdev_tx_direct(&unit, io);
+    expect(nposted == 1 && txflags_calls == 1,
+           "a checksum only: one ordinary write, one TxFlags call");
+    fixture(64);
+    netdev_queue_tail(&unit.nu_Writes, mk(0, 0));
+    netdev_queue_tail(&unit.nu_Writes, mk(1, 0));
+    pump_pass();
+    expect(nposted == 2 && txflags_calls == 2,
+           "from the queue: two writes, two TxFlags calls");
 
     /* And a batch-flagged write from an opener that was not granted the
        bit is an ordinary write of ios2_DataLength. */
