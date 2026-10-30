@@ -5221,18 +5221,22 @@ static BOOL httpd_writable(HttpConn *c)
 
 /* ------------------------------------------------------------------ main --- */
 
-static LONG httpd_listen(const ToolAddr *bindaddr, UWORD port)
+/* `v4_next`: the caller tries the IPv4 wildcard after a refused family, so
+   that refusal is not reported. */
+static LONG httpd_listen(const ToolAddr *bindaddr, UWORD port, BOOL v4_next)
 {
     ToolSockAddrAny sa;
     LONG            lsock;
     LONG            one = 1;
+    LONG            err;
 
     lsock = tool_sock_socket(httpd_sb, (LONG)bindaddr->ta_Family,
                              TOOL_SOCK_STREAM, 0);
     if (lsock < 0)
     {
-        tool_error("no socket: %s",
-                   (LONG)tool_sock_errstr(tool_sock_errno(httpd_sb)));
+        err = tool_sock_errno(httpd_sb);
+        if (!v4_next || err != TOOL_EAFNOSUPPORT)
+            tool_error("no socket: %s", (LONG)tool_sock_errstr(err));
         return -1;
     }
 
@@ -5244,21 +5248,13 @@ static LONG httpd_listen(const ToolAddr *bindaddr, UWORD port)
 
     (VOID)tool_sock_addr(&sa, bindaddr, port);
 
-    if (tool_sock_bind(httpd_sb, lsock, &sa) != 0)
+    if (tool_sock_bind(httpd_sb, lsock, &sa) != 0 ||
+        tool_sock_listen(httpd_sb, lsock, HTTPD_BACKLOG) != 0)
     {
-        LONG err = tool_sock_errno(httpd_sb);
-
-        tool_error("cannot listen on port %ld: %s", (LONG)port,
-                   (LONG)tool_sock_errstr(err));
-
-        (VOID)tool_sock_close(httpd_sb, lsock);
-        return -1;
-    }
-
-    if (tool_sock_listen(httpd_sb, lsock, HTTPD_BACKLOG) != 0)
-    {
-        tool_error("cannot listen on port %ld: %s", (LONG)port,
-                   (LONG)tool_sock_errstr(tool_sock_errno(httpd_sb)));
+        err = tool_sock_errno(httpd_sb);
+        if (!v4_next || err != TOOL_EAFNOSUPPORT)
+            tool_error("cannot listen on port %ld: %s", (LONG)port,
+                       (LONG)tool_sock_errstr(err));
         (VOID)tool_sock_close(httpd_sb, lsock);
         return -1;
     }
@@ -5815,6 +5811,7 @@ int main(int argc, char **argv)
     UWORD           port = 80;
     LONG            lsock;
     ULONG           i;
+    BOOL            wildcard6;
     char            dotted[TOOL_ADDR_STRLEN];
 
     (VOID)argv;
@@ -6116,7 +6113,22 @@ int main(int argc, char **argv)
     httpd_token_seed  = httpd_now();
     httpd_token_start = httpd_token_seed;
 
-    lsock = httpd_listen(&address, port);
+    wildcard6 = (BOOL)(args[ARG_ADDRESS] == 0 && TOOL_ADDR_IS6(&address));
+
+    lsock = httpd_listen(&address, port, wildcard6);
+
+    /* No ADDRESS means every address, and the IPv4 wildcard is every address
+       a library without IPv6 has.  The probe above can say yes and the
+       listener still be refused for its family: #338, "cannot listen (error
+       47)" out of S:User-Startup.  That is the same machine as one without
+       IPv6, so it is served the same way rather than not at all. */
+    if (lsock < 0 && wildcard6 &&
+        tool_sock_errno(httpd_sb) == TOOL_EAFNOSUPPORT)
+    {
+        tool_addr_v4(&address, 0);
+        lsock = httpd_listen(&address, port, FALSE);
+    }
+
     if (lsock < 0)
     {
         /* httpd_listen() closed the socket, and a close that succeeds
