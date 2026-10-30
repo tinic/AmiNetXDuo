@@ -203,6 +203,7 @@ void   ug_newlist(struct MinList *list);
 /* ug_context.c */
 void   ug_set_err(struct UserGroupBase *base, LONG err);
 void   ug_context_init(struct UserGroupBase *base);
+void   ug_copy_vectors(struct UserGroupBase *master, UBYTE *mem);
 void   ug_resolve_login(struct UserGroupBase *base);
 
 /* ug_db.c */
