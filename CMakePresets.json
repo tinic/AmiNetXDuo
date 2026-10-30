@@ -152,6 +152,10 @@
           "type": "BOOL",
           "value": "OFF"
         },
+        "AMINETXDUO_TCP_GSO": {
+          "type": "BOOL",
+          "value": "OFF"
+        },
         "AMINETXDUO_TCP_LOSS_PROBE": {
           "type": "BOOL",
           "value": "OFF"

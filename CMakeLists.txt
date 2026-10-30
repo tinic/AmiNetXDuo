@@ -1295,6 +1295,13 @@ if(NOT AMINETXDUO_TCP_RTT)
     add_compile_definitions(AMINETXDUO_TCP_RTT_OFF)
 endif()
 
+# Software segmentation trades code and a larger pool for fewer TCP calls.
+# The micro preset omits it; checksum and other interface capabilities remain.
+option(AMINETXDUO_TCP_GSO "Batch TCP segments on capable interfaces" ON)
+if(AMINETXDUO_TCP_GSO)
+    add_compile_definitions(AMINETXDUO_TCP_GSO)
+endif()
+
 # RFC 5827 early retransmit: below four segments in flight, three duplicate
 # acknowledgments cannot happen, so the threshold drops to what the flight can
 # reach.  No layout change, but a with/without measurement wants the whole tree

@@ -605,6 +605,10 @@ typedef struct AmiSocket
     ULONG                   as_SndTimeout;
     LONG                    as_RcvBuf;      /* SO_RCVBUF, as the caller set  */
     LONG                    as_SndBuf;      /* SO_SNDBUF, as the caller set  */
+    /* Zero until queue pressure enables automatic TX growth. The deadline
+       bounds retry work to once per measured RTT, in ami_millis units. */
+    ULONG                   as_AutoTxDepth;
+    ULONG                   as_AutoTxNext;
     LONG                    as_LingerOn;
     LONG                    as_LingerTime;
     LONG                    as_Ttl;
@@ -1017,6 +1021,7 @@ VOID       bsd_bpf_zone_read(VOID);
 /* socket.c, the receive window this machine can afford right now. */
 ULONG      ami_bsd_tcp_window(struct AmiSocketBase *base);
 VOID       bsd_tcp_window_settle(NX_TCP_SOCKET *tcp, ULONG rtt_ms);
+VOID       bsd_tcp_tx_autotune(NX_TCP_SOCKET *tcp, ULONG pending_bytes);
 struct AmiSana2If;
 AMIGA_ASM_ARGS VOID bsd_tcp_window_recap(NX_IP *ip, struct AmiSana2If *sana);
 

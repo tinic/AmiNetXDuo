@@ -417,6 +417,10 @@ ULONG _nx_amiga_handshake_millis(VOID);
    NX_INTERFACE and NX_PACKET layouts, so every translation unit must see it. */
 #define NX_ENABLE_INTERFACE_CAPABILITY
 
+#ifndef AMINETXDUO_TCP_GSO
+#define NX_DISABLE_TCP_GSO
+#endif
+
 /* Ours, not upstream's: third_party/netxduo branch
    amiga-ipv4-broadcast-loopback, where it is off by default. */
 #define NX_ENABLE_IP_BROADCAST_LOOPBACK

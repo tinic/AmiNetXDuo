@@ -8,6 +8,7 @@
 #include "nx_api.h"
 #include "nx_ip.h"
 #include "nx_udp.h"
+#include "nx_tcp.h"
 #include "nx_packet.h"
 
 #include <stdio.h>
@@ -264,6 +265,88 @@ static UINT h_send_and_drain(ULONG destination, const char *label,
     return delivered;
 }
 
+#ifdef NX_ENABLE_INTERFACE_CAPABILITY
+/* Exercise real packet allocation/copy, IP IDs and the MTU dispatch gate.
+   A valid local segmentation template must never become IP fragments. */
+static VOID h_tcp_gso_dispatch(VOID)
+{
+    NX_PACKET *packet, *copy, *invalid, *repair;
+    NX_TCP_HEADER *tcp;
+    NX_TCP_GSO_INFO *info;
+    UCHAR payload[3 * 1460 + 17];
+    ULONG id, word, free_before, dropped, cap;
+    UINT sent;
+    NX_INTERFACE *iface = &h_ip.nx_ip_interface[0];
+    free_before = h_pool.nx_packet_pool_available;
+    cap = iface -> nx_interface_capability_flag;
+    iface -> nx_interface_capability_flag |= NX_INTERFACE_CAPABILITY_TCP_GSO | NX_INTERFACE_CAPABILITY_IPV4_TX_CHECKSUM;
+    memset(payload, 0x5a, sizeof(payload));
+    h_check(_nx_packet_allocate(&h_pool, &packet, NX_TCP_GSO_PACKET, NX_NO_WAIT) == NX_SUCCESS,
+            "allocate explicit GSO headroom from actual pool");
+    h_check(_nx_packet_data_append(packet, payload, sizeof(payload), &h_pool, NX_NO_WAIT) == NX_SUCCESS,
+            "append aggregate across actual pool chain");
+    packet -> nx_packet_prepend_ptr -= sizeof(NX_TCP_HEADER);
+    packet -> nx_packet_length += sizeof(NX_TCP_HEADER);
+    tcp = (NX_TCP_HEADER *)packet -> nx_packet_prepend_ptr;
+    memset(tcp, 0, sizeof(*tcp));
+    word = (5UL << 28) | 0x00180000UL; /* ACK and PSH. */
+    NX_CHANGE_ULONG_ENDIAN(word);
+    tcp -> nx_tcp_header_word_3 = word;
+    info = (NX_TCP_GSO_INFO *)packet -> nx_packet_data_start;
+    info -> version = NX_TCP_GSO_VERSION;
+    info -> flags = 0;
+    info -> mss = 1460;
+    info -> offset = 0;
+    info -> length = 0;
+    packet -> nx_packet_interface_capability_flag = NX_INTERFACE_CAPABILITY_TCP_GSO;
+    packet -> nx_packet_address.nx_packet_interface_ptr = iface;
+    packet -> nx_packet_ip_version = NX_IP_VERSION_V4;
+    id = h_ip.nx_ip_packet_id;
+    h_check(_nx_ip_header_add(&h_ip, packet, H_OUR_IP, H_OTHER_HOST, NX_IP_NORMAL, 64, NX_IP_TCP,
+                             NX_DONT_FRAGMENT) == NX_SUCCESS, "build actual GSO IP template");
+    h_check(_nx_packet_tcp_gso_segments(packet) == 4, "template describes four wire datagrams");
+    h_check(_nx_ip_checksum_compute(packet, NX_IP_VERSION_V4, 20, NX_NULL, NX_NULL) == 0xffff,
+            "GSO template has a complete IPv4 checksum despite physical offload");
+    h_check(h_ip.nx_ip_packet_id == id + 4, "each GSO child reserves its own IPv4 ID");
+    h_check(_nx_packet_copy(packet, &copy, &h_pool, NX_NO_WAIT) == NX_SUCCESS,
+            "copy actual chained aggregate with headroom");
+    h_check(_nx_packet_copy(packet, &invalid, &h_pool, NX_NO_WAIT) == NX_SUCCESS,
+            "copy malformed-template test packet");
+    h_check(_nx_packet_tcp_gso_segments(copy) == 4 &&
+            memcmp(copy -> nx_packet_data_start, packet -> nx_packet_data_start, sizeof(*info)) == 0,
+            "packet copy preserves versioned segmentation metadata and capability");
+    h_check(_nx_packet_copy(packet, &repair, &h_pool, NX_NO_WAIT) == NX_SUCCESS,
+            "copy an explicit zero-pool repair template");
+    info = (NX_TCP_GSO_INFO *)repair -> nx_packet_data_start;
+    info -> flags = NX_TCP_GSO_REPAIR;
+    info -> offset = 1460;
+    info -> length = 1460;
+    h_check(_nx_packet_tcp_gso_segments(repair) == 1, "repair range requests exactly one physical datagram");
+    repair -> nx_packet_prepend_ptr += 20;
+    repair -> nx_packet_length -= 20;
+    repair -> nx_packet_ip_header_length = 0;
+    id = h_ip.nx_ip_packet_id;
+    h_check(_nx_ip_header_add(&h_ip, repair, H_OUR_IP, H_OTHER_HOST, NX_IP_NORMAL, 64, NX_IP_TCP,
+                             NX_DONT_FRAGMENT) == NX_SUCCESS && h_ip.nx_ip_packet_id == id + 1,
+            "repair range reserves one fresh IP ID rather than full aggregate IDs");
+    _nx_packet_release(repair);
+    _nx_packet_release(packet);
+    iface -> nx_interface_address_mapping_needed = NX_FALSE;
+    sent = h_wire_sends;
+    dropped = h_ip.nx_ip_send_packets_dropped;
+    _nx_ip_driver_packet_send(&h_ip, copy, H_OTHER_HOST, NX_DONT_FRAGMENT, H_OTHER_HOST);
+    h_check(h_wire_sends == sent + 1 && h_ip.nx_ip_send_packets_dropped == dropped,
+            "validated aggregate bypasses MTU fragmentation to capable driver");
+    ((NX_TCP_GSO_INFO *)invalid -> nx_packet_data_start) -> flags = 2;
+    _nx_ip_driver_packet_send(&h_ip, invalid, H_OTHER_HOST, NX_DONT_FRAGMENT, H_OTHER_HOST);
+    h_check(h_wire_sends == sent + 1 && h_ip.nx_ip_send_packets_dropped == dropped + 1,
+            "invalid metadata cannot bypass MTU gate or reach driver");
+    h_check(h_pool.nx_packet_pool_available == free_before, "GSO dispatch and rejected copy return every pool buffer");
+    iface -> nx_interface_address_mapping_needed = NX_TRUE;
+    iface -> nx_interface_capability_flag = cap;
+}
+#endif
+
 int main(void)
 {
     UINT status;
@@ -367,6 +450,9 @@ int main(void)
     printf("  10.0.0.42        ->  %u delivered locally\n", delivered);
     h_check(delivered == 0, "a unicast to another host is not delivered here");
 
+#ifdef NX_ENABLE_INTERFACE_CAPABILITY
+    h_tcp_gso_dispatch();
+#endif
     printf("%lu checks, %lu failures\n", h_checks, h_failures);
 
     return (h_failures == 0) ? 0 : 1;
