@@ -755,6 +755,14 @@ VOID bsd_BeginInterfaceConfig(register struct AddressAllocationMessage *aam __as
 
     aam->aam_InterfaceName[sizeof(aam->aam_InterfaceName) - 1] = '\0';
 
+    /* No stack, no interface: answered before anything is claimed. */
+    ip = bsd_stack_ip(SocketBase);
+    if (ip == NULL)
+    {
+        bsd_aam_reply(aam, AAMR_InterfaceNotKnown);
+        return;
+    }
+
     rc = netstack_interface_claim(aam->aam_InterfaceName, &index);
     if (rc != AMI_NET_OK)
     {
@@ -762,7 +770,6 @@ VOID bsd_BeginInterfaceConfig(register struct AddressAllocationMessage *aam __as
         return;
     }
 
-    ip = bsd_stack_ip(SocketBase);
     nxif = &ip->nx_ip_interface[index];
 
     if (nxif->nx_interface_address_mapping_needed == 0 ||
