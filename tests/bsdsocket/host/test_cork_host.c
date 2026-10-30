@@ -1461,8 +1461,13 @@ static void t_nonblocking(void)
     s->as_Nx.tcp.nx_tcp_socket_connect_mss          = 100;
     s->as_Nx.tcp.nx_tcp_socket_transmit_sent_count  = 0;
     s->as_Nx.tcp.nx_tcp_socket_tx_outstanding_bytes = 800;
+#ifdef AMINETXDUO_TCP_GSO
     CHECK(bsd_writable(s) == FALSE && s->as_TxWait == 1,
           "a full segment and no byte credit: not writable");
+#else
+    CHECK(bsd_writable(s) == TRUE,
+          "without GSO advertised capability does not impose aggregate byte credit");
+#endif
     s->as_Nx.tcp.nx_tcp_socket_tx_outstanding_bytes = 700;
     CHECK(bsd_writable(s) == TRUE, "credit again: writable");
     h_eth.nx_interface_capability_flag = 0;

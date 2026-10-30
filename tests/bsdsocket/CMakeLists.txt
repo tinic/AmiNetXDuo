@@ -1200,4 +1200,30 @@ if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SIZEOF_VOID_P EQUAL 4)
 
     add_test(NAME cork_small_writes COMMAND test_cork)
     add_test(NAME cork_small_writes_fastpath COMMAND test_cork_fast)
+
+    # Exercise the ordinary segment path even when the shipping/default
+    # configuration enables GSO. Keep the same real product sources and
+    # assertions; only the feature macro differs.
+    foreach(_gso_target IN ITEMS test_transfer test_cork test_cork_fast)
+        get_target_property(_gso_sources ${_gso_target} SOURCES)
+        add_executable(${_gso_target}_no_gso ${_gso_sources})
+        target_include_directories(${_gso_target}_no_gso PRIVATE
+            ${BSD_HOST32_INCLUDES})
+        target_compile_options(${_gso_target}_no_gso PRIVATE
+            -include "${CMAKE_CURRENT_SOURCE_DIR}/host/shim/host_prelude.h"
+            -UAMINETXDUO_TCP_GSO)
+        target_compile_definitions(${_gso_target}_no_gso PRIVATE
+            ${BSD_HOST32_DEFINES})
+        if(NOT _gso_target STREQUAL "test_transfer")
+            target_compile_definitions(${_gso_target}_no_gso PRIVATE
+                AMINETXDUO_TCP_CORK)
+        endif()
+        if(_gso_target STREQUAL "test_cork_fast")
+            target_compile_definitions(${_gso_target}_no_gso PRIVATE
+                AMINETXDUO_TCP_CORK_FASTPATH)
+        endif()
+    endforeach()
+    add_test(NAME transfer_scatter_gather_no_gso COMMAND test_transfer_no_gso)
+    add_test(NAME cork_small_writes_no_gso COMMAND test_cork_no_gso)
+    add_test(NAME cork_small_writes_fastpath_no_gso COMMAND test_cork_fast_no_gso)
 endif()
