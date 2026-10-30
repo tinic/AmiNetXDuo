@@ -25,7 +25,11 @@
 #include "dp8390.h"
 #include "genet_ring.h"     /* the run's reclaim rule, as genet_tx_run */
 
-#ifdef AMINETXDUO_TX_BATCH
+/* Built with netdev_tx.c, so only with AMINETXDUO_TX_BATCH
+   (src/netdev/CMakeLists.txt). */
+#ifndef AMINETXDUO_TX_BATCH
+#error "test_netdev_tx.c is built only with AMINETXDUO_TX_BATCH"
+#endif
 
 static int failures;
 static int checks;
@@ -993,13 +997,3 @@ int main(void)
     return failures == 0 ? 0 : 1;
 }
 
-#else /* !AMINETXDUO_TX_BATCH */
-
-/* Built without TX_BATCH: netdev_tx.c is empty and the write path is the
-   one in netdev_device.c, which no host test reaches. */
-int main(void)
-{
-    printf("netdev tx: built without AMINETXDUO_TX_BATCH, nothing to test\n");
-    return 0;
-}
-#endif /* AMINETXDUO_TX_BATCH */
