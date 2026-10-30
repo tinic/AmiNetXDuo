@@ -67,6 +67,28 @@ void ug_strncpy(char *dst, const char *src, ULONG size)
     dst[i] = '\0';
 }
 
+/*
+ * CopyMem() and CacheClearU() for ug_copy_vectors().  `shim_unflushed` is set
+ * by a copy and cleared by a flush, so a copy with no flush after it -- the
+ * #383 defect -- and a flush placed before the copy both leave it set.
+ */
+static int shim_copies;
+static int shim_flushes;
+static int shim_unflushed;
+
+void CopyMem(APTR source, APTR dest, ULONG size)
+{
+    memmove(dest, source, size);
+    shim_copies++;
+    shim_unflushed = 1;
+}
+
+void CacheClearU(void)
+{
+    shim_flushes++;
+    shim_unflushed = 0;
+}
+
 /* ---------------------------------------------------------------- harness */
 
 static int checks;
@@ -123,6 +145,49 @@ static void global_add(struct UgGlobal *g, struct UserGroupBase *base)
 
 /* getcredentials(NULL) and getcredentials(self) are the same answer, and it is
    the opener's own block -- not a copy. */
+/*
+ * An opener's base is a copy of the master's jump table, and a jump table is
+ * code.  The copy must be flushed out of the caches before the opener jumps
+ * through it, or a 68040/060 runs what was at that address before (#383).
+ */
+static void test_opener_vectors_are_flushed(void)
+{
+    /* Laid out as ug_LibOpen() does it: one allocation, the base NEG bytes
+       in.  44 vectors keep NEG a multiple of 8, so the base is aligned on
+       the host too. */
+    enum { NEG = 44 * 6, SIZE = NEG + sizeof(struct UserGroupBase) };
+    UBYTE *master_block = calloc(1, SIZE);
+    UBYTE *child_block  = calloc(1, SIZE);
+    struct UserGroupBase *master;
+    ULONG i;
+
+    CHECK(master_block != NULL && child_block != NULL);
+    if (master_block == NULL || child_block == NULL)
+    {
+        free(master_block);
+        free(child_block);
+        return;
+    }
+    master = (struct UserGroupBase *)(master_block + NEG);
+
+    for (i = 0; i < NEG; i++)
+        master_block[i] = (UBYTE)(0x4E + i);
+    master->lib.lib_NegSize = NEG;
+    master->lib.lib_Version = 4;
+
+    shim_copies = shim_flushes = shim_unflushed = 0;
+    ug_copy_vectors(master, child_block);
+
+    CHECK(shim_copies == 1);
+    CHECK(shim_flushes >= 1);
+    CHECK(shim_unflushed == 0);
+    CHECK(memcmp(child_block, master_block, NEG + sizeof(struct Library)) == 0);
+    CHECK(((struct Library *)(child_block + NEG))->lib_NegSize == NEG);
+
+    free(master_block);
+    free(child_block);
+}
+
 static void test_self_and_null(void)
 {
     struct UgGlobal      g;
@@ -300,6 +365,7 @@ int main(void)
     test_stale_task_pointer_is_not_dereferenced();
     test_other_opener_is_copied();
     test_empty_child_list();
+    test_opener_vectors_are_flushed();
 
     CHECK(stub_require_passwd_calls > 0);   /* the lazy resolve did run */
 

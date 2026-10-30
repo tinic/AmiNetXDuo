@@ -41,6 +41,11 @@ static inline ULONG SetSignal(ULONG new_signals, ULONG signal_set)
     return old;
 }
 
+/* Defined by a test that links a caller: ug_copy_vectors() in ug_context.c
+   copies a jump table and must flush after it. */
+void CopyMem(APTR source, APTR dest, ULONG size);
+void CacheClearU(void);
+
 static inline void Forbid(void) { ++shim_forbid_depth; }
 static inline void Permit(void) { --shim_forbid_depth; }
 

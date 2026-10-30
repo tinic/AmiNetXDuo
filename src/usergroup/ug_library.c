@@ -154,7 +154,7 @@ static struct UserGroupBase *ug_LibOpen(UG_A6)
      * is the private state of this opener, and stays as ami_alloc() left it:
      * zero.
      */
-    CopyMem((APTR)((UBYTE *)master - neg), mem, neg + sizeof(struct Library));
+    ug_copy_vectors(master, mem);
 
     child = (struct UserGroupBase *)(mem + neg);
     child->lib.lib_Node.ln_Succ = NULL;

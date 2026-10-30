@@ -34,6 +34,24 @@ void ug_set_err(struct UserGroupBase *base, LONG err)
     }
 }
 
+/* ------------------------------------------------------ opener's vectors, */
+
+/*
+ * The jump table plus the Library header of `master`, copied to the start of
+ * `mem`.  The table is code: on a 68040/060 the copy can still sit in the
+ * copyback data cache, and the instruction cache can hold whatever was at
+ * that address before, so the opener's first jsr runs stale bytes -- Guru
+ * 80000004 in ixnet's ug_SetupContextTagList() call (#383).  MakeLibrary()
+ * flushes for the same reason, and so does bsd_child_create().
+ */
+void ug_copy_vectors(struct UserGroupBase *master, UBYTE *mem)
+{
+    ULONG neg = master->lib.lib_NegSize;
+
+    CopyMem((APTR)((UBYTE *)master - neg), mem, neg + sizeof(struct Library));
+    CacheClearU();
+}
+
 /* --------------------------------------------------------------- context, */
 
 void ug_context_init(struct UserGroupBase *base)
