@@ -148,7 +148,8 @@ TABLE = {
                                                                                         # arm (off the in-order path)
     "nx_tcp_packet_process.c":           [("__nx_tcp_packet_process",           546)],  # 502
     "nx_tcp_socket_packet_process.c":    [("__nx_tcp_socket_packet_process",    515)],  # 474
-    "nx_tcp_socket_state_ack_check.c":   [("__nx_tcp_socket_state_ack_check",   604)],  # 556
+    # Reviewed GSO/byte-credit path: exact 69-instruction increase approved by turo, 2026-10-29.
+    "nx_tcp_socket_state_ack_check.c":   [("__nx_tcp_socket_state_ack_check",   673)],  # 556
 }
 
 try:
