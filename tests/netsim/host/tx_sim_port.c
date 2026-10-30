@@ -121,7 +121,9 @@ VOID _tx_thread_stack_build(TX_THREAD *thread_ptr, VOID (*function_ptr)(VOID))
 
     (VOID)function_ptr;
 
-    thread_ptr->tx_thread_sim_live = 0;
+    /* Live before the host thread exists, so it never reads the flag while
+       this writes it; taken back if the thread cannot be made. */
+    thread_ptr->tx_thread_sim_live = SIM_LIVE;
     pthread_cond_init(&thread_ptr->tx_thread_sim_run, NULL);
 
     /* NetX Duo's receive path nests deep enough that the host default for
@@ -130,8 +132,11 @@ VOID _tx_thread_stack_build(TX_THREAD *thread_ptr, VOID (*function_ptr)(VOID))
     pthread_attr_setstacksize(&attr, 1024UL * 1024UL);
 
     if (pthread_create(&thread_ptr->tx_thread_sim_host, &attr,
-                       sim_thread_main, thread_ptr) == 0)
-        thread_ptr->tx_thread_sim_live = SIM_LIVE;
+                       sim_thread_main, thread_ptr) != 0)
+    {
+        thread_ptr->tx_thread_sim_live = 0;
+        pthread_cond_destroy(&thread_ptr->tx_thread_sim_run);
+    }
 
     pthread_attr_destroy(&attr);
 
