@@ -103,6 +103,32 @@ ULONG ami_bsd_tcp_tx_flight_depth(ULONG bps, ULONG rtt_ms, ULONG mss,
     return (bytes < quota) ? bytes : quota;
 }
 
+ULONG ami_bsd_tcp_rx_auto_ceiling(ULONG pool_packets, ULONG payload)
+{
+    if (pool_packets < (ULONG)BSD_TCP_WINDOW_BIG_POOL)
+        return 0UL;
+    return ami_bsd_tcp_budget(pool_packets, payload);
+}
+
+ULONG ami_bsd_tcp_rx_auto_mark(ULONG window)
+{
+    return window - (window >> 2);
+}
+
+ULONG ami_bsd_tcp_rx_auto_grow(ULONG window, ULONG elapsed_ms, ULONG rtt_ms,
+                               ULONG room)
+{
+    ULONG want;
+
+    /* Slower than a round trip: the sender is not filling the window. */
+    if (rtt_ms == 0UL || elapsed_ms > rtt_ms)
+        return window;
+    want = (window > 0x7FFFFFFFUL) ? 0xFFFFFFFFUL : window << 1;
+    if (want > room)
+        want = room;
+    return (want > window) ? want : window;
+}
+
 ULONG ami_bsd_tcp_window_fit(ULONG window, ULONG hw_bytes, ULONG mss)
 {
     ULONG frame;

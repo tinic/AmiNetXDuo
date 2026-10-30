@@ -528,7 +528,9 @@ host_test_targets() { # builddir
 #      (#354): two NetX Duo stacks over a simulated link (all hosts).
 #      590 with netsim_tcp_shallow150k (#354): the 150 KB queue a repair
 #      retransmission was lost in (all hosts).
-HOST_TESTS_EXPECTED=590
+#      591 with netsim_tcp_wan (#354): 500 Mbit/s at 40 ms both ways, the
+#      receive window autotuning grows (all hosts).
+HOST_TESTS_EXPECTED=591
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,

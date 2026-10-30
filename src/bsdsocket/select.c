@@ -93,6 +93,14 @@ static VOID bsd_tcp_receive_notify(NX_TCP_SOCKET *socket_ptr)
     ami_budget_notify(ami_budget_clock());
 #endif
 
+#ifdef NX_ENABLE_TCP_WINDOW_SCALING
+    /* Receive autotuning: the mark has arrived (socket.c). */
+    if (sock != NULL && sock->as_RxAutoMark != 0UL &&
+        socket_ptr->nx_tcp_socket_rx_sequence - sock->as_RxAutoSeq >=
+            sock->as_RxAutoMark)
+        bsd_tcp_rx_autotune(socket_ptr);
+#endif
+
 #ifdef AMINETXDUO_RX_DIRECT_COMPLETE
     if (sock != NULL && sock->as_RxDState == BSD_RXD_ARMED)
         bsd_rxdirect_pump(sock, FALSE);

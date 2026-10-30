@@ -159,26 +159,32 @@ ULONG ami_bsd_tcp_window(struct AmiSocketBase *base)
  * bsd_tcp_window_grow() decides otherwise.
  */
 static VOID bsd_tcp_window_maximum(struct AmiSocketBase *base,
-                                   NX_TCP_SOCKET *tcp)
+                                   AmiSocket *sock)
 {
 #ifdef NX_ENABLE_TCP_WINDOW_SCALING
     NX_PACKET_POOL *pool = bsd_stack_pool(base);
     NX_IP          *ip   = bsd_stack_ip(base);
+    ULONG           share, ceiling;
 
     if (pool == NULL || ip == NULL)
         return;                         /* create left it at the window */
 
     /* The same consumer count the window itself was drawn against: this
-       socket is still CLOSED and is not among them. */
-    tcp->nx_tcp_socket_rx_window_maximum =
-        ami_bsd_tcp_window_max_for(pool->nx_packet_pool_total,
-                                   pool->nx_packet_pool_payload_size,
-                                   bsd_tcp_consumer_count(ip));
+       socket is still CLOSED and is not among them.  The scale is
+       negotiated for the autotuning ceiling where the pool has one. */
+    share = ami_bsd_tcp_window_max_for(pool->nx_packet_pool_total,
+                                       pool->nx_packet_pool_payload_size,
+                                       bsd_tcp_consumer_count(ip));
+    ceiling = ami_bsd_tcp_rx_auto_ceiling(pool->nx_packet_pool_total,
+                                          pool->nx_packet_pool_payload_size);
+    sock->as_RxShare = share;
+    sock->as_Nx.tcp.nx_tcp_socket_rx_window_maximum =
+        (ceiling > share) ? ceiling : share;
 #else
     /* Without the scale option there is no field and nothing to grow to:
        sixteen bits is the ceiling and the socket was created at it. */
     (VOID)base;
-    (VOID)tcp;
+    (VOID)sock;
 #endif
 }
 
@@ -367,9 +373,16 @@ VOID bsd_tcp_window_settle(NX_TCP_SOCKET *tcp, ULONG rtt_ms)
     AmiSocket    *sock = (AmiSocket *)tcp->nx_tcp_socket_reserved_ptr;
     ULONG bps  = (sana != NULL) ? ami_sana2_get_bps(sana) : 0UL;
     ULONG grow = ami_sana2_get_tcp_grow_rtt(sana);  /* 0 = built-in line */
-    ULONG want = ami_bsd_tcp_window_settle(tcp->nx_tcp_socket_rx_window_default,
-                                           bsd_tcp_window_top(tcp), bps,
-                                           rtt_ms, grow);
+    ULONG top  = bsd_tcp_window_top(tcp);
+    ULONG want;
+
+#ifdef NX_ENABLE_TCP_WINDOW_SCALING
+    /* The share, not the autotuning ceiling the scale was negotiated for. */
+    if (sock != NULL && sock->as_RxShare != 0UL && sock->as_RxShare < top)
+        top = sock->as_RxShare;
+#endif
+    want = ami_bsd_tcp_window_settle(tcp->nx_tcp_socket_rx_window_default,
+                                     top, bps, rtt_ms, grow);
 
     if (sock != NULL)
     {
@@ -387,7 +400,79 @@ VOID bsd_tcp_window_settle(NX_TCP_SOCKET *tcp, ULONG rtt_ms)
                          : 1UL);
     if (sana != NULL)
         bsd_tcp_window_recap(tcp->nx_tcp_socket_ip_ptr, sana);
+
+#ifdef NX_ENABLE_TCP_WINDOW_SCALING
+    /* Autotuning where the card does not bound the window and nobody sized
+       it: a long path on a fast card, no TCPWANWINDOW, no SO_RCVBUF. */
+    if (sock != NULL)
+    {
+        sock->as_RxAutoMark = 0UL;
+        if (sana != NULL && sock->as_RcvBuf == 0 && rtt_ms != 0UL &&
+            !ami_bsd_tcp_window_burst_bound(bps, rtt_ms, grow) &&
+            ami_sana2_get_tcp_wan_window(sana) == 0UL &&
+            tcp->nx_tcp_socket_rx_window_default <
+                tcp->nx_tcp_socket_rx_window_maximum)
+        {
+            sock->as_RxAutoSeq    = tcp->nx_tcp_socket_rx_sequence;
+            sock->as_RxAutoMillis = ami_millis();
+            sock->as_RxAutoMark   = ami_bsd_tcp_rx_auto_mark(
+                                        tcp->nx_tcp_socket_rx_window_default);
+        }
+    }
+#endif
 }
+
+#ifdef NX_ENABLE_TCP_WINDOW_SCALING
+/*
+ * Receive autotuning (bsdsocket_window.h): the mark has arrived.  IP
+ * thread, from the receive notify, like the settle.  The room is the pool's
+ * receive budget less what the other receivers hold.
+ */
+VOID bsd_tcp_rx_autotune(NX_TCP_SOCKET *tcp)
+{
+    AmiSocket      *sock = (AmiSocket *)tcp->nx_tcp_socket_reserved_ptr;
+    NX_IP          *ip   = tcp->nx_tcp_socket_ip_ptr;
+    NX_PACKET_POOL *pool = ip->nx_ip_default_packet_pool;
+    NX_TCP_SOCKET  *other = ip->nx_ip_tcp_created_sockets_ptr;
+    ULONG           count = ip->nx_ip_tcp_created_sockets_count;
+    ULONG           now   = ami_millis();
+    ULONG           cur   = tcp->nx_tcp_socket_rx_window_default;
+    ULONG           room, held = 0UL, want, i;
+
+    room = tcp->nx_tcp_socket_rx_window_maximum;
+    if (pool != NX_NULL)
+    {
+        ULONG budget = ami_bsd_tcp_budget(pool->nx_packet_pool_total,
+                                          pool->nx_packet_pool_payload_size);
+
+        for (i = 0; i < count && other != NX_NULL; i++)
+        {
+            if (other != tcp && bsd_tcp_draws(other->nx_tcp_socket_state))
+                held += other->nx_tcp_socket_rx_window_default;
+            other = other->nx_tcp_socket_created_next;
+        }
+        budget = (budget > held) ? budget - held : 0UL;
+        if (room > budget)
+            room = budget;
+    }
+    if ((room >> tcp->nx_tcp_rcv_win_scale_value) > 65535UL)
+        room = 65535UL << tcp->nx_tcp_rcv_win_scale_value;
+
+    want = ami_bsd_tcp_rx_auto_grow(cur, now - sock->as_RxAutoMillis,
+                                    sock->as_SettleRtt, room);
+    if (want > cur)
+    {
+        tcp->nx_tcp_socket_rx_window_current += want - cur;
+        tcp->nx_tcp_socket_rx_window_default  = want;
+        sock->as_SettleWant = want;
+    }
+
+    sock->as_RxAutoSeq    = tcp->nx_tcp_socket_rx_sequence;
+    sock->as_RxAutoMillis = now;
+    sock->as_RxAutoMark   = (want < tcp->nx_tcp_socket_rx_window_maximum)
+                          ? ami_bsd_tcp_rx_auto_mark(want) : 0UL;
+}
+#endif
 
 /*
  * What the card behind `sana` holds changed while the unit was online -- a
@@ -1899,7 +1984,7 @@ LONG bsd_socket(register LONG domain   __asm("d0"),
         {
             bsd_tcp_seed_isn(&sock->as_Nx.tcp);
             bsd_tcp_keepalive_default(&sock->as_Nx.tcp);
-            bsd_tcp_window_maximum(SocketBase, &sock->as_Nx.tcp);
+            bsd_tcp_window_maximum(SocketBase, sock);
             bsd_tcp_rx_queue_cap(&sock->as_Nx.tcp);
             bsd_tcp_tx_queue_default(SocketBase, &sock->as_Nx.tcp);
         }
@@ -2272,7 +2357,7 @@ static BOOL bsd_listen_park_one(struct AmiSocketBase *base, AmiSocket *sock)
     bsd_tcp_seed_isn(&spare->as_Nx.tcp);
     bsd_tcp_tx_queue_default(base, &spare->as_Nx.tcp);
     bsd_tcp_keepalive_default(&spare->as_Nx.tcp);
-    bsd_tcp_window_maximum(base, &spare->as_Nx.tcp);
+    bsd_tcp_window_maximum(base, spare);
     bsd_tcp_rx_queue_cap(&spare->as_Nx.tcp);
 
     spare->as_Flags    |= ASF_INCOMING | ASF_SERVER;
@@ -2483,7 +2568,7 @@ LONG bsd_listen(register LONG sock_fd __asm("d0"),
     {
         bsd_tcp_seed_isn(&incoming->as_Nx.tcp);
         bsd_tcp_keepalive_default(&incoming->as_Nx.tcp);
-        bsd_tcp_window_maximum(SocketBase, &incoming->as_Nx.tcp);
+        bsd_tcp_window_maximum(SocketBase, incoming);
         bsd_tcp_rx_queue_cap(&incoming->as_Nx.tcp);
         bsd_tcp_tx_queue_default(SocketBase, &incoming->as_Nx.tcp);
     }
