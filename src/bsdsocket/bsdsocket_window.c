@@ -129,6 +129,24 @@ ULONG ami_bsd_tcp_rx_auto_grow(ULONG window, ULONG elapsed_ms, ULONG rtt_ms,
     return (want > window) ? want : window;
 }
 
+static BOOL bsd_tcp_fast_start(ULONG pool_packets, ULONG bps)
+{
+    return (pool_packets >= (ULONG)BSD_TCP_WINDOW_BIG_POOL &&
+            bps >= (ULONG)BSD_TCP_WINDOW_FAST_BPS) ? TRUE : FALSE;
+}
+
+ULONG ami_bsd_tcp_initial_window(ULONG pool_packets, ULONG bps)
+{
+    return bsd_tcp_fast_start(pool_packets, bps)
+           ? (ULONG)BSD_TCP_INITIAL_WINDOW : 0UL;
+}
+
+ULONG ami_bsd_tcp_abc_limit(ULONG pool_packets, ULONG bps)
+{
+    return bsd_tcp_fast_start(pool_packets, bps)
+           ? (ULONG)BSD_TCP_ABC_LIMIT : 0UL;
+}
+
 ULONG ami_bsd_tcp_window_fit(ULONG window, ULONG hw_bytes, ULONG mss)
 {
     ULONG frame;

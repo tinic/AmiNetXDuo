@@ -757,6 +757,13 @@ static VOID ns_stack(UINT side, ULONG address)
     if (status == NX_SUCCESS)
         status = nx_tcp_enable(&ns_ip[side]);
 
+    /* bsd_tcp_window_recap(): the slow start a big pool behind a gigabit
+       card gets (bsdsocket_window.h, ami_bsd_tcp_initial_window). */
+    ns_ip[side].nx_ip_interface[0].nx_interface_tcp_initial_window =
+        (UCHAR)ami_bsd_tcp_initial_window(NS_POOL_PACKETS, NS_CARD_BPS);
+    ns_ip[side].nx_ip_interface[0].nx_interface_tcp_abc_limit =
+        (UCHAR)ami_bsd_tcp_abc_limit(NS_POOL_PACKETS, NS_CARD_BPS);
+
     /* Side 1 is the peer the A1200 transferred with, a Linux host: it
        acknowledges every second full segment (RFC 1122 4.2.3.2), where
        NetX Duo's receive ramp would stretch to the port's ceiling. */
