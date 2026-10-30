@@ -507,6 +507,15 @@ typedef struct AmiSocket
        part of the card back (socket.c, bsd_tcp_ring_sharers). */
     ULONG                   as_SharePass;
     ULONG                   as_ShareMillis;
+#ifdef NX_ENABLE_TCP_WINDOW_SCALING
+    /* Receive autotuning (bsdsocket_window.h, ami_bsd_tcp_rx_auto_grow):
+       the share the settle uses, then the sequence and ami_millis() the
+       current measurement started at and the bytes that end it (0 = off). */
+    ULONG                   as_RxShare;
+    ULONG                   as_RxAutoSeq;
+    ULONG                   as_RxAutoMillis;
+    ULONG                   as_RxAutoMark;
+#endif
 
     NXD_ADDRESS             as_LocalAddr;
     UINT                    as_LocalPort;
@@ -1022,6 +1031,9 @@ VOID       bsd_bpf_zone_read(VOID);
 ULONG      ami_bsd_tcp_window(struct AmiSocketBase *base);
 VOID       bsd_tcp_window_settle(NX_TCP_SOCKET *tcp, ULONG rtt_ms);
 VOID       bsd_tcp_tx_autotune(NX_TCP_SOCKET *tcp, ULONG pending_bytes);
+#ifdef NX_ENABLE_TCP_WINDOW_SCALING
+VOID       bsd_tcp_rx_autotune(NX_TCP_SOCKET *tcp);
+#endif
 struct AmiSana2If;
 AMIGA_ASM_ARGS VOID bsd_tcp_window_recap(NX_IP *ip, struct AmiSana2If *sana);
 

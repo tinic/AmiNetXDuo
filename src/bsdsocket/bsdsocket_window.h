@@ -281,4 +281,24 @@ ULONG ami_bsd_tcp_tx_free_packets(ULONG total, ULONG available,
 ULONG ami_bsd_tcp_tx_flight_depth(ULONG bps, ULONG rtt_ms, ULONG mss,
                                   ULONG quota);
 
+/*
+ * Receive autotuning on a long path, the receive half of the transmit
+ * autotune above (Linux tcp_rcv_space_adjust, FreeBSD tcp_autorcvbuf).
+ * #354, 39b9e8f5 on the A1200: the settled window held at 802,816 bytes, a
+ * quarter of the pool's budget, and download ran at 271 Mbit/s at 20 ms and
+ * 131 at 40 with the peer window-limited 94-98% of the time, where upload
+ * ran 442 and 218.
+ *
+ * The scale is negotiated for the ceiling, the pool's whole receive budget
+ * (0 below BSD_TCP_WINDOW_BIG_POOL: no autotuning).  The window starts where
+ * the settle put it.  Once three quarters of it (the mark) has arrived, it
+ * doubles if that took no longer than the handshake's round trip -- the
+ * sender is filling the window -- bounded by `room`, the budget the other
+ * receivers leave.  It never shrinks.  Pure arithmetic, host-tested.
+ */
+ULONG ami_bsd_tcp_rx_auto_ceiling(ULONG pool_packets, ULONG payload);
+ULONG ami_bsd_tcp_rx_auto_mark(ULONG window);
+ULONG ami_bsd_tcp_rx_auto_grow(ULONG window, ULONG elapsed_ms, ULONG rtt_ms,
+                               ULONG room);
+
 #endif /* AMINETXDUO_BSDSOCKET_WINDOW_H */

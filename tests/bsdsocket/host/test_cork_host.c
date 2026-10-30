@@ -931,6 +931,10 @@ AmiSocket *bsd_incoming_first_ready(const AmiSocket *listener)
 VOID  bsd_tcp_window_settle(NX_TCP_SOCKET *tcp, ULONG rtt_ms)
 { (VOID)tcp; (VOID)rtt_ms; }
 ULONG ami_millis(VOID) { return 0UL; }
+#ifdef NX_ENABLE_TCP_WINDOW_SCALING
+/* Receive autotuning: the inert settle never arms it. */
+VOID  bsd_tcp_rx_autotune(NX_TCP_SOCKET *tcp) { (VOID)tcp; }
+#endif
 NX_IP *netstack_ip(VOID) { return NX_NULL; }
 NX_PACKET_POOL *netstack_pool(VOID) { return &h_pool; }
 

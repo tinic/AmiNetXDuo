@@ -779,6 +779,31 @@ static void l_tx_growth_is_backed_and_path_bounded(void)
             "large bandwidth-delay products saturate at real capacity");
 }
 
+static void m_rx_growth_is_measured_and_bounded(void)
+{
+    ULONG budget = ami_bsd_tcp_budget((ULONG)AMI_POOL_MAX_PACKETS,
+                                      (ULONG)AMI_POOL_PAYLOAD);
+
+    h_check(ami_bsd_tcp_rx_auto_ceiling((ULONG)AMI_POOL_MAX_PACKETS,
+                                        (ULONG)AMI_POOL_PAYLOAD) == budget,
+            "a big pool autotunes up to its whole receive budget");
+    h_check(ami_bsd_tcp_rx_auto_ceiling((ULONG)BSD_TCP_WINDOW_BIG_POOL - 1UL,
+                                        (ULONG)AMI_POOL_PAYLOAD) == 0UL,
+            "a pool under the big line autotunes");
+    h_check(ami_bsd_tcp_rx_auto_mark(802816UL) == 602112UL,
+            "the mark is not three quarters of the window");
+    h_check(ami_bsd_tcp_rx_auto_grow(802816UL, 20UL, 21UL, budget) == 1605632UL,
+            "a filled window within a round trip did not double");
+    h_check(ami_bsd_tcp_rx_auto_grow(802816UL, 22UL, 21UL, budget) == 802816UL,
+            "a window filled slower than a round trip grew");
+    h_check(ami_bsd_tcp_rx_auto_grow(2000000UL, 5UL, 21UL, budget) == budget,
+            "growth passed the room");
+    h_check(ami_bsd_tcp_rx_auto_grow(802816UL, 5UL, 21UL, 100000UL) == 802816UL,
+            "less room shrank the window");
+    h_check(ami_bsd_tcp_rx_auto_grow(802816UL, 0UL, 0UL, budget) == 802816UL,
+            "an unmeasured round trip grew the window");
+}
+
 int main(void)
 {
     printf("packet pool sizing and the window it backs, v0.25.5\n");
@@ -795,6 +820,7 @@ int main(void)
     j_the_pool_is_sized_from_the_fastest_class();
     k_the_transmit_queue_is_a_quarter_of_the_pool();
     l_tx_growth_is_backed_and_path_bounded();
+    m_rx_growth_is_measured_and_bounded();
 
     printf("%lu checks, %lu failures, %s\n",
            h_checks, h_failures, (h_failures == 0UL) ? "PASS" : "FAIL");

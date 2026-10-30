@@ -312,6 +312,10 @@ LONG bsd_errno_from_nx(UINT status) { return (LONG)status; }
 VOID  bsd_tcp_window_settle(NX_TCP_SOCKET *tcp, ULONG rtt_ms)
 { (VOID)tcp; (VOID)rtt_ms; }
 ULONG ami_millis(VOID) { return 0UL; }
+#ifdef NX_ENABLE_TCP_WINDOW_SCALING
+/* Receive autotuning: the inert settle never arms it. */
+VOID  bsd_tcp_rx_autotune(NX_TCP_SOCKET *tcp) { (VOID)tcp; }
+#endif
 
 #ifdef AMINETXDUO_TCP_CORK
 /* The cork's hooks in select.c.  cork.c and its interplay with select.c are

@@ -155,6 +155,16 @@ static const NsScenario ns_scenarios[] =
       { 150000000ULL, 10 * NS_MS, 150000, 0 },
       { 150000000ULL, 10 * NS_MS, 0, 0 },
       32UL * 1024UL * 1024UL, 0, 850, 500 * NS_MS, 1050 },
+
+    /* A long fat path both ways round, 300 Mbit/s at 40 ms: 1.5 MB in
+       flight, more than the 1 MB window the settle gives a 4,096-packet
+       pool.  39b9e8f5 held the receiver at that window, 697/683 permille
+       (#354: the A1200's download at 40 ms, 131 Mbit/s); receive
+       autotuning has to grow it. */
+    { "wan",
+      { 300000000ULL, 20 * NS_MS, 0, 0 },
+      { 300000000ULL, 20 * NS_MS, 0, 0 },
+      64UL * 1024UL * 1024UL, 1, 850, 500 * NS_MS, 0 },
 };
 
 /* Slow start, printed and not yet asserted: two NetX Duo stacks at their
@@ -171,6 +181,12 @@ typedef struct NsEnd
     UINT            sends;
     ULONG64         connect_ns;
     ULONG           settled;        /* the window the establish settled    */
+    ULONG           rx_share;       /* bsdsocket's as_RxShare, as_RxAuto*  */
+    ULONG           auto_seq;
+    ULONG           auto_ms;
+    ULONG           auto_mark;
+    ULONG           grown;          /* the largest window autotuning set   */
+    ULONG           rtt_ms;         /* bsdsocket's as_SettleRtt            */
     UINT            failed;
     const char     *why;
 } NsEnd;
@@ -225,8 +241,7 @@ static VOID ns_establish_notify(NX_TCP_SOCKET *tcp)
            ? (ULONG)((netsim_now_ns() - e->connect_ns) / NS_MS)
            : tcp->nx_tcp_socket_handshake_rtt;
 
-    want = ami_bsd_tcp_window_settle(cur, tcp->nx_tcp_socket_rx_window_maximum,
-                                     NS_CARD_BPS, rtt_ms, 0);
+    want = ami_bsd_tcp_window_settle(cur, e->rx_share, NS_CARD_BPS, rtt_ms, 0);
 
     tcp->nx_tcp_socket_rx_window_cap = NX_TCP_RX_WINDOW_CAP_NONE;
 
@@ -237,6 +252,70 @@ static VOID ns_establish_notify(NX_TCP_SOCKET *tcp)
     }
 
     e->settled = tcp->nx_tcp_socket_rx_window_default;
+    e->rtt_ms  = rtt_ms;
+
+    /* bsd_tcp_window_settle(): receive autotuning on a long path. */
+    e->auto_mark = 0;
+    if (rtt_ms != 0 && !ami_bsd_tcp_window_burst_bound(NS_CARD_BPS, rtt_ms, 0) &&
+        e->settled < tcp->nx_tcp_socket_rx_window_maximum)
+    {
+        e->auto_seq  = tcp->nx_tcp_socket_rx_sequence;
+        e->auto_ms   = (ULONG)(netsim_now_ns() / NS_MS);
+        e->auto_mark = ami_bsd_tcp_rx_auto_mark(e->settled);
+    }
+
+    /* bsd_tcp_tx_autotune(): a long path's transmit queue grows to two
+       flights out of the free pool, as a write that fills it asks for. */
+    if (!ami_bsd_tcp_window_burst_bound(NS_CARD_BPS, rtt_ms, 0))
+    {
+        NX_PACKET_POOL *pool = &ns_pool[e->side];
+        ULONG mss   = tcp->nx_tcp_socket_connect_mss;
+        ULONG depth = ami_bsd_tcp_tx_flight_depth(NS_CARD_BPS, rtt_ms, mss,
+                          ami_bsd_tcp_tx_free_packets(pool->nx_packet_pool_total,
+                              pool->nx_packet_pool_available,
+                              mss ? e->settled / mss : 0));
+
+        if (depth > tcp->nx_tcp_socket_transmit_queue_maximum)
+        {
+            tcp->nx_tcp_socket_transmit_queue_maximum         = depth;
+            tcp->nx_tcp_socket_transmit_queue_maximum_default = depth;
+        }
+    }
+}
+
+/* bsd_tcp_receive_notify() and bsd_tcp_rx_autotune(): one connection, so
+   the room is the pool's whole receive budget. */
+static VOID ns_receive_notify(NX_TCP_SOCKET *tcp)
+{
+    NsEnd          *e    = (NsEnd *)tcp->nx_tcp_socket_reserved_ptr;
+    NX_PACKET_POOL *pool = &ns_pool[e->side];
+    ULONG           now, cur, room, want;
+
+    if (e->auto_mark == 0 ||
+        tcp->nx_tcp_socket_rx_sequence - e->auto_seq < e->auto_mark)
+        return;
+
+    now  = (ULONG)(netsim_now_ns() / NS_MS);
+    cur  = tcp->nx_tcp_socket_rx_window_default;
+    room = ami_bsd_tcp_budget(pool->nx_packet_pool_total,
+                              pool->nx_packet_pool_payload_size);
+    if (room > tcp->nx_tcp_socket_rx_window_maximum)
+        room = tcp->nx_tcp_socket_rx_window_maximum;
+    if ((room >> tcp->nx_tcp_rcv_win_scale_value) > 65535UL)
+        room = 65535UL << tcp->nx_tcp_rcv_win_scale_value;
+
+    want = ami_bsd_tcp_rx_auto_grow(cur, now - e->auto_ms, e->rtt_ms, room);
+    if (want > cur)
+    {
+        tcp->nx_tcp_socket_rx_window_current += want - cur;
+        tcp->nx_tcp_socket_rx_window_default  = want;
+        e->grown = want;
+    }
+
+    e->auto_seq  = tcp->nx_tcp_socket_rx_sequence;
+    e->auto_ms   = now;
+    e->auto_mark = (want < tcp->nx_tcp_socket_rx_window_maximum)
+                 ? ami_bsd_tcp_rx_auto_mark(want) : 0;
 }
 
 /* bsd_socket(SOCK_STREAM): the window, its maximum, the queue caps. */
@@ -257,9 +336,11 @@ static UINT ns_socket(NsEnd *e)
         return status;
 
     tcp->nx_tcp_socket_keepalive_enabled  = NX_FALSE;
-    tcp->nx_tcp_socket_rx_window_maximum  =
-        ami_bsd_tcp_window_max_for(pool->nx_packet_pool_total,
-                                   pool->nx_packet_pool_payload_size, 0);
+    e->rx_share = ami_bsd_tcp_window_max_for(pool->nx_packet_pool_total,
+                                             pool->nx_packet_pool_payload_size, 0);
+    cap = ami_bsd_tcp_rx_auto_ceiling(pool->nx_packet_pool_total,
+                                      pool->nx_packet_pool_payload_size);
+    tcp->nx_tcp_socket_rx_window_maximum = (cap > e->rx_share) ? cap : e->rx_share;
 
     cap = tcp->nx_tcp_socket_rx_window_maximum / NS_RX_MSS_REF + NS_RX_QUEUE_SLACK;
     if (cap < NX_TCP_MAXIMUM_RX_QUEUE)
@@ -273,6 +354,10 @@ static UINT ns_socket(NsEnd *e)
         tcp->nx_tcp_socket_transmit_queue_maximum;
 
     tcp->nx_tcp_socket_reserved_ptr = e;
+
+    status = nx_tcp_socket_receive_notify(tcp, ns_receive_notify);
+    if (status != NX_SUCCESS)
+        return status;
 
     return nx_tcp_socket_establish_notify(tcp, ns_establish_notify);
 }
@@ -540,7 +625,7 @@ static ULONG ns_run_phase(const char *label, UINT from, UINT port)
            " rx_gap_ms=%llu rx_gap_at_ms=%llu tx_gap_ms=%llu tx_gap_at_ms=%llu"
            " excess_bytes=%lu"
            " drops_queue=%lu drops_loss=%lu peak_queue=%lu rx_nobuf=%lu"
-           " nx_retransmits=%lu window=%lu elapsed_ms=%llu\n",
+           " nx_retransmits=%lu window=%lu grown=%lu tx_queue=%lu elapsed_ms=%llu\n",
            label, from, (unsigned long)ph->bytes, (unsigned long)ph->got,
            (unsigned)(!ph->corrupt), (unsigned long)steady, (unsigned long)all,
            (unsigned long long)st->data_bytes, (unsigned long long)st->retx_bytes,
@@ -554,6 +639,8 @@ static ULONG ns_run_phase(const char *label, UINT from, UINT port)
            (unsigned long)st->peak_queue, (unsigned long)netsim_rx_nobuf(from ^ 1U),
            (unsigned long)ph->retransmits,
            (unsigned long)ph->end[from ^ 1U].settled,
+           (unsigned long)ph->end[from ^ 1U].grown,
+           (unsigned long)ph->end[from].tcp.nx_tcp_socket_transmit_queue_maximum,
            (unsigned long long)((ph->done_ns - start) / NS_MS));
 
     {
@@ -717,7 +804,7 @@ int main(int argc, char **argv)
     if (ns_sc == NULL)
     {
         printf("netsim=FAIL reason=usage"
-               " want=clean|bottleneck|loss|reverse|shallow|shallow150k"
+               " want=clean|bottleneck|loss|reverse|shallow|shallow150k|wan"
                " [queue_bytes]\n");
         return 2;
     }
