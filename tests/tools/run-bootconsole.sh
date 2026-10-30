@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # `httpd <drawer> -C` OUT OF S:User-Startup, WITH NO WORKBENCH.
+# And a second httpd whose IPv6 wildcard the library refuses (#338).
 # SPDX-License-Identifier: MIT
 
 set -euo pipefail
@@ -22,6 +23,7 @@ done
 case "$BUILD" in /*) ;; *) BUILD="$ROOT/$BUILD" ;; esac
 
 PORT="${AMINETXDUO_BOOTCONSOLE_PORT:-8891}"
+PORT4=$((PORT + 1))
 
 # What the screen that arrives late is, and what the session must therefore
 # report.  Fixed here rather than spelled out three times below.
@@ -37,10 +39,11 @@ NC="$BUILD/src/tools/nc"
 BSD="$BUILD/src/bsdsocket/bsdsocket.library"
 ANXNET="$BUILD/src/netdev/anxnet.device"
 CHIPSCREEN="$BUILD/tests/perf/chipscreen"
+MONPROBE="$BUILD/tests/tools/MonProbe"
 CONSOLE_HTML="$ROOT/src/tools/web/console.html"
 
 for f in "$SMOKE" "$HTTPD" "$FETCH" "$NC" "$BSD" "$ANXNET" "$CHIPSCREEN" \
-         "$CONSOLE_HTML"; do
+         "$MONPROBE" "$CONSOLE_HTML"; do
     [ -f "$f" ] || { echo "missing $f, build the tree first" >&2; exit 2; }
 done
 
@@ -58,6 +61,7 @@ cp "$HTTPD"        "$STAGE/httpd"
 cp "$FETCH"        "$STAGE/fetch"
 cp "$NC"           "$STAGE/nc"
 cp "$CHIPSCREEN"   "$STAGE/chipscreen"
+cp "$MONPROBE"     "$STAGE/MonProbe"
 cp "$CONSOLE_HTML" "$STAGE/console.html"
 printf 'hello from the amiga\n' > "$STAGE/greeting.txt"
 cp -R "$ROOT/tests/netstack/devs/Internet" "$STAGE/devs/Internet"
@@ -102,6 +106,12 @@ wait 8
 &SYS:nc 127.0.0.1 $PORT CRLF <DH0:wsreq.txt >DH0:session.bin
 wait 20
 SYS:fetch http://127.0.0.1:$PORT/greeting.txt TO DH0:fetched-screen.txt
+# ---- #338: the library reports IPv6 and refuses its wildcard -------------
+&SYS:MonProbe DENY6 SECS 30 >DH0:deny6.txt
+wait 3
+&SYS:httpd DH0: $PORT4 >DH0:httpd-v4.txt
+wait 10
+SYS:fetch http://127.0.0.1:$PORT4/greeting.txt TO DH0:fetched-v4.txt
 EOF
 
 export AMINETXDUO_RUN_TAG="${AMINETXDUO_RUN_TAG:-bootconsole}"
@@ -113,7 +123,8 @@ set +e
     -I "$BUILD/src/tools/AddNetInterface" \
     "$SMOKE" \
     "$STAGE/devs" "$STAGE/libs" "$STAGE/httpd" "$STAGE/fetch" "$STAGE/nc" \
-    "$STAGE/chipscreen" "$STAGE/console.html" "$STAGE/greeting.txt" \
+    "$STAGE/chipscreen" "$STAGE/MonProbe" "$STAGE/console.html" \
+    "$STAGE/greeting.txt" \
     "$STAGE/wsreq.txt" "$STAGE/commands.txt"
 RUN_RC=$?
 set -e
@@ -226,6 +237,34 @@ if have fetched-screen.txt &&
     ok "screen_arrives_serves"
 else
     nope "screen_arrives_serves"
+fi
+
+echo
+echo "============================================================"
+echo "  #338: IPv6 refused for the wildcard, the server takes IPv4"
+echo "============================================================"
+
+echo "---- httpd with every IPv6 bind refused ----"
+cat "$HD/httpd-v4.txt" 2>/dev/null || echo "(none)"
+echo
+
+if grep -q "^deny6=armed" "$HD/deny6.txt" 2>/dev/null; then
+    ok "deny6_armed"
+else
+    nope "deny6_armed (no hook, so nothing below was refused)"
+fi
+
+if grep -q "cannot listen\|no socket" "$HD/httpd-v4.txt" 2>/dev/null ||
+   ! grep -q "^Serving " "$HD/httpd-v4.txt" 2>/dev/null; then
+    nope "v6_refused_still_serving (httpd stopped or reported the refusal)"
+else
+    ok "v6_refused_still_serving"
+fi
+
+if have fetched-v4.txt && cmp -s "$STAGE/greeting.txt" "$HD/fetched-v4.txt"; then
+    ok "v6_refused_serves_ipv4"
+else
+    nope "v6_refused_serves_ipv4"
 fi
 
 echo
