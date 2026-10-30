@@ -3938,13 +3938,21 @@
         (source (tackon S_ICONS (cat TL_N ".info")))
         (dest   TL_D)
         (optional "force"))
-      (copyfiles
-        (prompt ("Installing the %s icon into %s" TL_N TL_D))
-        (help   TL_H)
-        (source (tackon S_ICONS (cat TL_N ".info")))
-        (dest   TL_D)
-        (noposition)
-        (optional "force"))))
+      (
+        (copyfiles
+          (prompt ("Installing the %s icon into %s" TL_N TL_D))
+          (help   TL_H)
+          (source (tackon S_ICONS (cat TL_N ".info")))
+          (dest   TL_D)
+          (optional "force"))
+        ; The archive's position is the AmiNetXDuo drawer's.  (noposition)
+        ; on copyfiles acts on (infos) companions only, not on a .info
+        ; copied by name, so the position is cleared here: Workbench then
+        ; puts the icon beside the drawer's own instead of over them or
+        ; outside the window.
+        (tooltype
+          (dest (tackon TL_D TL_N))
+          (noposition)))))
 
 (set TL_N "NetPrefs")
 (set TL_D (if DRAWER_LAYOUT D_ROOT "SYS:Prefs"))

@@ -9,6 +9,8 @@
 #include <proto/exec.h>
 #include <proto/locale.h>
 
+#include "tooltz.h"
+
 #define HTTPD_AMIGA_EPOCH  252460800UL
 
 /* proto/locale.h's inlines require this symbol. */
@@ -32,7 +34,11 @@ VOID httpd_read_gmt_offset(VOID)
     locale = OpenLocale(NULL);          /* NULL: the current preferences */
     if (locale != NULL)
     {
-        httpd_gmt_west = (LONG)locale->loc_GMTOffset;
+        BPTR prefs = Lock((CONST_STRPTR)"ENV:Sys/locale.prefs", ACCESS_READ);
+
+        httpd_gmt_west = (LONG)tooltz_minutes_west(locale->loc_GMTOffset,
+                                                   prefs != (BPTR)0);
+        if (prefs != (BPTR)0) UnLock(prefs);
         CloseLocale(locale);
     }
 
