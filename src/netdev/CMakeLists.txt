@@ -33,7 +33,6 @@ set(NETDEV_CORE_SOURCES
     netdev_direct.c     # claim/completion half of the single-copy RX path
     netdev_verify.c     # stateless IPv4/IPv6 checksum verdict
     netdev_queue.c      # queued IORequest invariants, host-testable
-    netdev_tx.c         # the write path and its pump, host-testable
     netdev_cmds.c       # the S2_* table
     netdev_event.c      # S2_ONEVENT delivery and S2_PacketFilter, host-testable
     netdev_watchdog.c   # progress clock for a full transmit ring
@@ -47,6 +46,15 @@ set(NETDEV_CORE_SOURCES
     netdev_fingerprint.c # stable machine/card input to that address
     "${CMAKE_SOURCE_DIR}/src/net68k/n68k_iocopy.S"
     "${CMAKE_SOURCE_DIR}/src/net68k/n68k_iocopy.c")
+
+# The batched write path (AMINETXDUO_TX_BATCH) is a module of its own,
+# compiled only with the option, after netdev_queue.c where it sat;
+# without it netdev_device.c keeps the write path it had before.
+if(AMINETXDUO_TX_BATCH AND AMINETXDUO_TCP_GSO)
+    list(FIND NETDEV_CORE_SOURCES netdev_queue.c _netdev_tx_at)
+    math(EXPR _netdev_tx_at "${_netdev_tx_at} + 1")
+    list(INSERT NETDEV_CORE_SOURCES ${_netdev_tx_at} netdev_tx.c)
+endif()
 
 # anxnet.device: every Amiga card.  Zorro boards, the A600/A1200 PCMCIA slot
 # and the fixed-address X-Surf 500; the DP8390 family, the LANCE, the
@@ -811,7 +819,7 @@ if(NOT CMAKE_CROSSCOMPILING)
     # write (ANXD_S2F_TX_BATCH) paused at the head of the queue and resumed
     # in order, answered once, aborted by a close; and the masked pump pass
     # held to NETDEV_PUMP_FRAMES with what it leaves still going out.
-    # Without TX_BATCH netdev_tx.c is empty and the test only says so.
+    # Only with TX_BATCH, as netdev_tx.c itself.
     if(AMINETXDUO_TX_BATCH AND AMINETXDUO_TCP_GSO)
         add_executable(test_netdev_tx
             test/test_netdev_tx.c
@@ -819,21 +827,19 @@ if(NOT CMAKE_CROSSCOMPILING)
             netdev_queue.c
             netdev_unit.c
             netdev_mcaf.c)
-    else()
-        add_executable(test_netdev_tx test/test_netdev_tx.c)
+
+        target_include_directories(test_netdev_tx PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}"
+            "${CMAKE_SOURCE_DIR}/include"
+            "${CMAKE_SOURCE_DIR}/src/sana2"
+            "${CMAKE_CURRENT_SOURCE_DIR}/test/shim"
+            "${CMAKE_SOURCE_DIR}/tests/sana2/host/shim"
+            "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+
+        target_compile_options(test_netdev_tx PRIVATE -Wall -Wextra)
+
+        add_test(NAME netdev_tx COMMAND test_netdev_tx)
     endif()
-
-    target_include_directories(test_netdev_tx PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}"
-        "${CMAKE_SOURCE_DIR}/include"
-        "${CMAKE_SOURCE_DIR}/src/sana2"
-        "${CMAKE_CURRENT_SOURCE_DIR}/test/shim"
-        "${CMAKE_SOURCE_DIR}/tests/sana2/host/shim"
-        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
-
-    target_compile_options(test_netdev_tx PRIVATE -Wall -Wextra)
-
-    add_test(NAME netdev_tx COMMAND test_netdev_tx)
 
     # The private ABI is one size/version-gated TAG_USER record.  Keep its
     # parser host-visible so a field addition cannot silently make an old or
