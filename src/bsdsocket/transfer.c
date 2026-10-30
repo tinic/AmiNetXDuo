@@ -466,6 +466,11 @@ static ULONG bsd_send_gso_window(const NX_TCP_SOCKET *tcp)
     win = (win > tcp->nx_tcp_socket_tx_outstanding_bytes)
               ? win - tcp->nx_tcp_socket_tx_outstanding_bytes : 0;
 
+    /* The interface queue is stopped: the core holds the block whole, and
+       one built now would be cut into segments when it goes. */
+    if (NX_TCP_SOCKET_TX_QUEUE_STOPPED(tcp))
+        return 0;
+
 #ifdef NX_ENABLE_TCP_SACK
     if (NX_TCP_SACK_RECOVERY_ACTIVE(tcp))
     {

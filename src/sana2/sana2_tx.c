@@ -608,6 +608,30 @@ static UWORD ami_sana2_gso_frames(const AmiSana2If *iface, UWORD gso)
 #endif /* AMINETXDUO_TX_BATCH */
 
 /*
+ * Stop and wake the interface's transmit queue for NetX Duo
+ * (nx_interface_tx_queue_stopped): stopped at half the wait queue, woken at
+ * a quarter.  New TCP data then waits in its connection instead of
+ * overflowing this queue.  A write the full queue refused was a hole the
+ * peer reported and TCP had to repair: on Wi-Fi one connection's transmit
+ * queue (1024 segments) outran the 544 this interface holds, and the upload
+ * stalled for minutes.  Under Forbid(), in the region that changed the
+ * count: a decision made outside it could store a stale "stopped" after the
+ * queue had emptied, and an empty queue is never looked at again.
+ */
+static VOID ami_sana2_tx_flow(AmiSana2If *iface)
+{
+    NX_INTERFACE *nxif  = iface->interface_ptr;
+    UWORD         count = iface->tx_pend_count;
+
+    if (nxif == NX_NULL)
+        return;
+    if (count >= (UWORD)AMI_SANA2_TX_STOP_AT)
+        nxif->nx_interface_tx_queue_stopped = 1;
+    else if (count <= (UWORD)AMI_SANA2_TX_WAKE_AT)
+        nxif->nx_interface_tx_queue_stopped = 0;
+}
+
+/*
  * Abort anything still in flight and reap it.  AbortIO() is a request a driver
  * may decline; slot->req and its reply port live inside AmiSana2If, so
  * tx_orphaned stops ami_sana2_close() from freeing it.
@@ -656,6 +680,7 @@ VOID ami_sana2_tx_drain(AmiSana2If *iface)
                                           AMI_SANA2_TX_PEND);
             iface->tx_pend_count--;
         }
+        ami_sana2_tx_flow(iface);
         Permit();
 
         if (packet == NULL)
@@ -907,6 +932,7 @@ static BOOL ami_sana2_tx_enqueue(AmiSana2If *iface, NX_PACKET *packet,
             iface->tx_pend_count++;
         }
         queued = TRUE;
+        ami_sana2_tx_flow(iface);
     }
     Permit();
 
@@ -961,6 +987,7 @@ VOID ami_sana2_tx_kick(AmiSana2If *iface)
                 iface->tx_pend_head = (UWORD)((iface->tx_pend_head + 1) %
                                               AMI_SANA2_TX_PEND);
                 iface->tx_pend_count--;
+                ami_sana2_tx_flow(iface);
             }
         }
         Permit();
