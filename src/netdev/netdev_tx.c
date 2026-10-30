@@ -340,9 +340,13 @@ static VOID netdev_tx_owe(NetdevUnit *unit)
     Cause(&unit->nu_Soft);
 }
 
-/* A full-looking ring is asked about before anything is called stuck.  The
-   frames a run holds for company go to the chip first: held, they are
-   never retired, and a ring full of them waited for the blank's kick.
+/* A full-looking ring is asked about before anything is called stuck:
+   retire what the chip has finished, as before the batch work.  Only when
+   that frees nothing do the frames a run holds for company go to the chip
+   and the ring is asked again: held, they are never retired, and a ring
+   full of them would wait for the blank's kick.  Kicking first, on every
+   full-ring touch, broke the run's coalescing (b0: 84,000 kicks against
+   79,388).
    Inline: the test is every write's and was written at each site before;
    out of line it was one more call per ordinary write in the LTO image. */
 static inline VOID __attribute__((always_inline))
@@ -351,9 +355,13 @@ netdev_tx_reclaim_full(NetdevUnit *unit)
     if (unit->nu_Nic.txb_inuse >= unit->nu_Nic.txb_cnt &&
         unit->nu_Nic.tx_reclaim != NULL)
     {
-        if (unit->nu_Nic.tx_flush != NULL)
-            unit->nu_Nic.tx_flush(&unit->nu_Nic);
         (VOID)unit->nu_Nic.tx_reclaim(&unit->nu_Nic);
+        if (unit->nu_Nic.txb_inuse >= unit->nu_Nic.txb_cnt &&
+            unit->nu_Nic.tx_flush != NULL)
+        {
+            unit->nu_Nic.tx_flush(&unit->nu_Nic);
+            (VOID)unit->nu_Nic.tx_reclaim(&unit->nu_Nic);
+        }
     }
 }
 

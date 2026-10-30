@@ -259,8 +259,12 @@ static UWORD t_run(NetdevNic *nic, UWORD first, UWORD count,
     /* What genet_tx_run does before it counts its room. */
     if (genet_tx_run_reclaims(nic->txb_inuse, ring_size, count))
     {
-        t_flush(nic);
         (VOID)t_reclaim(nic);
+        if (nic->txb_inuse >= ring_size)
+        {
+            t_flush(nic);
+            (VOID)t_reclaim(nic);
+        }
     }
     room = (UWORD)(ring_size - nic->txb_inuse);
     if (count > room)
@@ -619,17 +623,48 @@ static void test_flush_before_reclaim(void)
 {
     struct IOSana2Req *io;
 
-    printf("netdev tx: held frames are kicked before the ring is called full\n");
+    printf("netdev tx: held frames are kicked only when nothing else frees\n");
+
+    /* Half the ring the chip has sent, half a run holding: the reclaim
+       frees room, and the held frames are not kicked for it. */
     fixture(4);
     unit.nu_Nic.txb_inuse = 4;
-    ring_held = 4;              /* a run's frames, unkicked */
+    ring_held = 2;              /* a run's frames, unkicked */
     io = mk(0, 2);
     netdev_tx_direct(&unit, io);
-    expect(norder >= 2 && order[0] == 'f' && order[1] == 'r',
-           "flush, then reclaim");
+    expect(norder >= 1 && order[0] == 'r' && flushes == 0,
+           "a reclaimable ring: reclaim, no extra kick");
     expect(nposted == 2 && replies == 0 &&
            (io->ios2_Req.io_Flags & IOF_QUICK) != 0,
            "and the batch goes out at once");
+
+    /* A ring full of held frames frees nothing until they are kicked:
+       kicked once, and the write goes out. */
+    fixture(4);
+    unit.nu_Nic.txb_inuse = 4;
+    ring_held = 4;
+    io = mk(0, 2);
+    netdev_tx_direct(&unit, io);
+    expect(norder >= 3 && order[0] == 'r' && order[1] == 'f' &&
+           order[2] == 'r' && flushes == 1,
+           "only held frames: reclaim, one kick, reclaim");
+    expect(nposted == 2 && replies == 0 &&
+           (io->ios2_Req.io_Flags & IOF_QUICK) != 0,
+           "and the batch goes out");
+
+    /* The same for an ordinary write. */
+    fixture(4);
+    unit.nu_Nic.txb_inuse = 4;
+    ring_held = 2;
+    io = mk(0, 0);
+    netdev_tx_direct(&unit, io);
+    expect(flushes == 0 && nposted == 1, "ordinary, reclaimable: no kick");
+    fixture(4);
+    unit.nu_Nic.txb_inuse = 4;
+    ring_held = 4;
+    io = mk(0, 0);
+    netdev_tx_direct(&unit, io);
+    expect(flushes == 1 && nposted == 1, "ordinary, all held: one kick");
 }
 
 /* A ring out of phase with the batches: 49 of 64 in use, all of them sent

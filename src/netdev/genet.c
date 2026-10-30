@@ -1703,10 +1703,17 @@ static UWORD genet_tx_run(NetdevNic *nic, UWORD first, UWORD count,
         return 0;
     }
 
+    /* Retire first; the held frames of a run are kicked here only when
+       nothing at all could be retired, else they leave with this run's
+       own kick below. */
     if (genet_tx_run_reclaims(nic->txb_inuse, GE_TX_RING, count))
     {
-        ge_tx_kick(nic);
         (VOID)ge_txintr(nic);
+        if (nic->txb_inuse >= GE_TX_RING)
+        {
+            ge_tx_kick(nic);
+            (VOID)ge_txintr(nic);
+        }
     }
     room = (UWORD)(GE_TX_RING - nic->txb_inuse);
     if (count > room)
