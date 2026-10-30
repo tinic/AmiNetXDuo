@@ -2147,6 +2147,7 @@ static void h_gso_fill(void)
 }
 
 /* Every send a block of `bytes`, marked, with a whole version 2 record. */
+#ifdef AMINETXDUO_TCP_GSO
 static int h_gso_block(unsigned n, ULONG bytes)
 {
     const NX_TCP_GSO_INFO *r = &h.send_recs[n];
@@ -2156,6 +2157,7 @@ static int h_gso_block(unsigned n, ULONG bytes)
            r->version == NX_TCP_GSO_VERSION && r->flags == 0 &&
            r->mss == 100 && r->offset == 0 && r->length == 0;
 }
+#endif
 
 /* Today's path: `n` sends of one segment each, none of them marked. */
 static int h_gso_none(unsigned n)
@@ -2175,6 +2177,7 @@ static int h_gso_none(unsigned n)
 
 static void t_gso_blocks(void)
 {
+#ifdef AMINETXDUO_TCP_GSO
     printf("transfer: a long write on a GSO interface goes as blocks\n");
 
     h_reset();
@@ -2229,6 +2232,28 @@ static void t_gso_blocks(void)
     CHECK(bsd_send(1, h_gso_buf, 400, 0, &h_base) == 400 &&
           h_gso_block(0, 200),
           "250 bytes of credit: a block of two segments");
+#else
+    static const ULONG lengths[] = { 1000, 550, 650, 199, 101, 100, 1 };
+    unsigned i;
+
+    printf("transfer: without GSO even a capable interface gets ordinary segments\n");
+    for (i = 0; i < sizeof(lengths) / sizeof(lengths[0]); i++)
+    {
+        ULONG len = lengths[i];
+        unsigned packets = (unsigned)((len + 99) / 100);
+
+        h_reset();
+        (VOID)h_gso_tcp();
+        h_gso_fill();
+        CHECK(bsd_send(1, h_gso_buf, (LONG)len, 0, &h_base) == (LONG)len &&
+              h_gso_none(packets), "ordinary allocations, MSS-sized sends, no GSO marks");
+        CHECK(h.send_lens[packets - 1] == (len - 1) % 100 + 1,
+              "the final ordinary segment has exactly the remaining bytes");
+        CHECK(h.wire_len == len && memcmp(h.wire, h_gso_buf, len) == 0,
+              "every caller byte is sent once and in order with GSO disabled");
+        CHECK(h.releases == 0, "successful ordinary sends leave no packet to release");
+    }
+#endif
 }
 
 /*
@@ -2248,10 +2273,18 @@ static void t_append_direct(void)
     h_reset();
     (VOID)h_gso_tcp();
     h_gso_fill();
+#ifdef AMINETXDUO_TCP_GSO
     CHECK(bsd_send(1, h_gso_buf, 1000, 0, &h_base) == 1000 &&
           h_gso_block(0, 400) && h.append_calls == 3,
           "three GSO blocks, each appended past the buffer");
+#else
+    CHECK(bsd_send(1, h_gso_buf, 1000, 0, &h_base) == 1000 &&
+          h_gso_none(10) && h.append_calls == 10,
+          "without GSO ten ordinary segments append past the buffer");
+#endif
     CHECK(h.nxe_appends == 0, "none of them through the wrapper");
+    CHECK(h.wire_len == 1000 && memcmp(h.wire, h_gso_buf, 1000) == 0,
+          "direct appends preserve all caller bytes in order");
 
     memset(&m, 0, sizeof(m));
     m.msg_iov    = iov;
@@ -2337,8 +2370,13 @@ static void t_gso_reserve(void)
     h_reset();
     (VOID)h_gso_tcp();
     h_pool.nx_packet_pool_available = 128 + 2;
+#ifdef AMINETXDUO_TCP_GSO
     CHECK(bsd_send(1, h_gso_buf, 400, 0, &h_base) == 400 && h_gso_block(0, 400),
           "the reserve and the block's packets free: a block");
+#else
+    CHECK(bsd_send(1, h_gso_buf, 400, 0, &h_base) == 400 && h_gso_none(4),
+          "without GSO enough reserve still means ordinary segments");
+#endif
 
     h_reset();
     (VOID)h_gso_tcp();
@@ -2360,6 +2398,7 @@ static void t_gso_reserve(void)
  * there into new packets, a second copy.  The stub moves no window, so every
  * block of the write sees the same one.
  */
+#ifdef AMINETXDUO_TCP_GSO
 static int h_gso_sizes(const ULONG *lens, const ULONG *marked, unsigned n)
 {
     unsigned i;
@@ -2375,9 +2414,11 @@ static int h_gso_sizes(const ULONG *lens, const ULONG *marked, unsigned n)
     }
     return 1;
 }
+#endif
 
 static void t_gso_window(void)
 {
+#ifdef AMINETXDUO_TCP_GSO
     static const ULONG l300[] = { 300, 300, 300, 100 };
     static const ULONG m300[] = { 1, 1, 1, 0 };
     static const ULONG l200[] = { 200, 200, 200, 200, 200 };
@@ -2464,11 +2505,57 @@ static void t_gso_window(void)
           h_gso_sizes(l300, m300, 4),
           "in SACK recovery: blocks of the PRR credit, 300");
 #endif
+#else
+    static const struct
+    {
+        ULONG cwnd, peer, outstanding, duplicates;
+    } cases[] = {
+        { 300, 1000000, 0, 0 }, { 1000000, 650, 300, 0 },
+        { 200, 1000000, 0, 0 }, { 100, 1000000, 0, 0 },
+        { 199, 1000000, 0, 0 }, { 1000000, 1000000, 1000000, 0 },
+        { 100, 1000000, 0, 1 }, { 100, 250, 0, 2 }
+    };
+    unsigned i;
+
+    printf("transfer: without GSO the core queues ordinary segments against its windows\n");
+    for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
+    {
+        NX_TCP_SOCKET *tcp;
+
+        h_reset();
+        tcp = &h_gso_tcp()->as_Nx.tcp;
+        tcp->nx_tcp_socket_tx_window_congestion = cases[i].cwnd;
+        tcp->nx_tcp_socket_tx_window_advertised = cases[i].peer;
+        tcp->nx_tcp_socket_tx_outstanding_bytes = cases[i].outstanding;
+        tcp->nx_tcp_socket_duplicated_ack_received = cases[i].duplicates;
+        h_gso_fill();
+        CHECK(bsd_send(1, h_gso_buf, 1000, 0, &h_base) == 1000 && h_gso_none(10),
+              "a capable interface's windows never enable GSO in an OFF build");
+        CHECK(h.wire_len == 1000 && memcmp(h.wire, h_gso_buf, 1000) == 0,
+              "window fallback preserves caller bytes and ordering");
+    }
+#ifdef NX_ENABLE_TCP_SACK
+    h_reset();
+    h_gso_tcp()->as_Nx.tcp.nx_tcp_socket_sack_permitted = NX_TRUE;
+    h_sock[1].as_Nx.tcp.nx_tcp_socket_fast_recovery = NX_TRUE;
+    h_sock[1].as_Nx.tcp.nx_tcp_socket_prr_recover_fs = 1000;
+    h_sock[1].as_Nx.tcp.nx_tcp_socket_prr_credit = 300;
+    CHECK(bsd_send(1, h_gso_buf, 1000, 0, &h_base) == 1000 && h_gso_none(10),
+          "SACK recovery also keeps ordinary packets when GSO is disabled");
+    CHECK(h.wire_len == 1000 && memcmp(h.wire, h_gso_buf, 1000) == 0,
+          "ordinary SACK recovery preserves every caller byte in order");
+#endif
+#endif /* AMINETXDUO_TCP_GSO */
 }
 
 /* What a block that did not all go credits: what went, as for a segment. */
 static void t_gso_short_and_break(void)
 {
+#ifdef AMINETXDUO_TCP_GSO
+    const ULONG first = 400, partial = 130, interrupted = 150;
+#else
+    const ULONG first = 100, partial = 30, interrupted = 15;
+#endif
     printf("transfer: a GSO write cut short reports what went\n");
 
     h_reset();
@@ -2476,12 +2563,15 @@ static void t_gso_short_and_break(void)
     h.send_plan[0] = NX_SUCCESS;
     h.send_plan[1] = NX_WINDOW_OVERFLOW;
     h.send_planned = 2;
-    h.send_trim    = 130;
-    CHECK(bsd_send(1, h_gso_buf, 1000, 0, &h_base) == 530,
-          "a block, then 130 bytes of the second, are credited");
-    CHECK(h.sent_bytes == 530 && h.releases == 1,
+    h.send_trim    = partial;
+    CHECK(bsd_send(1, h_gso_buf, 1000, 0, &h_base) == (LONG)(first + partial),
+          "the first packet and the accepted part of the second are credited");
+    CHECK(h.sent_bytes == first + partial && h.releases == 1,
           "the wire agrees, and the rest of the block is released");
     CHECK(h_sock[1].as_TxWait == 1, "and the next room posts FD_WRITE");
+#ifndef AMINETXDUO_TCP_GSO
+    CHECK(h_gso_none(2), "the partial write used only ordinary packets");
+#endif
 
     h_reset();
     (VOID)h_gso_tcp();
@@ -2497,7 +2587,7 @@ static void t_gso_short_and_break(void)
     (VOID)h_gso_tcp();
     h_base.sb_BreakMask = 1UL << 12;
     h.break_at_send = 1;
-    CHECK(bsd_send(1, h_gso_buf, 1000, 0, &h_base) == 400 && h.sends == 1,
+    CHECK(bsd_send(1, h_gso_buf, 1000, 0, &h_base) == (LONG)first && h.sends == 1,
           "a break after the first block returns the block");
 
     h_reset();
@@ -2505,9 +2595,9 @@ static void t_gso_short_and_break(void)
     h_base.sb_BreakMask = 1UL << 12;
     h.send_plan[0] = NX_WINDOW_OVERFLOW;
     h.send_planned = 1;
-    h.send_trim    = 150;
+    h.send_trim    = interrupted;
     h.break_at_send = 1;
-    CHECK(bsd_send(1, h_gso_buf, 1000, 0, &h_base) == 150 && h.releases == 1,
+    CHECK(bsd_send(1, h_gso_buf, 1000, 0, &h_base) == (LONG)interrupted && h.releases == 1,
           "a break while a block waits credits what of it went");
 }
 

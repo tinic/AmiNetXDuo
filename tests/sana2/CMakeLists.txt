@@ -133,6 +133,46 @@ target_compile_definitions(test_sana2_tx PRIVATE
 
 add_test(NAME sana2_tx COMMAND test_sana2_tx)
 
+# The same test built without AMINETXDUO_TX_BATCH, so the configuration the
+# micro profile ships (no batched transmit) is built and run on every host
+# CI pass, not only the default one: the product sources and assertions are
+# the target's own; only the feature macro differs (the _no_gso pattern of
+# tests/bsdsocket).
+if(NOT COMMAND anxd_add_no_batch_twin)
+    function(anxd_add_no_batch_twin target test_name)
+        get_target_property(_src ${target} SOURCES)
+        get_target_property(_inc ${target} INCLUDE_DIRECTORIES)
+        get_target_property(_opt ${target} COMPILE_OPTIONS)
+        get_target_property(_def ${target} COMPILE_DEFINITIONS)
+        get_target_property(_lib ${target} LINK_LIBRARIES)
+        get_target_property(_dir ${target} SOURCE_DIR)
+        set(_abs)
+        foreach(_s IN LISTS _src)
+            if(IS_ABSOLUTE "${_s}")
+                list(APPEND _abs "${_s}")
+            else()
+                list(APPEND _abs "${_dir}/${_s}")
+            endif()
+        endforeach()
+        add_executable(${target}_no_batch ${_abs})
+        if(_inc)
+            target_include_directories(${target}_no_batch PRIVATE ${_inc})
+        endif()
+        if(_opt)
+            target_compile_options(${target}_no_batch PRIVATE ${_opt})
+        endif()
+        target_compile_options(${target}_no_batch PRIVATE -UAMINETXDUO_TX_BATCH)
+        if(_def)
+            target_compile_definitions(${target}_no_batch PRIVATE ${_def})
+        endif()
+        if(_lib)
+            target_link_libraries(${target}_no_batch PRIVATE ${_lib})
+        endif()
+        add_test(NAME ${test_name}_no_batch COMMAND ${target}_no_batch)
+    endfunction()
+endif()
+anxd_add_no_batch_twin(test_sana2_tx sana2_tx)
+
 # ACKPACE: which acknowledgments sana2_ackpace.c holds and when it lets them
 # go, against an E-clock the test owns.  The send itself is the test's.
 add_executable(test_sana2_ackpace
@@ -314,3 +354,4 @@ if(AMINETXDUO_RX_VERIFY)
 endif()
 
 add_test(NAME sana2_device COMMAND test_sana2_device)
+anxd_add_no_batch_twin(test_sana2_device sana2_device)

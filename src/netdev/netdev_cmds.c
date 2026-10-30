@@ -964,7 +964,11 @@ VOID netdev_perform(NetdevOpener *op, struct IOSana2Req *io)
             if (unit->nu_InIsr == 0)
             {
                 unit->nu_InIsr = 1;
+#ifdef AMINETXDUO_TX_BATCH
+                (VOID)netdev_tx_service(unit);
+#else /* !AMINETXDUO_TX_BATCH */
                 (VOID)netdev_interrupt(unit);
+#endif /* AMINETXDUO_TX_BATCH */
                 unit->nu_InIsr = 0;
             }
             Enable();
@@ -1134,7 +1138,17 @@ BOOL netdev_abort(NetdevOpener *op, struct IOSana2Req *io)
     if (!found)
         was_event = found = cmd_dequeue(&op->op_Events, io);
     if (!found)
+#ifdef AMINETXDUO_TX_BATCH
+    {
+#endif /* AMINETXDUO_TX_BATCH */
         found = cmd_dequeue(&unit->nu_Writes, io);
+#ifdef AMINETXDUO_TX_BATCH
+        /* A batch paused at the head: what it posted is in the ring as the
+           device's own copies, and nothing of the opener's is kept. */
+        if (found)
+            netdev_tx_forget(unit, io);
+    }
+#endif /* AMINETXDUO_TX_BATCH */
     Enable();
 
     if (!found)
