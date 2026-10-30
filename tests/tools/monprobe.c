@@ -665,24 +665,106 @@ static VOID p_share_phase(struct Library *base)
     }
 }
 
+/* ------------------------------------------------------- DENY6 SECS ------ */
+
+/*
+ * Every IPv6 bind on the machine refused with EAFNOSUPPORT for SECS seconds,
+ * from whichever opener makes it: a library that reports IPv6 and still will
+ * not take the dual-stack wildcard (#338).  The family byte is at offset 1 in
+ * both sockaddr shapes.
+ */
+#define P_AF_INET6      28
+#define P_EAFNOSUPPORT  47
+
+static volatile LONG deny6_count;
+
+static LONG deny6_hook(register struct Hook *hook __asm("a0"),
+                       register APTR reserved __asm("a2"),
+                       register APTR message __asm("a1"))
+{
+    const struct BindMonitorMsg *bmm = (const struct BindMonitorMsg *)message;
+    const UBYTE                 *name;
+
+    (VOID)hook;
+    (VOID)reserved;
+
+    if (bmm == NULL || bmm->bmm_Name == NULL || bmm->bmm_NameLen < 2)
+        return 0;
+
+    name = (const UBYTE *)bmm->bmm_Name;
+    if (name[1] != (UBYTE)P_AF_INET6)
+        return 0;
+
+    deny6_count++;
+    return P_EAFNOSUPPORT;
+}
+
+static int deny6_run(struct Library *base, LONG secs)
+{
+    struct Hook hook;
+    ProbeEntry  entry;
+    LONG        rc;
+
+    entry.pe_Fn = deny6_hook;
+
+    hook.h_MinNode.mln_Succ = NULL;
+    hook.h_MinNode.mln_Pred = NULL;
+    hook.h_Entry            = entry.pe_Raw;
+    hook.h_SubEntry         = NULL;
+    hook.h_Data             = NULL;
+
+    rc = p_add_hook(base, MHT_Bind, &hook, NULL);
+    Printf((CONST_STRPTR)"deny6=%s\n", (LONG)((rc == 0) ? "armed" : "refused"));
+    (VOID)Flush(Output());
+    if (rc != 0)
+        return RETURN_FAIL;
+
+    Delay(secs * TICKS_PER_SECOND);
+
+    p_remove_hook(base, &hook);
+    Printf((CONST_STRPTR)"deny6_refused=%ld\n", deny6_count);
+
+    return RETURN_OK;
+}
+
 int main(void)
 {
     struct Library *base;
+    struct RDArgs  *rda;
     struct Hook     hook_a;
     struct Hook     hook_b;
     ProbeState      state_a;
     ProbeState      state_b;
     ProbeAddr       sa;
+    LONG            args[2] = { 0, 0 };
     LONG            rc;
     LONG            s;
     ULONG           i;
 
+    rda = ReadArgs((CONST_STRPTR)"DENY6/S,SECS/N", args, NULL);
+    if (rda == NULL)
+    {
+        Printf((CONST_STRPTR)"MonProbe: bad arguments\n");
+        return RETURN_FAIL;
+    }
+
     base = OpenLibrary((CONST_STRPTR)"bsdsocket.library", 4);
     if (base == NULL)
     {
+        FreeArgs(rda);
         Printf((CONST_STRPTR)"MonProbe: no bsdsocket.library\n");
         return RETURN_FAIL;
     }
+
+    if (args[0] != 0)
+    {
+        int code = deny6_run(base, (args[1] != 0) ? *(LONG *)args[1] : 30);
+
+        CloseLibrary(base);
+        FreeArgs(rda);
+        return code;
+    }
+    FreeArgs(rda);
 
     p_capability_phase(base);
     p_share_phase(base);

@@ -95,8 +95,24 @@ VOID bsd_runtime_close(VOID)
 
     if (bsd_usergroup_base != NULL)
     {
-        CloseLibrary(bsd_usergroup_base);
+        struct Library *ug = bsd_usergroup_base;
+        BOOL            last;
+
         bsd_usergroup_base = NULL;
+
+        /*
+         * Unloaded with this library when nothing else holds it, as a memory
+         * flush would: after NetShutdown the next stack must load its own
+         * (#383).  A base already marked LIBF_DELEXP expunges in its own
+         * close, and the pointer is gone after it.
+         */
+        Forbid();
+        last = (ug->lib_OpenCnt == 1 &&
+                (ug->lib_Flags & LIBF_DELEXP) == 0) ? TRUE : FALSE;
+        CloseLibrary(ug);
+        if (last)
+            RemLibrary(ug);
+        Permit();
     }
 
     if (DOSBase != NULL)

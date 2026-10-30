@@ -87,6 +87,11 @@ static void h_flush_reply(void)
     }
 }
 
+/* Another task that runs just before this write's BeginIO(): the kick's
+   launch preempted between its dequeue and the device (#354).  One shot. */
+static void (*h_before_write)(void);
+static NX_PACKET *h_order[8];
+static unsigned   h_order_n;
 /* For the GSO tests: every write posted, its slot's segment, and the frame a
    device that copies at BeginIO() time would have taken. */
 #define H_LOG       64
@@ -143,6 +148,17 @@ static void h_batch_more(UWORD n)
 
 VOID BeginIO(struct IORequest *req)
 {
+    if (req->io_Command != ANXD_CMD_TX_FLUSH && h_before_write != NULL)
+    {
+        void (*fn)(void) = h_before_write;
+
+        h_before_write = NULL;
+        fn();
+    }
+    if (req->io_Command != ANXD_CMD_TX_FLUSH &&
+        h_order_n < sizeof(h_order) / sizeof(h_order[0]))
+        h_order[h_order_n++] =
+            ((AmiTxSlot *)((struct IOSana2Req *)req)->ios2_Data)->packet;
     if (req->io_Command == ANXD_CMD_TX_FLUSH)
     {
         h_flushes++;
@@ -1443,6 +1459,40 @@ static void test_full_ring_queues_in_order(void)
             "and released every write that waited");
 }
 
+static void q_send_next(void)
+{
+    (void)q_send(Q_N + 1);
+}
+
+static void test_kick_launch_is_not_overtaken(void)
+{
+    UWORD i;
+
+    printf("sana2: a send while the kick launches a queued write goes "
+           "behind it\n");
+
+    fixture_init(FALSE, S2WireType_Ethernet);
+    for (i = 0; i < Q_N; i++)
+        (void)q_send(i);
+    h_check(q_send(Q_N) == NX_SUCCESS && iface.tx_pend_count == 1,
+            "a write waits behind the full ring");
+
+    /* Two slots come back; the reader's reap kicks the waiting write into
+       the first, and another task sends before that write reaches the
+       device, with the second slot free and nothing left in the queue. */
+    ReplyMsg(&iface.tx[3].req.ios2_Req.io_Message);
+    iface.tx[5].busy = FALSE;
+    h_order_n      = 0;
+    h_before_write = q_send_next;
+    ami_sana2_tx_reap(&iface);
+
+    h_check(h_order_n == 2, "both writes reached the device");
+    h_check(h_order[0] == &q_pkt[Q_N] && h_order[1] == &q_pkt[Q_N + 1],
+            "in the order they were sent");
+    h_check(iface.tx_pend_count == 0 && !iface.tx_kicking,
+            "nothing waits and the launcher flag is free");
+}
+
 /* ---------------------------------------------------------------- TCP GSO */
 #ifdef AMINETXDUO_TCP_GSO
 
@@ -2339,6 +2389,62 @@ static void test_gso_one_forbid_per_block(void)
     h_check(h_forbids == 4, "and one Forbid() per round of four slots");
 }
 
+/* The kick's race again with a GSO block as the other task's write: its
+   children go behind the write the kick has dequeued, per child or as one
+   batch (#354). */
+static NX_PACKET *k_gso_parent;
+
+static void k_send_gso(void)
+{
+    (void)ami_sana2_tx_send(&iface, k_gso_parent, AMI_ETHERTYPE_IPV4, 0xBC24,
+                            0x11EF103A);
+}
+
+static void test_kick_launch_is_not_overtaken_by_gso(void)
+{
+    int   batch;
+    UWORD i;
+
+    for (batch = 0; batch < 2; batch++)
+    {
+#ifndef AMINETXDUO_TX_BATCH
+        if (batch)
+            break;
+#endif
+        printf("sana2: a GSO block sent while the kick launches a queued "
+               "write goes behind it%s\n", batch ? " (batch)" : "");
+
+        fixture_init(FALSE, S2WireType_Ethernet);
+#ifdef AMINETXDUO_TX_BATCH
+        iface.tx_batch_ok = (UBYTE)batch;
+        h_batch_dev       = batch;
+#endif
+        for (i = 0; i < Q_N; i++)
+            (void)q_send(i);
+        h_check(q_send(Q_N) == NX_SUCCESS && iface.tx_pend_count == 1,
+                "a write waits behind the full ring");
+
+        k_gso_parent = gso_parent(32, 350, 100, 0x18, 1, 1, 37, g_odd_cuts, 5);
+        ReplyMsg(&iface.tx[3].req.ios2_Req.io_Message);
+        iface.tx[5].busy = FALSE;
+        h_order_n      = 0;
+        h_before_write = k_send_gso;
+        ami_sana2_tx_reap(&iface);
+
+        h_check(h_order_n == 2 && h_order[0] == &q_pkt[Q_N] &&
+                h_order[1] == k_gso_parent,
+                "the dequeued write first, then the block");
+        h_check(!iface.tx_kicking, "and the launcher flag is free");
+#ifdef AMINETXDUO_TX_BATCH
+        if (batch)
+            h_check(iface.tx_pend_count == 0, "the batch is one write");
+        else
+#endif
+            h_check(iface.tx_pend_count == 3 && h_seg_log[h_sends - 1] == 0,
+                    "child 0 out, three wait");
+    }
+}
+
 /* -------------------------------------------------------------- TX_BATCH */
 #ifdef AMINETXDUO_TX_BATCH
 
@@ -2764,6 +2870,7 @@ int main(void)
     test_run_flags_and_flushes();
 #endif
     test_full_ring_queues_in_order();
+    test_kick_launch_is_not_overtaken();
 
     test_pad_cooked_no_fusion();
     test_pad_cooked_with_fusion();
@@ -2796,6 +2903,7 @@ int main(void)
     test_gso_record_v1();
     test_gso_repair();
     test_gso_record_refused();
+    test_kick_launch_is_not_overtaken_by_gso();
 #ifdef AMINETXDUO_TX_BATCH
     test_batch_frames_identical();
     test_batch_stats_and_bounds();

@@ -72,6 +72,8 @@
 #             Installer falls back to InstallWiFi (answered), no Pi firmware
 #             is installed, and
 #             WirelessManager is started for prism2.device after the card.
+#             A commented-out supplicant line in S:User-Startup and
+#             NetWireless in SYS:WBStartup start none: it is still started.
 #   prism2pi  with -e wifi: the Pi Wi-Fi AND the Prism2 card are selected and
 #             the card is the primary interface (eth0).  One Wi-Fi at a
 #             time: the card is the Wi-Fi, the Pi Wi-Fi is not set up (no
@@ -1596,6 +1598,12 @@ FOREIGN_LINES=(
 if [ "$WIFI_MODE" = userstart ]; then
     FOREIGN_LINES+=("Run <>NIL: C:WirelessManager prism2.device")
 fi
+# -w prism2*: the same line commented out, as a user who moved to this stack
+# leaves it.  It starts nothing, so the written lines must still start
+# WirelessManager (GitHub #357).
+if [ "$PRISM2" = 1 ]; then
+    FOREIGN_LINES+=(";Run <>NIL: C:WirelessManager prism2.device")
+fi
 
 # Drawer mode is for a machine that keeps this stack in one drawer, and the
 # fixture is what another stack leaves behind on such a machine: everything
@@ -1886,6 +1894,17 @@ if [ "$STALE_PI_DRIVERS" = 1 ]; then
     chmod 755 "$HD/Devs/Networks/anxgenet.device" \
               "$HD/Devs/Networks/anxwifipi.device"
     echo "==> stale-install fixture: shipped Pi drivers, no Pi hardware"
+fi
+
+# -w prism2*: NetWireless in SYS:WBStartup, whose binary names
+# WirelessManager and starts none (GitHub #357).  No icon, so Workbench
+# never launches it here.
+if [ "$PRISM2" = 1 ]; then
+    _wbs=$(amiga_path WBStartup 2>/dev/null || true)
+    [ -n "$_wbs" ] || { _wbs="$HD/WBStartup"; mkdir -p "$_wbs"; }
+    cp "$UNPACK/AmiNetXDuo/C/NetWireless" "$_wbs/NetWireless"
+    chmod 755 "$_wbs/NetWireless"
+    echo "==> Wi-Fi fixture: NetWireless in SYS:WBStartup, a commented supplicant line"
 fi
 
 # -w keep and -w userwm: what a machine that already joins a Wi-Fi network
@@ -3528,7 +3547,9 @@ fi
 _sha256() { shasum -a 256 < "$1" | cut -d' ' -f1; }
 _sha1() { shasum < "$1" | cut -d' ' -f1; }
 _line() { # fixed text -> its first line number in S:Network-Startup, or empty
-    grep -Fnx -- "$1" "$NS_FILE" 2>/dev/null | head -1 | cut -d: -f1
+    # No match is an empty answer, not an exit: set -e ended the run here
+    # with no verdict when the lines were written commented.
+    { grep -Fnx -- "$1" "$NS_FILE" 2>/dev/null || true; } | head -1 | cut -d: -f1
 }
 WM_NS_ANY=0
 WM_NS_LIVE=0
