@@ -538,12 +538,10 @@ LONG tool_run_companion(const char *command, const char *argument,
                     (ULONG)output,
                     NP_StackSize, 8192UL,
                     TAG_DONE);
-    /* DOS owns these handles after a successful launch. */
-    if (rc == -1)
-    {
-        Close(input);
-        if (output != (BPTR)0) Close(output);
-    }
+    /* Synchronous, so the handles stay ours: only SYS_Asynch closes them.
+       Left open, the output file stays locked for the caller to read. */
+    Close(input);
+    if (output != (BPTR)0) Close(output);
     return rc;
 }
 
