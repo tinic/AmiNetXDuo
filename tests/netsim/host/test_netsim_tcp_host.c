@@ -31,12 +31,14 @@
  * slow start at the other end counts acknowledgments rather than bytes, so
  * two NetX Duo stacks at their defaults take a second to fill 375 KB.
  * Goodput is therefore measured over the second half of the data, once slow
- * start is behind it; stalls anywhere in the run are the gap's to catch.
+ * start is behind it.  A stall anywhere in the run is the receiver gap's
+ * to catch: the longest wait between advances of the in-order data the
+ * application reads.  The sender's longest silence is printed as tx_gap.
  *
  * WHAT IT CAUGHT, 2026-10-29, the bottleneck scenario against three NetX Duo
  * trees (AMINETXDUO_NETSIM_NETXDUO, tests/netsim/CMakeLists.txt):
  *
- *     NetX Duo    what                              goodput  gap     tx ratio
+ *     NetX Duo    what                              goodput  TX gap  tx ratio
  *     eeda05d8    main: retransmissions not in      80.0%    32 ms   1.015
  *                 the SACK pipe
  *     eed79540    PRR; repair slices lose their     92.3%    945 ms  1.043
@@ -165,6 +167,9 @@ typedef struct NsPhase
     ULONG           bytes;
     ULONG           got;
     UINT            corrupt;
+    ULONG           excess;         /* bytes past the end: corruption too  */
+    ULONG64         rx_gap_ns;      /* longest wait between advances of    */
+    ULONG64         rx_gap_at_ns;   /* the in-order bytes the receiver has */
     ULONG64         half_ns;        /* half delivered                      */
     ULONG64         done_ns;
     ULONG64         ss_ns;          /* NS_SS_BYTES delivered               */
@@ -347,13 +352,19 @@ static VOID ns_send_all(NsPhase *ph, NsEnd *e)
 #endif
 }
 
+/* nx_tcp_socket_receive() hands over in-order data only, so the time
+   between two deliveries is the time the connection made no progress --
+   what a stall is, wherever in the path it came from. */
 static VOID ns_receive_all(NsPhase *ph, NsEnd *e)
 {
+    ULONG64 last = netsim_now_ns();
+
     while (ph->got < ph->bytes)
     {
         NX_PACKET *packet;
         NX_PACKET *seg;
         UINT       status;
+        ULONG64    now;
 
         status = nx_tcp_socket_receive(&e->tcp, &packet, NS_SLICE);
         if (status == NX_NO_PACKET)
@@ -368,14 +379,28 @@ static VOID ns_receive_all(NsPhase *ph, NsEnd *e)
         {
             UCHAR *p = seg->nx_packet_prepend_ptr;
 
-            while (p < seg->nx_packet_append_ptr && ph->got < ph->bytes)
+            while (p < seg->nx_packet_append_ptr)
             {
+                if (ph->got >= ph->bytes)
+                {
+                    ph->excess  += (ULONG)(seg->nx_packet_append_ptr - p);
+                    ph->corrupt  = 1;
+                    break;
+                }
                 if (*p++ != ns_pattern(ph->got))
                     ph->corrupt = 1;
                 ph->got++;
             }
         }
         nx_packet_release(packet);
+
+        now = netsim_now_ns();
+        if (now - last > ph->rx_gap_ns)
+        {
+            ph->rx_gap_ns    = now - last;
+            ph->rx_gap_at_ns = now;
+        }
+        last = now;
 
         if (ph->ss_ns == 0 && ph->got >= NS_SS_BYTES)
             ph->ss_ns = netsim_now_ns();
@@ -496,15 +521,19 @@ static ULONG ns_run_phase(const char *label, UINT from, UINT port)
     printf("phase=%s from=%u bytes=%lu delivered=%lu data_ok=%u"
            " goodput_permille=%lu goodput_all_permille=%lu"
            " sent_bytes=%llu retx_bytes=%llu tx_ratio_permille=%lu"
-           " max_gap_ms=%llu max_gap_at_ms=%llu"
+           " rx_gap_ms=%llu rx_gap_at_ms=%llu tx_gap_ms=%llu tx_gap_at_ms=%llu"
+           " excess_bytes=%lu"
            " drops_queue=%lu drops_loss=%lu peak_queue=%lu rx_nobuf=%lu"
            " nx_retransmits=%lu window=%lu elapsed_ms=%llu\n",
            label, from, (unsigned long)ph->bytes, (unsigned long)ph->got,
            (unsigned)(!ph->corrupt), (unsigned long)steady, (unsigned long)all,
            (unsigned long long)st->data_bytes, (unsigned long long)st->retx_bytes,
            (unsigned long)ratio,
+           (unsigned long long)(ph->rx_gap_ns / NS_MS),
+           (unsigned long long)((ph->rx_gap_at_ns - start) / NS_MS),
            (unsigned long long)(st->max_gap_ns / NS_MS),
            (unsigned long long)((st->max_gap_at_ns - start) / NS_MS),
+           (unsigned long)ph->excess,
            (unsigned long)st->drops_queue, (unsigned long)st->drops_loss,
            (unsigned long)st->peak_queue, (unsigned long)netsim_rx_nobuf(from ^ 1U),
            (unsigned long)ph->retransmits,
@@ -535,7 +564,7 @@ static ULONG ns_run_phase(const char *label, UINT from, UINT port)
     if (ns_sc->goodput_floor != 0)
         ns_check(steady >= ns_sc->goodput_floor, label, "goodput");
     if (ns_sc->gap_limit_ns != 0)
-        ns_check(st->max_gap_ns < ns_sc->gap_limit_ns, label, "gap");
+        ns_check(ph->rx_gap_ns < ns_sc->gap_limit_ns, label, "gap");
     if (ns_sc->ratio_limit != 0)
         ns_check(ratio <= ns_sc->ratio_limit, label, "tx_ratio");
 
