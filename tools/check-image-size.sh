@@ -144,7 +144,8 @@ BUDGETS=(
     # 2026-09-26.
     # 238,240 with the bounded S2_OFFLINE (#90, see the default row).
     # 242,624 on e806188f with the same F-series fixes as the full build.
-    "minimal:src/bsdsocket/bsdsocket.library:243000"
+    # Core recovery adds 188 bytes; exact increase approved by turo, 2026-10-29.
+    "minimal:src/bsdsocket/bsdsocket.library:243188"
     "minimal:src/netdev/anxnet.device:46000"
     # 29,088 on e806188f after the audited device fixes.
     "minimal:src/netdev/anxgenet.device:29120"
