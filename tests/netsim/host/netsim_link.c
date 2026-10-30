@@ -114,18 +114,32 @@ static ULONG netsim_draw_ppm(VOID)
 }
 
 /* Payload and sequence of a TCP segment, from its IPv4 header on. */
+/* An IPv4 TCP segment whose headers lie inside `len` bytes: its IP header
+   length, total length and TCP header length.  Every read of a header
+   field below comes after this. */
+static UINT netsim_tcp_header(const UCHAR *d, ULONG len, ULONG *ihl,
+                              ULONG *total, ULONG *doff)
+{
+    if (len < 20 || (d[0] >> 4) != 4 || d[9] != NX_PROTOCOL_TCP)
+        return NX_FALSE;
+
+    *ihl   = (ULONG)(d[0] & 0x0F) * 4UL;
+    *total = ((ULONG)d[2] << 8) | d[3];
+    if (*ihl < 20 || *total > len || *ihl + 20 > *total)
+        return NX_FALSE;
+
+    *doff = (ULONG)(d[*ihl + 12] >> 4) * 4UL;
+    if (*doff < 20 || *ihl + *doff > *total)
+        return NX_FALSE;
+
+    return NX_TRUE;
+}
+
 static UINT netsim_tcp_data(const UCHAR *d, ULONG len, ULONG *seq, ULONG *bytes)
 {
     ULONG ihl, total, doff;
 
-    if (len < 40 || (d[0] >> 4) != 4 || d[9] != NX_PROTOCOL_TCP)
-        return NX_FALSE;
-
-    ihl   = (ULONG)(d[0] & 0x0F) * 4UL;
-    total = ((ULONG)d[2] << 8) | d[3];
-    doff  = (ULONG)(d[ihl + 12] >> 4) * 4UL;
-
-    if (total > len || ihl + doff > total)
+    if (!netsim_tcp_header(d, len, &ihl, &total, &doff))
         return NX_FALSE;
 
     *seq   = ((ULONG)d[ihl + 4] << 24) | ((ULONG)d[ihl + 5] << 16) |
@@ -145,10 +159,11 @@ static UINT netsim_account(NetSimPath *p, const NetSimFrame *f)
     if (!netsim_tcp_data(f->data, f->len, &seq, &bytes))
     {
         const UCHAR *d = f->data;
+        ULONG        ihl, total, doff;
 
         /* A pure acknowledgment: ACK, no SYN, FIN or RST. */
-        if (f->len >= 40 && d[9] == NX_PROTOCOL_TCP &&
-            (d[((d[0] & 0x0F) * 4) + 13] & 0x17) == 0x10)
+        if (netsim_tcp_header(d, f->len, &ihl, &total, &doff) &&
+            (d[ihl + 13] & 0x17) == 0x10)
             st->acks++;
         return 0;
     }
@@ -261,13 +276,8 @@ static VOID netsim_trace_data(const char *ev, const NetSimFrame *f, UINT retx)
     const UCHAR *d = f->data;
     ULONG        ihl, total, doff, seq;
 
-    if (t == NULL || f->len < 40 || d[9] != NX_PROTOCOL_TCP)
-        return;
-
-    ihl   = (ULONG)(d[0] & 0x0F) * 4UL;
-    total = ((ULONG)d[2] << 8) | d[3];
-    doff  = (ULONG)(d[ihl + 12] >> 4) * 4UL;
-    if (total <= ihl + doff)
+    if (t == NULL || !netsim_tcp_header(d, f->len, &ihl, &total, &doff) ||
+        total == ihl + doff)
         return;
 
     seq = netsim_get32(d + ihl + 4);
@@ -294,13 +304,8 @@ static VOID netsim_trace_ack(const NetSimFrame *f)
     ULONG        ihl, total, doff;
 
     if (t == NULL || ns_sender == NX_NULL || !ns_trace_based ||
-        f->len < 40 || d[9] != NX_PROTOCOL_TCP)
-        return;
-
-    ihl   = (ULONG)(d[0] & 0x0F) * 4UL;
-    total = ((ULONG)d[2] << 8) | d[3];
-    doff  = (ULONG)(d[ihl + 12] >> 4) * 4UL;
-    if (total != ihl + doff || (d[ihl + 13] & 0x10) == 0)
+        !netsim_tcp_header(d, f->len, &ihl, &total, &doff) ||
+        total != ihl + doff || (d[ihl + 13] & 0x10) == 0)
         return;
 
     netsim_trace_stamp(t);
