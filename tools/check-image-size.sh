@@ -162,9 +162,9 @@ BUDGETS=(
     # 2026-10-29.  In-order transmit launch (#356): +84, 253,016 -> 253,100.
     # usergroup.library unloaded with the stack (#383): +84,
     # 253,100 -> 253,184.
-    # Receive window autotuning (#354): +516, 253,184 -> 253,700, pending
+    # Receive window autotuning (#354): +508, 253,184 -> 253,692, pending
     # turo's approval.
-    "minimal:src/bsdsocket/bsdsocket.library:253700"
+    "minimal:src/bsdsocket/bsdsocket.library:253692"
     "minimal:src/netdev/anxnet.device:46000"
     # 29,088 on e806188f after the audited device fixes.
     # Batched transmit adds 632, 29,120 -> 29,752, approved by turo 2026-10-29.
