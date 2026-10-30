@@ -3749,11 +3749,12 @@
   the Pi Ethernet as well, both start, the Ethernet first with
   PRIORITY=10, so the default route stays on the cable, and the Wi-Fi in
   the background, so the boot does not wait for it; the micro stack
-  starts the Ethernet only. Where WirelessManager is set up on the
-  machine already -- a copy or a Wireless.prefs the Installer did not
-  create, or a mention in S:User-Startup, S:Startup-Sequence or
-  SYS:WBStartup -- the lines that would start a second copy are written
-  commented out.
+  starts the Ethernet only. Where WirelessManager starts from elsewhere
+  already -- a line in S:User-Startup or S:Startup-Sequence that runs
+  it, or the program or an icon that names it in SYS:WBStartup -- the
+  lines that would start a second copy are written commented out. A
+  commented-out line, or a program such as NetWireless that only
+  mentions WirelessManager, does not count.
 
 @endnode
 

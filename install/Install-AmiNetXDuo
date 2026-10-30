@@ -426,10 +426,11 @@
        "1.5, which loops without ever scanning on prism2.device 2.9, it is "
        "still kept, and the archive's copy goes into the AmiNetXDuo drawer "
        "and is the one S:Network-Startup starts.  A Wireless.prefs that this "
-       "installer did not write is kept and used.  Only when S:User-Startup, "
-       "S:Startup-Sequence or SYS:WBStartup names WirelessManager are the "
-       "lines that start it commented out, so that two copies do not share "
-       "one radio.\n\n"
+       "installer did not write is kept and used.  Only when a line in "
+       "S:User-Startup or S:Startup-Sequence starts WirelessManager, or "
+       "SYS:WBStartup holds it or an icon that names it, are the lines that "
+       "start it commented out, so that two copies do not share one "
+       "radio.\n\n"
        "It is based on wpa_supplicant and is distributed under wpa_supplicant's "
        "three-clause BSD licence, Copyright (c) 2003-2010 Jouni Malinen and "
        "contributors, (c) 2011-2025 Neil Cafferkey.  The licence is installed "
@@ -1749,7 +1750,7 @@
 ; lines, which is also how they are removed again -- so a reinstall can tell
 ; its own copy from one the user had.  A WirelessManager that is not ours is
 ; looked for in C:, SYS:C and this layout's own C; it is never replaced, and
-; S:Network-Startup starts that one.  Only WirelessManager named in the
+; S:Network-Startup starts that one.  Only WirelessManager started by the
 ; startup files or WBStartup keeps S:Network-Startup from starting it:
 ; Status recognises a running copy only by its exact command name, and two
 ; supplicants on one radio fight over it.  A WirelessManager or a
@@ -1803,18 +1804,41 @@
           (set WM_REC (tackon DOCDIR "WirelessManager"))
         ))
     )))
+; Started elsewhere means a line that runs it, not the word: a supplicant
+; line commented out in S:User-Startup, or NetWireless in SYS:WBStartup,
+; whose binary names WirelessManager, left the Wi-Fi unjoined (GitHub
+; #357).  Search PATTERN finds a pattern anywhere in a line, so a line
+; start cannot be matched; instead the lines naming it are written to T:,
+; those with a semicolon before the name are written from them, and a
+; difference in size is a line that runs it.  In WBStartup, a copy of the
+; program, or an icon whose default tool or tool types name it.
 (set WM_ELSEWHERE 0)
 (set WM_SCAN_N 0)
+(set WM_SCAN_ALL "T:AmiNetXDuo-WM-all")
+(set WM_SCAN_OFF "T:AmiNetXDuo-WM-off")
 (while (set WM_SCAN (select WM_SCAN_N "S:User-Startup" "S:Startup-Sequence"
-                                      "SYS:WBStartup" ""))
+                                      ""))
   (
     (if (exists WM_SCAN (noreq))
-        (if (= 0 (run ("Search >NIL: FROM %s SEARCH WirelessManager QUIET"
-                       WM_SCAN)
-                      (quiet) (safe)))
-            (set WM_ELSEWHERE 1)))
+      (
+        (run ("Search >%s FROM %s SEARCH WirelessManager NONUM"
+              WM_SCAN_ALL WM_SCAN)
+             (quiet) (safe))
+        (run ("Search >%s FROM %s SEARCH \";#?WirelessManager\" PATTERN NONUM"
+              WM_SCAN_OFF WM_SCAN_ALL)
+             (quiet) (safe))
+        (if (AND (exists WM_SCAN_ALL (noreq)) (exists WM_SCAN_OFF (noreq)))
+            (if (> (getsize WM_SCAN_ALL) (getsize WM_SCAN_OFF))
+                (set WM_ELSEWHERE 1)))
+      ))
     (set WM_SCAN_N (+ WM_SCAN_N 1))
   ))
+(run "Delete >NIL: T:AmiNetXDuo-WM-#? QUIET" (quiet) (safe))
+(if (exists "SYS:WBStartup" (noreq))
+    (if (OR (exists "SYS:WBStartup/WirelessManager" (noreq))
+            (= 0 (run "Search >NIL: FROM SYS:WBStartup/#?.info SEARCH WirelessManager QUIET"
+                      (quiet) (safe))))
+        (set WM_ELSEWHERE 1)))
 (set WM_LIVE (if WM_ELSEWHERE 0 1))
 
 (if (= KEEP_OLD 0)
