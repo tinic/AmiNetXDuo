@@ -437,40 +437,32 @@ set(AMINETXDUO_DNS_PACKETS "4" CACHE STRING
 add_compile_definitions(
     "NX_DNS_PACKET_POOL_SIZE=(${AMINETXDUO_DNS_PACKETS}*(NX_DNS_PACKET_PAYLOAD+sizeof(NX_PACKET)))")
 
-# Half-open connections held with their options recorded exactly.
+# Half-open connections held with their options recorded exactly, and the
+# SYNs a listening port holds unanswered while every parked socket is taken
+# (NX_TCP_SYNCACHE_DEFERRED_MAXIMUM, half of this, port/netxduo-amiga/inc/
+# nx_user.h).  Past the cache the SYN cookie takes over and rebuilds the
+# connection from the sequence number it echoes, carrying the MSS, window
+# scale, SACK and timestamp options with it (nx_api.h says so at length).
 #
-# NetX Duo's own number is 512, chosen against the four megabytes this project
-# targets, and it is 37,376 of the 37,612 bytes an NX_IP instance occupies --
-# 99 per cent of it.  The minimal drawer is what the Installer offers a ONE
-# megabyte machine, and 37 KB of half-open connection slots on a machine that
-# will never see eight at once is the wrong shape entirely.
-#
-# It is not a limit on connections.  Past the cache the SYN cookie takes over
-# and rebuilds the connection from the sequence number it echoes, carrying the
-# MSS, window scale, SACK and timestamp options with it (nx_api.h says so at
-# length).  A smaller cache costs option fidelity under a flood and nothing
-# else.
+# The held SYNs are why the size is more than option fidelity.  A cookie is
+# answered whether or not a socket is parked, so a cache full of held SYNs
+# answers every new one, finishes it into a full accept queue and resets it:
+# 128 held SYNs in 32 entries had 64 clients on an Amiberry A1200 driving 170
+# handshakes a second while the server accepted 2.
 #
 # Buckets are a quarter of the entries, which is NetX Duo's own ratio.
 #
-# 32 rather than NetX Duo's 512.  Measured sizeof(NX_IP.nx_ip_tcp_syncache),
-# and what each costs in the one AmiNetStack allocation:
+# Measured sizeof(NX_IP.nx_ip_tcp_syncache), 2026-10-24:
 #
-#     entries   syncache   AmiNetStack
-#         512     37,376        83,460
-#         128     10,192        56,276
-#          64      5,136        51,220
-#          32      2,608        48,692     <- ships
-#          16      1,344        47,428
+#     entries   syncache
+#         256      23,376     <- ships
+#          32       2,992
 #
-# 512 sizes itself against four megabytes in NetX Duo's own comment; the
-# smallest machine measured here is a 2 MB A1200 with 1.2 MB free.  Overflow
-# is not a ceiling -- past the cache the cookie takes over, and a smaller
-# cache costs option fidelity under a flood and nothing else.  Both drawers
-# ship 32.  tests/syncache/ inherits this define, so it always runs against
-# whatever ships; it was checked by hand at 32, 128 and 512.
-set(AMINETXDUO_TCP_SYNCACHE "32" CACHE STRING
-    "Half-open connections cached with exact options (32 ships)")
+# The minimal and micro presets pin 32 (CMakePresets.json), which holds 16
+# SYNs.  tests/syncache/ inherits this define, so it always runs against
+# whatever ships.
+set(AMINETXDUO_TCP_SYNCACHE "256" CACHE STRING
+    "Half-open connections cached with exact options (256 ships)")
 if(NOT AMINETXDUO_TCP_SYNCACHE EQUAL 512)
     math(EXPR _anxd_syncache_buckets "${AMINETXDUO_TCP_SYNCACHE} / 4")
     if(_anxd_syncache_buckets LESS 1)
@@ -1303,6 +1295,23 @@ if(NOT AMINETXDUO_TCP_RTT)
     add_compile_definitions(AMINETXDUO_TCP_RTT_OFF)
 endif()
 
+# Software segmentation trades code and a larger pool for fewer TCP calls.
+# The micro preset omits it; checksum and other interface capabilities remain.
+option(AMINETXDUO_TCP_GSO "Batch TCP segments on capable interfaces" ON)
+if(AMINETXDUO_TCP_GSO)
+    add_compile_definitions(AMINETXDUO_TCP_GSO)
+endif()
+
+# Batched transmit (ANXD_S2F_TX_BATCH): each copied TCP GSO block goes to a
+# device that offers it, anxgenet.device, as one write, and the device cuts
+# the frames.  Code in the library and the drivers, and 64 KB more of the
+# GENET's transmit ring; it needs TCP GSO.  The micro preset omits it, and
+# then the library never asks for it and no driver offers it.
+option(AMINETXDUO_TX_BATCH "Send each copied TCP GSO block as one batched write" ON)
+if(AMINETXDUO_TX_BATCH AND AMINETXDUO_TCP_GSO)
+    add_compile_definitions(AMINETXDUO_TX_BATCH)
+endif()
+
 # RFC 5827 early retransmit: below four segments in flight, three duplicate
 # acknowledgments cannot happen, so the threshold drops to what the flight can
 # reach.  No layout change, but a with/without measurement wants the whole tree
@@ -1887,6 +1896,10 @@ add_subdirectory(src/rfb)
 # is the only way to see what this stack costs on real hardware, no emulator
 # above a 68020 has a usable cycle model.  tools/profiler/CMakeLists.txt.
 add_subdirectory(tools/profiler)
+
+# forbidrec, every Forbid()/Disable() hold on a running machine, with its
+# workload.  Instruments, not shipped.  tools/forbidrec/CMakeLists.txt.
+add_subdirectory(tools/forbidrec)
 
 if(CMAKE_CROSSCOMPILING)
     # The archive needs substantially less than the default ALL target, which

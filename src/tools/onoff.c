@@ -23,6 +23,7 @@ static const char version_tag[] __attribute__((used)) =
     TOOL_VERSTAG("Online");
 #endif
 
+#ifdef TOOL_OFFLINE
 #define TEMPLATE    "NAME/A,UNIT/N,TIMEOUT/N"
 
 enum
@@ -32,6 +33,21 @@ enum
     ARG_TIMEOUT,
     ARG_COUNT
 };
+#else
+#define TEMPLATE    "NAME/A,UNIT/N,TIMEOUT/N,SYNCTIME/S,SERVER/K"
+enum
+{
+    ARG_NAME = 0,
+    ARG_UNIT,
+    ARG_TIMEOUT,
+    ARG_SYNCTIME,
+    ARG_SERVER,
+    ARG_COUNT
+};
+
+static BOOL sync_time;
+static char time_server[256];
+#endif
 
 /* Seconds for link-up and the DHCP lease together when TIMEOUT is not given.
    Unbounded, a Wi-Fi unit that never gets a lease left Online silent forever
@@ -615,11 +631,13 @@ static VOID report_linked_online(const char *name, UWORD index, ULONG addr)
 }
 #endif
 
-int main(int argc, char **argv)
+static int onoff_run(int argc, char **argv)
 {
     LONG           args[ARG_COUNT];
     struct RDArgs *rda;
-    AmiIfConfig    ifc;
+    /* Command-private state, like resolved/other below. Keep the definition
+       off the Shell's 4 KB stack, including the main -> onoff_run path. */
+    static AmiIfConfig ifc;
     static char    resolved[TOOL_NAME_LEN];
     const char    *given;
     const char    *name;
@@ -640,17 +658,25 @@ int main(int argc, char **argv)
     args[ARG_NAME]    = 0;
     args[ARG_UNIT]    = 0;
     args[ARG_TIMEOUT] = 0;
+#ifndef TOOL_OFFLINE
+    args[ARG_SYNCTIME] = 0;
+    args[ARG_SERVER]   = 0;
+#endif
 
     rda = ReadArgs((CONST_STRPTR)TEMPLATE, args, NULL);
     if (rda == NULL)
     {
         tool_fault(IoErr());
-        tool_usage("<interface or driver> [UNIT <n>] [TIMEOUT <secs>]",
 #ifdef TOOL_OFFLINE
+        tool_usage("<interface or driver> [UNIT <n>] [TIMEOUT <secs>]",
                    "eth0, or the driver it uses, for example a2065.device."
 #else
+        tool_usage("<interface or driver> [UNIT <n>] [TIMEOUT <secs>] "
+                   "[SYNCTIME] [SERVER <host>]",
                    "eth0, or the driver it uses, for example a2065.device.\n"
-                   "  TIMEOUT: default 30; 0 waits indefinitely."
+                   "  TIMEOUT: default 30; 0 waits indefinitely.\n"
+                   "  SYNCTIME: set the clock after going online.\n"
+                   "  SERVER: with SYNCTIME; default pool.ntp.org."
 #endif
                    );
         return RETURN_ERROR;
@@ -681,6 +707,35 @@ int main(int argc, char **argv)
                    ? (ULONG)*(const LONG *)args[ARG_TIMEOUT] : ONLINE_TIMEOUT;
 #endif
     tool_wait_init(&wait, timeout);
+
+#ifndef TOOL_OFFLINE
+    sync_time = args[ARG_SYNCTIME] != 0;
+    if (args[ARG_SERVER] != 0 && !sync_time)
+    {
+        tool_error("SERVER requires SYNCTIME");
+        FreeArgs(rda);
+        return RETURN_ERROR;
+    }
+    {
+        const char *server = args[ARG_SERVER] != 0
+                             ? (const char *)args[ARG_SERVER] : "pool.ntp.org";
+        ULONG n = 0;
+        while (server[n] != '\0' && n < sizeof(time_server))
+        {
+            UBYTE c = (UBYTE)server[n];
+            if (c <= 32 || c >= 127) break;
+            n++;
+        }
+        if (n == 0 || n >= sizeof(time_server) || server[n] != '\0' ||
+            server[0] == '-')
+        {
+            tool_error("SERVER must be a host name or IP address (up to 255 characters)");
+            FreeArgs(rda);
+            return RETURN_ERROR;
+        }
+        tool_copy_string(time_server, sizeof(time_server), server);
+    }
+#endif
 
     /* Resolve NAME: interface first, then driver. */
     if (load_interface(given, &ifc, FALSE))
@@ -937,4 +992,32 @@ int main(int argc, char **argv)
 
     FreeArgs(rda);
     return RETURN_OK;
+}
+
+int main(int argc, char **argv)
+{
+    int rc;
+#ifndef TOOL_OFFLINE
+    sync_time = FALSE;
+#endif
+    rc = onoff_run(argc, argv);
+#ifndef TOOL_OFFLINE
+    /* Only after link/DHCP success, including an already-online interface.
+       All RDArgs storage has gone, so the server was copied above. */
+    if (rc == RETURN_OK && sync_time)
+    {
+        if (tool_break())
+        {
+            tool_fault(ERROR_BREAK);
+            return RETURN_WARN;
+        }
+        tool_printf("Synchronizing time with %s...\n", (LONG)time_server);
+        if (tool_run_companion("sntp", time_server, "TIMEOUT 10", FALSE) != RETURN_OK)
+        {
+            tool_error("network is online; time synchronization failed (check sntp and the server)");
+            return RETURN_WARN;
+        }
+    }
+#endif
+    return rc;
 }

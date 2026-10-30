@@ -1,5 +1,6 @@
 /*
- * bsdsocket.library, the receive window the packet pool can back.
+ * bsdsocket.library, the receive window the packet pool can back, and the
+ * transmit queue.
  *
  * A socket may only advertise what the pool it draws from can hold.  Kept
  * here, next to the pool arithmetic it reads, because the two are one
@@ -202,8 +203,9 @@ BOOL ami_bsd_tcp_window_long_path(ULONG rtt_ms, ULONG grow_rtt_ms);
  * far end's link spaces the data, so the window is `want` -- unless the card
  * overran while a long path ran unfitted (`wan_fitted`), which then gets the
  * fit.  An interface that sets TCPWANWINDOW gets min(want, wan_window) on a
- * long path instead, never below the fit, overruns or not.  `wan_window` 0 =
- * not set.  Pure arithmetic, host-tested.
+ * long path instead, on any link, overruns or not: never below the fit where
+ * the path is burst-bound, never below two segments where it is not.
+ * `wan_window` 0 = not set.  Pure arithmetic, host-tested.
  */
 ULONG ami_bsd_tcp_window_receive_bound(ULONG want, ULONG hw_bytes, ULONG mss,
                                        ULONG bps, ULONG rtt_ms,
@@ -246,5 +248,37 @@ ULONG ami_bsd_tcp_window_for(ULONG pool_packets, ULONG payload,
                              ULONG consumers);
 ULONG ami_bsd_tcp_window_max_for(ULONG pool_packets, ULONG payload,
                                  ULONG consumers);
+
+/*
+ * The TCP transmit queue a socket starts with, in unacknowledged segments:
+ * 1/BSD_TCP_TX_POOL_SHARE of `pool_packets`, never below
+ * BSD_TCP_TX_QUEUE_MIN (the old fixed depth), never above `ceiling`
+ * (NX_TCP_MAXIMUM_TX_QUEUE, nx_user.h, the SO_SNDBUF ceiling).  A quarter:
+ * the 4,096-packet clamp gives 1024, the ceiling; 512 packets give 128;
+ * under 32 the floor of 8 holds.  An eighth held the A1200 (4,096 packets)
+ * at 512 segments, 747,520 bytes a round trip: uploads measured ~280
+ * Mbit/s at 20 ms, 142 at 40 (#354).  Why it moves at all is in nx_user.h.
+ * Pure arithmetic, host-tested.
+ */
+#ifndef BSD_TCP_TX_QUEUE_MIN
+#define BSD_TCP_TX_QUEUE_MIN    8
+#endif
+#ifndef BSD_TCP_TX_POOL_SHARE
+#define BSD_TCP_TX_POOL_SHARE   4       /* 1/N of the pool per socket       */
+#endif
+
+ULONG ami_bsd_tcp_tx_queue_for(ULONG pool_packets, ULONG ceiling);
+
+/* Automatic TX growth is optional headroom, not a new minimum allocation.
+   Leave control packets and the outstanding receive-window promises alone.
+   Below BIG_POOL the historical policy is unchanged. */
+ULONG ami_bsd_tcp_tx_free_packets(ULONG total, ULONG available,
+                                  ULONG receive_credit_packets);
+
+/* Two bandwidth-delay flights, bounded by the resource quota. Zero means
+   the path is not measured. Arithmetic stays within signed sequence space
+   and needs no 64-bit runtime division on the Amiga. */
+ULONG ami_bsd_tcp_tx_flight_depth(ULONG bps, ULONG rtt_ms, ULONG mss,
+                                  ULONG quota);
 
 #endif /* AMINETXDUO_BSDSOCKET_WINDOW_H */

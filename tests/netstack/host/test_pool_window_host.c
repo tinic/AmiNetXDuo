@@ -613,9 +613,35 @@ static void i_the_window_settles_for_the_path_and_the_link(void)
                                              hundm, 22UL, 50UL, 46720UL, FALSE)
                 == 8UL * 1460UL,
             "TCPWANWINDOW ignored a raised TCPGROWRTT line");
+    /* A gigabit card on a long path is never burst-bound, and TCPWANWINDOW
+       still sets its window: #354, genet kept 802,816 under
+       TCPWANWINDOW=300000.  Unset, the settled window stands, overruns or
+       not; a LAN round trip keeps the fit; two segments are the floor. */
+    h_check(ami_bsd_tcp_window_receive_bound(802816UL, 128UL * 2048UL, 1460UL,
+                                             gbit, rtt, 0UL, 300000UL, FALSE)
+                == 300000UL,
+            "TCPWANWINDOW did not bound a long path on a gigabit card");
     h_check(ami_bsd_tcp_window_receive_bound(max, 52UL * 256UL, 1460UL,
-                                             gbit, rtt, 0UL, 46720UL, FALSE) == max,
-            "TCPWANWINDOW capped a path that was never burst-bound");
+                                             gbit, rtt, 0UL, 46720UL, TRUE)
+                == 46720UL,
+            "TCPWANWINDOW under the ring fit was lifted on a gigabit card");
+    h_check(ami_bsd_tcp_window_receive_bound(802816UL, 128UL * 2048UL, 1460UL,
+                                             gbit, rtt, 0UL, 2000000UL, FALSE)
+                == 802816UL,
+            "TCPWANWINDOW on a gigabit card passed the settled window");
+    h_check(ami_bsd_tcp_window_receive_bound(802816UL, 128UL * 2048UL, 1460UL,
+                                             gbit, rtt, 0UL, 1000UL, FALSE)
+                == 2UL * 1460UL,
+            "TCPWANWINDOW on a gigabit card went under two segments");
+    h_check(ami_bsd_tcp_window_receive_bound(max, 128UL * 2048UL, 1460UL,
+                                             gbit, rtt, 0UL, 0UL, FALSE) == max &&
+            ami_bsd_tcp_window_receive_bound(max, 128UL * 2048UL, 1460UL,
+                                             gbit, rtt, 0UL, 0UL, TRUE) == max,
+            "an unset TCPWANWINDOW capped a gigabit long path");
+    h_check(ami_bsd_tcp_window_receive_bound(lmax, 128UL * 2048UL, 1460UL,
+                                             gbit, rtt - 1UL, 0UL, 46720UL, FALSE)
+                == ami_bsd_tcp_window_fit(lmax, 128UL * 2048UL, 1460UL),
+            "TCPWANWINDOW reached a gigabit LAN round trip");
 
     /* The buffer behind a cut window: twice the cut, so the acknowledgment
        of a whole burst still offers a window; never more than the window
@@ -676,6 +702,83 @@ static void j_the_pool_is_sized_from_the_fastest_class(void)
                                                   stride));
 }
 
+/*
+ * THE TRANSMIT QUEUE, #354: a quarter of the pool per socket.  The clamped
+ * pool reaches the ceiling, the smallest keeps the old 8, and one socket
+ * never holds more than half the pool (the floor's case) or more than a
+ * quarter where the floor does not decide.  The ceiling is
+ * NX_TCP_MAXIMUM_TX_QUEUE (nx_user.h), passed as socket.c passes it: this
+ * test sees no NetX headers.
+ */
+#define H_TX_CEILING    1024UL
+
+static void k_the_transmit_queue_is_a_quarter_of_the_pool(void)
+{
+    ULONG p;
+    int   over = 0;
+
+    h_check(ami_bsd_tcp_tx_queue_for((ULONG)AMI_POOL_MAX_PACKETS,
+                                     H_TX_CEILING) == H_TX_CEILING,
+            "the clamped pool does not reach the transmit ceiling");
+    h_check(ami_bsd_tcp_tx_queue_for(2048UL, H_TX_CEILING) == 512UL,
+            "a 2,048-packet pool does not give a quarter");
+    h_check(ami_bsd_tcp_tx_queue_for(512UL, H_TX_CEILING) == 128UL,
+            "a 512-packet pool does not give a quarter");
+    h_check(ami_bsd_tcp_tx_queue_for(94UL, H_TX_CEILING) == 23UL,
+            "the A1200 with no Fast RAM does not get a quarter");
+    h_check(ami_bsd_tcp_tx_queue_for((ULONG)AMI_POOL_MIN_PACKETS,
+                                     H_TX_CEILING) ==
+            (ULONG)BSD_TCP_TX_QUEUE_MIN,
+            "the smallest pool lost the floor of 8");
+    h_check(ami_bsd_tcp_tx_queue_for(0UL, H_TX_CEILING) ==
+            (ULONG)BSD_TCP_TX_QUEUE_MIN,
+            "no pool lost the floor of 8");
+    h_check(ami_bsd_tcp_tx_queue_for(65536UL, H_TX_CEILING) == H_TX_CEILING,
+            "a pool past the clamp went over the ceiling");
+    h_check(ami_bsd_tcp_tx_queue_for(4096UL, 64UL) == 64UL,
+            "a smaller ceiling was not kept");
+
+    for (p = (ULONG)AMI_POOL_MIN_PACKETS; p <= (ULONG)AMI_POOL_MAX_PACKETS; p++)
+    {
+        ULONG d = ami_bsd_tcp_tx_queue_for(p, H_TX_CEILING);
+
+        if (d < (ULONG)BSD_TCP_TX_QUEUE_MIN || d > H_TX_CEILING ||
+            2UL * d > p ||
+            (d > (ULONG)BSD_TCP_TX_QUEUE_MIN && 4UL * d > p))
+            over = 1;
+    }
+    h_check(!over, "one socket's transmit queue passed its share of a pool");
+}
+
+
+static void l_tx_growth_is_backed_and_path_bounded(void)
+{
+    ULONG n;
+    h_check(ami_bsd_tcp_tx_free_packets(94, 94, 0) == 0,
+            "small-RAM machines retain their existing queue policy");
+    h_check(ami_bsd_tcp_tx_free_packets(4096, 3100, 720) == 1868,
+            "growth leaves control and receive-window credit unspent");
+    h_check(ami_bsd_tcp_tx_free_packets(4096, 512, 0) == 0 &&
+            ami_bsd_tcp_tx_free_packets(4096, 600, 720) == 0,
+            "pressure cannot wrap a reserved pool into free capacity");
+    for (n = 0; n <= 4096; n++)
+    {
+        ULONG free = ami_bsd_tcp_tx_free_packets(4096, n, 720);
+        h_check(free == 0 || free + 512 + 720 <= n,
+                "every granted packet is beyond both reservations");
+    }
+    h_check(ami_bsd_tcp_tx_flight_depth(1000000000UL, 30, 1448, 2868) == 2868,
+            "a measured long path can grow past the old1024-MSS ceiling");
+    h_check(ami_bsd_tcp_tx_flight_depth(1000000000UL, 1, 1000, 4096) == 250,
+            "a small flight does not claim all available memory");
+    h_check(ami_bsd_tcp_tx_flight_depth(1000000000UL, 0, 1448, 4096) == 0 &&
+            ami_bsd_tcp_tx_flight_depth(0, 30, 1448, 4096) == 0 &&
+            ami_bsd_tcp_tx_flight_depth(1000000000UL, 30, 0, 4096) == 0,
+            "unmeasured or invalid inputs do not request automatic growth");
+    h_check(ami_bsd_tcp_tx_flight_depth(0xFFFFFFFFUL, 0xFFFFFFFFUL, 1, 4096) == 4096,
+            "large bandwidth-delay products saturate at real capacity");
+}
+
 int main(void)
 {
     printf("packet pool sizing and the window it backs, v0.25.5\n");
@@ -690,6 +793,8 @@ int main(void)
     h_a_big_machine_is_bounded_by_the_link();
     i_the_window_settles_for_the_path_and_the_link();
     j_the_pool_is_sized_from_the_fastest_class();
+    k_the_transmit_queue_is_a_quarter_of_the_pool();
+    l_tx_growth_is_backed_and_path_bounded();
 
     printf("%lu checks, %lu failures, %s\n",
            h_checks, h_failures, (h_failures == 0UL) ? "PASS" : "FAIL");

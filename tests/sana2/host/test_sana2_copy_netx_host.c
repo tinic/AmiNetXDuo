@@ -60,6 +60,27 @@ AMIGA_ASM_ARGS ULONG n68k_copy_sum_longwords(ULONG *to, const ULONG *from, ULONG
     return acc;
 }
 
+/* The same, summed alone: a GSO child's sum when its frame is copied in
+   pieces. */
+AMIGA_ASM_ARGS ULONG n68k_sum_longwords(const ULONG *p, ULONG count)
+{
+    ULONG acc = 0;
+
+    while (count != 0UL)
+    {
+        const UCHAR *b = (const UCHAR *)p++;
+        ULONG w = ((ULONG)b[0] << 24) | ((ULONG)b[1] << 16) |
+                  ((ULONG)b[2] << 8) | (ULONG)b[3];
+
+        acc += w;
+        if (acc < w)
+            acc++;
+        count--;
+    }
+
+    return acc;
+}
+
 
 /* nx_ip_checksum_compute.c references it on a path these packets do not
    take. */

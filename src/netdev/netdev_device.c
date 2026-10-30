@@ -571,6 +571,7 @@ static VOID nd_time_report(VOID)
 }
 #endif
 
+#ifndef AMINETXDUO_TX_BATCH
 /*
  * A 6-byte Ethernet address as a longword and a word.  Both ends must be even:
  * the staging buffer is AllocMem'd and ios2_DstAddr/ios2_SrcAddr sit at even
@@ -599,6 +600,7 @@ static VOID nd_zero(UBYTE *p, ULONG n)
         *p++ = 0;
 }
 
+#endif /* AMINETXDUO_TX_BATCH */
 /* NewList() lives in amiga.lib, which a -nostartfiles image does not link. */
 /*
  * netdev_reply(), netdev_rebuild_filter() and netdev_drop_writes() were here
@@ -832,6 +834,11 @@ static VOID netdev_rx(APTR arg, const UBYTE *frame, UWORD len)
 
 /* ------------------------------------------------------------- transmit --- */
 
+#ifdef AMINETXDUO_TX_BATCH
+/* The write path -- framing, issue, the queue pump and the task-level
+   transmit -- is netdev_tx.c, which a host test can compile.  The clock's
+   brackets around it stay here with the clock. */
+#else /* !AMINETXDUO_TX_BATCH */
 /*
  * Frame one CMD_WRITE into nu_TxBuf.  Returns the wire length, or 0 with the
  * request already answered.
@@ -958,8 +965,13 @@ static LONG netdev_tx_issue(NetdevUnit *unit, struct IOSana2Req *io,
     return 0;
 }
 
+#endif /* AMINETXDUO_TX_BATCH */
 #ifdef NETDEV_TIME
+#ifdef AMINETXDUO_TX_BATCH
+UWORD netdev_tx_timed_build(NetdevUnit *unit, struct IOSana2Req *io,
+#else /* !AMINETXDUO_TX_BATCH */
 static UWORD netdev_tx_timed_build(NetdevUnit *unit, struct IOSana2Req *io,
+#endif /* AMINETXDUO_TX_BATCH */
                                    NetdevOpener *op)
 {
     ULONG t = nd_now();
@@ -971,7 +983,11 @@ static UWORD netdev_tx_timed_build(NetdevUnit *unit, struct IOSana2Req *io,
     return n;
 }
 
+#ifdef AMINETXDUO_TX_BATCH
+LONG netdev_tx_timed_issue(NetdevUnit *unit, struct IOSana2Req *io,
+#else /* !AMINETXDUO_TX_BATCH */
 static LONG netdev_tx_timed_issue(NetdevUnit *unit, struct IOSana2Req *io,
+#endif /* AMINETXDUO_TX_BATCH */
                                   NetdevOpener *op, UWORD total)
 {
     ULONG t  = nd_now();
@@ -984,9 +1000,12 @@ static LONG netdev_tx_timed_issue(NetdevUnit *unit, struct IOSana2Req *io,
     return r;
 }
 #else
+#ifndef AMINETXDUO_TX_BATCH
 #define netdev_tx_timed_build(u, i, o)      netdev_tx_build((u), (i), (o))
 #define netdev_tx_timed_issue(u, i, o, t)   netdev_tx_issue((u), (i), (o), (t))
+#endif /* AMINETXDUO_TX_BATCH */
 #endif
+#ifndef AMINETXDUO_TX_BATCH
 
 /*
  * Drain the queue into whatever transmit buffers the chip has free.  The caller
@@ -1221,6 +1240,7 @@ static VOID netdev_tx_direct_task(NetdevUnit *unit, struct IOSana2Req *io)
     }
 }
 #endif /* NETDEV_HAS_TX_TASK_LOCK */
+#endif /* AMINETXDUO_TX_BATCH */
 
 /* ------------------------------------------------------------- the filter -- */
 
@@ -1271,6 +1291,9 @@ LONG netdev_online(NetdevUnit *unit)
     netdev_event(unit, S2EVENT_ONLINE);
 
     Disable();
+#ifdef AMINETXDUO_TX_BATCH
+    netdev_tx_section(unit);
+#endif /* AMINETXDUO_TX_BATCH */
     netdev_tx_pump(unit);
     Enable();
 
@@ -1307,6 +1330,9 @@ static VOID netdev_set_offline(NetdevUnit *unit, ULONG event, BOOL stop)
     {
         struct IOSana2Req *io = (struct IOSana2Req *)RemHead(&unit->nu_Writes);
 
+#ifdef AMINETXDUO_TX_BATCH
+        netdev_tx_forget(unit, io);
+#endif /* AMINETXDUO_TX_BATCH */
         netdev_reply(io, S2ERR_OUTOFSERVICE, S2WERR_UNIT_OFFLINE);
     }
     Enable();
@@ -1513,7 +1539,12 @@ ULONG netdev_soft_c(register NetdevUnit *unit __asm("a1"))
     if (unit->nu_InIsr == 0)
     {
         unit->nu_InIsr = 1;
+#ifdef AMINETXDUO_TX_BATCH
+        /* The service and the pass a budget-cut pump owed, one budget. */
+        if (netdev_tx_service(unit) != 0)
+#else /* !AMINETXDUO_TX_BATCH */
         if (netdev_interrupt(unit) != 0)
+#endif /* AMINETXDUO_TX_BATCH */
         {
             unit->nu_IntSeen++;
             unit->nu_IntSilent = 0;
@@ -1544,7 +1575,11 @@ ULONG netdev_server_c(register NetdevUnit *unit __asm("a1"))
     }
 
     unit->nu_InIsr = 1;
+#ifdef AMINETXDUO_TX_BATCH
+    mine = netdev_tx_service(unit);
+#else /* !AMINETXDUO_TX_BATCH */
     mine = netdev_interrupt(unit);
+#endif /* AMINETXDUO_TX_BATCH */
     unit->nu_InIsr = 0;
 
     if (mine != 0)
@@ -1567,6 +1602,10 @@ ULONG netdev_tick_c(register NetdevUnit *unit __asm("a1"))
     BOOL wedged = FALSE;
 
     Disable();
+#ifdef AMINETXDUO_TX_BATCH
+    /* One pump budget for everything this blank does under the mask. */
+    netdev_tx_section(unit);
+#endif /* AMINETXDUO_TX_BATCH */
 
     /* A task mid-transmit under the tx task lock (tx_busy) keeps the core's
        reclaim off the ring, so no completion can be recorded while it holds
@@ -1600,10 +1639,17 @@ ULONG netdev_tick_c(register NetdevUnit *unit __asm("a1"))
         unit->nu_IntSilent++;
 
     /* A core with a link to poll or completions to collect, once a blank. */
+#ifdef AMINETXDUO_TX_BATCH
+    /* And writes waiting with a slot free and nothing else to run the
+       pump: the backstop for a pass cut at its budget on a quiet wire. */
+    if (unit->nu_Online && unit->nu_InIsr == 0)
+        netdev_tx_blank(unit);
+#else /* !AMINETXDUO_TX_BATCH */
     if (unit->nu_Online && unit->nu_InIsr == 0 &&
         unit->nu_Nic.ops->tick != NULL &&
         unit->nu_Nic.ops->tick(&unit->nu_Nic))
         netdev_tx_pump(unit);
+#endif /* AMINETXDUO_TX_BATCH */
 
     if (unit->nu_Online && unit->nu_IntSilent >= 10u && unit->nu_InIsr == 0 &&
         (!netdev_pcmcia_is_unit(unit) || unit->nu_Nic.running))

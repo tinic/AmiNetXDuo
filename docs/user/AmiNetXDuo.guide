@@ -1450,7 +1450,7 @@
 
                               @{b}Online@{ub}
 
-      Online NAME/A,UNIT/N,TIMEOUT/N
+      Online NAME/A,UNIT/N,TIMEOUT/N,SYNCTIME/S,SERVER/K
 
   Puts an interface back on the network after
   @{"Offline" link OFFLINE}. Starts the stack first if it is not
@@ -1464,10 +1464,20 @@
             used, and the command reports which one.
   @{b}UNIT@{ub}      Which unit of the driver, when NAME is a driver.
             Default 0.
-  @{b}TIMEOUT@{ub}   Seconds for the whole operation: link-up and, on a DHCP
+  @{b}TIMEOUT@{ub}   Seconds for bringing the interface online: link-up and, on a DHCP
             interface, its lease becoming BOUND with routes and name-server
             options installed. Default 30. 0 waits indefinitely. Ctrl-C
             stops the wait in either case.
+  @{b}SYNCTIME@{ub}  After going online, run the supplied sntp command to set
+            the system and battery clocks. Disabled unless requested.
+            Uses the time zone in Locale preferences. Also works when
+            the interface is already online. The time-server request has
+            its own TIMEOUT 10 setting, after the online wait (three
+            attempts, up to 12 seconds); name lookup may take longer.
+            If synchronization fails, Online returns WARN
+            and leaves the interface online. Ctrl-C cancels the wait.
+  @{b}SERVER@{ub}    Time-server host name or IPv4/IPv6 address; requires
+            SYNCTIME. Default pool.ntp.org.
 
   @{b}Example@{ub}
 
@@ -1476,6 +1486,27 @@
 
       1> Online eth0
       eth0: already online
+
+      1> Online eth0 SYNCTIME
+      1> Online eth0 SYNCTIME SERVER time.example.net
+
+  In NetSwitch, tick "Synchronize time" before pressing Online (or
+  double-clicking an offline interface). It uses pool.ntp.org and waits
+  for the link, DHCP and synchronization to finish, with a busy pointer.
+  The checkbox starts off on a new installation. Changing it saves 1 (on)
+  or 0 (off) in ENV:ANXDNETSWITCHSYNCTIME and
+  ENVARC:ANXDNETSWITCHSYNCTIME, so the choice survives closing NetSwitch
+  and rebooting. A save failure opens a requester. This is a global
+  NetSwitch preference, shared by all its interfaces; it does not enable
+  SYNCTIME implicitly for Shell commands or change S:Network-Startup.
+  Online and sntp must be installed beside NetSwitch, in its C drawer or
+  in C:. A failure opens a requester; the interface may still be online.
+  Leave the box clear to keep the usual immediate Online action.
+
+  To synchronize at boot, use the installer's clock-setting option for
+  S:Network-Startup, or add after the network-start command:
+
+      Run >NIL: <NIL: C:sntp pool.ntp.org QUIET
 
   As with @{"AddNetInterface" link ADDNETINTERFACE}, that address is the
   one the interface holds and not the one in the file.

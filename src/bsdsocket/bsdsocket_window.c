@@ -54,6 +54,55 @@ ULONG ami_bsd_tcp_window_max_for(ULONG pool_packets, ULONG payload,
     return (max < lan) ? lan : max;
 }
 
+ULONG ami_bsd_tcp_tx_queue_for(ULONG pool_packets, ULONG ceiling)
+{
+    ULONG depth = pool_packets / (ULONG)BSD_TCP_TX_POOL_SHARE;
+
+    if (depth < (ULONG)BSD_TCP_TX_QUEUE_MIN)
+        depth = (ULONG)BSD_TCP_TX_QUEUE_MIN;
+    if (depth > ceiling)
+        depth = ceiling;
+
+    return depth;
+}
+
+ULONG ami_bsd_tcp_tx_free_packets(ULONG total, ULONG available,
+                                  ULONG receive_credit_packets)
+{
+    ULONG reserve;
+    if (total < (ULONG)BSD_TCP_WINDOW_BIG_POOL)
+        return 0UL;
+    reserve = total / 8UL;
+    if (reserve < 16UL)
+        reserve = 16UL;
+    if (available > total)
+        available = total;
+    if (available <= reserve)
+        return 0UL;
+    available -= reserve;
+    return (available > receive_credit_packets)
+           ? available - receive_credit_packets : 0UL;
+}
+
+ULONG ami_bsd_tcp_tx_flight_depth(ULONG bps, ULONG rtt_ms, ULONG mss,
+                                  ULONG quota)
+{
+    ULONG bytes_per_ms, bytes, limit;
+    if (bps == 0UL || rtt_ms == 0UL || mss == 0UL || quota == 0UL)
+        return 0UL;
+    if (quota > 0x7FFFFFFFUL / mss)
+        quota = 0x7FFFFFFFUL / mss;
+    if (quota == 0UL)
+        return 0UL;
+    limit = quota * mss;
+    bytes_per_ms = bps / 8000UL + ((bps % 8000UL) != 0UL ? 1UL : 0UL);
+    if (rtt_ms > (limit / 2UL) / bytes_per_ms)
+        return quota;
+    bytes = 2UL * bytes_per_ms * rtt_ms;
+    bytes = bytes / mss + ((bytes % mss) != 0UL ? 1UL : 0UL);
+    return (bytes < quota) ? bytes : quota;
+}
+
 ULONG ami_bsd_tcp_window_fit(ULONG window, ULONG hw_bytes, ULONG mss)
 {
     ULONG frame;
@@ -124,6 +173,18 @@ BOOL ami_bsd_tcp_window_long_path(ULONG rtt_ms, ULONG grow_rtt_ms)
     return (rtt_ms >= bsd_grow_rtt(grow_rtt_ms)) ? TRUE : FALSE;
 }
 
+/* TCPWANWINDOW within the window settled for the socket, never below
+   `floor`. */
+static ULONG bsd_wan_window(ULONG want, ULONG wan_window, ULONG floor)
+{
+    ULONG wan = (wan_window < want) ? wan_window : want;
+
+    if (floor > want)
+        floor = want;
+
+    return (wan > floor) ? wan : floor;
+}
+
 ULONG ami_bsd_tcp_window_receive_bound(ULONG want, ULONG hw_bytes, ULONG mss,
                                        ULONG bps, ULONG rtt_ms,
                                        ULONG grow_rtt_ms, ULONG wan_window,
@@ -131,8 +192,13 @@ ULONG ami_bsd_tcp_window_receive_bound(ULONG want, ULONG hw_bytes, ULONG mss,
 {
     ULONG fit;
 
+    /* A long path on a gigabit card: the card is not consulted, so
+       TCPWANWINDOW, when set, is the window -- floored at two segments, the
+       fit's own floor.  #354: genet kept 802,816 under TCPWANWINDOW=300000. */
     if (!ami_bsd_tcp_window_burst_bound(bps, rtt_ms, grow_rtt_ms))
-        return want;
+        return (wan_window != 0UL)
+               ? bsd_wan_window(want, wan_window, 2UL * mss)
+               : want;
 
     fit = ami_bsd_tcp_window_fit(want, hw_bytes, mss);
 
@@ -142,12 +208,9 @@ ULONG ami_bsd_tcp_window_receive_bound(ULONG want, ULONG hw_bytes, ULONG mss,
        window settled for the socket. */
     if (rtt_ms >= bsd_grow_rtt(grow_rtt_ms))
     {
-        ULONG wan;
-
         if (wan_window == 0UL)
             return wan_fitted ? fit : want;
-        wan = (wan_window < want) ? wan_window : want;
-        return (wan > fit) ? wan : fit;
+        return bsd_wan_window(want, wan_window, fit);
     }
 
     return fit;

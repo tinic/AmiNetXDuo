@@ -517,7 +517,18 @@ host_test_targets() { # builddir
 #      ownership without mistaking a valid recycled pool slot for the orphan.
 #      575 with addrinfo_dns_policy: default IPv4 LAN DNS query policy and
 #      source-aware ordering of A/AAAA answers (x86_64 shim only).
-HOST_TESTS_EXPECTED=575
+#      576 with arp_lan_chatter (#354): ARP between other hosts leaves the
+#      peer's entry in place (all hosts).
+#      578 with adopt_suspend_clean and adopt_suspend_latched: the suspend
+#      clears the run signal with SetSignal() only when it is latched.
+#      584 with netdev_tx (the write path and its pump) and the _no_batch
+#      builds of sana2_tx, sana2_device, netdev_cmds and netdev_extension:
+#      the configuration without AMINETXDUO_TX_BATCH (all hosts).
+#      589 with netsim_tcp_clean, _bottleneck, _loss, _reverse and _shallow
+#      (#354): two NetX Duo stacks over a simulated link (all hosts).
+#      590 with netsim_tcp_shallow150k (#354): the 150 KB queue a repair
+#      retransmission was lost in (all hosts).
+HOST_TESTS_EXPECTED=590
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,
@@ -530,14 +541,14 @@ case "$(uname -m)" in
     # test_unbracketed_close (F-059), test_raw_hdrincl6 (F-061),
     # test_deferred_release (F-059), test_hostsource (F-088),
     # test_raw_v6_lock (N-036), test_netstatus_order (N-077), and
-    # test_addrinfo_dns, all
+    # test_addrinfo_dns and test_tcp_autotune, all
     # x86_64-only for
     # the reason in
     # tests/bsdsocket/CMakeLists.txt:
     # elsewhere the host's LONG is eight bytes and no structure in them has
     # the target's shape.
     # Subtract the x86_64-only bsdsocket fixtures here.
-    *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 31)) ;;
+    *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 32)) ;;
 esac
 # The conflict-drain fixture uses Linux's MAP_32BIT, not merely x86_64.
 # Darwin arm64 registers 543; Darwin x86_64 registers 574 on this tree.
@@ -1379,8 +1390,9 @@ ${rlwhy:+ -- }${rlwhy:-, see the log above}" ;;
 # the ones whose pointer round trips through 32-bit slots are load-bearing.
 HOST32_TEST_TARGETS=(fuzz_mdns fuzz_tls_crypto tls_rsa_key_regression test_tls_x509
                      test_tcp_handler test_transfer test_cork test_cork_fast
+                     test_transfer_no_gso test_cork_no_gso test_cork_fast_no_gso
                      test_oob_filter tls_rsa_bounds tls_rsa_modulus_parity)
-HOST32_TEST_REGEX='(fuzz_mdns|fuzz_tls_crypto)_(seeds|sweep(_[0-9]+)?)$|^tls_rsa_key_regression$|tls_x509_checks$|^tcp_handler_packets$|^transfer_scatter_gather$|^cork_small_writes(_fastpath)?$|^oob_filter_payload_guard$|^tls_rsa_bounds$|^tls_rsa_modulus_parity$'
+HOST32_TEST_REGEX='(fuzz_mdns|fuzz_tls_crypto)_(seeds|sweep(_[0-9]+)?)$|^tls_rsa_key_regression$|tls_x509_checks$|^tcp_handler_packets$|^transfer_scatter_gather(_no_gso)?$|^cork_small_writes(_fastpath)?(_no_gso)?$|^oob_filter_payload_guard$|^tls_rsa_bounds$|^tls_rsa_modulus_parity$'
 # 7 until fuzz_tls_crypto_sweep was split into four streams to get under the
 # ten-second budget; 10 then, 13 once fuzz_mdns_sweep followed it at 9.31 s of
 # that budget, and 21 when four streams each turned out to still be 8.14 s on
@@ -1395,7 +1407,8 @@ HOST32_TEST_REGEX='(fuzz_mdns|fuzz_tls_crypto)_(seeds|sweep(_[0-9]+)?)$|^tls_rsa
 # scratch bounds; 32-bit for tls_rsa_key_regression's reason.
 # 27 with tls_rsa_modulus_parity (N-171), ours refusing an even modulus
 # before any exponentiation; the same reason.
-HOST32_TESTS_EXPECTED=27
+# 30 with GSO-disabled transfer and both cork paths, alongside the default builds.
+HOST32_TESTS_EXPECTED=30
 
 stage_host32() {
     hr "host tests (32-bit: mDNS, TLS crypto, X.509, TCP:, transfer)"
@@ -2041,6 +2054,18 @@ stage_web() {
     else
         cat "$BUILD/web-wire-selftest.log"
         fail "web (the Wire class sends fresh=1 on the wrong upgrade)"
+        return 1
+    fi
+
+    # Exercise the host adapter as well as the browser pages. In particular,
+    # HTTP failures are process status 2 with JSON on stderr; function-only
+    # tests cannot catch a CLI caller reading the wrong stream.
+    if node --test tools/web/remote-control.test.mjs \
+            > "$BUILD/web-remote-control.log" 2>&1; then
+        note "remote-control protocol and CLI tests passed"
+    else
+        cat "$BUILD/web-remote-control.log"
+        fail "web (remote-control protocol or CLI contract)"
         return 1
     fi
 

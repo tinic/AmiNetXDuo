@@ -2,7 +2,9 @@
  * NetSwitch: every interface in DEVS:NetInterfaces with its live state and
  * first IPv4 address, and Online and Offline for the selected one.  It reads
  * and switches through the netstatus calls C:Online and C:Offline use
- * (onoff.c), and does not wait for a link or a lease: the list shows them.
+ * (onoff.c). Normally it does not wait for a link or a lease: the list shows
+ * them. Optional clock synchronization uses Online SYNCTIME, which waits for
+ * the link and DHCP before asking the time server.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -11,6 +13,7 @@
 #include "netswitch_banner.h"
 
 #include <exec/memory.h>
+#include <dos/var.h>
 #include <graphics/gfxbase.h>
 #include <graphics/rastport.h>
 #include <graphics/text.h>
@@ -38,6 +41,10 @@ struct Library       *GadToolsBase;
 #define NS_ROW_CHARS    (NS_NAME_CHARS + 2 + NS_STATE_CHARS + 2 + 15)
 #define NS_LIST_ROWS    6
 
+/* Simple global settings use ENV:/ENVARC:, as HOSTNAME and the ANXD dials
+   do. Keep the name specific to this UI: Online still requires SYNCTIME. */
+#define NS_SYNC_VAR     "ANXDNETSWITCHSYNCTIME"
+
 /* Spacing in pixels, as NetPrefs has it; everything else is the font's. */
 #define MARGIN_X        8
 #define MARGIN_Y        5
@@ -46,7 +53,7 @@ struct Library       *GadToolsBase;
 #define SCROLLER_W      16
 #define LIST_PAD        12      /* listview frame and text inset */
 
-enum { GID_LIST = 1, GID_ONLINE, GID_OFFLINE };
+enum { GID_LIST = 1, GID_ONLINE, GID_OFFLINE, GID_SYNCTIME };
 
 /* NS_UNKNOWN: the stack is up and did not answer.  NS_DETACHED: no stack,
    or not in it. */
@@ -80,6 +87,7 @@ static struct
     ULONG               count;
     LONG                selected;
     ULONG               click_secs, click_micros;
+    BOOL                sync_time;
 } ns = { .selected = -1 };
 
 /* The live snapshot; static, as onoff.c keeps it. */
@@ -105,6 +113,34 @@ static VOID set_attr(struct Gadget *g, ULONG tag, ULONG value)
     struct TagItem tags[2] = { { tag, value }, { TAG_DONE, 0 } };
 
     GT_SetGadgetAttrsA(g, ns.window, NULL, tags);
+}
+
+static BOOL load_sync_time(VOID)
+{
+    char value[8];
+
+    /* Global only: a launching Shell's local variable must not hide the
+       saved preference. Missing or invalid values retain the opt-in default. */
+    return GetVar((CONST_STRPTR)NS_SYNC_VAR, (STRPTR)value, sizeof(value),
+                   LV_VAR | GVF_GLOBAL_ONLY) == 1 && value[0] == '1';
+}
+
+static BOOL save_sync_time(BOOL enabled)
+{
+    const char *value = enabled ? "1" : "0";
+    BPTR file;
+    BOOL ok;
+
+    /* GVF_SAVE_VAR, used by hostname, is ignored by DOS V37. NetSwitch
+       supports OS 2.04 too, so write the archive explicitly on every OS and
+       check it before updating the active global variable. */
+    file = Open((CONST_STRPTR)"ENVARC:" NS_SYNC_VAR, MODE_NEWFILE);
+    if (file == (BPTR)0) return FALSE;
+    ok = Write(file, (APTR)value, 1) == 1;
+    if (!Close(file)) ok = FALSE;
+    if (!ok) return FALSE;
+    return SetVar((CONST_STRPTR)NS_SYNC_VAR, (CONST_STRPTR)value, 1,
+                   LV_VAR | GVF_GLOBAL_ONLY) != 0;
 }
 
 /* `text` left-justified in a column of `width`, cut at the width, then a
@@ -356,7 +392,17 @@ static VOID act(BOOL up)
     /* Attaching opens the driver, which takes a moment.  The busy pointer is
        V39. */
     if (busy) SetWindowPointer(ns.window, WA_BusyPointer, TRUE, TAG_DONE);
-    switch_row(&ns.rows[now], up);
+    if (up && ns.sync_time)
+    {
+        if (tool_run_companion("Online", seen.name, "SYNCTIME", TRUE) != RETURN_OK)
+        {
+            ULONG args[1] = { (ULONG)seen.name };
+            requester("Online or time synchronization did not complete.\n"
+                      "The interface may still be online.\n"
+                      "For details, run Online %s SYNCTIME in a Shell.", args);
+        }
+    }
+    else switch_row(&ns.rows[now], up);
     if (busy) SetWindowPointer(ns.window, WA_Pointer, 0, TAG_DONE);
     refresh();
 }
@@ -375,7 +421,8 @@ static struct Gadget *add_gadget(ULONG kind, struct Gadget *previous,
     ng.ng_Width = w; ng.ng_Height = h;
     ng.ng_GadgetText = (STRPTR)label;
     ng.ng_TextAttr = ta;
-    ng.ng_GadgetID = id; ng.ng_Flags = PLACETEXT_IN;
+    ng.ng_GadgetID = id;
+    ng.ng_Flags = kind == CHECKBOX_KIND ? PLACETEXT_RIGHT : PLACETEXT_IN;
     ng.ng_VisualInfo = ns.visual; ng.ng_UserData = NULL;
     return CreateGadgetA(kind, previous, &ng, tags);
 }
@@ -418,7 +465,7 @@ static BOOL make_window(struct TextAttr *ta)
     struct RastPort  rp;
     struct Gadget   *g;
     WORD left, top, list_w, list_h, button_w, button_h, inner_w, inner_h;
-    WORD width, height, w;
+    WORD width, height, w, sync_w;
     WORD above = ns.banner.h != 0 ? (WORD)(ns.banner.h + MARGIN_Y) : 0;
 
     if ((bf = OpenFont(ta)) == NULL) return FALSE;
@@ -434,14 +481,17 @@ static BOOL make_window(struct TextAttr *ta)
     button_h = (WORD)(bf->tf_YSize + 6);
     list_w   = (WORD)(NS_ROW_CHARS * lf->tf_XSize + SCROLLER_W + LIST_PAD);
     list_h   = (WORD)(NS_LIST_ROWS * lf->tf_YSize + 4);
+    sync_w   = (WORD)(26 + TextLength(&rp,
+                           (CONST_STRPTR)"Synchronize time", 16));
     CloseFont(bf);
     CloseFont(lf);
 
     if (list_w < 2 * button_w + GAP) list_w = (WORD)(2 * button_w + GAP);
     if (list_w < ns.banner.w) list_w = ns.banner.w;
+    if (list_w < sync_w) list_w = sync_w;
     button_w = (WORD)((list_w - GAP) / 2);
     inner_w  = (WORD)(list_w + 2 * MARGIN_X);
-    inner_h  = (WORD)(above + MARGIN_Y + list_h + GAP / 2 + button_h +
+    inner_h  = (WORD)(above + MARGIN_Y + list_h + GAP / 2 + 2 * button_h + GAP / 2 +
                       MARGIN_Y);
 
     /* The title bar is in the screen font whatever the gadgets use. */
@@ -460,6 +510,7 @@ static BOOL make_window(struct TextAttr *ta)
             { GTLV_Selected, ~0UL }, { GTLV_ScrollWidth, SCROLLER_W },
             { TAG_DONE, 0 } };
         struct TagItem off[] = { { GA_Disabled, TRUE }, { TAG_DONE, 0 } };
+        struct TagItem sync[] = { { GTCB_Checked, ns.sync_time }, { TAG_DONE, 0 } };
         WORD y = (WORD)(top + MARGIN_Y + list_h + GAP / 2);
 
         g = CreateContext(&ns.gadgets);
@@ -474,6 +525,10 @@ static BOOL make_window(struct TextAttr *ta)
                                       (WORD)(left + inner_w - MARGIN_X -
                                              button_w), y, button_w,
                                       button_h, "Offline", ta, off);
+        g = add_gadget(CHECKBOX_KIND, g, GID_SYNCTIME,
+                       (WORD)(left + MARGIN_X),
+                       (WORD)(y + button_h + GAP / 2), 26, button_h,
+                       "Synchronize time", ta, sync);
         if (g == NULL) return FALSE;
     }
     {
@@ -484,7 +539,8 @@ static BOOL make_window(struct TextAttr *ta)
             { WA_InnerHeight, (ULONG)inner_h },
             { WA_Title, (ULONG)"NetSwitch" },
             { WA_IDCMP, IDCMP_CLOSEWINDOW | IDCMP_REFRESHWINDOW |
-                        BUTTONIDCMP | LISTVIEWIDCMP | IDCMP_INTUITICKS },
+                        BUTTONIDCMP | LISTVIEWIDCMP | CHECKBOXIDCMP |
+                        IDCMP_INTUITICKS },
             { WA_Flags, WFLG_DRAGBAR | WFLG_DEPTHGADGET | WFLG_CLOSEGADGET |
                         WFLG_ACTIVATE | WFLG_SMART_REFRESH },
             { WA_Gadgets, (ULONG)ns.gadgets },
@@ -588,6 +644,19 @@ static VOID event_loop(VOID)
                 if (id == GID_LIST) list_clicked(&m);
                 else if (id == GID_ONLINE) act(TRUE);
                 else if (id == GID_OFFLINE) act(FALSE);
+                else if (id == GID_SYNCTIME)
+                {
+                    BOOL enabled = m.Code != 0;
+                    if (enabled != ns.sync_time)
+                    {
+                        ns.sync_time = enabled;
+                        if (!save_sync_time(enabled))
+                            requester("Time synchronization preference could not\n"
+                                      "be saved completely to ENV: and ENVARC:.\n"
+                                      "The current choice remains in this window.",
+                                      NULL);
+                    }
+                }
             }
         }
     }
@@ -643,6 +712,7 @@ static int netswitch_run(void)
 
     if (IntuitionBase != NULL && GfxBase != NULL && GadToolsBase != NULL)
     {
+        ns.sync_time = load_sync_time();
         empty_list();
         refresh();
         if (open_ui())

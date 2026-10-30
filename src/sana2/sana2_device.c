@@ -1361,34 +1361,46 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
     /* One versioned record owns every optional stack/device fast-path fact.
        A third-party driver ignores this one private tag and leaves Accepted
        zero. */
-    iface->extension.Version  = ANXD_S2_ABI_VERSION;
-    iface->extension.Size     = (UWORD)sizeof(iface->extension);
-    iface->extension.Request  = ANXD_S2F_RX_DIRECT |
+    AMI_SANA2_EXT(iface).Version  = ANXD_S2_ABI_VERSION;
+    AMI_SANA2_EXT(iface).Size     = (UWORD)sizeof(iface->extension);
+    AMI_SANA2_EXT(iface).Request  = ANXD_S2F_RX_DIRECT |
                                 ANXD_S2F_RX_LINK_HDR |
                                 ANXD_S2F_RX_POLL |
                                 ANXD_S2F_RX_CAPACITY |
                                 ANXD_S2F_TX_QUICK;
 #ifdef AMINETXDUO_TX_RUN
     if (ami_config_tx_run(1UL) != 0UL)
-        iface->extension.Request |= ANXD_S2F_TX_MORE;
+        AMI_SANA2_EXT(iface).Request |= ANXD_S2F_TX_MORE;
 #endif
 #ifdef AMINETXDUO_RX_BATCH
     if (ami_config_rx_batch(1UL) != 0UL)
-        iface->extension.Request |= ANXD_S2F_RX_BATCH;
+        AMI_SANA2_EXT(iface).Request |= ANXD_S2F_RX_BATCH;
 #endif
-    iface->extension.Accepted = 0;
-    iface->extension.RxDirect = ami_sana2_rx_direct;
-    iface->extension.RxFilled = ami_sana2_rx_filled;
-    iface->extension.TxFlags  = ami_sana2_tx_flags;
+    AMI_SANA2_EXT(iface).Accepted = 0;
+    AMI_SANA2_EXT(iface).RxDirect = ami_sana2_rx_direct;
+    AMI_SANA2_EXT(iface).RxFilled = ami_sana2_rx_filled;
+    AMI_SANA2_EXT(iface).TxFlags  = ami_sana2_tx_flags;
+#ifdef AMINETXDUO_TX_BATCH
+    /* Appended to version 3 (AnxdS2ExtensionTx): a driver that does not
+       know TX_BATCH leaves it out of Accepted and every GSO child is its
+       own write, as before. */
+    iface->extension.Reserved[0] = NULL;
+    iface->extension.Reserved[1] = NULL;
+    iface->extension.TxBatch     = ami_sana2_tx_batch;
+    iface->extension.TxChild     = ami_sana2_tx_child;
+    iface->extension.TxPosted    = ami_sana2_tx_posted;
+    if (ami_config_tx_batch(1UL) != 0UL)
+        AMI_SANA2_EXT(iface).Request |= ANXD_S2F_TX_BATCH;
+#endif
 #ifdef AMINETXDUO_RX_CHECKSUM_OFFLOAD
     /* Request only the device fact this build consumes.  GRO classification
        is deliberately stack-side, including for an ordinary SANA-II driver. */
-    iface->extension.Request |= ANXD_S2F_RX_VERIFIED;
+    AMI_SANA2_EXT(iface).Request |= ANXD_S2F_RX_VERIFIED;
 #endif
 #ifdef AMINETXDUO_RX_VERIFY
     /* The transport checksum by the card, TCP only: what the fused copy
        does in software otherwise, and the same reason it stops at TCP. */
-    iface->extension.Request |= ANXD_S2F_TX_CSUM_TCP;
+    AMI_SANA2_EXT(iface).Request |= ANXD_S2F_TX_CSUM_TCP;
 #endif
     iface->buffer_tags[tag].ti_Tag  = ANXD_S2_EXTENSION;
     iface->buffer_tags[tag].ti_Data = (ULONG)&iface->extension;
@@ -1432,6 +1444,7 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
         if (port == NULL)
         {
             ami_sana2_rx_free_slots(iface);
+            ami_sana2_gso_free(iface);
             ami_free(iface);
             if (err != NULL)
                 *err = AMI_NET_ERR_NOMEM;
@@ -1452,33 +1465,39 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
         DeleteMsgPort(port);
     }
 
-    iface->link_hdr_ok = (BOOL)((iface->extension.Accepted &
+    iface->link_hdr_ok = (BOOL)((AMI_SANA2_EXT(iface).Accepted &
                                  ANXD_S2F_RX_LINK_HDR) != 0);
     iface->rx_flags_ok =
-        (UBYTE)(((iface->extension.Accepted & ANXD_S2F_RX_VERIFIED) != 0)
+        (UBYTE)(((AMI_SANA2_EXT(iface).Accepted & ANXD_S2F_RX_VERIFIED) != 0)
                     ? ANXD_S2_RXF_VERIFIED : 0);
     iface->rx_poll_ok =
-        (UBYTE)(((iface->extension.Accepted & ANXD_S2F_RX_POLL) != 0) ? 1 : 0);
+        (UBYTE)(((AMI_SANA2_EXT(iface).Accepted & ANXD_S2F_RX_POLL) != 0) ? 1 : 0);
     /* Batches carry no per-frame request fields: the link header the device
        writes in front of each payload is the frame's whole identity, so a
        batch is only usable when that was accepted too (the device accepts
        the two together, but both are checked here rather than trusted). */
 #ifdef AMINETXDUO_RX_BATCH
     iface->rx_batch_ok =
-        (UBYTE)(((iface->extension.Accepted & ANXD_S2F_RX_BATCH) != 0 &&
+        (UBYTE)(((AMI_SANA2_EXT(iface).Accepted & ANXD_S2F_RX_BATCH) != 0 &&
                  iface->link_hdr_ok && !iface->raw_mode) ? 1 : 0);
 #endif
     iface->hw_rx_bytes = 0;
     iface->tx_quick_ok =
-        (UBYTE)(((iface->extension.Accepted & ANXD_S2F_TX_QUICK) != 0) ? 1 : 0);
+        (UBYTE)(((AMI_SANA2_EXT(iface).Accepted & ANXD_S2F_TX_QUICK) != 0) ? 1 : 0);
     iface->tx_csum_ok = 0;
-    if ((iface->extension.Accepted & ANXD_S2F_TX_CSUM_TCP) != 0)
+    if ((AMI_SANA2_EXT(iface).Accepted & ANXD_S2F_TX_CSUM_TCP) != 0)
         iface->tx_csum_ok |= ANXD_S2_TXF_TCP;
-    if ((iface->extension.Accepted & ANXD_S2F_TX_CSUM_UDP) != 0)
+    if ((AMI_SANA2_EXT(iface).Accepted & ANXD_S2F_TX_CSUM_UDP) != 0)
         iface->tx_csum_ok |= ANXD_S2_TXF_UDP;
 #ifdef AMINETXDUO_TX_RUN
     iface->tx_more_ok =
-        (UBYTE)(((iface->extension.Accepted & ANXD_S2F_TX_MORE) != 0) ? 1 : 0);
+        (UBYTE)(((AMI_SANA2_EXT(iface).Accepted & ANXD_S2F_TX_MORE) != 0) ? 1 : 0);
+#endif
+#ifdef AMINETXDUO_TX_BATCH
+    /* Cooked only: the copy hook cuts the block, as for one write a child. */
+    iface->tx_batch_ok =
+        (UBYTE)(((AMI_SANA2_EXT(iface).Accepted & ANXD_S2F_TX_BATCH) != 0 &&
+                 !iface->raw_mode) ? 1 : 0);
 #endif
     if (status != 0)
     {
@@ -1490,6 +1509,9 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
 #endif
         iface->tx_quick_ok = 0;
         iface->tx_csum_ok  = 0;
+#ifdef AMINETXDUO_TX_BATCH
+        iface->tx_batch_ok = 0;
+#endif
 #ifdef AMINETXDUO_TX_RUN
         iface->tx_more_ok  = 0;
 #endif
@@ -1513,6 +1535,7 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
             AMI_ERROR("sana2: cannot open %s unit %ld (%ld)", iface->device,
                       (long)iface->unit, (long)status);
         ami_sana2_rx_free_slots(iface);
+        ami_sana2_gso_free(iface);
         ami_free(iface);
         if (err != NULL)
             *err = AMI_NET_ERR_NODEV;
@@ -1566,7 +1589,7 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
     iface->overruns_new        = 0;
     if (cfg->rx_buffer != 0)
         iface->hw_rx_bytes = cfg->rx_buffer;
-    else if ((iface->extension.Accepted & ANXD_S2F_RX_CAPACITY) != 0)
+    else if ((AMI_SANA2_EXT(iface).Accepted & ANXD_S2F_RX_CAPACITY) != 0)
     {
         iface->rx_capacity_live = TRUE;
         ami_sana2_refresh_rx_capacity(iface);
@@ -1725,6 +1748,7 @@ static VOID ami_sana2_release(AmiSana2If *iface)
     ami_sana2_detach(iface);
 
     ami_sana2_rx_free_slots(iface);
+    ami_sana2_gso_free(iface);
     ami_free(iface);
 }
 

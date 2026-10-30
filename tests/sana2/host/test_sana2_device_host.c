@@ -459,15 +459,28 @@ VOID ami_free(APTR ptr)
 
 VOID ami_log(int level, const char *fmt, ...) { (VOID)level; (VOID)fmt; }
 
+/* sana2_driver.c's, with the interface: no case here advertises GSO, so
+   there is never a table to free. */
+VOID ami_sana2_gso_free(AmiSana2If *iface)
+{
+    (VOID)iface;
+}
+
 VOID ami_random_arrival(VOID) { }
 ULONG ami_config_rx_batch(ULONG fallback) { return fallback; }
 ULONG ami_config_tx_run(ULONG fallback)   { return fallback; }
+ULONG ami_config_tx_batch(ULONG fallback) { return fallback; }
 
 UINT tx_thread_sleep(ULONG ticks) { (VOID)ticks; return 0; }
 
 /* --------------------------------------------------------- the device I/O -- */
 
 static ULONG h_open_flags;      /* what the last open asked the driver for */
+/* What the fake driver writes into the extension record's Accepted, as it
+   stands, request or no request: 0 is a driver that ignores the tag. */
+static ULONG h_ext_accept;
+static ULONG h_ext_request;     /* what the last open asked for there */
+static UWORD h_ext_size;
 static UBYTE h_units[2];        /* unit 0 is NULL, as plipbox reports it */
 
 LONG ami_sana2_open_device_flags(const char *name, ULONG unit,
@@ -489,6 +502,12 @@ LONG ami_sana2_open_device_flags(const char *name, ULONG unit,
                 h_dev.link_speed_seen = iface->link_speed_request.Mbps;
                 if (h_dev.supports_link_speed)
                     iface->link_speed_request.Accepted = 1;
+            }
+            if (tag->ti_Tag == ANXD_S2_EXTENSION)
+            {
+                h_ext_request = AMI_SANA2_EXT(iface).Request;
+                h_ext_size    = AMI_SANA2_EXT(iface).Size;
+                AMI_SANA2_EXT(iface).Accepted = h_ext_accept;
             }
             tag++;
         }
@@ -831,6 +850,31 @@ BOOL ami_sana2_copy_from_buff(register APTR to   __asm("a0"),
     (VOID)len;
     return FALSE;
 }
+
+#ifdef AMINETXDUO_TX_BATCH
+ULONG ami_sana2_tx_batch(APTR ios2_data, AnxdS2TxBatchInfo *info)
+{
+    (VOID)ios2_data;
+    (VOID)info;
+    return 0;
+}
+
+VOID ami_sana2_tx_posted(APTR ios2_data, ULONG count)
+{
+    (VOID)ios2_data;
+    (VOID)count;
+}
+
+ULONG ami_sana2_tx_child(APTR ios2_data, ULONG index, UBYTE *dst, ULONG len)
+{
+    (VOID)ios2_data;
+    (VOID)index;
+    (VOID)dst;
+    (VOID)len;
+    return 0;
+}
+
+#endif
 
 UBYTE *ami_sana2_rx_direct(APTR ios2_data, ULONG len)
 {
@@ -2239,6 +2283,72 @@ static void case_link_speed(void)
         h_check(ami_sana2_close(iface), "ordinary interface closes cleanly");
 }
 
+/*
+ * TX_BATCH is asked for with its own bit and a record that carries the pair,
+ * and used only when the driver says so with that bit.  A driver from the
+ * experimental build that offered bit 10 -- whatever it answers -- gets
+ * every GSO child as its own write.
+ */
+static void case_tx_batch_negotiation(void)
+{
+    AmiSana2If *iface;
+    LONG        err = 0;
+
+    printf("sana2 device: TX_BATCH negotiation\n");
+
+    h_device_reset();
+    h_config();
+    h_ext_accept = 0;
+    iface = ami_sana2_open(&h_cfg, &err);
+    h_check(iface != NULL, "an ordinary driver opens");
+#ifndef AMINETXDUO_TX_BATCH
+    /* Built without it: never asked for, and the record is version 3's
+       alone, whatever a driver says. */
+    h_check(iface != NULL && (h_ext_request & ANXD_S2F_TX_BATCH) == 0 &&
+            h_ext_size == (UWORD)sizeof(AnxdS2Extension),
+            "without TX_BATCH: not requested, the plain record");
+    if (iface != NULL)
+        h_check(ami_sana2_close(iface), "and closes");
+#else
+    if (iface != NULL)
+    {
+        h_check((h_ext_request & ANXD_S2F_TX_BATCH) != 0 &&
+                (h_ext_request & (1UL << 10)) == 0,
+                "TX_BATCH is requested, bit 10 never");
+        h_check(h_ext_size >= (UWORD)ANXD_S2_EXTENSION_BATCH_SIZE &&
+                iface->extension.TxBatch == ami_sana2_tx_batch &&
+                iface->extension.TxChild == ami_sana2_tx_child &&
+                iface->extension.TxPosted == ami_sana2_tx_posted &&
+                iface->extension.Reserved[0] == NULL &&
+                iface->extension.Reserved[1] == NULL,
+                "the record carries the pair, the reserved pointers NULL");
+        h_check(iface->tx_batch_ok == 0,
+                "a driver that ignores the record gets no batches");
+        h_check(ami_sana2_close(iface), "and closes");
+    }
+
+    h_device_reset();
+    h_config();
+    h_ext_accept = (1UL << 10) | ANXD_S2F_TX_QUICK;
+    iface = ami_sana2_open(&h_cfg, &err);
+    h_check(iface != NULL && iface->tx_batch_ok == 0,
+            "a driver offering only bit 10 gets no batches");
+    if (iface != NULL)
+        h_check(ami_sana2_close(iface), "and closes");
+
+    h_device_reset();
+    h_config();
+    h_ext_accept = ANXD_S2F_TX_BATCH | ANXD_S2F_TX_QUICK;
+    iface = ami_sana2_open(&h_cfg, &err);
+    h_check(iface != NULL && iface->tx_batch_ok == 1,
+            "a driver accepting TX_BATCH gets batches");
+    if (iface != NULL)
+        h_check(ami_sana2_close(iface), "and closes");
+#endif
+
+    h_ext_accept = 0;
+}
+
 /* ------------------------------------------------ bounded attach commands -- */
 
 /* An open with h_dev.slow_cmd answered as `mode`. */
@@ -2389,6 +2499,7 @@ int main(void)
     printf("sana2 device: open, online, offline, close\n");
 
     case_link_speed();
+    case_tx_batch_negotiation();
     case_healthy();
     case_out_of_service_still_offlines();
     case_offline_is_idempotent();

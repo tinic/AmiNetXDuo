@@ -207,13 +207,8 @@ typedef struct
 #define BSD_UDP_QUEUE_CEILING   64
 #define BSD_UDP_POOL_SHARE      4       /* 1/N of the pool per socket       */
 
-/* The TCP transmit queue, in unacknowledged segments.  bsd_tcp_tx_queue_default()
-   in socket.c sizes each socket from the pool: 1/N of it, never below the old
-   fixed depth, never above NX_TCP_MAXIMUM_TX_QUEUE (nx_user.h, the SO_SNDBUF
-   ceiling).  On a 512-packet pool that is the ceiling; on the 16-packet floor
-   it is the old 8.  Why it moves at all is in nx_user.h. */
-#define BSD_TCP_TX_QUEUE_MIN    8
-#define BSD_TCP_TX_POOL_SHARE   8       /* 1/N of the pool per socket       */
+/* The TCP transmit queue's share of the pool, BSD_TCP_TX_POOL_SHARE and
+   BSD_TCP_TX_QUEUE_MIN, is in bsdsocket_window.h (ami_bsd_tcp_tx_queue_for). */
 
 /* Room for one dotted quad plus terminator, used by Inet_NtoA(). */
 #define BSD_NTOA_BUFLEN         16
@@ -499,6 +494,7 @@ typedef struct AmiSocket
     ULONG                   as_EventMask;   /* SO_EVENTMASK                  */
     LONG                    as_SoError;     /* SO_ERROR, cleared when read   */
     ULONG                   as_ConnectMillis; /* ami_millis() at the SYN     */
+    TX_THREAD              *as_ConnectWaiter; /* asleep in connect()         */
     /* What the window settle chose before the card bounded it, and the
        round trip it chose for: kept so a change in what the card holds can
        be applied to the live connection (socket.c, bsd_tcp_window_recap).
@@ -609,6 +605,10 @@ typedef struct AmiSocket
     ULONG                   as_SndTimeout;
     LONG                    as_RcvBuf;      /* SO_RCVBUF, as the caller set  */
     LONG                    as_SndBuf;      /* SO_SNDBUF, as the caller set  */
+    /* Zero until queue pressure enables automatic TX growth. The deadline
+       bounds retry work to once per measured RTT, in ami_millis units. */
+    ULONG                   as_AutoTxDepth;
+    ULONG                   as_AutoTxNext;
     LONG                    as_LingerOn;
     LONG                    as_LingerTime;
     LONG                    as_Ttl;
@@ -754,11 +754,18 @@ VOID  bsd_nx_release(struct AmiSocketBase *base);
 
 /*
  * The break bits pending for this base's owner, observed without consuming.
+ *
+ * A read of the caller's own tc_SigRecvd, not SetSignal(0, 0): the answer is
+ * the same longword, but SetSignal() takes Disable()/Enable() to change it,
+ * and a blocking TCP send asks twice per segment.  On the PiStorm A1200 the
+ * two calls were 27.5% of an AmiSpeedTest upload (about 6 us each,
+ * 2026-10-29).  An aligned longword read cannot tear, and a bit an interrupt
+ * sets after it is seen on the next look, as it would be after SetSignal().
  */
 static __inline ULONG bsd_break_signals(struct AmiSocketBase *base)
 {
     (VOID)base;
-    return SetSignal(0UL, 0UL);
+    return FindTask(NULL)->tc_SigRecvd;
 }
 
 static __inline BOOL bsd_nx_orphan(struct AmiSocketBase *base)
@@ -1014,6 +1021,7 @@ VOID       bsd_bpf_zone_read(VOID);
 /* socket.c, the receive window this machine can afford right now. */
 ULONG      ami_bsd_tcp_window(struct AmiSocketBase *base);
 VOID       bsd_tcp_window_settle(NX_TCP_SOCKET *tcp, ULONG rtt_ms);
+VOID       bsd_tcp_tx_autotune(NX_TCP_SOCKET *tcp, ULONG pending_bytes);
 struct AmiSana2If;
 AMIGA_ASM_ARGS VOID bsd_tcp_window_recap(NX_IP *ip, struct AmiSana2If *sana);
 

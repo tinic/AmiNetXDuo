@@ -38,6 +38,8 @@
 #include "netmonitor.h"
 #include "aminetxduo/sana2.h"
 #include "nx_ip.h"
+#include "nx_packet.h"
+#include "aminetxduo/tcpgso.h"
 
 #include <proto/dos.h>
 
@@ -45,6 +47,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* TCP GSO (transfer.c): no interface here advertises it, so transfer.c
+   never asks; linked because transfer.c names it. */
+UINT ami_sana2_gso_max_segs(NX_INTERFACE *interface_ptr)
+{
+    (VOID)interface_ptr;
+    return 0;
+}
 
 #ifndef AMINETXDUO_TCP_CORK
 #error "test_cork is the cork's test: build it with AMINETXDUO_TCP_CORK"
@@ -274,9 +284,20 @@ static void h_safe(void)
         h.unsafe++;
 }
 
+/* bsd_break_signals() reads the caller's tc_SigRecvd: h.signals at the
+   moment of the call, whichever task is asking. */
+/* socket.c's queue autotune: never grows anything here. */
+VOID bsd_tcp_tx_autotune(NX_TCP_SOCKET *tcp, ULONG pending_bytes)
+{
+    (VOID)tcp;
+    (VOID)pending_bytes;
+}
+
 struct Task *FindTask(const char *name)
 {
     (VOID)name;
+    if (h.me != NULL)
+        h.me->tc_SigRecvd = h.signals;
     return h.me;
 }
 
@@ -374,6 +395,13 @@ UINT _tx_thread_sleep(ULONG timer_ticks)
         h.sleep_finishes = NULL;
     }
     return TX_SUCCESS;
+}
+
+/* The connect() wake (select.c): nothing here connects, so never reached. */
+UINT _txe_thread_wait_abort(TX_THREAD *thread_ptr)
+{
+    (void)thread_ptr;
+    abort();
 }
 
 UINT _txe_timer_create(TX_TIMER *timer_ptr, CHAR *name_ptr,
@@ -540,9 +568,9 @@ UINT _nxe_packet_allocate(NX_PACKET_POOL *pool_ptr, NX_PACKET **packet_ptr,
     return NX_NO_PACKET;
 }
 
-UINT _nxe_packet_data_append(NX_PACKET *packet_ptr, VOID *data_start,
-                             ULONG data_size, NX_PACKET_POOL *pool_ptr,
-                             ULONG wait_option)
+UINT _nx_packet_data_append(NX_PACKET *packet_ptr, VOID *data_start,
+                            ULONG data_size, NX_PACKET_POOL *pool_ptr,
+                            ULONG wait_option)
 {
     (VOID)pool_ptr; (VOID)wait_option;
     h_safe();
@@ -551,6 +579,16 @@ UINT _nxe_packet_data_append(NX_PACKET *packet_ptr, VOID *data_start,
     packet_ptr->nx_packet_append_ptr += data_size;
     packet_ptr->nx_packet_length     += data_size;
     return NX_SUCCESS;
+}
+
+/* transfer.c calls _nx_packet_data_append() directly; the wrapper is for
+   anything else that reaches it. */
+UINT _nxe_packet_data_append(NX_PACKET *packet_ptr, VOID *data_start,
+                             ULONG data_size, NX_PACKET_POOL *pool_ptr,
+                             ULONG wait_option)
+{
+    return _nx_packet_data_append(packet_ptr, data_start, data_size, pool_ptr,
+                                  wait_option);
 }
 
 UINT _nxe_packet_length_get(NX_PACKET *packet_ptr, ULONG *length)
@@ -590,10 +628,10 @@ static void h_wire(const UBYTE *from, ULONG n)
     h.wire_len += n;
 }
 
-UINT _nxe_tcp_socket_send(NX_TCP_SOCKET *socket_ptr, NX_PACKET **packet_ptr_ptr,
-                          ULONG wait_option)
+UINT _nx_tcp_socket_send(NX_TCP_SOCKET *socket_ptr, NX_PACKET *packet_ptr,
+                         ULONG wait_option)
 {
-    NX_PACKET *pkt = *packet_ptr_ptr;
+    NX_PACKET *pkt = packet_ptr;
     HPacket   *p   = h_from_nx(pkt);
     UINT       status;
     ULONG      take;
@@ -635,6 +673,13 @@ UINT _nxe_tcp_socket_send(NX_TCP_SOCKET *socket_ptr, NX_PACKET **packet_ptr_ptr,
     pkt->nx_packet_length      -= take;
 
     return status;
+}
+
+/* cork.c's spelling; transfer.c calls _nx_tcp_socket_send() directly. */
+UINT _nxe_tcp_socket_send(NX_TCP_SOCKET *socket_ptr, NX_PACKET **packet_ptr_ptr,
+                          ULONG wait_option)
+{
+    return _nx_tcp_socket_send(socket_ptr, *packet_ptr_ptr, wait_option);
 }
 
 UINT _nx_tcp_socket_receive(NX_TCP_SOCKET *socket_ptr, NX_PACKET **packet_ptr,
@@ -1409,6 +1454,24 @@ static void t_nonblocking(void)
     CHECK(bsd_writable(s) == TRUE, "room in the queue for it: writable");
     s->as_Nx.tcp.nx_tcp_socket_transmit_sent_count = 7;
     CHECK(bsd_writable(s) == FALSE, "sent_count + 1 == max: not writable");
+
+    /* On a GSO interface the queue is bounded in bytes too
+       (_nx_tcp_socket_queue_byte_credit): 8 entries of 100 bytes. */
+    h_eth.nx_interface_capability_flag = NX_INTERFACE_CAPABILITY_TCP_GSO;
+    s->as_Nx.tcp.nx_tcp_socket_connect_mss          = 100;
+    s->as_Nx.tcp.nx_tcp_socket_transmit_sent_count  = 0;
+    s->as_Nx.tcp.nx_tcp_socket_tx_outstanding_bytes = 800;
+#ifdef AMINETXDUO_TCP_GSO
+    CHECK(bsd_writable(s) == FALSE && s->as_TxWait == 1,
+          "a full segment and no byte credit: not writable");
+#else
+    CHECK(bsd_writable(s) == TRUE,
+          "without GSO advertised capability does not impose aggregate byte credit");
+#endif
+    s->as_Nx.tcp.nx_tcp_socket_tx_outstanding_bytes = 700;
+    CHECK(bsd_writable(s) == TRUE, "credit again: writable");
+    h_eth.nx_interface_capability_flag = 0;
+    s->as_Nx.tcp.nx_tcp_socket_tx_outstanding_bytes = 0;
 }
 
 static void t_oob(void)

@@ -844,7 +844,10 @@ static inline VOID __attribute__((always_inline)) ami_sana2_rx_arm(
  * touches these two: the flag is cleared where the reply is dequeued, in the
  * drain, and in the teardown reap -- both on this thread.
  */
-static VOID ami_sana2_rx_mark(AmiSana2Rx *rx, AmiRxSlot *slot, BOOL posted)
+/* always_inline: once a frame, five sites, and LTO put it out of line when
+   the transmit side grew (tools/check-hot-calls.sh). */
+static inline VOID __attribute__((always_inline)) ami_sana2_rx_mark(
+    AmiSana2Rx *rx, AmiRxSlot *slot, BOOL posted)
 {
     if ((slot->posted != FALSE) == (posted != FALSE))
         return;

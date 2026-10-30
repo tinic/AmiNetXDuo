@@ -11,6 +11,12 @@ typedef char anxd_ext_txflags_at_20[
     (offsetof(AnxdS2Extension, TxFlags) == 20u) ? 1 : -1];
 typedef char anxd_batch_header_is_8[
     (offsetof(AnxdS2RxBatch, Cookie) == 8u) ? 1 : -1];
+#ifdef AMINETXDUO_TX_BATCH
+typedef char anxd_ext_tx_batch_at_32[
+    (offsetof(AnxdS2ExtensionTx, TxBatch) == 32u) ? 1 : -1];
+typedef char anxd_ext_tx_batch_size_is_44[
+    (ANXD_S2_EXTENSION_BATCH_SIZE == 44u) ? 1 : -1];
+#endif /* AMINETXDUO_TX_BATCH */
 #endif
 
 BOOL netdev_take_extension(AnxdS2Extension *ext, NetdevOpener *op,
@@ -37,6 +43,25 @@ BOOL netdev_take_extension(AnxdS2Extension *ext, NetdevOpener *op,
             (UBYTE)((request & ANXD_S2F_RX_LINK_HDR) != 0);
         if ((request & ANXD_S2F_RX_VERIFIED) != 0)
             op->op_RxFlags = ANXD_S2_RXF_VERIFIED;
+#ifdef AMINETXDUO_TX_BATCH
+    }
+    /* Appended to version 3 (AnxdS2ExtensionTx): read only from a record
+       whose Size covers them, and only for the bit that names them -- bit
+       10 and the 24..31 pointers belonged to an experimental record, and a
+       record of that shape never gets these. */
+    if ((request & ANXD_S2F_TX_BATCH) != 0 &&
+        ext->Size >= (UWORD)ANXD_S2_EXTENSION_BATCH_SIZE)
+    {
+        const AnxdS2ExtensionTx *tx = (const AnxdS2ExtensionTx *)ext;
+
+        if (tx->TxBatch != NULL && tx->TxChild != NULL &&
+            tx->TxPosted != NULL)
+        {
+            op->op_TxBatch  = (APTR)tx->TxBatch;
+            op->op_TxChild  = (APTR)tx->TxChild;
+            op->op_TxPosted = (APTR)tx->TxPosted;
+        }
+#endif /* AMINETXDUO_TX_BATCH */
     }
     if (ext->TxFlags != NULL)
     {
@@ -87,6 +112,14 @@ ULONG netdev_extension_supported(NetdevOpener *op, const NetdevNic *nic)
         supported |= ANXD_S2F_RX_BATCH;
     if (nic->tx_flush != NULL && op->op_TxFlags != NULL)
         supported |= ANXD_S2F_TX_MORE;
+#ifdef AMINETXDUO_TX_BATCH
+    /* Batches are cut by a core's tx_run under the task-level transmit lock
+       (netdev_tx.c), cooked: the shell writes each frame's link header. */
+    if (nic->tx_run != NULL && nic->tx_task_lock &&
+        op->op_TxBatch != NULL && op->op_TxChild != NULL &&
+        op->op_TxPosted != NULL && op->op_TxFlags != NULL && op->op_CopyFrom != NULL && !op->op_Raw)
+        supported |= ANXD_S2F_TX_BATCH;
+#endif /* AMINETXDUO_TX_BATCH */
     if ((op->op_RxFlags & ANXD_S2_RXF_VERIFIED) != 0)
         supported |= ANXD_S2F_RX_VERIFIED;
     if ((op->op_TxCsum & ANXD_S2_TXF_TCP) != 0)

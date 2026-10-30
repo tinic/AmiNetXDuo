@@ -55,6 +55,13 @@ VOID _tx_thread_system_resume(TX_THREAD *t)   { (void) t; _tx_thread_preempt_dis
 UINT _tx_event_flags_set(TX_EVENT_FLAGS_GROUP *g, ULONG f, UINT o)  { (void) g; (void) f; (void) o; return TX_SUCCESS; }
 UINT _txe_event_flags_set(TX_EVENT_FLAGS_GROUP *g, ULONG f, UINT o) { (void) g; (void) f; (void) o; return TX_SUCCESS; }
 VOID _nx_tcp_cleanup_deferred(TX_THREAD *t NX_CLEANUP_PARAMETER) { (void) t; NX_CLEANUP_EXTENSION }
+/* SACK storage is lazy; this teardown-only test has no packet pool. */
+UINT _nx_packet_allocate(NX_PACKET_POOL *pool, NX_PACKET **packet, ULONG type, ULONG wait)
+{
+    (void)pool; (void)packet; (void)type; (void)wait;
+    return NX_NO_PACKET;
+}
+
 UINT _nx_packet_release(NX_PACKET *p)         { (void) p; released++; return NX_SUCCESS; }
 UINT _nx_ipv6_multicast_leave(NX_IP *i, ULONG *a, NX_INTERFACE *f) { (void) i; (void) a; (void) f; return NX_SUCCESS; }
 VOID _nx_tcp_syncache_interface_flush(NX_IP *i, NX_INTERFACE *f, NXD_IPV6_ADDRESS *a) { (void) i; (void) f; (void) a; }

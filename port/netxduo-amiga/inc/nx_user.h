@@ -81,6 +81,16 @@ extern struct TX_THREAD_STRUCT *_nx_ip_input_thread;
 
 #define NX_ARP_MAX_QUEUE_DEPTH                  2
 
+/* An entry only for an address this machine sends to.  Auto entries give one
+   to the sender of every ARP packet heard, the requests between other hosts
+   too, and _nx_arp_entry_allocate() recycles the one allocated longest ago:
+   on a busy LAN the 19 entries (AMI_ARP_CACHE_SIZE) turned over under a
+   transfer, the peer's mapping went with them, and an A1200 uploading at
+   550 Mbit/s dropped ~200 segments while it resolved again (#354).  A request
+   for us is still answered from the packet itself; an entry already present
+   is still refreshed.  tests/arp, arp_lan_chatter. */
+#define NX_DISABLE_ARP_AUTO_ENTRY
+
 /* Seconds.  Governs unresolved entries only: NX_ARP_EXPIRATION_RATE is 0 here,
    so a resolved entry carries no next-update time and is never re-probed. */
 #define NX_ARP_UPDATE_RATE                      1
@@ -91,7 +101,7 @@ extern struct TX_THREAD_STRUCT *_nx_ip_input_thread;
 /* ------------------------------------------------------------------ TCP --- */
 
 /* THE CEILING, NOT THE DEFAULT.  Each socket starts with a share of the packet
-   pool (bsd_tcp_tx_queue_default(), src/bsdsocket/socket.c: pool/8, floor 8,
+   pool (bsd_tcp_tx_queue_default(), src/bsdsocket/socket.c: pool/4, floor 8,
    ceiling this) and SO_SNDBUF may raise it up to this.
 
    8 was the fixed depth from wave 1 to 0.27.5, held against the vendor's 20 by
@@ -110,9 +120,10 @@ extern struct TX_THREAD_STRUCT *_nx_ip_input_thread;
    Eight segments a round trip is a bandwidth cap in its own right, and no
    card can lift it.  1024 x 1460 is 1.4 MB, past the 1 MB receive window a
    peer on a long path may offer (bsdsocket_window.h), so the peer's window
-   is the limit again and not this.  The pool-share default (an eighth of
-   the pool, 513 segments on a 4,096-packet pool) keeps a 1 MB machine where
-   it was; this is the ceiling SO_SNDBUF may ask for. */
+   is the limit again and not this.  The pool-share default (a quarter of
+   the pool, bsdsocket_window.h) reaches it on a 4,096-packet pool and keeps
+   the floor of 8 under 32 packets; this is the ceiling SO_SNDBUF may ask
+   for. */
 #define NX_TCP_MAXIMUM_TX_QUEUE                 1024
 
 /* The data-driven acknowledgment threshold (the fork's
@@ -135,6 +146,15 @@ extern struct TX_THREAD_STRUCT *_nx_ip_input_thread;
    in fourteen.  A host test that compiles the SYN cache provides this.  */
 ULONG _nx_amiga_handshake_millis(VOID);
 #define NX_TCP_SYNCACHE_CLOCK()                 _nx_amiga_handshake_millis()
+
+/* Unanswered SYNs a listening port holds while every parked socket is taken
+   (nx_tcp_syncache.c).  Bounded by the listen backlog, bsdsocket's eight,
+   the ninth client's SYN pushed the oldest out and that client waited out
+   its 1 s and 3 s retransmits: 64 clients on httpd ran 61 connections a
+   second with 512 connect timeouts a minute.  Half the cache, so held SYNs
+   leave room for the handshakes in flight; a cache they filled would answer
+   every new SYN with a cookie (CMakeLists.txt, AMINETXDUO_TCP_SYNCACHE).  */
+#define NX_TCP_SYNCACHE_DEFERRED_MAXIMUM        (NX_TCP_SYNCACHE_SIZE / 2)
 
 /* Compiles the per-socket receive-queue cap; src/bsdsocket/socket.c must size
    nx_tcp_socket_receive_queue_maximum from each socket's window or a sub-MSS
@@ -396,6 +416,10 @@ ULONG _nx_amiga_handshake_millis(VOID);
    claims every capability bit unconditionally under this define.  Changes the
    NX_INTERFACE and NX_PACKET layouts, so every translation unit must see it. */
 #define NX_ENABLE_INTERFACE_CAPABILITY
+
+#ifndef AMINETXDUO_TCP_GSO
+#define NX_DISABLE_TCP_GSO
+#endif
 
 /* Ours, not upstream's: third_party/netxduo branch
    amiga-ipv4-broadcast-loopback, where it is off by default. */

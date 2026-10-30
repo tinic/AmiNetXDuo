@@ -113,6 +113,56 @@ static inline ULONG genet_tx_csum_info(UBYTE ihl, UWORD offset, UBYTE flag)
     return info;
 }
 
+#ifdef AMINETXDUO_TX_BATCH
+/*
+ * Whether the checksum block's word worked out for one frame holds for the
+ * next (genet_tx_run): every byte netdev_tx_csum4() reads to decide and
+ * place the checksum, other than the lengths, is the same -- the EtherType,
+ * the IP version and header length, the fragment word, the protocol and
+ * the TCP data offset -- and the protocol is TCP, whose verdict reads no
+ * length that differs between a batch's frames (UDP's reads its own length
+ * field, so a UDP frame is always worked out afresh).  The length checks
+ * there pass for every frame of a batch alike: each is at least as long as
+ * its own IP datagram, and each datagram at least its two headers.
+ */
+#define GENET_TX_SHAPE_LEN  7
+
+static inline UWORD genet_tx_thl_at(const UBYTE *frame)
+{
+    return (UWORD)(14u + ((UWORD)(frame[14] & 0x0Fu) << 2) + 12u);
+}
+
+static inline VOID genet_tx_csum_shape(const UBYTE *frame, UBYTE *shape)
+{
+    shape[0] = frame[12];
+    shape[1] = frame[13];
+    shape[2] = frame[14];       /* version, IHL     */
+    shape[3] = frame[20];       /* flags, fragment  */
+    shape[4] = frame[21];
+    shape[5] = frame[23];       /* protocol         */
+    shape[6] = frame[genet_tx_thl_at(frame)];
+}
+
+static inline BOOL genet_tx_csum_same(const UBYTE *frame, const UBYTE *shape)
+{
+    return (BOOL)(shape[5] == 6u &&
+                  frame[12] == shape[0] && frame[13] == shape[1] &&
+                  frame[14] == shape[2] && frame[20] == shape[3] &&
+                  frame[21] == shape[4] && frame[23] == shape[5] &&
+                  frame[genet_tx_thl_at(frame)] == shape[6]);
+}
+
+/* Whether a run of `count` frames asks the chip what it has finished
+   first (genet_tx_run): whenever the ring's free slots are fewer than the
+   run, not only when none are.  A ring 49/64 in use has 15 free, and a
+   16-frame batch would otherwise pause with one frame left, once every
+   four batches, while the chip had long since sent what it held. */
+static inline BOOL genet_tx_run_reclaims(UWORD inuse, UWORD ring, UWORD count)
+{
+    return (BOOL)((UWORD)(ring - inuse) < count);
+}
+
+#endif /* AMINETXDUO_TX_BATCH */
 /*
  * The receive line's mask while a reader is behind.  A pass that stopped at
  * a frame whose reader had no read posted (`held`) consumed nothing, and an
