@@ -407,6 +407,13 @@ UINT ami_sana2_gso_max_segs(NX_INTERFACE *interface_ptr);
 #define AMI_SANA2_TX_PEND           (AMI_SANA2_TX_SLOTS * 16)
 #endif
 
+/* Where the queue stops new TCP data and where it takes it again
+   (sana2_tx.c, ami_sana2_tx_flow).  The half above the stop is for what is
+   already on its way: a GSO block per sending connection, retransmissions,
+   acknowledgments and other protocols. */
+#define AMI_SANA2_TX_STOP_AT        (AMI_SANA2_TX_PEND / 2)
+#define AMI_SANA2_TX_WAKE_AT        (AMI_SANA2_TX_PEND / 4)
+
 /* `gso` names the GSO block (AmiTxGso below) this entry is the next child
    of, and `packet` is then its parent; AMI_SANA2_GSO_NONE for an ordinary
    write.  Which child is the block's own count: they leave in order.

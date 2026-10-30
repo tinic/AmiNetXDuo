@@ -1459,6 +1459,71 @@ static void test_full_ring_queues_in_order(void)
             "and released every write that waited");
 }
 
+/* The queue stops new TCP data before it can overflow and drop it
+   (nx_interface_tx_queue_stopped, ami_sana2_tx_flow): set when half the wait
+   queue is in use, cleared again at a quarter and by the drain.  On Wi-Fi a
+   connection's 1024-segment transmit queue overran the 544 writes this holds
+   and the refused writes stalled the upload in TCP repair. */
+static NX_INTERFACE q_nxif;
+
+static void q_complete_one(void)
+{
+    UWORD i;
+
+    for (i = 0; i < Q_N; i++)
+    {
+        if (iface.tx[i].busy)
+        {
+            ReplyMsg(&iface.tx[i].req.ios2_Req.io_Message);
+            ami_sana2_tx_reap(&iface);
+            return;
+        }
+    }
+}
+
+static void test_queue_stops_and_wakes_tcp(void)
+{
+    UWORD i;
+
+    printf("sana2: the wait queue stops new TCP data at half and wakes it "
+           "at a quarter\n");
+
+    fixture_init(FALSE, S2WireType_Ethernet);
+    memset(&q_nxif, 0, sizeof(q_nxif));
+    iface.interface_ptr = &q_nxif;
+
+    for (i = 0; i < Q_N + AMI_SANA2_TX_STOP_AT - 1; i++)
+        (void)q_send(i);
+    h_check(iface.tx_pend_count == AMI_SANA2_TX_STOP_AT - 1 &&
+            q_nxif.nx_interface_tx_queue_stopped == 0,
+            "below the stop the queue takes TCP data");
+    (void)q_send((UWORD)(Q_N + AMI_SANA2_TX_STOP_AT - 1));
+    h_check(iface.tx_pend_count == AMI_SANA2_TX_STOP_AT &&
+            q_nxif.nx_interface_tx_queue_stopped != 0,
+            "at the stop it asks TCP to hold new data");
+    h_check(iface.stats.tx_queue_full == 0 && iface.stats.tx_errors == 0,
+            "with nothing dropped");
+
+    while (iface.tx_pend_count > AMI_SANA2_TX_WAKE_AT + 1)
+        q_complete_one();
+    h_check(q_nxif.nx_interface_tx_queue_stopped != 0,
+            "it stays stopped above the wake mark");
+    q_complete_one();
+    h_check(iface.tx_pend_count == AMI_SANA2_TX_WAKE_AT &&
+            q_nxif.nx_interface_tx_queue_stopped == 0,
+            "and wakes at a quarter");
+
+    for (i = 0; iface.tx_pend_count < AMI_SANA2_TX_STOP_AT; i++)
+        (void)q_send(i);
+    h_check(q_nxif.nx_interface_tx_queue_stopped != 0, "stopped again");
+    h_reply_on_sleep = 0;
+    ami_sana2_tx_drain(&iface);
+    h_check(iface.tx_pend_count == 0 &&
+            q_nxif.nx_interface_tx_queue_stopped == 0,
+            "the drain empties the queue and wakes it");
+    iface.interface_ptr = NULL;
+}
+
 static void q_send_next(void)
 {
     (void)q_send(Q_N + 1);
@@ -2870,6 +2935,7 @@ int main(void)
     test_run_flags_and_flushes();
 #endif
     test_full_ring_queues_in_order();
+    test_queue_stops_and_wakes_tcp();
     test_kick_launch_is_not_overtaken();
 
     test_pad_cooked_no_fusion();
