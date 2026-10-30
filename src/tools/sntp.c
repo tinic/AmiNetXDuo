@@ -17,6 +17,8 @@
 #include <libraries/locale.h>
 #include <proto/battclock.h>
 #include <proto/locale.h>
+
+#include "tooltz.h"
 #include "aminetxduo/version.h"
 
 const char *const tool_name = "sntp";
@@ -242,8 +244,9 @@ static BOOL battclock_write(ULONG secs)
 }
 
 /*
- * Minutes west of Greenwich, from the Locale preferences. FALSE when
- * locale.library is not on the machine; the caller then falls back to UTC.
+ * Minutes west of Greenwich, the zone the Locale preferences show (tooltz.h).
+ * FALSE when locale.library is not on the machine; the caller then falls
+ * back to UTC.
  */
 static BOOL locale_gmt_offset(LONG *minutes_west)
 {
@@ -258,8 +261,12 @@ static BOOL locale_gmt_offset(LONG *minutes_west)
     locale = OpenLocale(NULL);          /* NULL: the current preferences */
     if (locale != NULL)
     {
-        *minutes_west = locale->loc_GMTOffset;
-        got           = TRUE;
+        BPTR prefs = Lock((CONST_STRPTR)"ENV:Sys/locale.prefs", ACCESS_READ);
+
+        *minutes_west = tooltz_minutes_west(locale->loc_GMTOffset,
+                                            prefs != (BPTR)0);
+        if (prefs != (BPTR)0) UnLock(prefs);
+        got = TRUE;
         CloseLocale(locale);
     }
 
@@ -698,16 +705,7 @@ int main(int argc, char **argv)
      * holds local time. The clamp covers a UTC value small enough for the
      * subtraction to wrap.
      */
-    if (have_locale && gmt_west != 0)
-    {
-        LONG shifted = (LONG)new_utc - (gmt_west * 60L);
-
-        new_local = (shifted > 0) ? (ULONG)shifted : new_utc;
-    }
-    else
-    {
-        new_local = new_utc;
-    }
+    new_local = have_locale ? tooltz_local_secs(new_utc, gmt_west) : new_utc;
 
     if (!quiet)
     {
