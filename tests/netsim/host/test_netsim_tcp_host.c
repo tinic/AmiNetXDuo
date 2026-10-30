@@ -16,14 +16,20 @@
  * 4,096-packet pool.  ThreadX runs on shim/tx_port.h's virtual clock, so a
  * run is deterministic and takes host CPU time only (netsim.h, the wire).
  *
- * The application is the bsdsocket path, not iperf: 32 KB blocking writes,
- * as AmiSpeedTest makes them, cut into MSS segments and sent with
- * bsd_send_tcp_run()'s sequence of NetX Duo calls (src/bsdsocket/transfer.c)
- * -- a packet allocated without waiting and then in BSD_BREAK_SLICE_TICKS
- * slices, the send tried without waiting and then in slices.  transfer.c
- * itself is not linked: it compiles only where a pointer is four bytes
- * (tests/bsdsocket/CMakeLists.txt, the host32 tier).  The receiver reads in
- * slices too and checks every byte against the pattern the sender wrote.
+ * The sender makes 32 KB blocking writes, as AmiSpeedTest does, cut into MSS
+ * segments and sent with bsd_send_tcp_run()'s sequence of NetX Duo calls
+ * (src/bsdsocket/transfer.c) -- a packet allocated without waiting and then
+ * in BSD_BREAK_SLICE_TICKS slices, the send tried without waiting and then in
+ * slices.  The receiver reads in slices too and checks every byte against
+ * the pattern the sender wrote.
+ *
+ * WHAT IT IS NOT.  A portable gate on TCP and the wire, nothing more.  It
+ * reproduces those NetX Duo calls but runs none of the BSD socket layer
+ * (transfer.c compiles only where a pointer is four bytes, the host32 tier),
+ * SANA-II, Exec, GSO segmentation or batched transmit, and the CPU is
+ * infinitely fast.  It cannot stand in for hardware, driver or bsdsocket
+ * coverage, and says nothing about full speed or audio and interrupt
+ * latency.
  *
  * Side 0 is the Amiga.  Side 1 is the peer it transferred with, a Linux
  * host, which acknowledges every second segment; NetX Duo's own receive ramp
@@ -133,8 +139,9 @@ static const NsScenario ns_scenarios[] =
       32UL * 1024UL * 1024UL, 1, 900, 500 * NS_MS, 0 },
 
     /* A shallow queue, 64 KB: wanemu's default and an ISP uplink's.  The
-       bottleneck's gap and ratio; goodput is printed only, as the 85% floor
-       needs faster window growth (CUBIC/HyStart, RFC 9438), not yet done. */
+       bottleneck's gap and ratio; goodput is printed only.  Its 80.6% is an
+       open limit: Reno growth after the slow-start loss, which faster window
+       growth would likely lift; no fix is proven yet. */
     { "shallow",
       { 150000000ULL, 10 * NS_MS, 65536, 0 },
       { 150000000ULL, 10 * NS_MS, 0, 0 },
