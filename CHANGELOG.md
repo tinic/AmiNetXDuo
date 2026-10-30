@@ -7,6 +7,37 @@ are history.
 
 ## Unreleased
 
+- TCP uploads hand the network driver blocks of up to 16 segments, which
+  cuts the CPU cost per packet (all profiles except micro).
+- anxgenet.device takes a block of up to 16 segments in one write (all
+  profiles except micro).
+- The TCP send buffer grows by itself on gigabit links with a long round
+  trip; an explicit SO_SNDBUF keeps a fixed size.
+- The TCP receive window grows by itself on fast links with a long round
+  trip; an explicit SO_RCVBUF or TCPWANWINDOW keeps a fixed size.
+- New TCP connections on a gigabit interface with a large packet pool
+  start with a 10-segment window (RFC 6928).
+- A TCP retransmission that is lost again is resent once later data is
+  acknowledged, without waiting for the retransmission timeout.
+- SACK loss recovery sends no more than the link carries, and a TCP upload
+  over a lossy path completes.
+- Frames leave in order when the driver's send queue is busy.
+- NetShutdown removes bsdsocket.library and usergroup.library from memory
+  once no program has them open.
+- usergroup.library flushes the CPU caches after copying its jump table; an
+  ixemul program no longer crashes with 80000004 on a 68040 or 68060.
+- httpd listens on IPv4 when the IPv6 listener is refused.
+- httpd -C starts without a readable front screen and checks the screen
+  again when the console page opens.
+- Installer writes WirelessManager lines live when only a commented-out
+  line or NetWireless mentions WirelessManager.
+- Installer leaves NetSwitch, NetMeter, NetPrefs, NetWirelessPrefs and
+  NetWireless without a fixed icon position.
+- NetSwitch has a Synchronize time checkbox that sets the clock by SNTP
+  when an interface goes online.
+- NetSwitch shows why a time synchronisation failed.
+- sntp and httpd use the time zone that Locale shows when Locale prefs were
+  never saved.
 - TCP uploads keep up to 1024 segments in flight on a large packet pool, which
   doubles upload speed over long round trips.
 - `TCPWANWINDOW` takes effect on gigabit interfaces too.
