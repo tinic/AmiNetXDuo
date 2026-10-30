@@ -1527,7 +1527,14 @@ post:
        starts this one.  The holder's own thread only -- the kick that
        launches a queued write from the reader, or an acknowledgement the IP
        thread sends meanwhile, is a plain write and starts what is held. */
-    if (iface->tx_holder != NULL && iface->tx_holder == tx_thread_identify())
+    if (iface->tx_holder != NULL && iface->tx_holder == tx_thread_identify()
+#ifdef AMINETXDUO_TCP_GSO
+        /* Not a batch: the device kicks a batch's frames itself, so it
+           holds nothing for the run's flush.  A held write from earlier in
+           the run stays held. */
+        && slot->batch_count == 0
+#endif
+        )
     {
         slot->tx_flags |= ANXD_S2_TXF_MORE;
         iface->tx_held  = 1;

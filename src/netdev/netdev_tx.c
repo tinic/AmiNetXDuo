@@ -101,16 +101,20 @@ UWORD netdev_tx_build(NetdevUnit *unit, struct IOSana2Req *io,
 }
 
 /*
- * The write's per-write metadata, asked for once and before it is framed:
- * the checksum the card is to finish and whether a run may hold its start,
- * into the core's fields, and the flags as the opener answered them, so
- * the caller can tell a batch write.  Per-write metadata comes through the
+ * The write's per-write metadata: the checksum the card is to finish and
+ * whether a run may hold its start, into the core's fields, and the flags
+ * as the opener answered them, so a caller can tell a batch write.  Per-write metadata comes through the
  * versioned extension, never through an unassigned bit in Exec/SANA-II's
  * io_Flags.  The callback is a plain load from the opener-owned request
  * cookie and is safe when a queued write advances from interrupt context.
  */
-static UBYTE netdev_tx_meta(NetdevUnit *unit, struct IOSana2Req *io,
-                            NetdevOpener *op)
+/* Inline where it is used: inside netdev_tx_issue(), where an ordinary
+   write has always paid for it, and ahead of the build only for an opener
+   granted TX_BATCH, which must know before framing.  Called ahead of the
+   build for every write it was a call of its own on each one in the
+   release LTO image. */
+static inline UBYTE __attribute__((always_inline))
+netdev_tx_meta(NetdevUnit *unit, struct IOSana2Req *io, NetdevOpener *op)
 {
     UBYTE flags = 0;
 
@@ -139,14 +143,14 @@ static UBYTE netdev_tx_meta(NetdevUnit *unit, struct IOSana2Req *io,
     return flags;
 }
 
-/* The chip half, and the only half that needs the mask.  The metadata above
-   is the caller's, before the build. */
+/* The chip half, and the only half that needs the mask. */
 LONG netdev_tx_issue(NetdevUnit *unit, struct IOSana2Req *io,
                      NetdevOpener *op, UWORD total)
 {
     NetdevTrack *tr;
     LONG         rc;
 
+    (VOID)netdev_tx_meta(unit, io, op);
     rc = unit->nu_Nic.ops->tx(&unit->nu_Nic, unit->nu_TxAt, total);
     if (rc != 0)
         return rc;
@@ -334,8 +338,11 @@ static VOID netdev_tx_owe(NetdevUnit *unit)
 
 /* A full-looking ring is asked about before anything is called stuck.  The
    frames a run holds for company go to the chip first: held, they are
-   never retired, and a ring full of them waited for the blank's kick. */
-static VOID netdev_tx_reclaim_full(NetdevUnit *unit)
+   never retired, and a ring full of them waited for the blank's kick.
+   Inline: the test is every write's and was written at each site before;
+   out of line it was one more call per ordinary write in the LTO image. */
+static inline VOID __attribute__((always_inline))
+netdev_tx_reclaim_full(NetdevUnit *unit)
 {
     if (unit->nu_Nic.txb_inuse >= unit->nu_Nic.txb_cnt &&
         unit->nu_Nic.tx_reclaim != NULL)
@@ -381,7 +388,9 @@ VOID netdev_tx_pump(NetdevUnit *unit)
 
         io = (struct IOSana2Req *)RemHead(&unit->nu_Writes);
         op = NETDEV_IO_OPENER(io);
-        flags = netdev_tx_meta(unit, io, op);
+        /* Only an opener granted TX_BATCH can have sent a batch. */
+        flags = ((op->op_Extensions & ANXD_S2F_TX_BATCH) != 0)
+                    ? netdev_tx_meta(unit, io, op) : 0;
 
 #if NETDEV_HAS_TX_TASK_LOCK
         if ((flags & ANXD_S2_TXF_BATCH) != 0)
@@ -539,7 +548,6 @@ VOID netdev_tx_direct(NetdevUnit *unit, struct IOSana2Req *io)
     unit->nu_TxBuilding = 1;
     /* No batch on these cores: TX_BATCH needs tx_run, which only a
        tx_task_lock core offers (netdev_extension_supported). */
-    (VOID)netdev_tx_meta(unit, io, op);
     if (!unit->nu_Nic.tx_short_build)
     {
         Enable();
@@ -632,7 +640,9 @@ static VOID netdev_tx_direct_task(NetdevUnit *unit, struct IOSana2Req *io)
     }
 
     unit->nu_TxBuilding = 1;
-    flags = netdev_tx_meta(unit, io, op);
+    /* Only an opener granted TX_BATCH can have sent a batch. */
+    flags = ((op->op_Extensions & ANXD_S2F_TX_BATCH) != 0)
+                ? netdev_tx_meta(unit, io, op) : 0;
     if ((flags & ANXD_S2_TXF_BATCH) != 0)
     {
         UWORD copied = 0;

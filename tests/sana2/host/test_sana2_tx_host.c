@@ -2635,6 +2635,51 @@ static void test_batch_prefix_not_copies(void)
     ami_sana2_tx_reap(&iface);
 }
 
+#ifdef AMINETXDUO_TX_RUN
+/*
+ * A batch is kicked by the device itself, so a run of nothing but batches
+ * holds nothing and its end sends no ANXD_CMD_TX_FLUSH; an ordinary write
+ * of the run is still held and flushed once, whether it came before the
+ * batch or after it.
+ */
+static void test_batch_run_no_flush(void)
+{
+    NX_PACKET *p;
+
+    printf("sana2: a run of batches sends no flush, an ordinary write one\n");
+
+    fixture_init(FALSE, S2WireType_Ethernet);
+    iface.tx_batch_ok = 1;
+    iface.tx_quick_ok = TRUE;
+    iface.tx_more_ok  = 1;
+    h_quick_kept = 1;
+    h_batch_dev  = 1;
+    ami_sana2_tx_run_begin(&iface);
+    p = gso_parent(32, 350, 100, 0x18, 1, 1, 37, g_odd_cuts, 5);
+    (VOID)ami_sana2_tx_send(&iface, p, AMI_ETHERTYPE_IPV4, 0xBC24, 0x11EF103A);
+    p = gso_parent(32, 350, 100, 0x18, 1, 1, 37, g_odd_cuts, 5);
+    (VOID)ami_sana2_tx_send(&iface, p, AMI_ETHERTYPE_IPV4, 0xBC24, 0x11EF103A);
+    h_check(h_sends == 2 && h_bn == 8, "two blocks, two batch writes");
+    h_check((ami_sana2_tx_flags(((struct IOSana2Req *)h_sent_log[1])
+                                    ->ios2_Data) & ANXD_S2_TXF_MORE) == 0 &&
+            iface.tx_held == 0, "neither is one of the run's held writes");
+    ami_sana2_tx_run_end(&iface);
+    h_check(h_flushes == 0, "and the run's end sends no flush");
+
+    /* An ordinary write held before a batch stays held. */
+    ami_sana2_tx_run_begin(&iface);
+    packet_init(arp_frame, ARP_LEN);
+    (VOID)ami_sana2_tx_send(&iface, &pkt, AMI_ETHERTYPE_ARP, 0xFFFF,
+                            0xFFFFFFFF);
+    h_check(iface.tx_held == 1, "an ordinary write of the run is held");
+    p = gso_parent(32, 350, 100, 0x18, 1, 1, 37, g_odd_cuts, 5);
+    (VOID)ami_sana2_tx_send(&iface, p, AMI_ETHERTYPE_IPV4, 0xBC24, 0x11EF103A);
+    h_check(iface.tx_held == 1, "a batch after it leaves it held");
+    ami_sana2_tx_run_end(&iface);
+    h_check(h_flushes == 1, "and the run's end flushes once");
+}
+#endif
+
 /* Blocks behind a full ring wait as one entry each, in order, and launch
    as one batch each. */
 static void test_batch_queues_as_one(void)
@@ -2754,6 +2799,9 @@ int main(void)
     test_batch_child_restart();
     test_batch_abort_mid_batch();
     test_batch_prefix_not_copies();
+#ifdef AMINETXDUO_TX_RUN
+    test_batch_run_no_flush();
+#endif
     test_batch_queues_as_one();
     test_batch_one_forbid();
     test_batch_not_taken();
