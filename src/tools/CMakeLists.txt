@@ -471,7 +471,7 @@ endif()
 # CyberGraphX, kept out of httpfb.c so that the chipset path has no library
 # call and no card-shaped branch in it.  It is where the readback routes are
 # timed, which is the measurement the whole RTG design turns on.
-aminetxduo_add_tool(tool_httpd   httpd    SOURCES httpd.c httpdate.c httpfs.c httpstr.c httpvol.c httppath.c httprequest.c httpif.c
+aminetxduo_add_tool(tool_httpd   httpd    SOURCES httpd.c httpdate.c tooltz.c httpfs.c httpstr.c httpvol.c httppath.c httprequest.c httpif.c
                                           httpframe.c httplock.c httphead.c httpstatus.c
                                           httpiperf.c
                                           httpxml.c httpws.c
@@ -632,7 +632,8 @@ aminetxduo_add_tool(tool_paysum  paysum   SOURCES paysum.c toolsock.c
 # SNTP add-on, and the comment at the top of sntp.c says why, the short
 # version is that the add-on wants a running ThreadX, and a Shell command's
 # copy of ThreadX is not the one the stack is using.
-aminetxduo_add_tool(tool_sntp    sntp     SOURCES sntp.c toolsock.c toolbudget.c)
+aminetxduo_add_tool(tool_sntp    sntp     SOURCES sntp.c tooltz.c toolsock.c
+                                          toolbudget.c)
 
 # ShowNetServices browses for mDNS services.  Config-only: it starts and stops
 # the browse through NETCTRL_MDNS_BROWSE and reads the answers through
@@ -1105,6 +1106,12 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_include_directories(test_nslbudget PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
     target_compile_options(test_nslbudget PRIVATE -Wall -Wextra)
     add_test(NAME nslookup_budget COMMAND test_nslbudget)
+
+    # The zone sntp and httpd take from Locale, never saved, east and west.
+    add_executable(test_tooltz test/test_tooltz.c tooltz.c)
+    target_include_directories(test_tooltz PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    target_compile_options(test_tooltz PRIVATE -Wall -Wextra)
+    add_test(NAME tooltz_locale_zone COMMAND test_tooltz)
 
     add_executable(test_iperfwire
         test/test_iperfwire.c
