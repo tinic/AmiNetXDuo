@@ -614,8 +614,9 @@ static UWORD ami_sana2_gso_frames(const AmiSana2If *iface, UWORD gso)
  * overflowing this queue.  A write the full queue refused was a hole the
  * peer reported and TCP had to repair: on Wi-Fi one connection's transmit
  * queue (1024 segments) outran the 544 this interface holds, and the upload
- * stalled for minutes.  Read outside Forbid(): the count is one word, and a
- * stale look is put right by the next change.
+ * stalled for minutes.  Under Forbid(), in the region that changed the
+ * count: a decision made outside it could store a stale "stopped" after the
+ * queue had emptied, and an empty queue is never looked at again.
  */
 static VOID ami_sana2_tx_flow(AmiSana2If *iface)
 {
@@ -679,13 +680,11 @@ VOID ami_sana2_tx_drain(AmiSana2If *iface)
                                           AMI_SANA2_TX_PEND);
             iface->tx_pend_count--;
         }
+        ami_sana2_tx_flow(iface);
         Permit();
 
         if (packet == NULL)
-        {
-            ami_sana2_tx_flow(iface);
             break;
-        }
         /* A GSO child owns only its share: the parent goes back once the
            children in slots are done with it too. */
 #ifdef AMINETXDUO_TCP_GSO
@@ -933,6 +932,7 @@ static BOOL ami_sana2_tx_enqueue(AmiSana2If *iface, NX_PACKET *packet,
             iface->tx_pend_count++;
         }
         queued = TRUE;
+        ami_sana2_tx_flow(iface);
     }
     Permit();
 
@@ -940,7 +940,6 @@ static BOOL ami_sana2_tx_enqueue(AmiSana2If *iface, NX_PACKET *packet,
         return FALSE;
 
     iface->stats.tx_queued += count;
-    ami_sana2_tx_flow(iface);
 
 #ifdef AMINETXDUO_TX_LAZY_COLLECT
     if (iface->tx_lazy_parked)
@@ -988,13 +987,13 @@ VOID ami_sana2_tx_kick(AmiSana2If *iface)
                 iface->tx_pend_head = (UWORD)((iface->tx_pend_head + 1) %
                                               AMI_SANA2_TX_PEND);
                 iface->tx_pend_count--;
+                ami_sana2_tx_flow(iface);
             }
         }
         Permit();
 
         if (slot == NULL)
             return;
-        ami_sana2_tx_flow(iface);
 
         if (!iface->online)
         {

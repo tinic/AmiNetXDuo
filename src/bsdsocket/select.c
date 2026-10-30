@@ -566,6 +566,10 @@ BOOL bsd_writable(AmiSocket *sock)
         reserved = 1;
     }
 #endif
+    /* A stopped interface queue holds the write (nx_tcp.h); the ACK of the
+       data outstanding posts FD_WRITE, so no caller spins on it. */
+    if (NX_TCP_SOCKET_TX_QUEUE_STOPPED(&sock->as_Nx.tcp))
+        return FALSE;
     /* Room in entries AND in bytes: a GSO entry is many segments, and the
        core bounds the queue by both (_nx_tcp_socket_queue_byte_credit). This
        is the pool's backpressure, not the window's. */
