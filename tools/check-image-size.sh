@@ -94,8 +94,8 @@ BUDGETS=(
     # BeginInterfaceConfig() answers a base with no stack instead of reading
     # an interface through NULL: +8, 375,676 -> 375,684.
     # The transmit queue stops TCP before it overflows (A500 Wi-Fi upload
-    # stall, netxduo #38): +156, 375,684 -> 375,840.
-    "default:src/bsdsocket/bsdsocket.library:375840"
+    # stall, netxduo #38): +208, 375,684 -> 375,892.
+    "default:src/bsdsocket/bsdsocket.library:375892"
     # 41,412 after stateless receive-checksum verification was added to the
     # EL3 and word/long NE2000 direct paths, 2026-09-15.  43,620 with
     # ANXD_CMD_RX_BATCH in the shell (claim, completion, staging copy, the
@@ -172,8 +172,8 @@ BUDGETS=(
     # turo's approval.
     # RFC 6928/3465 slow start (#354, netxduo #37): +36, 253,692 -> 253,728.
     # BeginInterfaceConfig() with no stack: +12, 253,728 -> 253,740.
-    # Transmit queue stop for TCP (netxduo #38): +156, 253,740 -> 253,896.
-    "minimal:src/bsdsocket/bsdsocket.library:253896"
+    # Transmit queue stop for TCP (netxduo #38): +200, 253,740 -> 253,940.
+    "minimal:src/bsdsocket/bsdsocket.library:253940"
     "minimal:src/netdev/anxnet.device:46000"
     # 29,088 on e806188f after the audited device fixes.
     # Batched transmit adds 632, 29,120 -> 29,752, approved by turo 2026-10-29.
