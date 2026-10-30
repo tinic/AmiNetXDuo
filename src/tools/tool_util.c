@@ -483,7 +483,7 @@ static BOOL companion_quote(char *out, ULONG cap, ULONG *used,
 }
 
 LONG tool_run_companion(const char *command, const char *argument,
-                        const char *options, BOOL silent)
+                        const char *options, const char *output_name)
 {
     static char path[512], line[1600];
     struct Process *me = (struct Process *)FindTask(NULL);
@@ -524,8 +524,9 @@ LONG tool_run_companion(const char *command, const char *argument,
     }
 
     input = Open((CONST_STRPTR)"NIL:", MODE_OLDFILE);
-    if (silent) output = Open((CONST_STRPTR)"NIL:", MODE_NEWFILE);
-    if (input == (BPTR)0 || (silent && output == (BPTR)0))
+    if (output_name != NULL)
+        output = Open((CONST_STRPTR)output_name, MODE_NEWFILE);
+    if (input == (BPTR)0 || (output_name != NULL && output == (BPTR)0))
     {
         if (input != (BPTR)0) Close(input);
         if (output != (BPTR)0) Close(output);
@@ -533,15 +534,14 @@ LONG tool_run_companion(const char *command, const char *argument,
     }
     rc = SystemTags((CONST_STRPTR)line,
                     SYS_Input, (ULONG)input,
-                    silent ? SYS_Output : TAG_IGNORE, (ULONG)output,
+                    output_name != NULL ? SYS_Output : TAG_IGNORE,
+                    (ULONG)output,
                     NP_StackSize, 8192UL,
                     TAG_DONE);
-    /* DOS owns these handles after a successful launch. */
-    if (rc == -1)
-    {
-        Close(input);
-        if (output != (BPTR)0) Close(output);
-    }
+    /* Synchronous, so the handles stay ours: only SYS_Asynch closes them.
+       Left open, the output file stays locked for the caller to read. */
+    Close(input);
+    if (output != (BPTR)0) Close(output);
     return rc;
 }
 

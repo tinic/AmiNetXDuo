@@ -1012,9 +1012,9 @@ int main(int argc, char **argv)
             return RETURN_WARN;
         }
         tool_printf("Synchronizing time with %s...\n", (LONG)time_server);
-        if (tool_run_companion("sntp", time_server, "TIMEOUT 10", FALSE) != RETURN_OK)
+        if (tool_run_companion("sntp", time_server, "TIMEOUT 10", NULL) != RETURN_OK)
         {
-            tool_error("network is online; time synchronization failed (check sntp and the server)");
+            tool_error("online, but the clock was not set");
             return RETURN_WARN;
         }
     }

@@ -1500,7 +1500,8 @@
   NetSwitch preference, shared by all its interfaces; it does not enable
   SYNCTIME implicitly for Shell commands or change S:Network-Startup.
   Online and sntp must be installed beside NetSwitch, in its C drawer or
-  in C:. A failure opens a requester; the interface may still be online.
+  in C:. A failure opens a requester with what Online and sntp printed;
+  the interface may still be online.
   Leave the box clear to keep the usual immediate Online action.
 
   To synchronize at boot, use the installer's clock-setting option for
