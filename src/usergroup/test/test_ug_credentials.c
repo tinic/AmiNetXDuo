@@ -152,12 +152,23 @@ static void global_add(struct UgGlobal *g, struct UserGroupBase *base)
  */
 static void test_opener_vectors_are_flushed(void)
 {
-    enum { NEG = 260 };
-    static UBYTE master_block[NEG + sizeof(struct UserGroupBase)];
-    static UBYTE child_block[NEG + sizeof(struct UserGroupBase)];
-    struct UserGroupBase *master =
-        (struct UserGroupBase *)(master_block + NEG);
+    /* Laid out as ug_LibOpen() does it: one allocation, the base NEG bytes
+       in.  44 vectors keep NEG a multiple of 8, so the base is aligned on
+       the host too. */
+    enum { NEG = 44 * 6, SIZE = NEG + sizeof(struct UserGroupBase) };
+    UBYTE *master_block = calloc(1, SIZE);
+    UBYTE *child_block  = calloc(1, SIZE);
+    struct UserGroupBase *master;
     ULONG i;
+
+    CHECK(master_block != NULL && child_block != NULL);
+    if (master_block == NULL || child_block == NULL)
+    {
+        free(master_block);
+        free(child_block);
+        return;
+    }
+    master = (struct UserGroupBase *)(master_block + NEG);
 
     for (i = 0; i < NEG; i++)
         master_block[i] = (UBYTE)(0x4E + i);
@@ -172,6 +183,9 @@ static void test_opener_vectors_are_flushed(void)
     CHECK(shim_unflushed == 0);
     CHECK(memcmp(child_block, master_block, NEG + sizeof(struct Library)) == 0);
     CHECK(((struct Library *)(child_block + NEG))->lib_NegSize == NEG);
+
+    free(master_block);
+    free(child_block);
 }
 
 static void test_self_and_null(void)
