@@ -153,7 +153,18 @@ LONG netstack_interface_dhcp_lease(UWORD index, AmiDhcpLease *out)
 LONG netstack_interface_dhcp_stop(UWORD index, BOOL release)
 { (void)index; (void)release; return AMI_NET_OK; }
 
-VOID netstack_interface_release(UWORD index) { (void)index; }
+static int h_claims;
+static int h_releases;
+
+LONG netstack_interface_claim(const char *name, UWORD *index_out)
+{
+    (void)name;
+    h_claims++;
+    *index_out = 0;
+    return AMI_NET_OK;
+}
+
+VOID netstack_interface_release(UWORD index) { (void)index; h_releases++; }
 
 /* bsd_aam_store_lease()'s helpers. */
 VOID bsd_strncpy(char *dst, const char *src, ULONG size)
@@ -166,6 +177,7 @@ VOID bsd_strncpy(char *dst, const char *src, ULONG size)
 
 VOID DateStamp(struct DateStamp *ds) { (void)ds; }
 VOID bsd_stack_transient_release(struct AmiSocketBase *base) { (void)base; }
+LONG bsd_stack_transient_hold(struct AmiSocketBase *base) { (void)base; return -1; }
 
 #include "addralloc.c"
 
@@ -351,8 +363,37 @@ static void h_start(void)
     bsd_aam_launch(h_aam, 0, NULL);
 }
 
+/* BeginInterfaceConfig() on a base with no stack (no references, or no base
+   at all): bsd_stack_ip() is NULL.  Answered InterfaceNotKnown with nothing
+   claimed, never an interface read through address 0. */
+static void t_begin_no_stack(void)
+{
+    struct AddressAllocationMessage aam;
+    struct AmiSocketBase base;
+    int pass;
+
+    for (pass = 0; pass < 2; pass++)
+    {
+        memset(&aam, 0, sizeof(aam));
+        aam.aam_Version  = AAM_VERSION;
+        aam.aam_Protocol = AAMP_DHCP;
+        aam.aam_Message.mn_ReplyPort = &h_proc.pr_MsgPort;
+        strcpy(aam.aam_InterfaceName, "eth0");
+        memset(&base, 0, sizeof(base));     /* sb_StackRefs == 0 */
+        h_claims = h_releases = h_replies = 0;
+
+        bsd_BeginInterfaceConfig(&aam, pass == 0 ? &base : NULL);
+        CHECK(h_replies == 1 && aam.aam_Result == AAMR_InterfaceNotKnown,
+              "no stack: replied InterfaceNotKnown");
+        CHECK(h_claims == 0 && h_releases == 0,
+              "no stack: no interface claimed or released");
+        CHECK(bsd_aam_workers == 0, "no stack: no worker started");
+    }
+}
+
 int main(void)
 {
+    t_begin_no_stack();
     t_create_buffer_layout();
     t_create_overflow();
     /* Deleted by the caller while the worker is polling: not freed under it,
