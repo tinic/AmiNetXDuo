@@ -45,6 +45,10 @@ struct Library       *GadToolsBase;
    do. Keep the name specific to this UI: Online still requires SYNCTIME. */
 #define NS_SYNC_VAR     "ANXDNETSWITCHSYNCTIME"
 
+/* What Online SYNCTIME printed, shown when it fails. */
+#define NS_SYNC_LOG     "T:NetSwitch-Online.txt"
+#define NS_SYNC_TEXT    600
+
 /* Spacing in pixels, as NetPrefs has it; everything else is the font's. */
 #define MARGIN_X        8
 #define MARGIN_Y        5
@@ -141,6 +145,55 @@ static BOOL save_sync_time(BOOL enabled)
     if (!ok) return FALSE;
     return SetVar((CONST_STRPTR)NS_SYNC_VAR, (CONST_STRPTR)value, 1,
                    LV_VAR | GVF_GLOBAL_ONLY) != 0;
+}
+
+/*
+ * Online SYNCTIME failed: show what it printed, which names the cause (no
+ * link, no lease, no answer from the time server).  The Shell's own
+ * "failed returncode" lines add nothing and are left out.
+ */
+static VOID sync_failed(const char *name)
+{
+    static char text[NS_SYNC_TEXT + 1];
+    ULONG       args[1];
+    LONG        got = 0;
+    LONG        in, out = 0, line;
+    BPTR        file = Open((CONST_STRPTR)NS_SYNC_LOG, MODE_OLDFILE);
+
+    if (file != (BPTR)0)
+    {
+        got = Read(file, (APTR)text, NS_SYNC_TEXT);
+        Close(file);
+        if (got < 0) got = 0;
+    }
+    for (in = 0; in < got; )
+    {
+        LONG  end = in;
+        BOOL  keep = TRUE;
+        LONG  k;
+
+        while (end < got && text[end] != '\n') end++;
+        for (k = in; k + 18 <= end; k++)
+            if (tool_stricmp_n(&text[k], " failed returncode", 18) == 0)
+                keep = FALSE;
+        if (keep && end > in)
+        {
+            for (line = in; line < end; line++) text[out++] = text[line];
+            text[out++] = '\n';
+        }
+        in = end + 1;
+    }
+    while (out > 0 && text[out - 1] == '\n') out--;
+    text[out] = '\0';
+
+    if (out == 0)
+    {
+        args[0] = (ULONG)name;
+        requester("%s: Online SYNCTIME did not complete.", args);
+        return;
+    }
+    args[0] = (ULONG)text;
+    requester("%s", args);
 }
 
 /* `text` left-justified in a column of `width`, cut at the width, then a
@@ -394,13 +447,13 @@ static VOID act(BOOL up)
     if (busy) SetWindowPointer(ns.window, WA_BusyPointer, TRUE, TAG_DONE);
     if (up && ns.sync_time)
     {
-        if (tool_run_companion("Online", seen.name, "SYNCTIME", TRUE) != RETURN_OK)
+        if (tool_run_companion("Online", seen.name, "SYNCTIME",
+                               NS_SYNC_LOG) != RETURN_OK)
         {
-            ULONG args[1] = { (ULONG)seen.name };
-            requester("Online or time synchronization did not complete.\n"
-                      "The interface may still be online.\n"
-                      "For details, run Online %s SYNCTIME in a Shell.", args);
+            refresh();          /* the list behind the requester is current */
+            sync_failed(seen.name);
         }
+        (VOID)DeleteFile((CONST_STRPTR)NS_SYNC_LOG);
     }
     else switch_row(&ns.rows[now], up);
     if (busy) SetWindowPointer(ns.window, WA_Pointer, 0, TAG_DONE);
