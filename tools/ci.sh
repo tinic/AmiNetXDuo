@@ -524,7 +524,11 @@ host_test_targets() { # builddir
 #      584 with netdev_tx (the write path and its pump) and the _no_batch
 #      builds of sana2_tx, sana2_device, netdev_cmds and netdev_extension:
 #      the configuration without AMINETXDUO_TX_BATCH (all hosts).
-HOST_TESTS_EXPECTED=584
+#      589 with netsim_tcp_clean, _bottleneck, _loss, _reverse and _shallow
+#      (#354): two NetX Duo stacks over a simulated link (all hosts).
+#      590 with netsim_tcp_shallow150k (#354): the 150 KB queue a repair
+#      retransmission was lost in (all hosts).
+HOST_TESTS_EXPECTED=590
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,
