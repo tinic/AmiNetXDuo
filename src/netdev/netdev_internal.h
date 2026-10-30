@@ -99,9 +99,11 @@ typedef struct NetdevOpener
                                            opener's writes */
     APTR                op_RxFilled;
     APTR                op_TxFlags;     /* per-write ANXD_S2_TXF_* callback */
+#ifdef AMINETXDUO_TX_BATCH
     APTR                op_TxBatch;     /* TX_BATCH's three, or NULL: only */
     APTR                op_TxChild;     /* from a record that covers them */
     APTR                op_TxPosted;
+#endif /* AMINETXDUO_TX_BATCH */
     ULONG               op_Extensions;  /* ANXD_S2F_* accepted for this open */
     AnxdLinkSpeed      *op_LinkSpeed;    /* input/output during Open only */
 
@@ -259,6 +261,7 @@ typedef struct NetdevUnit
                                                    holding frames for the
                                                    pass-end reply           */
 
+#ifdef AMINETXDUO_TX_BATCH
     /*
      * The one batch write (ANXD_S2F_TX_BATCH) part way into the ring: it is
      * at the head of nu_Writes, nu_TxBatchNext of its frames posted, its
@@ -281,6 +284,7 @@ typedef struct NetdevUnit
                                                      full or budget spent  */
     ULONG                       nu_PumpNudges;    /* passes owed and Caused */
 
+#endif /* AMINETXDUO_TX_BATCH */
     struct Sana2DeviceStats     nu_Stats;
 
     /* Frames are staged here on the way out, 4-aligned for the long window. */
@@ -386,6 +390,7 @@ typedef enum
     NETDEV_RX_REJECTED,
     NETDEV_RX_FAILED        /* the opener's CopyToBuff hook returned FALSE */
 } NetdevRxResult;
+#ifdef AMINETXDUO_TX_BATCH
 
 /*
  * A 6-byte Ethernet address as a longword and a word.  Both ends must be even:
@@ -465,6 +470,7 @@ BOOL netdev_tx_tick(NetdevUnit *unit);
    answer.  And the blank's share of the pump, after its own section. */
 ULONG netdev_tx_service(NetdevUnit *unit);
 VOID  netdev_tx_blank(NetdevUnit *unit);
+#endif /* AMINETXDUO_TX_BATCH */
 
 /* netdev_device.c */
 VOID netdev_reply(struct IOSana2Req *io, LONG err, ULONG wire);

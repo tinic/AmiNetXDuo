@@ -521,7 +521,10 @@ host_test_targets() { # builddir
 #      peer's entry in place (all hosts).
 #      578 with adopt_suspend_clean and adopt_suspend_latched: the suspend
 #      clears the run signal with SetSignal() only when it is latched.
-HOST_TESTS_EXPECTED=579
+#      584 with netdev_tx (the write path and its pump) and the _no_batch
+#      builds of sana2_tx, sana2_device, netdev_cmds and netdev_extension:
+#      the configuration without AMINETXDUO_TX_BATCH (all hosts).
+HOST_TESTS_EXPECTED=584
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,

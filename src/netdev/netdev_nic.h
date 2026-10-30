@@ -243,6 +243,7 @@ struct NetdevNic
        only on a core that sets tx_flush, the start it holds back. */
     UBYTE               tx_more;
     VOID              (*tx_flush)(struct NetdevNic *nic);
+#ifdef AMINETXDUO_TX_BATCH
     /*
      * ANXD_S2F_TX_BATCH: up to `count` frames of one batch write, indices
      * from `first`, into the ring's own buffers -- fill(arg, index, buf)
@@ -260,6 +261,7 @@ struct NetdevNic
                                 UWORD (*fill)(APTR arg, UWORD index,
                                               UBYTE *buf),
                                 APTR arg, UBYTE *failed);
+#endif /* AMINETXDUO_TX_BATCH */
 
     /* Even, and stated rather than inherited from what precedes them:
        netdev_device.c copies both as a longword and a word, which is an

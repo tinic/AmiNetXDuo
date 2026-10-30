@@ -505,9 +505,9 @@ LONG ami_sana2_open_device_flags(const char *name, ULONG unit,
             }
             if (tag->ti_Tag == ANXD_S2_EXTENSION)
             {
-                h_ext_request = iface->extension.Base.Request;
-                h_ext_size    = iface->extension.Base.Size;
-                iface->extension.Base.Accepted = h_ext_accept;
+                h_ext_request = AMI_SANA2_EXT(iface).Request;
+                h_ext_size    = AMI_SANA2_EXT(iface).Size;
+                AMI_SANA2_EXT(iface).Accepted = h_ext_accept;
             }
             tag++;
         }
@@ -851,6 +851,7 @@ BOOL ami_sana2_copy_from_buff(register APTR to   __asm("a0"),
     return FALSE;
 }
 
+#ifdef AMINETXDUO_TX_BATCH
 ULONG ami_sana2_tx_batch(APTR ios2_data, AnxdS2TxBatchInfo *info)
 {
     (VOID)ios2_data;
@@ -872,6 +873,8 @@ ULONG ami_sana2_tx_child(APTR ios2_data, ULONG index, UBYTE *dst, ULONG len)
     (VOID)len;
     return 0;
 }
+
+#endif
 
 UBYTE *ami_sana2_rx_direct(APTR ios2_data, ULONG len)
 {
@@ -2298,10 +2301,12 @@ static void case_tx_batch_negotiation(void)
     h_ext_accept = 0;
     iface = ami_sana2_open(&h_cfg, &err);
     h_check(iface != NULL, "an ordinary driver opens");
-#ifndef AMINETXDUO_TCP_GSO
-    /* No GSO, no blocks to batch: never asked for, whatever a driver says. */
+#ifndef AMINETXDUO_TX_BATCH
+    /* Built without it: never asked for, and the record is version 3's
+       alone, whatever a driver says. */
     h_check(iface != NULL && (h_ext_request & ANXD_S2F_TX_BATCH) == 0 &&
-            iface->extension.TxBatch == NULL, "without GSO: not requested");
+            h_ext_size == (UWORD)sizeof(AnxdS2Extension),
+            "without TX_BATCH: not requested, the plain record");
     if (iface != NULL)
         h_check(ami_sana2_close(iface), "and closes");
 #else

@@ -91,6 +91,7 @@ extern struct ExecBase *SysBase;
 #ifndef GE_RX_PASS_MAX
 #define GE_RX_PASS_MAX  32
 #endif
+#ifdef AMINETXDUO_TX_BATCH
 /*
  * Transmit descriptors, and the bounce buffers behind them.  64 and not
  * 32: a GSO block arrives as one batch of up to 16 frames
@@ -101,6 +102,9 @@ extern struct ExecBase *SysBase;
  * than 32 was.
  */
 #define GE_TX_RING      64
+#else /* !AMINETXDUO_TX_BATCH */
+#define GE_TX_RING      32
+#endif /* AMINETXDUO_TX_BATCH */
 /*
  * How many writes of one run may wait for company before the ring is
  * kicked anyway (ANXD_S2_TXF_MORE, anxs2ext.h).  The peer acknowledges a
@@ -559,6 +563,7 @@ __asm__(
 "    subq.l #1,%d0\n"
 "    bne 1b\n"
 "    rte\n"
+#ifdef AMINETXDUO_TX_BATCH
 /*
  * The same for two ranges in one supervisor entry, a0 = { first, pages,
  * first, pages }, the second count possibly 0: a transmit kick whose frames
@@ -581,6 +586,7 @@ __asm__(
 "    subq.l #1,%d0\n"
 "    bne 3b\n"
 "4:  rte\n"
+#endif /* AMINETXDUO_TX_BATCH */
 /*
  * VOID ge_sup_pages_call(first, pages, sysbase): Supervisor(ge_sup_cpushp)
  * with a0 = first, d0 = pages.  Out of line, saving a5 and a6 itself, for the
@@ -597,6 +603,7 @@ __asm__(
 "    jsr -30(%a6)\n"                /* Supervisor() */
 "    movem.l (%sp)+,%a5-%a6\n"
 "    rts\n"
+#ifdef AMINETXDUO_TX_BATCH
 /* VOID ge_sup_pages2_call(ranges, sysbase): Supervisor(ge_sup_cpushp2). */
 "    .globl _ge_sup_pages2_call\n"
 "_ge_sup_pages2_call:\n"
@@ -607,11 +614,14 @@ __asm__(
 "    jsr -30(%a6)\n"                /* Supervisor() */
 "    movem.l (%sp)+,%a5-%a6\n"
 "    rts\n"
+#endif /* AMINETXDUO_TX_BATCH */
 );
 extern VOID ge_sup_cpushp(VOID);
+#ifdef AMINETXDUO_TX_BATCH
 extern VOID ge_sup_cpushp2(VOID);
 extern AMIGA_ASM_ARGS VOID ge_sup_pages2_call(const ULONG *ranges,
                                               struct ExecBase *sysbase);
+#endif /* AMINETXDUO_TX_BATCH */
 /* The asm above reads its arguments at 12..20(sp), so the stack pin
    (aminetxduo/asm_abi.h). */
 extern AMIGA_ASM_ARGS VOID ge_sup_pages_call(ULONG first, ULONG pages,
@@ -638,6 +648,7 @@ static VOID ge_cache(NetdevNic *nic, APTR addr, ULONG len)
     }
 
     CacheClearE(addr, len, CACRF_ClearD);
+#ifdef AMINETXDUO_TX_BATCH
 }
 
 /* Two ranges, one supervisor entry.  `len2` may be 0. */
@@ -664,6 +675,7 @@ static VOID ge_cache2(NetdevNic *nic, APTR addr, ULONG len, APTR addr2,
     CacheClearE(addr, len, CACRF_ClearD);
     if (len2 != 0)
         CacheClearE(addr2, len2, CACRF_ClearD);
+#endif /* AMINETXDUO_TX_BATCH */
 }
 
 /* ---------------------------------------------------------------- link --- */
@@ -1542,10 +1554,16 @@ static VOID ge_tx_kick(NetdevNic *nic)
         }
         else
         {
+#ifdef AMINETXDUO_TX_BATCH
             /* Across the ring's end: both ranges in one trap. */
             ge_cache2(nic, c->tx_buf + (ULONG)first * GE_BUFSZ,
                       (ULONG)room * GE_BUFSZ, c->tx_buf,
                       (ULONG)(n - room) * GE_BUFSZ);
+#else /* !AMINETXDUO_TX_BATCH */
+            ge_cache(nic, c->tx_buf + (ULONG)first * GE_BUFSZ,
+                     (ULONG)room * GE_BUFSZ);
+            ge_cache(nic, c->tx_buf, (ULONG)(n - room) * GE_BUFSZ);
+#endif /* AMINETXDUO_TX_BATCH */
         }
         GE_P_ADD(nic, GE_ST_P_TXCACHE_US, pk);
     }
@@ -1671,6 +1689,7 @@ static LONG genet_tx_body(NetdevNic *nic, const UBYTE *frame, UWORD len)
         nic->core_stat[GE_ST_TX_HELD]++;
 
     return 0;
+#ifdef AMINETXDUO_TX_BATCH
 }
 
 /*
@@ -1774,6 +1793,7 @@ static UWORD genet_tx_run(NetdevNic *nic, UWORD first, UWORD count,
         ge_tx_kick(nic);
 
     return done;
+#endif /* AMINETXDUO_TX_BATCH */
 }
 
 /* TRUE when the chip retired frames. */
@@ -2179,7 +2199,9 @@ static LONG genet_attach(NetdevNic *nic)
     nic->rx_holds        = 1;           /* the ring keeps frames for a late read */
     nic->rx_batches      = 1;           /* a pass drains a burst: one reply each */
     nic->tx_flush        = ge_tx_flush;  /* runs may hold their start           */
+#ifdef AMINETXDUO_TX_BATCH
     nic->tx_run          = genet_tx_run; /* a batch write, one kick (TX_BATCH)  */
+#endif /* AMINETXDUO_TX_BATCH */
     /* A frame takes a whole buffer whatever its size, so what the ring holds
        is GE_RX_RING full frames, not GE_RX_RING * GE_BUFSZ bytes of them: the
        opener's page arithmetic (bsdsocket_window.h, ami_bsd_tcp_window_fit)

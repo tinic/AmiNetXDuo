@@ -15,6 +15,10 @@
 
 #include <proto/exec.h>
 
+/* The whole of this file is the TX_BATCH build's write path; without the
+   option netdev_device.c keeps the write path it had before, verbatim. */
+#ifdef AMINETXDUO_TX_BATCH
+
 /* ------------------------------------------------------------- transmit --- */
 
 /*
@@ -728,3 +732,8 @@ static VOID netdev_tx_direct_task(NetdevUnit *unit, struct IOSana2Req *io)
     }
 }
 #endif /* NETDEV_HAS_TX_TASK_LOCK */
+
+#else /* !AMINETXDUO_TX_BATCH */
+/* ISO C wants a translation unit to declare something. */
+typedef int netdev_tx_unused;
+#endif /* AMINETXDUO_TX_BATCH */

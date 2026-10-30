@@ -580,11 +580,13 @@ ULONG ami_config_rx_batch(ULONG fallback);
    ami_sana2_tx_run_begin).  Anything else, or no variable, is `fallback`. */
 ULONG ami_config_tx_run(ULONG fallback);
 
+#ifdef AMINETXDUO_TX_BATCH
 /* ENV:ANXDTXBATCH 0 leaves ANXD_S2F_TX_BATCH unrequested, so every GSO child
    is its own write: the A/B for batched transmit (anxs2ext.h).  Anything
    else, or no variable, is `fallback`. */
 ULONG ami_config_tx_batch(ULONG fallback);
 
+#endif /* AMINETXDUO_TX_BATCH */
 /*
  * How loud the serial diagnostic is, AMI_LOG_ERROR..AMI_LOG_TRACE.
  *

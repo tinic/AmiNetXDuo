@@ -113,6 +113,7 @@ static inline ULONG genet_tx_csum_info(UBYTE ihl, UWORD offset, UBYTE flag)
     return info;
 }
 
+#ifdef AMINETXDUO_TX_BATCH
 /*
  * Whether the checksum block's word worked out for one frame holds for the
  * next (genet_tx_run): every byte netdev_tx_csum4() reads to decide and
@@ -161,6 +162,7 @@ static inline BOOL genet_tx_run_reclaims(UWORD inuse, UWORD ring, UWORD count)
     return (BOOL)((UWORD)(ring - inuse) < count);
 }
 
+#endif /* AMINETXDUO_TX_BATCH */
 /*
  * The receive line's mask while a reader is behind.  A pass that stopped at
  * a frame whose reader had no read posted (`held`) consumed nothing, and an

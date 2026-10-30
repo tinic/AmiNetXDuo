@@ -100,7 +100,7 @@ static UCHAR             h_frames[H_LOG][H_FRAME];
 static BOOL              h_frame_ok[H_LOG];
 static int               h_copy_on_begin;
 
-#ifdef AMINETXDUO_TCP_GSO
+#ifdef AMINETXDUO_TX_BATCH
 /*
  * A TX_BATCH device (anxs2ext.h) behind BeginIO(): a write flagged
  * ANXD_S2_TXF_BATCH is asked its shape and h_batch_take of its frames are
@@ -177,7 +177,7 @@ VOID BeginIO(struct IORequest *req)
                                          s2->ios2_DataLength);
         }
     }
-#ifdef AMINETXDUO_TCP_GSO
+#ifdef AMINETXDUO_TX_BATCH
     if (h_batch_dev &&
         (ami_sana2_tx_flags(((struct IOSana2Req *)req)->ios2_Data) &
          ANXD_S2_TXF_BATCH) != 0)
@@ -501,7 +501,7 @@ static void fixture_init(BOOL raw, ULONG hw_type)
     h_released       = NULL;
     h_forbids        = 0;
     memset(h_frame_ok, 0, sizeof(h_frame_ok));
-#ifdef AMINETXDUO_TCP_GSO
+#ifdef AMINETXDUO_TX_BATCH
     h_batch_dev      = 0;
     h_batch_take     = 0;
     h_bn             = 0;
@@ -2340,6 +2340,7 @@ static void test_gso_one_forbid_per_block(void)
 }
 
 /* -------------------------------------------------------------- TX_BATCH */
+#ifdef AMINETXDUO_TX_BATCH
 
 /* Frame `n` the batch device copied against child h_bidx[n] of the block,
    built from scratch, its pad zeroes and nothing past it. */
@@ -2751,6 +2752,7 @@ static void test_batch_not_taken(void)
             ami_sana2_tx_flags(((struct IOSana2Req *)h_sent_log[0])->ios2_Data)
             == 0, "not accepted: four plain writes");
 }
+#endif /* AMINETXDUO_TX_BATCH */
 #endif /* AMINETXDUO_TCP_GSO */
 
 int main(void)
@@ -2794,6 +2796,7 @@ int main(void)
     test_gso_record_v1();
     test_gso_repair();
     test_gso_record_refused();
+#ifdef AMINETXDUO_TX_BATCH
     test_batch_frames_identical();
     test_batch_stats_and_bounds();
     test_batch_child_restart();
@@ -2805,6 +2808,7 @@ int main(void)
     test_batch_queues_as_one();
     test_batch_one_forbid();
     test_batch_not_taken();
+#endif
 #endif
 #ifdef AMINETXDUO_TX_RUN
     test_drain_waits_for_a_queued_flush();

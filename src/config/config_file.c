@@ -588,11 +588,13 @@ ULONG ami_config_tx_run(ULONG fallback)
     return cfg_env_number("ENV:ANXDTXRUN", 0UL, 1UL, fallback);
 }
 
+#ifdef AMINETXDUO_TX_BATCH
 ULONG ami_config_tx_batch(ULONG fallback)
 {
     return cfg_env_number("ENV:ANXDTXBATCH", 0UL, 1UL, fallback);
 }
 
+#endif /* AMINETXDUO_TX_BATCH */
 /*
  * The diagnostic dial: a single digit 0..4 in ENV:ANXDLOGLEVEL.  Anything else
  * is the fallback, silently -- a mistyped variable must not be the reason a

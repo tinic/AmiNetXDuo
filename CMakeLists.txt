@@ -1302,6 +1302,16 @@ if(AMINETXDUO_TCP_GSO)
     add_compile_definitions(AMINETXDUO_TCP_GSO)
 endif()
 
+# Batched transmit (ANXD_S2F_TX_BATCH): each copied TCP GSO block goes to a
+# device that offers it, anxgenet.device, as one write, and the device cuts
+# the frames.  Code in the library and the drivers, and 64 KB more of the
+# GENET's transmit ring; it needs TCP GSO.  The micro preset omits it, and
+# then the library never asks for it and no driver offers it.
+option(AMINETXDUO_TX_BATCH "Send each copied TCP GSO block as one batched write" ON)
+if(AMINETXDUO_TX_BATCH AND AMINETXDUO_TCP_GSO)
+    add_compile_definitions(AMINETXDUO_TX_BATCH)
+endif()
+
 # RFC 5827 early retransmit: below four segments in flight, three duplicate
 # acknowledgments cannot happen, so the threshold drops to what the flight can
 # reach.  No layout change, but a with/without measurement wants the whole tree

@@ -234,6 +234,7 @@ VOID netdev_offline(NetdevUnit *unit, ULONG event)
 /* ANXD_CMD_RX_POLL runs the chip service when a core left frames behind; this
    harness has no core, so it counts the call and reports nothing found. */
 static int interrupt_calls;
+#ifdef AMINETXDUO_TX_BATCH
 
 /* netdev_tx.c's service section, which this file does not link: the
    interrupt it wraps is the recorder above. */
@@ -242,6 +243,7 @@ ULONG netdev_tx_service(NetdevUnit *unit)
 {
     return netdev_interrupt(unit);
 }
+#endif /* AMINETXDUO_TX_BATCH */
 
 ULONG netdev_interrupt(NetdevUnit *unit)
 {
@@ -1883,6 +1885,7 @@ static void r_abort_finds_each_list(void)
     expect(netdev_abort(&opener, &wr) == TRUE,
            "an aborted write is found on the unit's list");
 
+#ifdef AMINETXDUO_TX_BATCH
     /* A batch write paused at the head (ANXD_S2F_TX_BATCH): the abort
        answers it and the device forgets its cursor, so the pump never
        resumes a request the opener has back. */
@@ -1897,6 +1900,7 @@ static void r_abort_finds_each_list(void)
     expect(unit.nu_TxBatchIo == NULL,
            "and the device keeps no cursor into it");
 
+#endif /* AMINETXDUO_TX_BATCH */
     /* A request on no list of ours is not ours to complete. */
     req(&stranger, CMD_READ);
     nreplies = 0;

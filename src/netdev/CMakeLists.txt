@@ -722,6 +722,46 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     add_test(NAME netdev_cmds COMMAND test_netdev_cmds)
 
+    # The same test built without AMINETXDUO_TX_BATCH, so the configuration the
+    # micro profile ships (no batched transmit) is built and run on every host
+    # CI pass, not only the default one: the product sources and assertions are
+    # the target's own; only the feature macro differs (the _no_gso pattern of
+    # tests/bsdsocket).
+    if(NOT COMMAND anxd_add_no_batch_twin)
+        function(anxd_add_no_batch_twin target test_name)
+            get_target_property(_src ${target} SOURCES)
+            get_target_property(_inc ${target} INCLUDE_DIRECTORIES)
+            get_target_property(_opt ${target} COMPILE_OPTIONS)
+            get_target_property(_def ${target} COMPILE_DEFINITIONS)
+            get_target_property(_lib ${target} LINK_LIBRARIES)
+            get_target_property(_dir ${target} SOURCE_DIR)
+            set(_abs)
+            foreach(_s IN LISTS _src)
+                if(IS_ABSOLUTE "${_s}")
+                    list(APPEND _abs "${_s}")
+                else()
+                    list(APPEND _abs "${_dir}/${_s}")
+                endif()
+            endforeach()
+            add_executable(${target}_no_batch ${_abs})
+            if(_inc)
+                target_include_directories(${target}_no_batch PRIVATE ${_inc})
+            endif()
+            if(_opt)
+                target_compile_options(${target}_no_batch PRIVATE ${_opt})
+            endif()
+            target_compile_options(${target}_no_batch PRIVATE -UAMINETXDUO_TX_BATCH)
+            if(_def)
+                target_compile_definitions(${target}_no_batch PRIVATE ${_def})
+            endif()
+            if(_lib)
+                target_link_libraries(${target}_no_batch PRIVATE ${_lib})
+            endif()
+            add_test(NAME ${test_name}_no_batch COMMAND ${target}_no_batch)
+        endfunction()
+    endif()
+    anxd_add_no_batch_twin(test_netdev_cmds netdev_cmds)
+
     # What BeginIO does to a request before it dispatches it.  netdev_event.c
     # is driven directly by the test above, which is why it stayed green over
     # a BeginIO that cleared ios2_WireError for every command including
@@ -771,12 +811,17 @@ if(NOT CMAKE_CROSSCOMPILING)
     # write (ANXD_S2F_TX_BATCH) paused at the head of the queue and resumed
     # in order, answered once, aborted by a close; and the masked pump pass
     # held to NETDEV_PUMP_FRAMES with what it leaves still going out.
-    add_executable(test_netdev_tx
-        test/test_netdev_tx.c
-        netdev_tx.c
-        netdev_queue.c
-        netdev_unit.c
-        netdev_mcaf.c)
+    # Without TX_BATCH netdev_tx.c is empty and the test only says so.
+    if(AMINETXDUO_TX_BATCH AND AMINETXDUO_TCP_GSO)
+        add_executable(test_netdev_tx
+            test/test_netdev_tx.c
+            netdev_tx.c
+            netdev_queue.c
+            netdev_unit.c
+            netdev_mcaf.c)
+    else()
+        add_executable(test_netdev_tx test/test_netdev_tx.c)
+    endif()
 
     target_include_directories(test_netdev_tx PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -809,6 +854,7 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(test_netdev_extension PRIVATE -Wall -Wextra)
 
     add_test(NAME netdev_extension COMMAND test_netdev_extension)
+    anxd_add_no_batch_twin(test_netdev_extension netdev_extension)
 
     add_executable(test_netdev_verify
         test/test_netdev_verify.c

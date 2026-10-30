@@ -593,6 +593,7 @@ BOOL ami_sana2_gso_parse(NX_PACKET *packet, ULONG mtu, AmiTxGso *g)
  * launch is the block's next child, and the block's cursor only moves
  * forward, so the whole block costs one walk of the chain.
  */
+#ifdef AMINETXDUO_TX_BATCH
 ULONG ami_sana2_gso_prepare(AmiTxSlot *slot, NX_PACKET *parent)
 {
     AmiTxGso *g = &slot->iface->gso[slot->gso - 1];
@@ -606,6 +607,9 @@ ULONG ami_sana2_gso_prepare(AmiTxSlot *slot, NX_PACKET *parent)
  * walk then starts over from the parent.
  */
 ULONG ami_sana2_gso_place(AmiTxSlot *slot, NX_PACKET *parent, UWORD seg)
+#else
+ULONG ami_sana2_gso_prepare(AmiTxSlot *slot, NX_PACKET *parent)
+#endif
 {
     AmiTxGso  *g = &slot->iface->gso[slot->gso - 1];
     ULONG      seg_off;
@@ -613,7 +617,11 @@ ULONG ami_sana2_gso_place(AmiTxSlot *slot, NX_PACKET *parent, UWORD seg)
     NX_PACKET *buf;
     LONG       start;
 
+#ifdef AMINETXDUO_TX_BATCH
     slot->seg_index = (UBYTE)seg;
+#else
+    slot->seg_index = g->next_seg++;
+#endif
     seg_off = ami_sana2_gso_slice(g, slot->seg_index, &seg_len);
 
     if (g->cur_buf == NULL || (LONG)seg_off < g->cur_start)
@@ -656,6 +664,7 @@ ULONG ami_sana2_gso_place(AmiTxSlot *slot, NX_PACKET *parent, UWORD seg)
     return (ULONG)g->ihl + g->thl + seg_len;
 }
 
+#ifdef AMINETXDUO_TX_BATCH
 /* The write length of child `seg`: its headers and slice, and on Ethernet
    at least the 46 bytes the copy pads to (ami_sana2_tx_launch). */
 ULONG ami_sana2_gso_frame_len(const AmiSana2If *iface, const AmiTxGso *g,
@@ -671,6 +680,7 @@ ULONG ami_sana2_gso_frame_len(const AmiSana2If *iface, const AmiTxGso *g,
         len = (ULONG)(AMI_ETH_MIN_FRAME - AMI_ETH_HEADER_SIZE);
     return len;
 }
+#endif /* AMINETXDUO_TX_BATCH */
 
 static VOID ami_sana2_gso_fields(const AmiTxGso *g, UWORD seg,
                                  const UCHAR *ip, AmiGsoFields *f)
@@ -1045,6 +1055,7 @@ static BOOL __attribute__((noinline)) ami_sana2_gso_copy(AmiTxSlot *slot,
     return TRUE;
 }
 
+#ifdef AMINETXDUO_TX_BATCH
 /*
  * TX_BATCH (aminetxduo/anxs2ext.h): the shape of a batch write, and child
  * `index` of it, the same bytes the child's own write would have carried --
@@ -1107,6 +1118,7 @@ AMIGA_ASM_ARGS VOID ami_sana2_tx_posted(APTR ios2_data, ULONG count)
     slot->batch_done = (UBYTE)((count < slot->batch_count)
                                ? count : slot->batch_count);
 }
+#endif /* AMINETXDUO_TX_BATCH */
 #endif /* AMINETXDUO_TCP_GSO */
 
 /*

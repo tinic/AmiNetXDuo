@@ -242,6 +242,7 @@ static void test_duplicate_records_first_valid_wins(void)
           "a valid later ANX record is taken after an invalid one");
 }
 
+#ifdef AMINETXDUO_TX_BATCH
 /* TX_BATCH's pair, never called here. */
 static ULONG tx_batch(APTR data, AnxdS2TxBatchInfo *info)
 {
@@ -347,6 +348,37 @@ static void test_tx_batch_needs_the_appended_pair(void)
           "but not to a raw opener");
 }
 
+#else /* !AMINETXDUO_TX_BATCH */
+/* Built without the option: a full record asking for TX_BATCH, from a unit
+   whose core takes the task-level transmit lock, is still not offered it,
+   and the version-3 facts beside it are taken as ever. */
+static void test_tx_batch_not_offered(void)
+{
+    NetdevOpener      op;
+    AnxdS2ExtensionTx ext;
+    AnxdS2Extension  *answer = NULL;
+    NetdevNic         nic;
+
+    memset(&ext, 0, sizeof(ext));
+    ext.Base.Version = ANXD_S2_ABI_VERSION;
+    ext.Base.Size    = (UWORD)ANXD_S2_EXTENSION_BATCH_SIZE;
+    ext.Base.Request = ANXD_S2F_TX_BATCH | ANXD_S2F_TX_CSUM_TCP;
+    ext.Base.TxFlags = tx_flags;
+    memset(&op, 0, sizeof(op));
+    CHECK(netdev_take_extension(&ext.Base, &op, &answer) &&
+          op.op_TxFlags == (APTR)tx_flags &&
+          op.op_TxCsum == ANXD_S2_TXF_TCP,
+          "without TX_BATCH: the record is taken for what it is");
+    memset(&nic, 0, sizeof(nic));
+    nic.tx_task_lock      = 1;
+    nic.tx_csum_supported = ANXD_S2_TXF_TCP;
+    op.op_CopyFrom        = (APTR)tx_flags;     /* present, never called */
+    CHECK((netdev_extension_supported(&op, &nic) & ANXD_S2F_TX_BATCH) == 0,
+          "and bit 11 is never offered");
+    CHECK((netdev_extension_supported(&op, &nic) & ANXD_S2F_TX_CSUM_TCP) != 0,
+          "while the checksum it came with still is");
+}
+#endif /* AMINETXDUO_TX_BATCH */
 int main(void)
 {
     test_duplicate_records_first_valid_wins();
@@ -355,7 +387,11 @@ int main(void)
     test_receive_facts_need_the_receive_callbacks();
     test_tx_needs_owned_metadata();
     test_supported_features_follow_opener_and_unit();
+#ifdef AMINETXDUO_TX_BATCH
     test_tx_batch_needs_the_appended_pair();
+#else
+    test_tx_batch_not_offered();
+#endif /* AMINETXDUO_TX_BATCH */
 
     if (failures != 0)
         printf("netdev extension: %d failure(s)\n", failures);

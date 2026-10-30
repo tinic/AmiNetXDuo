@@ -186,6 +186,7 @@ static void g_rx_line(void)
     line("released with DONE pending", 0, 1, WANTED, WANTED, 0, 0);
 }
 
+#ifdef AMINETXDUO_TX_BATCH
 /* When genet_tx_run may reuse a checksum word: the next frame's header has
    the first one's shape, and it is TCP. */
 static void h_tx_csum_shape(void)
@@ -236,6 +237,7 @@ static void i_tx_run_reclaims(void)
     expect_u32("run: an empty ring", genet_tx_run_reclaims(0, 64, 16), 0);
 }
 
+#endif /* AMINETXDUO_TX_BATCH */
 int main(void)
 {
     a_fresh();
@@ -245,8 +247,10 @@ int main(void)
     e_tx_status();
     f_tx_csum();
     g_rx_line();
+#ifdef AMINETXDUO_TX_BATCH
     h_tx_csum_shape();
     i_tx_run_reclaims();
+#endif /* AMINETXDUO_TX_BATCH */
 
     if (failures != 0)
     {
