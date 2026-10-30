@@ -1001,6 +1001,17 @@ VOID ami_sana2_tx_kick(AmiSana2If *iface)
     }
 }
 
+/* The launcher flag back from a direct launch, then what queued behind it: a
+   write that found the flag held left its kick to the holder.  The barrier
+   keeps the count's load after the store that frees the flag. */
+static VOID ami_sana2_tx_unclaim(AmiSana2If *iface)
+{
+    iface->tx_kicking = FALSE;
+    __asm__ __volatile__("" ::: "memory");
+    if (iface->tx_pend_count != 0)
+        ami_sana2_tx_kick(iface);
+}
+
 /* ----------------------------------------------------------- transmit runs */
 #ifdef AMINETXDUO_TX_RUN
 
@@ -1092,6 +1103,7 @@ ami_sana2_gso_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
     AmiTxGso   blk;
     AmiTxSlot *slot;
     ULONG      claimed = 0;
+    BOOL       held;
     UWORD      idx = AMI_SANA2_GSO_NONE;
     UWORD      at;
     UWORD      i;
@@ -1139,9 +1151,17 @@ ami_sana2_gso_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
         at++;
     }
     /* The children's slots in the same region: one Forbid() per block, as
-       the ordinary write takes one per frame.  Not past a queued write. */
-    if (idx != AMI_SANA2_GSO_NONE && iface->tx_pend_count == 0)
+       the ordinary write takes one per frame.  Not past a queued write, nor
+       past one the kick has dequeued and not yet started: the slots come
+       with the launcher flag, as ami_sana2_tx_claim()'s do. */
+    if (idx != AMI_SANA2_GSO_NONE && !iface->tx_kicking &&
+        iface->tx_pend_count == 0)
+    {
         claimed = ami_sana2_tx_claim_run(iface, AMI_SANA2_GSO_WRITES(blk));
+        if (claimed != 0)
+            iface->tx_kicking = TRUE;
+    }
+    held = (BOOL)(claimed != 0);
     Permit();
 
     /* Cannot happen: a block in flight holds a slot or a queue entry, and
@@ -1200,10 +1220,18 @@ ami_sana2_gso_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
             iface->stats.tx_queue_full++;
             ami_sana2_gso_put(iface, idx,
                               (UWORD)(AMI_SANA2_GSO_WRITES(blk) - i), TRUE);
+            if (held)
+                ami_sana2_tx_unclaim(iface);
             return (i == 0) ? NX_TX_QUEUE_DEPTH : NX_SUCCESS;
         }
-        ami_sana2_tx_kick(iface);
     }
+
+    /* The rest queued while the flag was held, so behind the children
+       already out. */
+    if (held)
+        ami_sana2_tx_unclaim(iface);
+    else
+        ami_sana2_tx_kick(iface);
 
     return NX_SUCCESS;
 }
@@ -1288,12 +1316,7 @@ UINT ami_sana2_tx_send_now(AmiSana2If *iface, NX_PACKET *packet,
 
     rc = ami_sana2_tx_launch(iface, slot, packet, ether_type, dst_msw,
                              dst_lsw);
-
-    /* A write that queued behind this launch found the flag held and left
-       its kick to the holder. */
-    iface->tx_kicking = FALSE;
-    if (iface->tx_pend_count != 0)
-        ami_sana2_tx_kick(iface);
+    ami_sana2_tx_unclaim(iface);
 
     return rc;
 }
