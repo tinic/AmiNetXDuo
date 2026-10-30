@@ -323,7 +323,7 @@ typedef struct
     UWORD   tag;
     int     fail_at;        /* -1: never                                    */
     int     answer_zero;    /* TxBatch answers 0                            */
-    ULONG   posted;         /* the last TxPosted count                      */
+    ULONG   committed;      /* the last TxPosted count                      */
     int     posts;
     int     copies[32];     /* TxChild calls per frame                      */
 } Write;
@@ -356,7 +356,7 @@ static VOID t_txposted(APTR data, ULONG count)
 {
     Write *w = (Write *)data;
 
-    w->posted = count;
+    w->committed = count;
     w->posts++;
 }
 
@@ -532,7 +532,7 @@ static void test_one_batch(void)
     expect(replies == 0 && io->ios2_Req.io_Error == 0 &&
            (io->ios2_Req.io_Flags & IOF_QUICK) != 0,
            "answered once, quick, no error");
-    expect(wr[0].posted == 5 && wr[0].posts == 1,
+    expect(wr[0].committed == 5 && wr[0].posts == 1,
            "the committed prefix reported once: five");
     expect(unit.nu_Stats.PacketsSent == 5, "five frames counted, not one");
     expect(unit.nu_TxBatchIo == NULL && unit.nu_TxBatches == 1,
@@ -553,7 +553,7 @@ static void test_partial_then_resume(void)
     netdev_tx_direct(&unit, io);
 
     expect(nposted == 3 && posted[2].index == 2, "three frames now");
-    expect(wr[0].posted == 3, "and three reported committed");
+    expect(wr[0].committed == 3, "and three reported committed");
     expect(replies == 0 && (io->ios2_Req.io_Flags & IOF_QUICK) == 0,
            "not answered: queued, IOF_QUICK cleared");
     expect(unit.nu_Writes.lh_Head == &io->ios2_Req.io_Message.mn_Node &&
@@ -578,7 +578,7 @@ static void test_partial_then_resume(void)
     expect(replies == 2 && io->ios2_Req.io_Error == 0 &&
            io->ios2_Req.io_Message.mn_Node.ln_Type == NT_REPLYMSG,
            "the batch answered once, after its last frame, and the write");
-    expect(wr[0].posted == 5 && wr[0].posts == 2,
+    expect(wr[0].committed == 5 && wr[0].posts == 2,
            "the prefix reported per run: 3, then 5");
     expect(unit.nu_TxBatchIo == NULL && IsListEmpty(&unit.nu_Writes),
            "nothing left");

@@ -395,12 +395,19 @@ typedef enum
 /*
  * A 6-byte Ethernet address as a longword and a word.  Both ends must be even:
  * the staging buffer is AllocMem'd and ios2_DstAddr/ios2_SrcAddr sit at even
- * offsets in the request.
+ * offsets in the request.  The longword is typed for exactly that, an even
+ * address: the m68k ABI aligns a ULONG to two anyway, so the target's code is
+ * the same, and a host build, whose ULONG wants four, reads it legally.
  */
+typedef ULONG nd_even_ulong __attribute__((aligned(2), may_alias));
+typedef UWORD nd_even_uword __attribute__((may_alias));
+
 static inline VOID nd_addr6(UBYTE *to, const UBYTE *from)
 {
-    *(ULONG *)(APTR)to        = *(const ULONG *)(CONST_APTR)from;
-    *(UWORD *)(APTR)(to + 4)  = *(const UWORD *)(CONST_APTR)(from + 4);
+    *(nd_even_ulong *)(APTR)to       =
+        *(const nd_even_ulong *)(CONST_APTR)from;
+    *(nd_even_uword *)(APTR)(to + 4) =
+        *(const nd_even_uword *)(CONST_APTR)(from + 4);
 }
 
 static inline VOID nd_zero(UBYTE *p, ULONG n)
