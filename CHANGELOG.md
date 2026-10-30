@@ -9,6 +9,10 @@ are history.
 
 - TCP uploads hand the network driver blocks of up to 16 segments, which
   cuts the CPU cost per packet (all profiles except micro).
+- Socket calls check for Ctrl-C by reading the task's received signals
+  instead of calling SetSignal(0,0), which removes a Disable() per call.
+- Sending on a socket makes no Exec call when the caller's event signal is
+  already pending.
 - anxgenet.device takes a block of up to 16 segments in one write (all
   profiles except micro).
 - The TCP send buffer grows by itself on gigabit links with a long round
