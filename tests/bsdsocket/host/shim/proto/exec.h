@@ -75,6 +75,8 @@ BYTE  DoIO(struct IORequest *ioRequest);
    the tree casts the literal to STRPTR, which is unsigned. */
 struct Library *OpenLibrary(const UBYTE *libName, ULONG version);
 VOID  CloseLibrary(struct Library *library);
+/* library_runtime.c unloads usergroup.library with the stack (#383). */
+VOID  RemLibrary(struct Library *library);
 
 VOID  NewList(struct List *list);
 VOID  AddTail(struct List *list, struct Node *node);

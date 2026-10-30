@@ -85,7 +85,9 @@ BUDGETS=(
     # 372,620 -> 373,924, approved by turo 2026-10-29.
     # In-order transmit launch (#356, the launcher flag on the direct, kick
     # and GSO paths): +88, 373,924 -> 374,012.
-    "default:src/bsdsocket/bsdsocket.library:374012"
+    # NetShutdown leaves no usergroup.library behind (#383): +80,
+    # 374,012 -> 374,092.
+    "default:src/bsdsocket/bsdsocket.library:374092"
     # 41,412 after stateless receive-checksum verification was added to the
     # EL3 and word/long NE2000 direct paths, 2026-09-15.  43,620 with
     # ANXD_CMD_RX_BATCH in the shell (claim, completion, staging copy, the
@@ -156,7 +158,9 @@ BUDGETS=(
     # GSO frontend adds 8,616 more; this exact increase was approved the same day.
     # Batched transmit adds 1,212, 251,804 -> 253,016, approved by turo
     # 2026-10-29.  In-order transmit launch (#356): +84, 253,016 -> 253,100.
-    "minimal:src/bsdsocket/bsdsocket.library:253100"
+    # usergroup.library unloaded with the stack (#383): +84,
+    # 253,100 -> 253,184.
+    "minimal:src/bsdsocket/bsdsocket.library:253184"
     "minimal:src/netdev/anxnet.device:46000"
     # 29,088 on e806188f after the audited device fixes.
     # Batched transmit adds 632, 29,120 -> 29,752, approved by turo 2026-10-29.

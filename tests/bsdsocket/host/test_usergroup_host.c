@@ -64,6 +64,13 @@ static struct
     struct Library *close_base[H_MAX_CLOSES];
     unsigned        closes;
 
+    /* RemLibrary(), and the Forbid() depth each call saw */
+    struct Library *rem_base[H_MAX_CLOSES];
+    unsigned        rem_closes_before[H_MAX_CLOSES];
+    LONG            rem_forbid[H_MAX_CLOSES];
+    unsigned        rems;
+    LONG            forbid;
+
     /* pr_WindowPtr as seen inside the fallback OpenLibrary() */
     APTR            open_window[H_MAX_OPENS];
 
@@ -77,6 +84,9 @@ static void h_reset(void)
 {
     memset(&h, 0, sizeof(h));
     memset(&h_proc, 0, sizeof(h_proc));
+    memset(&h_ug_lib, 0, sizeof(h_ug_lib));
+    memset(&h_ug_amitcp_lib, 0, sizeof(h_ug_amitcp_lib));
+    memset(&h_dos_lib, 0, sizeof(h_dos_lib));
 
     h_proc.pr_Task.tc_Node.ln_Type = NT_PROCESS;
     h_proc.pr_WindowPtr            = (APTR)0x5EA1ED;
@@ -86,6 +96,13 @@ static void h_reset(void)
 }
 
 /* --------------------------------------------------------------- stubs -- */
+
+/* An open counts, as Exec's does, so "the last opener" is answerable. */
+static struct Library *h_counted(struct Library *lib)
+{
+    lib->lib_OpenCnt++;
+    return lib;
+}
 
 struct Library *OpenLibrary(const UBYTE *libName, ULONG version)
 {
@@ -100,13 +117,13 @@ struct Library *OpenLibrary(const UBYTE *libName, ULONG version)
     h.opens++;
 
     if (strcmp(name, "dos.library") == 0)
-        return h.have_dos ? &h_dos_lib : NULL;
+        return h.have_dos ? h_counted(&h_dos_lib) : NULL;
 
     if (strcmp(name, "usergroup.library") == 0)
-        return h.have_usergroup ? &h_ug_lib : NULL;
+        return h.have_usergroup ? h_counted(&h_ug_lib) : NULL;
 
     if (strcmp(name, "AmiTCP:libs/usergroup.library") == 0)
-        return h.have_amitcp_ug ? &h_ug_amitcp_lib : NULL;
+        return h.have_amitcp_ug ? h_counted(&h_ug_amitcp_lib) : NULL;
 
     return NULL;
 }
@@ -116,6 +133,30 @@ VOID CloseLibrary(struct Library *library)
     if (h.closes < H_MAX_CLOSES)
         h.close_base[h.closes] = library;
     h.closes++;
+
+    if (library != NULL && library->lib_OpenCnt > 0)
+        library->lib_OpenCnt--;
+}
+
+VOID RemLibrary(struct Library *library)
+{
+    if (h.rems < H_MAX_CLOSES)
+    {
+        h.rem_base[h.rems]          = library;
+        h.rem_closes_before[h.rems] = h.closes;
+        h.rem_forbid[h.rems]        = h.forbid;
+    }
+    h.rems++;
+}
+
+VOID Forbid(VOID)
+{
+    h.forbid++;
+}
+
+VOID Permit(VOID)
+{
+    h.forbid--;
 }
 
 struct Task *FindTask(const char *name)
@@ -363,6 +404,66 @@ static void t_not_a_process(void)
     bsd_runtime_close();
 }
 
+/*
+ * #383: NetShutdown has to leave no usergroup.library of ours behind, or the
+ * next stack's usergroup.library is answered by this one.  The last opener
+ * removes it, inside Forbid() and after its own close, as a flush would.
+ */
+static void t_unloaded_when_last(void)
+{
+    printf("usergroup: unloaded with the stack when nothing else holds it\n");
+
+    h_reset();
+
+    bsd_usergroup_open();
+    bsd_runtime_close();
+
+    CHECK(h.rems == 1 && h.rem_base[0] == &h_ug_lib,
+          "RemLibrary() is called on the usergroup base it opened");
+    CHECK(h.rems == 1 && h.rem_closes_before[0] == h_close_count(&h_ug_lib),
+          "after its own CloseLibrary(), not before");
+    CHECK(h.rems == 1 && h.rem_forbid[0] > 0,
+          "inside Forbid(), so a late opener sees one state or the other");
+    CHECK(h.forbid == 0, "and every Forbid() is paired with a Permit()");
+}
+
+/*
+ * Another program still holds it (an ixnet client, or AmiTCP's own tools):
+ * a flush would leave it, and so does this.
+ */
+static void t_kept_when_shared(void)
+{
+    printf("usergroup: kept while another opener holds it\n");
+
+    h_reset();
+    h_ug_lib.lib_OpenCnt = 1;
+
+    bsd_usergroup_open();
+    bsd_runtime_close();
+
+    CHECK(h_close_count(&h_ug_lib) == 1, "the hold is still given back");
+    CHECK(h.rems == 0, "but the library is not removed under its opener");
+    CHECK(h_ug_lib.lib_OpenCnt == 1, "and its other opener keeps its count");
+}
+
+/*
+ * A base already marked LIBF_DELEXP expunges inside its own close.  The
+ * pointer is gone after that, so it must not be handed to RemLibrary().
+ */
+static void t_delexp_not_touched_after_close(void)
+{
+    printf("usergroup: LIBF_DELEXP expunges in its close, no second call\n");
+
+    h_reset();
+
+    bsd_usergroup_open();
+    h_ug_lib.lib_Flags |= LIBF_DELEXP;
+    bsd_runtime_close();
+
+    CHECK(h_close_count(&h_ug_lib) == 1, "the hold is given back");
+    CHECK(h.rems == 0, "and the freed base is not used again");
+}
+
 int main(void)
 {
     printf("library_runtime.c host checks\n\n");
@@ -373,6 +474,9 @@ int main(void)
     t_fallback();
     t_absent();
     t_not_a_process();
+    t_unloaded_when_last();
+    t_kept_when_shared();
+    t_delexp_not_touched_after_close();
 
     printf("\n%lu checks, %lu failures\n", h_checks, h_failures);
 

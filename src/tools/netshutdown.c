@@ -144,6 +144,24 @@ static LONG stop_tcp_handler(VOID)
     return DoPkt(port, ACTION_DIE, 0, 0, 0, 0, 0) ? 1 : 0;
 }
 
+/*
+ * Roadshow's last step: bsdsocket.library leaves memory once no program uses
+ * the network, so a script can start another stack without RemLib (#383).
+ * The expunge vector decides.  With an opener left it sets LIBF_DELEXP, and
+ * that opener's CloseLibrary() removes the library instead.
+ */
+static VOID unload_library(VOID)
+{
+    struct Library *lib;
+
+    Forbid();
+    lib = (struct Library *)FindName(&SysBase->LibList,
+                                     (CONST_STRPTR)"bsdsocket.library");
+    if (lib != NULL && tool_stack_is_ours(lib))
+        RemLibrary(lib);
+    Permit();
+}
+
 /* Name the holders the last others_holding() listed, one to a line, then the
    count of the ones it had no room for. */
 static VOID name_them(LONG listed, LONG total)
@@ -226,6 +244,7 @@ int main(int argc, char **argv)
     if (!tool_stack_library_running())
     {
         say("Network not running.\n");
+        unload_library();
         FreeArgs(rda);
         return RETURN_WARN;
     }
@@ -390,6 +409,8 @@ int main(int argc, char **argv)
     holding = others_holding(base, &listed);
 
     tool_netstatus_close(base);
+
+    unload_library();
 
     if (stopped_waiting)
     {
