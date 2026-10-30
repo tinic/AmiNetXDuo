@@ -301,4 +301,23 @@ ULONG ami_bsd_tcp_rx_auto_mark(ULONG window);
 ULONG ami_bsd_tcp_rx_auto_grow(ULONG window, ULONG elapsed_ms, ULONG rtt_ms,
                                ULONG room);
 
+/*
+ * Slow start on an interface (NetX Duo's nx_interface_tcp_initial_window
+ * and nx_interface_tcp_abc_limit, in segments), gated like the autotunes:
+ * a pool of BSD_TCP_WINDOW_BIG_POOL packets or more behind a card of
+ * BSD_TCP_WINDOW_FAST_BPS gets RFC 6928's 10 segments and RFC 3465's L of
+ * 2; anything else 0, NetX Duo's RFC 3390 window and one segment per
+ * acknowledgment.  #354: NetX Duo grew about 1.27x a round trip against a
+ * Linux receiver acknowledging every 3.75 segments, so upload trailed
+ * download at 20 and 40 ms.  Pure arithmetic, host-tested.
+ */
+#ifndef BSD_TCP_INITIAL_WINDOW
+#define BSD_TCP_INITIAL_WINDOW  10
+#endif
+#ifndef BSD_TCP_ABC_LIMIT
+#define BSD_TCP_ABC_LIMIT       2
+#endif
+ULONG ami_bsd_tcp_initial_window(ULONG pool_packets, ULONG bps);
+ULONG ami_bsd_tcp_abc_limit(ULONG pool_packets, ULONG bps);
+
 #endif /* AMINETXDUO_BSDSOCKET_WINDOW_H */

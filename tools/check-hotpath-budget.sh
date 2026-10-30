@@ -149,7 +149,8 @@ TABLE = {
     "nx_tcp_packet_process.c":           [("__nx_tcp_packet_process",           546)],  # 502
     "nx_tcp_socket_packet_process.c":    [("__nx_tcp_socket_packet_process",    515)],  # 474
     # Reviewed GSO/byte-credit path: exact 69-instruction increase approved by turo, 2026-10-29.
-    "nx_tcp_socket_state_ack_check.c":   [("__nx_tcp_socket_state_ack_check",   673)],  # 556
+    # RFC 3465 slow-start limit from the interface (#354, netxduo #37): +11.
+    "nx_tcp_socket_state_ack_check.c":   [("__nx_tcp_socket_state_ack_check",   684)],  # 556
 }
 
 try:

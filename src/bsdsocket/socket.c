@@ -359,6 +359,24 @@ static VOID bsd_tcp_window_apply(NX_TCP_SOCKET *tcp, ULONG want, ULONG rtt_ms,
 }
 
 /*
+ * The interface's slow start (bsdsocket_window.h, ami_bsd_tcp_initial_window),
+ * from the recap, which every settle also runs: the card's speed may be
+ * known only once the link is up.
+ */
+static VOID bsd_tcp_slow_start_policy(NX_IP *ip, NX_INTERFACE *nxif,
+                                      AmiSana2If *sana)
+{
+    ULONG pool = (ip->nx_ip_default_packet_pool != NX_NULL)
+               ? ip->nx_ip_default_packet_pool->nx_packet_pool_total : 0UL;
+    ULONG bps  = ami_sana2_get_bps(sana);
+
+    nxif->nx_interface_tcp_initial_window =
+        (UCHAR)ami_bsd_tcp_initial_window(pool, bps);
+    nxif->nx_interface_tcp_abc_limit =
+        (UCHAR)ami_bsd_tcp_abc_limit(pool, bps);
+}
+
+/*
  * Settle a freshly established socket's window (bsdsocket_window.h).  IP
  * thread, from the establish notify, with the receive queue still empty:
  * current and default move together, so what the next acknowledgment
@@ -522,6 +540,7 @@ AMIGA_ASM_ARGS VOID bsd_tcp_window_recap(NX_IP *ip, AmiSana2If *sana)
                 (hw != 0UL && mss != 0UL)
                 ? ami_bsd_tcp_window_fit(NX_TCP_RX_WINDOW_CAP_NONE - 1UL, hw, mss)
                 : 0UL;
+            bsd_tcp_slow_start_policy(ip, nxif, sana);
         }
     }
 

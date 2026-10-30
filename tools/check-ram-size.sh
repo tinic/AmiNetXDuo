@@ -75,13 +75,15 @@ BUDGETS=(
     # (CMakeLists.txt, AMINETXDUO_TCP_SYNCACHE), 23,376 bytes against 2,992
     # at 32, so a listening port can hold SYNs past its backlog without
     # filling it.  Minimal and micro keep 32.
-    "default:89532"
-    "minimal:18092"
+    # +20 default and fat / +12 minimal / +8 micro on 2026-10-30 (#354,
+    # netxduo #37): the per-interface slow-start fields in NX_INTERFACE.
+    "default:89552"
+    "minimal:18104"
     # First budgeted as a shipping profile at 0.28.9: 15,716 bytes, with
     # headroom to the next KiB boundary.
-    "micro:16480"
+    "micro:16488"
     # The full stack's options, so the full stack's budget.
-    "fat:89532"
+    "fat:89552"
 )
 
 budget=""

@@ -804,6 +804,23 @@ static void m_rx_growth_is_measured_and_bounded(void)
             "an unmeasured round trip grew the window");
 }
 
+static void n_slow_start_is_gated(void)
+{
+    ULONG big = (ULONG)BSD_TCP_WINDOW_BIG_POOL, gbit = (ULONG)BSD_TCP_WINDOW_FAST_BPS;
+
+    h_check(ami_bsd_tcp_initial_window(big, gbit) == 10UL &&
+            ami_bsd_tcp_abc_limit(big, gbit) == 2UL,
+            "a big pool behind a gigabit card lost RFC 6928 and RFC 3465");
+    h_check(ami_bsd_tcp_initial_window(big - 1UL, gbit) == 0UL &&
+            ami_bsd_tcp_abc_limit(big - 1UL, gbit) == 0UL,
+            "a small pool changed its slow start");
+    h_check(ami_bsd_tcp_initial_window(big, 100000000UL) == 0UL &&
+            ami_bsd_tcp_abc_limit(big, 100000000UL) == 0UL,
+            "a 100 Mbit card changed its slow start");
+    h_check(ami_bsd_tcp_initial_window(big, 0UL) == 0UL,
+            "an unknown link speed changed its slow start");
+}
+
 int main(void)
 {
     printf("packet pool sizing and the window it backs, v0.25.5\n");
@@ -821,6 +838,7 @@ int main(void)
     k_the_transmit_queue_is_a_quarter_of_the_pool();
     l_tx_growth_is_backed_and_path_bounded();
     m_rx_growth_is_measured_and_bounded();
+    n_slow_start_is_gated();
 
     printf("%lu checks, %lu failures, %s\n",
            h_checks, h_failures, (h_failures == 0UL) ? "PASS" : "FAIL");
