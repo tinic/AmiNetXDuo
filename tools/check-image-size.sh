@@ -83,7 +83,9 @@ BUDGETS=(
     # Reviewed GSO frontend: exact 1,620-byte increase approved by turo, 2026-10-29.
     # Batched transmit (AMINETXDUO_TX_BATCH): exact 1,304-byte increase,
     # 372,620 -> 373,924, approved by turo 2026-10-29.
-    "default:src/bsdsocket/bsdsocket.library:373924"
+    # In-order transmit launch (#356, the launcher flag on the direct, kick
+    # and GSO paths): +88, 373,924 -> 374,012.
+    "default:src/bsdsocket/bsdsocket.library:374012"
     # 41,412 after stateless receive-checksum verification was added to the
     # EL3 and word/long NE2000 direct paths, 2026-09-15.  43,620 with
     # ANXD_CMD_RX_BATCH in the shell (claim, completion, staging copy, the
@@ -153,8 +155,8 @@ BUDGETS=(
     # Core recovery adds 188 bytes; exact increase approved by turo, 2026-10-29.
     # GSO frontend adds 8,616 more; this exact increase was approved the same day.
     # Batched transmit adds 1,212, 251,804 -> 253,016, approved by turo
-    # 2026-10-29.
-    "minimal:src/bsdsocket/bsdsocket.library:253016"
+    # 2026-10-29.  In-order transmit launch (#356): +84, 253,016 -> 253,100.
+    "minimal:src/bsdsocket/bsdsocket.library:253100"
     "minimal:src/netdev/anxnet.device:46000"
     # 29,088 on e806188f after the audited device fixes.
     # Batched transmit adds 632, 29,120 -> 29,752, approved by turo 2026-10-29.
