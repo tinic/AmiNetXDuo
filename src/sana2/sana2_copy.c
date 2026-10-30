@@ -455,6 +455,7 @@ BOOL ami_sana2_tx_pseudo_sum(NX_PACKET *pkt)
 }
 
 /* ------------------------------------------------------------- TCP GSO */
+#ifdef AMINETXDUO_TCP_GSO
 
 /*
  * A GSO child's frame is its parent's headers patched for the segment, the
@@ -1015,6 +1016,7 @@ static BOOL __attribute__((noinline)) ami_sana2_gso_copy(AmiTxSlot *slot,
     slot->consumed = pos;
     return TRUE;
 }
+#endif /* AMINETXDUO_TCP_GSO */
 
 /*
  * S2_CopyFromBuff.  `from` is this CMD_WRITE's ios2_Data, the AmiTxSlot.  A
@@ -1037,9 +1039,11 @@ BOOL ami_sana2_copy_from_buff(register APTR to   __asm("a0"),
     if (len > slot->total)
         return FALSE;
 
+#ifdef AMINETXDUO_TCP_GSO
     /* A GSO child is cut from its parent as it is copied. */
     if (slot->gso != AMI_SANA2_GSO_NONE)
         return ami_sana2_gso_copy(slot, out, len);
+#endif
 
     /* Rewind on a restart, or when the cursor cannot cover the request. */
     if (slot->cursor == NULL || slot->consumed >= slot->total ||

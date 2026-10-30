@@ -1225,6 +1225,7 @@ static void test_set_physical_address(void)
     ami_sana2_unbind(&iface);
 }
 
+#ifdef AMINETXDUO_TCP_GSO
 /*
  * TCP GSO is advertised at link-up only where a block can be cut and has
  * room to overlap: cooked writes, four slots, a 256-packet pool.  The rest
@@ -1325,6 +1326,33 @@ static void test_gso_advertised_with_the_link(void)
             ami_sana2_gso_max_segs(NULL) == 0,
             "an interface without the bit answers 0");
 }
+#else /* !AMINETXDUO_TCP_GSO */
+/* Without the option nothing is advertised on any link, the core is told
+   1, and the checksum bits are the link's as ever. */
+static void test_gso_advertised_with_the_link(void)
+{
+    printf("sana2: without TCP GSO the link never advertises it\n");
+
+    fixture_init(AMI_ETH_ADDR_SIZE);
+    ami_sana2_attach(&iface, &ip, 0);
+    iface.tx_slots = 32;
+    iface.pool     = &pool;
+    pool.nx_packet_pool_total = 1024;
+    interface_obj.nx_interface_capability_flag =
+        NX_INTERFACE_CAPABILITY_TCP_TX_CHECKSUM;
+    h_allocs = h_frees = 0;
+    drive(NX_LINK_ENABLE);
+    h_check(ami_sana2_gso_max_segs(&interface_obj) == 1 && h_allocs == 0,
+            "a big machine: one segment, no table");
+    h_check(interface_obj.nx_interface_capability_flag ==
+            NX_INTERFACE_CAPABILITY_TCP_TX_CHECKSUM,
+            "and the capability bits are the checksum's alone");
+    drive(NX_LINK_DISABLE);
+    ami_sana2_unbind(&iface);
+    h_check(h_frees == 0 && ami_sana2_gso_max_segs(NULL) == 1,
+            "and nothing to free");
+}
+#endif /* AMINETXDUO_TCP_GSO */
 
 int main(void)
 {

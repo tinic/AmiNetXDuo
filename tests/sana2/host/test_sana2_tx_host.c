@@ -92,7 +92,9 @@ static void h_flush_reply(void)
 #define H_LOG       64
 #define H_FRAME     256
 static struct IORequest *h_sent_log[H_LOG];
+#ifdef AMINETXDUO_TCP_GSO
 static UBYTE             h_seg_log[H_LOG];
+#endif
 static ULONG             h_len_log[H_LOG];
 static UCHAR             h_frames[H_LOG][H_FRAME];
 static BOOL              h_frame_ok[H_LOG];
@@ -122,7 +124,9 @@ VOID BeginIO(struct IORequest *req)
         AmiTxSlot         *slot = (AmiTxSlot *)s2->ios2_Data;
 
         h_sent_log[h_sends - 1] = req;
+#ifdef AMINETXDUO_TCP_GSO
         h_seg_log[h_sends - 1]  = slot->seg_index;
+#endif
         h_len_log[h_sends - 1]  = s2->ios2_DataLength;
         if (h_copy_on_begin)
         {
@@ -401,8 +405,10 @@ VOID ami_log(int level, const char *fmt, ...)
 
 static AmiSana2If iface;
 static NX_PACKET  pkt;
+#ifdef AMINETXDUO_TCP_GSO
 /* The GSO context table, as the driver allocates it at link-up. */
 static AmiTxGso   h_gso_table[AMI_SANA2_TX_SLOTS + AMI_SANA2_TX_PEND];
+#endif
 static UCHAR      pool[POOL_BYTES];
 
 static void fixture_init(BOOL raw, ULONG hw_type)
@@ -416,9 +422,11 @@ static void fixture_init(BOOL raw, ULONG hw_type)
     memcpy(iface.mac, "\x02\x41\x4d\x49\x00\x42", AMI_ETH_ADDR_SIZE);
 
     ami_sana2_tx_init(&iface);
+#ifdef AMINETXDUO_TCP_GSO
     memset(h_gso_table, 0, sizeof(h_gso_table));
     iface.gso       = h_gso_table;
     iface.gso_count = (UWORD)(AMI_SANA2_TX_SLOTS + AMI_SANA2_TX_PEND);
+#endif
 
     h_sent     = NULL;
     h_sends    = 0;
@@ -1372,6 +1380,7 @@ static void test_full_ring_queues_in_order(void)
 }
 
 /* ---------------------------------------------------------------- TCP GSO */
+#ifdef AMINETXDUO_TCP_GSO
 
 /*
  * A GSO parent as the core builds it (aminetxduo/tcpgso.h): the record at
@@ -2266,6 +2275,8 @@ static void test_gso_one_forbid_per_block(void)
     h_check(h_forbids == 4, "and one Forbid() per round of four slots");
 }
 
+#endif /* AMINETXDUO_TCP_GSO */
+
 int main(void)
 {
     frames_init();
@@ -2292,6 +2303,7 @@ int main(void)
     test_no_pad_off_ethernet();
     test_drain_reaps_final_sleep();
 
+#ifdef AMINETXDUO_TCP_GSO
     test_gso_children_fused();
     test_gso_children_offload();
     test_gso_pads_the_last();
@@ -2306,6 +2318,7 @@ int main(void)
     test_gso_record_v1();
     test_gso_repair();
     test_gso_record_refused();
+#endif
 #ifdef AMINETXDUO_TX_RUN
     test_drain_waits_for_a_queued_flush();
 #endif

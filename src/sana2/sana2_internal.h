@@ -20,7 +20,12 @@
 #include "aminetxduo/anxs2ext.h"
 #include "aminetxduo/anxnet.h"
 #include "aminetxduo/asm_abi.h"
+#ifdef AMINETXDUO_TCP_GSO
 #include "aminetxduo/tcpgso.h"
+#else
+/* What the core asks of an interface (aminetxduo/tcpgso.h): 1, none. */
+UINT ami_sana2_gso_max_segs(NX_INTERFACE *interface_ptr);
+#endif
 
 #include "sana2_device.h"
 
@@ -433,8 +438,10 @@ typedef struct AmiTxPending
  * retransmission.
  */
 /* `gso` in a slot or a queue entry is the context's index plus one, so a
-   zeroed one is an ordinary write. */
+   zeroed one is an ordinary write.  It is always that without
+   AMINETXDUO_TCP_GSO, which leaves out everything below. */
 #define AMI_SANA2_GSO_NONE      0
+#ifdef AMINETXDUO_TCP_GSO
 /* What the context fields and the child indices hold. */
 #define AMI_SANA2_GSO_MAX_SEGS  255
 /* The gates on advertising it (sana2_driver.c). */
@@ -475,6 +482,7 @@ static inline ULONG ami_sana2_gso_slice(const AmiTxGso *g, UWORD seg,
         *len = g->mss;
     return off;
 }
+#endif /* AMINETXDUO_TCP_GSO */
 
 /* ACKPACE (sana2_ackpace.c): a pure acknowledgment waiting for its turn,
    and the E-clock ticks the bytes it acknowledges take at the rate. */
@@ -900,11 +908,13 @@ typedef struct AmiTxSlot
        seg_sum is the slice's TCP checksum once a copy in pieces needed it
        before the bytes went past (seg_summed). */
     UWORD               gso;        /* AMI_SANA2_GSO_NONE: ordinary write  */
+#ifdef AMINETXDUO_TCP_GSO
     UBYTE               seg_index;
     UBYTE               seg_summed;
     UWORD               seg_sum;
     NX_PACKET          *seg_buf;
     ULONG               seg_buf_off;
+#endif
 
 #ifdef AMINETXDUO_RXPROBE
     /* The ack leg's opening stamp: E-Clock at BeginIO, 0 when unarmed.  The
@@ -1133,10 +1143,12 @@ struct AmiSana2If
        them, NULL until GSO is first advertised; gso_next is where the
        search for a free one starts.  gso_max_segs is the most segments one
        block may carry here, 0 = not advertised (sana2_driver.c). */
+#ifdef AMINETXDUO_TCP_GSO
     AmiTxGso           *gso;
     UWORD               gso_count;
     UWORD               gso_next;
     UBYTE               gso_max_segs;
+#endif
 
 #ifdef AMINETXDUO_TX_LAZY_COLLECT
     /*
@@ -1206,9 +1218,11 @@ BOOL ami_sana2_tx_pseudo_sum(NX_PACKET *pkt);
    length before any pad; _header is the child's headers as its copy writes
    them, checksum included, into `out` (60 + 60 bytes at most), for the
    capture tap. */
+#ifdef AMINETXDUO_TCP_GSO
 BOOL  ami_sana2_gso_parse(NX_PACKET *packet, ULONG mtu, AmiTxGso *g);
 ULONG ami_sana2_gso_prepare(AmiTxSlot *slot, NX_PACKET *parent);
 ULONG ami_sana2_gso_header(AmiTxSlot *slot, UCHAR *out);
+#endif /* AMINETXDUO_TCP_GSO */
 AMIGA_ASM_ARGS UBYTE ami_sana2_tx_flags(APTR ios2_data);
 #ifdef AMINETXDUO_TX_RUN
 /* The flush request came back on tx_port: the device queued it rather than

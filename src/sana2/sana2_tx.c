@@ -282,8 +282,10 @@ VOID ami_sana2_tx_reap(AmiSana2If *iface)
  * replied, and from ami_sana2_tx_send() itself for one it completed inside
  * BeginIO() with IOF_QUICK kept (tx_quick_ok).
  */
+#ifdef AMINETXDUO_TCP_GSO
 static VOID ami_sana2_gso_complete(AmiSana2If *iface, AmiTxSlot *slot,
                                    LONG err);
+#endif
 
 static VOID ami_sana2_tx_complete(AmiSana2If *iface, AmiTxSlot *slot)
 {
@@ -339,11 +341,14 @@ static VOID ami_sana2_tx_complete(AmiSana2If *iface, AmiTxSlot *slot)
 
         /* A GSO child counted above as the frame it is; the parent is the
            block's, and goes back with its last child. */
+#ifdef AMINETXDUO_TCP_GSO
         if (slot->gso != AMI_SANA2_GSO_NONE)
         {
             ami_sana2_gso_complete(iface, slot, err);
         }
-        else if (slot->packet != NULL)
+        else
+#endif
+        if (slot->packet != NULL)
         {
             /* Restore the packet to the shape NetX Duo handed over before
                releasing it. A queued TCP segment gets sent again. */
@@ -434,6 +439,7 @@ static VOID ami_sana2_tx_complete(AmiSana2If *iface, AmiTxSlot *slot)
 }
 
 /* ------------------------------------------------------------- TCP GSO */
+#ifdef AMINETXDUO_TCP_GSO
 
 /*
  * `*p += n` and `*p -= n` as one read-modify-write instruction, which a task
@@ -516,6 +522,7 @@ static VOID ami_sana2_gso_complete(AmiSana2If *iface, AmiTxSlot *slot,
     slot->gso    = AMI_SANA2_GSO_NONE;
     ami_sana2_gso_put(iface, idx, 1, (BOOL)(err != 0));
 }
+#endif /* AMINETXDUO_TCP_GSO */
 
 /*
  * Abort anything still in flight and reap it.  AbortIO() is a request a driver
@@ -572,9 +579,13 @@ VOID ami_sana2_tx_drain(AmiSana2If *iface)
             break;
         /* A GSO child owns only its share: the parent goes back once the
            children in slots are done with it too. */
+#ifdef AMINETXDUO_TCP_GSO
         if (gso != AMI_SANA2_GSO_NONE)
             ami_sana2_gso_put(iface, gso, 1, TRUE);
         else
+#else
+        (VOID)gso;
+#endif
             AMI_NX_CLEANUP(nx_packet_transmit_release(packet));
         iface->stats.tx_errors++;
     }
@@ -695,6 +706,7 @@ static AmiTxSlot *ami_sana2_tx_claim(AmiSana2If *iface)
     return slot;
 }
 
+#ifdef AMINETXDUO_TCP_GSO
 /* Up to `want` free slots for a GSO block's children, marked busy, as a mask
    of their indices (AMI_SANA2_TX_SLOTS is at most 32).  Under the caller's
    Forbid(), for the reason ami_sana2_tx_claim() takes its own. */
@@ -715,6 +727,7 @@ static ULONG ami_sana2_tx_claim_run(AmiSana2If *iface, UWORD want)
 
     return mask;
 }
+#endif /* AMINETXDUO_TCP_GSO */
 
 /*
  * bpf_write()'s wire end.  The payload is copied into a pool packet because the
@@ -863,9 +876,11 @@ VOID ami_sana2_tx_kick(AmiSana2If *iface)
             /* The interface went down while the write waited: teardown.  A
                GSO child gives back its share of the parent and no more. */
             slot->busy = FALSE;
+#ifdef AMINETXDUO_TCP_GSO
             if (pend.gso != AMI_SANA2_GSO_NONE)
                 ami_sana2_gso_put(iface, pend.gso, 1, TRUE);
             else
+#endif
                 AMI_NX_CLEANUP(nx_packet_transmit_release(pend.packet));
             iface->stats.tx_errors++;
         }
@@ -958,6 +973,7 @@ VOID ami_sana2_tx_flush_replied(AmiSana2If *iface)
 }
 #endif /* AMINETXDUO_TX_RUN */
 
+#ifdef AMINETXDUO_TCP_GSO
 /*
  * A TCP GSO block (aminetxduo/tcpgso.h) as its k child writes, in order:
  * into free slots while nothing waits, the rest queued behind them in one
@@ -1076,6 +1092,7 @@ ami_sana2_gso_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
 
     return NX_SUCCESS;
 }
+#endif /* AMINETXDUO_TCP_GSO */
 
 UINT ami_sana2_tx_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
                        ULONG dst_msw, ULONG dst_lsw)
@@ -1122,10 +1139,12 @@ UINT ami_sana2_tx_send_now(AmiSana2If *iface, NX_PACKET *packet,
         return NX_NOT_ENABLED;
     }
 
+#ifdef AMINETXDUO_TCP_GSO
     /* A TCP GSO block goes out as several writes (ami_sana2_gso_send). */
     if ((packet->nx_packet_interface_capability_flag &
          NX_INTERFACE_CAPABILITY_TCP_GSO) != 0)
         return ami_sana2_gso_send(iface, packet, ether_type, dst_msw, dst_lsw);
+#endif
 
     /*
      * Behind whatever is already waiting, or straight into a slot.  A full
@@ -1170,6 +1189,7 @@ ami_sana2_tx_capture(AmiSana2If *iface, AmiTxSlot *slot, NX_PACKET *packet,
                    dst_msw, dst_lsw, iface->mac);
 }
 
+#ifdef AMINETXDUO_TCP_GSO
 /*
  * A GSO child as the wire sees it: the synthetic link header, the headers
  * the copy hook will write and the payload slice in place.  Never the
@@ -1237,6 +1257,7 @@ ami_sana2_gso_capture(AmiSana2If *iface, AmiTxSlot *slot, ULONG length,
 
     ami_bpf_tap_view(iface, &view);
 }
+#endif /* AMINETXDUO_TCP_GSO */
 #endif
 
 /*
@@ -1258,6 +1279,7 @@ static UINT ami_sana2_tx_launch(AmiSana2If *iface, AmiTxSlot *slot,
 
     slot->hdr_len = 0;
 
+#ifdef AMINETXDUO_TCP_GSO
     /* A GSO child: cooked, nothing written into the parent, the frame the
        copy hook's.  The pad is the copy hook's zeroes too. */
     if (slot->gso != AMI_SANA2_GSO_NONE)
@@ -1277,6 +1299,7 @@ static UINT ami_sana2_tx_launch(AmiSana2If *iface, AmiTxSlot *slot,
 #endif
         goto post;
     }
+#endif /* AMINETXDUO_TCP_GSO */
 
     /*
      * ariadne.device 1.50 compares ios2_PacketType against 1500 SIGNED, so any
@@ -1359,7 +1382,9 @@ static UINT ami_sana2_tx_launch(AmiSana2If *iface, AmiTxSlot *slot,
 
     length = packet->nx_packet_length;
 
+#ifdef AMINETXDUO_TCP_GSO
 post:
+#endif
     slot->packet     = packet;
     slot->cursor     = NULL;      /* the copy hook rewinds on first call */
     slot->cursor_off = 0;
