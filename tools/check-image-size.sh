@@ -89,7 +89,9 @@ BUDGETS=(
     # 374,012 -> 374,092.
     # Receive window autotuning (#354): +452, 374,092 -> 374,544, pending
     # turo's approval.
-    "default:src/bsdsocket/bsdsocket.library:374544"
+    # Lost SACK retransmission repair and RFC 6928/3465 slow start (#354,
+    # netxduo #37): +1,132, 374,544 -> 375,676.
+    "default:src/bsdsocket/bsdsocket.library:375676"
     # 41,412 after stateless receive-checksum verification was added to the
     # EL3 and word/long NE2000 direct paths, 2026-09-15.  43,620 with
     # ANXD_CMD_RX_BATCH in the shell (claim, completion, staging copy, the
@@ -164,7 +166,8 @@ BUDGETS=(
     # 253,100 -> 253,184.
     # Receive window autotuning (#354): +508, 253,184 -> 253,692, pending
     # turo's approval.
-    "minimal:src/bsdsocket/bsdsocket.library:253692"
+    # RFC 6928/3465 slow start (#354, netxduo #37): +36, 253,692 -> 253,728.
+    "minimal:src/bsdsocket/bsdsocket.library:253728"
     "minimal:src/netdev/anxnet.device:46000"
     # 29,088 on e806188f after the audited device fixes.
     # Batched transmit adds 632, 29,120 -> 29,752, approved by turo 2026-10-29.
