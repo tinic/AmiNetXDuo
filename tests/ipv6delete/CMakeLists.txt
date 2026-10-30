@@ -17,6 +17,7 @@ add_executable(test_ipv6_delete_tcp
     "${_nxs}/nxd_ipv6_address_delete.c"
     "${_nxs}/nx_tcp_socket_connection_reset.c"
     "${_nxs}/nx_tcp_socket_block_cleanup.c"
+    "${_nxs}/nx_tcp_sack_recovery.c"
     "${_nxs}/nx_tcp_transmit_cleanup.c"
     "${_nxs}/nx_tcp_receive_cleanup.c"
     "${_nxs}/nx_tcp_connect_cleanup.c"
