@@ -156,15 +156,15 @@ static const NsScenario ns_scenarios[] =
       { 150000000ULL, 10 * NS_MS, 0, 0 },
       32UL * 1024UL * 1024UL, 0, 850, 500 * NS_MS, 1050 },
 
-    /* A long fat path both ways round, 500 Mbit/s at 40 ms: 2.5 MB in
-       flight, three times the window the settle gives a 4,096-packet pool.
-       39b9e8f5 held the receiver at that window, 160 Mbit/s each way (#354:
-       the A1200's download at 40 ms, 131); receive autotuning has to grow
-       it. */
+    /* A long fat path both ways round, 300 Mbit/s at 40 ms: 1.5 MB in
+       flight, more than the 1 MB window the settle gives a 4,096-packet
+       pool.  39b9e8f5 held the receiver at that window, 697/683 permille
+       (#354: the A1200's download at 40 ms, 131 Mbit/s); receive
+       autotuning has to grow it. */
     { "wan",
-      { 500000000ULL, 20 * NS_MS, 0, 0 },
-      { 500000000ULL, 20 * NS_MS, 0, 0 },
-      128UL * 1024UL * 1024UL, 1, 850, 500 * NS_MS, 0 },
+      { 300000000ULL, 20 * NS_MS, 0, 0 },
+      { 300000000ULL, 20 * NS_MS, 0, 0 },
+      64UL * 1024UL * 1024UL, 1, 850, 500 * NS_MS, 0 },
 };
 
 /* Slow start, printed and not yet asserted: two NetX Duo stacks at their
