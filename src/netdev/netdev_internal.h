@@ -99,6 +99,11 @@ typedef struct NetdevOpener
                                            opener's writes */
     APTR                op_RxFilled;
     APTR                op_TxFlags;     /* per-write ANXD_S2_TXF_* callback */
+#ifdef AMINETXDUO_TX_BATCH
+    APTR                op_TxBatch;     /* TX_BATCH's three, or NULL: only */
+    APTR                op_TxChild;     /* from a record that covers them */
+    APTR                op_TxPosted;
+#endif /* AMINETXDUO_TX_BATCH */
     ULONG               op_Extensions;  /* ANXD_S2F_* accepted for this open */
     AnxdLinkSpeed      *op_LinkSpeed;    /* input/output during Open only */
 
@@ -256,6 +261,30 @@ typedef struct NetdevUnit
                                                    holding frames for the
                                                    pass-end reply           */
 
+#ifdef AMINETXDUO_TX_BATCH
+    /*
+     * The one batch write (ANXD_S2F_TX_BATCH) part way into the ring: it is
+     * at the head of nu_Writes, nu_TxBatchNext of its frames posted, its
+     * shape as TxBatch answered it.  Per write and the device's own, never
+     * the opener's record; NULL when no batch is paused.  Every path that
+     * takes a write off nu_Writes clears it (netdev_tx_forget).
+     */
+    struct IOSana2Req          *nu_TxBatchIo;
+    AnxdS2TxBatchInfo           nu_TxBatchInfo;
+    UWORD                       nu_TxBatchNext;
+    /* A pump pass stopped at its frame budget with writes waiting and a
+       free slot: the software interrupt runs the next one. */
+    UBYTE                       nu_PumpOwed;
+    /* Frames the masked section now running may still copy: set at the
+       section's entry (netdev_tx_section) and spent by every pump inside
+       it, so a service pass and its owed pass share one budget. */
+    UBYTE                       nu_PumpBudget;
+    ULONG                       nu_TxBatches;     /* batch writes answered  */
+    ULONG                       nu_TxBatchPauses; /* left at the head, ring
+                                                     full or budget spent  */
+    ULONG                       nu_PumpNudges;    /* passes owed and Caused */
+
+#endif /* AMINETXDUO_TX_BATCH */
     struct Sana2DeviceStats     nu_Stats;
 
     /* Frames are staged here on the way out, 4-aligned for the long window. */
@@ -361,6 +390,87 @@ typedef enum
     NETDEV_RX_REJECTED,
     NETDEV_RX_FAILED        /* the opener's CopyToBuff hook returned FALSE */
 } NetdevRxResult;
+#ifdef AMINETXDUO_TX_BATCH
+
+/*
+ * A 6-byte Ethernet address as a longword and a word.  Both ends must be even:
+ * the staging buffer is AllocMem'd and ios2_DstAddr/ios2_SrcAddr sit at even
+ * offsets in the request.
+ */
+static inline VOID nd_addr6(UBYTE *to, const UBYTE *from)
+{
+    *(ULONG *)(APTR)to        = *(const ULONG *)(CONST_APTR)from;
+    *(UWORD *)(APTR)(to + 4)  = *(const UWORD *)(CONST_APTR)(from + 4);
+}
+
+static inline VOID nd_zero(UBYTE *p, ULONG n)
+{
+    /* The transmit pad is the hot caller and always lands on an even offset
+       of nu_TxBuf.  Everything else here is init-time and does not care. */
+    if ((((unsigned long)(APTR)p) & 1u) == 0)
+    {
+        while (n >= 2)
+        {
+            *(UWORD *)(APTR)p = 0;
+            p += 2;
+            n -= 2;
+        }
+    }
+    while (n-- != 0)
+        *p++ = 0;
+}
+
+/*
+ * The most frames one pump pass copies, under Disable().  The pump drains
+ * the write queue from the interrupt, the blank and a task's Disable(); at
+ * 2.2 us a copy on the A1200 a 64-slot ring drained in one pass would be
+ * 140 us with the machine's interrupts off.  A pass that stops here with
+ * writes waiting and a free slot is owed another, which the software
+ * interrupt runs (netdev_tx_owed) and the blank backs up (netdev_tx_tick).
+ */
+#ifndef NETDEV_PUMP_FRAMES
+#define NETDEV_PUMP_FRAMES  8
+#endif
+
+/* A masked section that may pump opens: NETDEV_PUMP_FRAMES for all of
+   it.  The software interrupt, the server, the blank, ANXD_CMD_RX_POLL and
+   the write path's own Disable() each call this once at their entry. */
+static inline VOID netdev_tx_section(NetdevUnit *unit)
+{
+    unit->nu_PumpBudget = (UBYTE)NETDEV_PUMP_FRAMES;
+}
+
+/* A write leaving nu_Writes by any path but the pump's own resume. */
+static inline VOID netdev_tx_forget(NetdevUnit *unit, struct IOSana2Req *io)
+{
+    if (unit->nu_TxBatchIo == io)
+        unit->nu_TxBatchIo = NULL;
+}
+
+/* netdev_tx.c: the write path, apart from the romtag so it can run as a
+   host test. */
+UWORD netdev_tx_build(NetdevUnit *unit, struct IOSana2Req *io,
+                      NetdevOpener *op);
+LONG  netdev_tx_issue(NetdevUnit *unit, struct IOSana2Req *io,
+                      NetdevOpener *op, UWORD total);
+#ifdef NETDEV_TIME
+/* netdev_device.c, the clock's brackets around the two above. */
+UWORD netdev_tx_timed_build(NetdevUnit *unit, struct IOSana2Req *io,
+                            NetdevOpener *op);
+LONG  netdev_tx_timed_issue(NetdevUnit *unit, struct IOSana2Req *io,
+                            NetdevOpener *op, UWORD total);
+#endif
+/* The pass the software interrupt owes (nu_PumpOwed), and the blank's
+   backstop: TRUE when either pumped.  Both under the caller's Disable(). */
+BOOL netdev_tx_owed(NetdevUnit *unit);
+BOOL netdev_tx_tick(NetdevUnit *unit);
+/* The chip's service with its one budget (netdev_tx_section), the pass a
+   budget-cut pump owed and nothing more, under the caller's Disable(): the
+   software interrupt, the server and ANXD_CMD_RX_POLL.  netdev_interrupt()'s
+   answer.  And the blank's share of the pump, after its own section. */
+ULONG netdev_tx_service(NetdevUnit *unit);
+VOID  netdev_tx_blank(NetdevUnit *unit);
+#endif /* AMINETXDUO_TX_BATCH */
 
 /* netdev_device.c */
 VOID netdev_reply(struct IOSana2Req *io, LONG err, ULONG wire);

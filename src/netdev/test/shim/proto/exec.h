@@ -39,6 +39,17 @@ VOID         AddSemaphore(struct SignalSemaphore *sem);
 VOID         RemSemaphore(struct SignalSemaphore *sem);
 struct SignalSemaphore *FindSemaphore(STRPTR name);
 
+/* The transmit pump's owed pass (src/netdev/netdev_tx.c), counted by
+   src/netdev/test/test_netdev_tx.c. */
+struct Interrupt;
+VOID         Cause(struct Interrupt *interrupt);
+
+/* <exec/lists.h>'s macro, which this shim's lists.h does not carry. */
+#ifndef IsListEmpty
+#define IsListEmpty(x) \
+    (((x)->lh_TailPred) == (struct Node *)(x))
+#endif
+
 VOID         NewList(struct List *list);
 VOID         AddHead(struct List *list, struct Node *node);
 VOID         AddTail(struct List *list, struct Node *node);

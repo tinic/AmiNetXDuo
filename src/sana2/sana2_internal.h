@@ -465,6 +465,10 @@ typedef struct AmiTxGso
     UBYTE       lost;           /* children refused, aborted or dropped     */
     UBYTE       next_seg;       /* the child the next launch is             */
     UBYTE       mode;           /* AMI_SANA2_GSO_REPAIR, _TAIL              */
+#ifdef AMINETXDUO_TX_BATCH
+    UBYTE       batch;          /* one write carries every child
+                                   (ANXD_S2F_TX_BATCH), not one each        */
+#endif
 } AmiTxGso;
 
 /* A repair record's one child, and whether it ends the payload. */
@@ -482,6 +486,18 @@ static inline ULONG ami_sana2_gso_slice(const AmiTxGso *g, UWORD seg,
         *len = g->mss;
     return off;
 }
+
+/* How many writes block `b` goes out as, and how many frames are lost when
+   the last `i` of them cannot be queued: a batch is one write for all its
+   children (ANXD_S2F_TX_BATCH). */
+#ifdef AMINETXDUO_TX_BATCH
+#define AMI_SANA2_GSO_WRITES(b)   ((b).batch ? 1 : (UWORD)(b).segs)
+#define AMI_SANA2_GSO_LOST(b, i)  ((b).batch ? (ULONG)(b).segs \
+                                             : (ULONG)((b).segs - (i)))
+#else
+#define AMI_SANA2_GSO_WRITES(b)   ((b).segs)
+#define AMI_SANA2_GSO_LOST(b, i)  ((ULONG)((b).segs - (i)))
+#endif
 #endif /* AMINETXDUO_TCP_GSO */
 
 /* ACKPACE (sana2_ackpace.c): a pure acknowledgment waiting for its turn,
@@ -914,6 +930,14 @@ typedef struct AmiTxSlot
     UWORD               seg_sum;
     NX_PACKET          *seg_buf;
     ULONG               seg_buf_off;
+#ifdef AMINETXDUO_TX_BATCH
+    /* A batch write (ANXD_S2F_TX_BATCH): the block's children, 0 for any
+       other write, and how many of them, from the first, the device has
+       committed (TxPosted).  seg_index is then the child placed last,
+       which TxChild moves. */
+    UBYTE               batch_count;
+    UBYTE               batch_done;
+#endif
 #endif
 
 #ifdef AMINETXDUO_RXPROBE
@@ -948,7 +972,12 @@ struct AmiSana2If
     char                card[AMI_CFG_NAME_LEN];
     struct TagItem      buffer_tags[12];
     AnxdLinkSpeed       link_speed_request;
+#ifdef AMINETXDUO_TX_BATCH
+    AnxdS2ExtensionTx   extension;       /* one size/version negotiated record,
+                                           the batch three appended         */
+#else
     AnxdS2Extension     extension;       /* one size/version negotiated record */
+#endif
     BOOL                link_hdr_ok;    /* negotiated ANXD_S2F_RX_LINK_HDR   */
     UBYTE               rx_flags_ok;    /* negotiated RX_FILLED verdict bits */
 #ifdef AMINETXDUO_RX_BATCH
@@ -961,6 +990,10 @@ struct AmiSana2If
                                            ANXD device (link_hdr_ok) honours
                                            it, a kept flag is a finished
                                            write with no reply to reap      */
+#ifdef AMINETXDUO_TX_BATCH
+    UBYTE               tx_batch_ok;    /* ANXD_S2F_TX_BATCH accepted: a GSO
+                                           block is one write (sana2_tx.c) */
+#endif
     UBYTE               tx_csum_ok;     /* negotiated ANXD_S2_TXF_*
                                            checksums the device writes on the
                                            way out, 0 = none (sana2_tx.c)   */
@@ -1192,6 +1225,14 @@ struct AmiSana2If
 #endif
 };
 
+/* The private extension record's version-3 fields, whichever record the
+   interface carries: the batch three appended, or the record alone. */
+#ifdef AMINETXDUO_TX_BATCH
+#define AMI_SANA2_EXT(iface)    ((iface)->extension.Base)
+#else
+#define AMI_SANA2_EXT(iface)    ((iface)->extension)
+#endif
+
 /* ------------------------------------------------------------- internals */
 
 /* sana2_copy.c, called by the device with its arguments on the stack
@@ -1222,6 +1263,19 @@ BOOL ami_sana2_tx_pseudo_sum(NX_PACKET *pkt);
 BOOL  ami_sana2_gso_parse(NX_PACKET *packet, ULONG mtu, AmiTxGso *g);
 ULONG ami_sana2_gso_prepare(AmiTxSlot *slot, NX_PACKET *parent);
 ULONG ami_sana2_gso_header(AmiTxSlot *slot, UCHAR *out);
+#ifdef AMINETXDUO_TX_BATCH
+/* _place is _prepare for child `seg` of the slot's block, wherever the
+   block's cursor is; _frame_len a child's write length, pad included. */
+ULONG ami_sana2_gso_place(AmiTxSlot *slot, NX_PACKET *parent, UWORD seg);
+ULONG ami_sana2_gso_frame_len(const AmiSana2If *iface, const AmiTxGso *g,
+                              UWORD seg);
+/* TX_BATCH's three (aminetxduo/anxs2ext.h), on a batch write's slot. */
+AMIGA_ASM_ARGS ULONG ami_sana2_tx_batch(APTR ios2_data,
+                                        AnxdS2TxBatchInfo *info);
+AMIGA_ASM_ARGS ULONG ami_sana2_tx_child(APTR ios2_data, ULONG index,
+                                        UBYTE *dst, ULONG len);
+AMIGA_ASM_ARGS VOID  ami_sana2_tx_posted(APTR ios2_data, ULONG count);
+#endif
 #endif /* AMINETXDUO_TCP_GSO */
 AMIGA_ASM_ARGS UBYTE ami_sana2_tx_flags(APTR ios2_data);
 #ifdef AMINETXDUO_TX_RUN

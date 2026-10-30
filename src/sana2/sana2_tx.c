@@ -52,6 +52,10 @@ VOID ami_sana2_tx_init(AmiSana2If *iface)
         slot->hdr_len = 0;
         slot->pad_len = 0;
         slot->gso     = AMI_SANA2_GSO_NONE;
+#ifdef AMINETXDUO_TX_BATCH
+        slot->batch_count = 0;
+        slot->batch_done  = 0;
+#endif
 
 #ifdef AMINETXDUO_RXPROBE
         slot->write_at = 0UL;
@@ -286,6 +290,10 @@ VOID ami_sana2_tx_reap(AmiSana2If *iface)
 static VOID ami_sana2_gso_complete(AmiSana2If *iface, AmiTxSlot *slot,
                                    LONG err);
 #endif
+#ifdef AMINETXDUO_TX_BATCH
+static VOID ami_sana2_batch_count(AmiSana2If *iface, AmiTxSlot *slot,
+                                  LONG err);
+#endif
 
 static VOID ami_sana2_tx_complete(AmiSana2If *iface, AmiTxSlot *slot)
 {
@@ -301,6 +309,14 @@ static VOID ami_sana2_tx_complete(AmiSana2If *iface, AmiTxSlot *slot)
         }
 #endif
 
+#ifdef AMINETXDUO_TX_BATCH
+        /* A batch write is its frames, counted as they are. */
+        if (slot->batch_count != 0)
+        {
+            ami_sana2_batch_count(iface, slot, err);
+        }
+        else
+#endif
         if (err != 0)
         {
             /*
@@ -518,11 +534,78 @@ static VOID ami_sana2_gso_complete(AmiSana2If *iface, AmiTxSlot *slot,
 {
     UWORD idx = slot->gso;
 
+#ifdef AMINETXDUO_TX_BATCH
+    /* A batch is one write for the whole block: the children the device
+       never copied are the block's losses, and the write gives back the
+       one share it holds. */
+    if (slot->batch_count != 0)
+    {
+        UBYTE lost = (UBYTE)(slot->batch_count - slot->batch_done);
+
+        slot->batch_count = 0;
+        slot->batch_done  = 0;
+        slot->packet = NULL;
+        slot->gso    = AMI_SANA2_GSO_NONE;
+        if (lost != 0)
+            ami_sana2_gso_add(&iface->gso[idx - 1].lost, lost);
+        ami_sana2_gso_put(iface, idx, 1, FALSE);
+        return;
+    }
+#endif
+
     slot->packet = NULL;
     slot->gso    = AMI_SANA2_GSO_NONE;
     ami_sana2_gso_put(iface, idx, 1, (BOOL)(err != 0));
 }
 #endif /* AMINETXDUO_TCP_GSO */
+
+#ifdef AMINETXDUO_TX_BATCH
+/*
+ * A batch write's statistics, per frame: the children the device committed
+ * (TxPosted) were sent, the rest were not; a copy it made and never posted
+ * is not a frame.  A write the device failed with every
+ * child copied still counts its one error.  Before gso_complete(), while
+ * the context still holds the block's shape.
+ */
+static VOID ami_sana2_batch_count(AmiSana2If *iface, AmiTxSlot *slot,
+                                  LONG err)
+{
+    const AmiTxGso *g    = &iface->gso[slot->gso - 1];
+    UWORD           n    = slot->batch_count;
+    UWORD           done = slot->batch_done;
+    ULONG           bytes;
+
+    if (done > n)
+        done = n;               /* cannot happen: TxChild bounds the index */
+
+    bytes = (ULONG)done * ami_sana2_gso_frame_len(iface, g, 0);
+    if (done == n)
+        bytes += ami_sana2_gso_frame_len(iface, g, (UWORD)(n - 1)) -
+                 ami_sana2_gso_frame_len(iface, g, 0);
+
+    iface->stats.packets_sent += done;
+    AMI_SANA2_COUNT_BYTES(iface->stats.tx_bytes_hi, iface->stats.tx_bytes,
+                          bytes);
+
+    if (err != 0 || done < n)
+    {
+        iface->stats.tx_errors += (done < n) ? (ULONG)(n - done) : 1UL;
+        AMI_ERROR("sana2: batch CMD_WRITE err=%ld wire=%ld: %ld of %ld "
+                  "frames copied",
+                  (LONG)err, (LONG)slot->req.ios2_WireError, (LONG)done,
+                  (LONG)n);
+    }
+}
+
+/* What one write of block `gso` stands for, in frames: every child for a
+   batch, one otherwise.  Read before the write's share is given back. */
+static UWORD ami_sana2_gso_frames(const AmiSana2If *iface, UWORD gso)
+{
+    const AmiTxGso *g = &iface->gso[gso - 1];
+
+    return g->batch ? (UWORD)g->segs : 1;
+}
+#endif /* AMINETXDUO_TX_BATCH */
 
 /*
  * Abort anything still in flight and reap it.  AbortIO() is a request a driver
@@ -581,7 +664,13 @@ VOID ami_sana2_tx_drain(AmiSana2If *iface)
            children in slots are done with it too. */
 #ifdef AMINETXDUO_TCP_GSO
         if (gso != AMI_SANA2_GSO_NONE)
+        {
+#ifdef AMINETXDUO_TX_BATCH
+            /* A batch's write is every frame of its block. */
+            iface->stats.tx_errors += ami_sana2_gso_frames(iface, gso) - 1UL;
+#endif
             ami_sana2_gso_put(iface, gso, 1, TRUE);
+        }
         else
 #else
         (VOID)gso;
@@ -878,7 +967,14 @@ VOID ami_sana2_tx_kick(AmiSana2If *iface)
             slot->busy = FALSE;
 #ifdef AMINETXDUO_TCP_GSO
             if (pend.gso != AMI_SANA2_GSO_NONE)
+            {
+#ifdef AMINETXDUO_TX_BATCH
+                /* A batch's write is every frame of its block. */
+                iface->stats.tx_errors +=
+                    ami_sana2_gso_frames(iface, pend.gso) - 1UL;
+#endif
                 ami_sana2_gso_put(iface, pend.gso, 1, TRUE);
+            }
             else
 #endif
                 AMI_NX_CLEANUP(nx_packet_transmit_release(pend.packet));
@@ -1005,6 +1101,14 @@ ami_sana2_gso_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
         return NX_INVALID_PACKET;
     }
 
+#ifdef AMINETXDUO_TX_BATCH
+    /* A device that takes TX_BATCH gets the block as one write, its
+       children cut by TxChild as it asks for them (anxs2ext.h); a lone
+       repair child, or a block past the batch limit, goes as ever. */
+    blk.batch = (UBYTE)(iface->tx_batch_ok && blk.segs >= 2 &&
+                        blk.segs <= ANXD_S2_TX_BATCH_MAX);
+#endif
+
     /* Blocks finish roughly in the order they started, so the search starts
        after the last one taken and usually stops at once. */
     Forbid();
@@ -1016,7 +1120,7 @@ ami_sana2_gso_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
         if (iface->gso[at].parent == NULL)
         {
             blk.parent       = packet;
-            blk.outstanding  = blk.segs;
+            blk.outstanding  = (UBYTE)AMI_SANA2_GSO_WRITES(blk);
             blk.lost         = 0;
             blk.next_seg     = 0;
             iface->gso[at]   = blk;
@@ -1029,7 +1133,7 @@ ami_sana2_gso_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
     /* The children's slots in the same region: one Forbid() per block, as
        the ordinary write takes one per frame.  Not past a queued write. */
     if (idx != AMI_SANA2_GSO_NONE && iface->tx_pend_count == 0)
-        claimed = ami_sana2_tx_claim_run(iface, blk.segs);
+        claimed = ami_sana2_tx_claim_run(iface, AMI_SANA2_GSO_WRITES(blk));
     Permit();
 
     /* Cannot happen: a block in flight holds a slot or a queue entry, and
@@ -1067,24 +1171,27 @@ ami_sana2_gso_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
             i++;
         }
 
-        if (back && i < blk.segs && iface->tx_pend_count == 0)
+        if (back && i < AMI_SANA2_GSO_WRITES(blk) &&
+            iface->tx_pend_count == 0)
         {
             Forbid();
             if (iface->tx_pend_count == 0)
-                claimed = ami_sana2_tx_claim_run(iface, (UWORD)(blk.segs - i));
+                claimed = ami_sana2_tx_claim_run(
+                    iface, (UWORD)(AMI_SANA2_GSO_WRITES(blk) - i));
             Permit();
         }
     }
 
-    if (i < blk.segs)
+    if (i < AMI_SANA2_GSO_WRITES(blk))
     {
         if (!ami_sana2_tx_enqueue(iface, packet, ether_type, dst_msw, dst_lsw,
-                                  idx, (UWORD)(blk.segs - i)))
+                                  idx, (UWORD)(AMI_SANA2_GSO_WRITES(blk) - i)))
         {
             /* The children already launched still own their share. */
-            iface->stats.tx_errors += (ULONG)(blk.segs - i);
+            iface->stats.tx_errors += AMI_SANA2_GSO_LOST(blk, i);
             iface->stats.tx_queue_full++;
-            ami_sana2_gso_put(iface, idx, (UWORD)(blk.segs - i), TRUE);
+            ami_sana2_gso_put(iface, idx,
+                              (UWORD)(AMI_SANA2_GSO_WRITES(blk) - i), TRUE);
             return (i == 0) ? NX_TX_QUEUE_DEPTH : NX_SUCCESS;
         }
         ami_sana2_tx_kick(iface);
@@ -1278,16 +1385,52 @@ static UINT ami_sana2_tx_launch(AmiSana2If *iface, AmiTxSlot *slot,
 #endif
 
     slot->hdr_len = 0;
+#ifdef AMINETXDUO_TX_BATCH
+    slot->batch_count = 0;
+    slot->batch_done  = 0;
+#endif
 
 #ifdef AMINETXDUO_TCP_GSO
     /* A GSO child: cooked, nothing written into the parent, the frame the
        copy hook's.  The pad is the copy hook's zeroes too. */
     if (slot->gso != AMI_SANA2_GSO_NONE)
     {
+#ifdef AMINETXDUO_TX_BATCH
+        const AmiTxGso *g = &iface->gso[slot->gso - 1];
+#endif
+
         raw_write = FALSE;
         csum_hw   = (iface->tx_csum_ok & ANXD_S2_TXF_TCP) != 0;
         slot->tx_flags = csum_hw ? ANXD_S2_TXF_TCP : 0;
         slot->pad_len  = 0;
+#ifdef AMINETXDUO_TX_BATCH
+
+        /* The whole block in this write: child 0 placed, the rest placed
+           by TxChild as the device asks.  The tap still sees each child as
+           the wire will. */
+        if (g->batch)
+        {
+            slot->batch_count = g->segs;
+#ifdef AMINETXDUO_BPF
+            if (ami_bpf_bound_channels != 0)
+            {
+                UWORD c;
+
+                for (c = 0; c < g->segs; c++)
+                {
+                    (VOID)ami_sana2_gso_place(slot, packet, c);
+                    ami_sana2_gso_capture(iface, slot,
+                                          ami_sana2_gso_frame_len(iface, g, c),
+                                          ether_type, dst_msw, dst_lsw);
+                }
+            }
+#endif
+            (VOID)ami_sana2_gso_place(slot, packet, 0);
+            length = ami_sana2_gso_frame_len(iface, g, 0);
+            goto post;
+        }
+#endif
+
         length    = ami_sana2_gso_prepare(slot, packet);
         if (iface->hw_type == S2WireType_Ethernet &&
             length < (ULONG)(AMI_ETH_MIN_FRAME - AMI_ETH_HEADER_SIZE))
@@ -1391,12 +1534,23 @@ post:
     slot->consumed   = 0;
     slot->total      = length;
     slot->tx_flags   = csum_hw ? ANXD_S2_TXF_TCP : 0;
+#ifdef AMINETXDUO_TX_BATCH
+    if (slot->batch_count != 0)
+        slot->tx_flags |= ANXD_S2_TXF_BATCH;
+#endif
 #ifdef AMINETXDUO_TX_RUN
     /* One of the holder's run: the device may wait for the next before it
        starts this one.  The holder's own thread only -- the kick that
        launches a queued write from the reader, or an acknowledgement the IP
        thread sends meanwhile, is a plain write and starts what is held. */
-    if (iface->tx_holder != NULL && iface->tx_holder == tx_thread_identify())
+    if (iface->tx_holder != NULL && iface->tx_holder == tx_thread_identify()
+#ifdef AMINETXDUO_TX_BATCH
+        /* Not a batch: the device kicks a batch's frames itself, so it
+           holds nothing for the run's flush.  A held write from earlier in
+           the run stays held. */
+        && slot->batch_count == 0
+#endif
+        )
     {
         slot->tx_flags |= ANXD_S2_TXF_MORE;
         iface->tx_held  = 1;
