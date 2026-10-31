@@ -176,8 +176,9 @@ static int env_write(void *ctx, const char *name, const char *value)
         }
         return SetVar((CONST_STRPTR)name, (CONST_STRPTR)value, -1, GVF_GLOBAL_ONLY) != 0;
     }
-    /* Not DeleteVar(): on 3.2 it leaves an unreadable stub, even for a
-       variable that never existed, and the stubs keep the directories. */
+    /* Not DeleteVar(): on 3.1 it fails when the directory is missing, on
+       3.2 it leaves an unreadable stub, even for a variable that never
+       existed, and the stubs keep the directories. */
     return ne_remove(name, env_delete, NULL);
 }
 
