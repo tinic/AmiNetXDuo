@@ -7,6 +7,10 @@ are history.
 
 ## Unreleased
 
+- Optional NetEnv commodity publishes current IPv4 and IPv6 addresses and
+  default routes in ENV: for desktop tools such as NewMeter. It writes only
+  changed configuration, removes stale values, and exports no traffic counters.
+
 - A slow network driver such as plipbox is given only as many queued writes
   as it completes in about 20 ms, which cuts lost pings and latency during
   transfers; plipbox uploads no longer resend about one segment in ten.

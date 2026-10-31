@@ -1,0 +1,112 @@
+NetEnv - network configuration in ENV:
+=====================================
+
+NetEnv is an optional commodity for desktop displays such as NewMeter.
+It publishes the running AmiNetXDuo's IPv4 and IPv6 configuration as global
+AmigaDOS environment variables. It exports no throughput, traffic counters,
+Wi-Fi signal strength, latency, elapsed times or lifetime countdowns.
+
+Starting and stopping
+---------------------
+
+    Run >NIL: C:NetEnv
+    Run >NIL: C:NetEnv INTERVAL 5
+    NetEnv VERSION
+
+INTERVAL is the refresh period in seconds, from 1 to 3600; default 2.
+A refresh reads configuration. Only changed or missing values are written.
+NetEnv is installed in C: and, with its icon, in SYS:Tools/Commodities
+(or the selected private installation drawer). It is not started by the
+installer. Double-click its icon, or copy the program AND its icon into
+SYS:WBStartup. The icon has DONOTWAIT and INTERVAL=2 tooltypes.
+
+Only one instance runs. Stop it through Commodities Exchange or Ctrl-C
+in its Shell. Disabling it in Exchange withdraws its variables; enabling
+it republishes them at the next refresh. It closes bsdsocket.library
+between refreshes and before accessing ENV:. It does not start a network
+which is down or keep a library open while waiting for the next refresh.
+
+Variables
+---------
+
+ANXD/STATE                    UP, DOWN or ERROR
+ANXD/INTERFACES               Space-separated interface names, sorted
+ANXD/IF/<name>/STATE          UP, DOWN or CONFIGURING
+ANXD/IF/<name>/ADDRESS        Current IPv4 address
+ANXD/IF/<name>/NETMASK        Current IPv4 subnet mask
+ANXD/IF/<name>/ADDR6          Space-separated IPv6 address/prefix entries
+ANXD/DEFAULT/INTERFACE        Interface carrying the IPv4 default route
+ANXD/DEFAULT/ADDRESS          Its IPv4 address
+ANXD/DEFAULT/NETMASK          Its IPv4 subnet mask
+ANXD/DEFAULT/GATEWAY          The IPv4 default gateway
+ANXD/DEFAULT6/INTERFACE       Interface of an unambiguous IPv6 default router
+ANXD/DEFAULT6/GATEWAY         That router's IPv6 address
+
+ANXD/STATE describes the stack snapshot: UP means the stack is running,
+not that Internet connectivity was tested. DOWN means no running
+AmiNetXDuo was found. ERROR means the snapshot or publication failed.
+
+Interface names are the live names used by ShowNetStatus, such as eth0 or
+wifi0. Attached SANA-II interfaces are exported; loopback and extra address
+aliases are omitted. STATE is DOWN for a link/device which is down,
+CONFIGURING for an up link with no ready address, and UP when either
+address family is ready. On a down link the address variables are absent.
+Names use letters, digits, underscore, hyphen and dot, up to 15 characters;
+unsafe or ambiguous names invalidate the snapshot rather than create paths.
+All exported variable names fit the older 31-character DOS limit.
+
+IPv6 ADDR6 includes ready preferred/valid addresses, not tentative or
+deprecated addresses. Each has its prefix length. Link-local addresses
+include their interface scope, for example:
+
+    2001:db8::1234/64 fe80::abcd%eth0/64
+
+There is no single default IPv6 source address: source selection depends
+on the destination. Multiple distinct eligible default IPv6 routers are
+ambiguous, so DEFAULT6 is absent in that case. It is also absent when
+there is no usable default router. IPv4 and IPv6 defaults can use different
+interfaces. IPv4-only builds simply omit IPv6 variables.
+
+Addresses, masks and defaults disappear when they are no longer valid.
+Removed interfaces disappear from INTERFACES and lose their variables.
+On stack shutdown only ANXD/STATE=DOWN and an empty ANXD/INTERFACES remain.
+On normal NetEnv exit all its variables are removed. Nothing is saved to
+ENVARC:. Do not save this namespace yourself: these are live values.
+
+NewMeter examples
+-----------------
+
+In the NewMeter icon's tooltypes, show the default IPv4 connection:
+
+    FOOTER=%{ANXD/DEFAULT/INTERFACE}: %{ANXD/DEFAULT/ADDRESS}
+
+Or show the two interfaces independently, on separate lines:
+
+    FOOTER=Ethernet: %{ANXD/IF/eth0/ADDRESS}*nWi-Fi: %{ANXD/IF/wifi0/ADDRESS}
+
+Or show the IPv6 address list:
+
+    FOOTER=IPv6: %{ANXD/IF/eth0/ADDR6}
+
+These examples require those interface names to exist. An unavailable
+value has no environment variable. NewMeter's text placeholders are used;
+ENVGAUGE is intended for numbers, not dotted addresses or IPv6 text.
+
+Limits and recovery
+--------------------
+
+Variables form a convenient display, not an atomic multi-field API.
+During an update a reader can briefly see fields from different snapshots.
+Applications needing a coherent network query should use the status API.
+
+A process crash or forced removal can leave old variables until NetEnv is
+restarted or the machine reboots. On restart it recovers documented keys
+from the ANXD namespace and removes obsolete values. Unknown user files
+are preserved. Write failures are reported and retried; successful values
+are compared before writing, so retries do not rewrite unchanged siblings.
+
+The implementation bounds snapshots at 32 interfaces, 128 IPv6 addresses
+and 96 default-route candidates. Truncated queries, invalid names and full
+output buffers produce ERROR and withdraw the previous configuration;
+they never publish a silently shortened address list. It does not test
+Internet reachability and generates no network traffic.

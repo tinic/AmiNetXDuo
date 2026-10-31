@@ -239,6 +239,16 @@
       "UNIT": "1"
     }
   },
+  "NetEnv": {
+    "binary": "src/tools/NetEnv",
+    "mode": "interrupt",
+    "parser": "readargs",
+    "source": "src/tools/netenv.c",
+    "values": {
+      "INTERVAL": "1",
+      "VERSION": true
+    }
+  },
   "NetShutdown": {
     "binary": "src/tools/NetShutdown",
     "parser": "readargs",

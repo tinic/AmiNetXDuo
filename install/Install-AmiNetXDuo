@@ -2972,6 +2972,7 @@
           (set SN_WROTE 1) (set SN_T "SYS:Utilities/NetSwitch.ilbm") (P_snap)
           (set BK_SUB "Tools/Commodities")
           (set SN_WROTE 1) (set SN_T "SYS:Tools/Commodities/NetWireless.info") (P_snap)
+          (set SN_WROTE 1) (set SN_T "SYS:Tools/Commodities/NetEnv.info") (P_snap)
         )
         (
           (set BK_SUB "AmiNetXDuo")
@@ -3026,6 +3027,9 @@
   (P_rec_ours)
   (set REC_F (if DRAWER_LAYOUT (tackon D_ROOT "NetWireless")
                  "SYS:Tools/Commodities/NetWireless"))
+  (P_rec_ours)
+  (set REC_F (if DRAWER_LAYOUT (tackon D_ROOT "NetEnv")
+                 "SYS:Tools/Commodities/NetEnv"))
   (P_rec_ours)
   (set REC_N 0)
   (while (set REC_SUB (select REC_N "anxnet.device" "anxgenet.device"
@@ -3140,7 +3144,7 @@
       (set REC_N 0)
       (while (set REC_SUB (select REC_N "NetPrefs.info" "NetMeter.info"
                                         "NetSwitch.info"
-                                        "NetWireless.info" "NetWirelessPrefs.info"
+                                        "NetWireless.info" "NetWirelessPrefs.info" "NetEnv.info"
                                         "C.info" ""))
         (
           ((set REC_ADD (cat "Delete \"" (tackon D_ROOT REC_SUB) "\" QUIET\n"
@@ -3309,6 +3313,10 @@
     (set BK_SRC "SYS:Tools/Commodities/NetWireless") (P_backup)
     (set BK_ARCH (tackon S_ICONS "NetWireless.info"))
     (set BK_SRC "SYS:Tools/Commodities/NetWireless.info") (P_backup)
+    (set BK_ARCH "")
+    (set BK_SRC "SYS:Tools/Commodities/NetEnv") (P_backup)
+    (set BK_ARCH (tackon S_ICONS "NetEnv.info"))
+    (set BK_SRC "SYS:Tools/Commodities/NetEnv.info") (P_backup)
     (set BK_SUB "Devs/Internet")
     (set BK_ARCH (tackon (tackon S_DEVS "Internet") "certificates"))
     (set BK_SRC (tackon (tackon D_DEVS "Internet") "certificates")) (P_backup)
@@ -3327,7 +3335,7 @@
     (set TL_I 0)
     (while (set TL_N (select TL_I "NetPrefs.info" "NetMeter.info"
                                   "NetSwitch.info"
-                                  "NetWireless.info" "NetWirelessPrefs.info" ""))
+                                  "NetWireless.info" "NetWirelessPrefs.info" "NetEnv.info" ""))
       (
         (set BK_ARCH (if (< TL_I 2) (tackon S_EARLIER (cat TL_N ".beta8")) ""))
         (set BK_SRC (tackon D_C TL_N)) (P_backup)
@@ -3919,7 +3927,7 @@
       (optional "force")))
 (set S_CSEL (if (= MINPICK 3) S_CFAT S_C))
 
-; The four Workbench tools, each with its icon from Icons/: in a private
+; The Workbench tools, each with its icon from Icons/: in a private
 ; installation beside the documentation, in a system one where an Amiga user
 ; looks -- SYS:Prefs for the editors, SYS:Utilities for NetMeter and
 ; SYS:Tools/Commodities for the commodity.  C: keeps the command copies for
@@ -3990,6 +3998,10 @@
     (makedir TL_D (prompt ("Creating %s" TL_D)) (help @makedir-help)))
 (set TL_H (cat "NetWireless is the Wi-Fi commodity: the link's state and "
                "signal as an AppIcon."))
+(P_tool)
+(set TL_N "NetEnv")
+(set TL_H (cat "NetEnv optionally publishes live IPv4 and IPv6 configuration "
+               "in ENV: for desktop tools.  It is not started automatically."))
 (P_tool)
 
 ; Icons an earlier installation put in C: or beside the commands drawer.
