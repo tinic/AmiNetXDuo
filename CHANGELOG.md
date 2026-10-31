@@ -9,6 +9,8 @@ are history.
 
 ## 1.0.0-rc3
 
+- After a switch from the drawer installation to the system one, the tools no
+  longer read interface files from the old drawer.
 - A TCP connection whose IPv6 address expires or is withdrawn by the router
   no longer stops the network when a tail loss probe fires.
 - A resent block that spans the 32-bit sequence number wrap is sent in full
