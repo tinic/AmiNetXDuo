@@ -1238,6 +1238,8 @@ VOID ami_sana2_get_stats(const AmiSana2If *iface, AmiSana2Stats *out)
        thread, because S2_GETGLOBALSTATS here would need a reply port on
        whichever task called GetNetworkStatistics(). */
     *out = iface->stats;
+    out->tx_queue_limit = iface->tx_lim_limit;
+    out->tx_queue_stops = iface->tx_lim_stops;
 
 #ifdef AMINETXDUO_RXPROBE
     ami_sana2_rxprobe_report(iface);

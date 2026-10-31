@@ -93,6 +93,7 @@ _Static_assert(NETSTATUS_FILE_LEN == AMI_CFG_PATH_LEN, "device path width");
 _Static_assert(sizeof(NetStatusIfDevice) == 4 + NETSTATUS_FILE_LEN,
                "NetStatusIfDevice ABI");
 _Static_assert(sizeof(NetStatusIfBytes) == 20, "NetStatusIfBytes ABI");
+_Static_assert(sizeof(NetStatusIfQueue) == 20, "NetStatusIfQueue ABI");
 
 #ifdef AMINETXDUO_MDNS
 /*
@@ -211,7 +212,8 @@ static const NsQueryLayout ns_query_layout[] =
     [NETSTATUS_SERVICES_TYPE] = { sizeof(NetStatusService),   1 },
     [NETSTATUS_IFDEVICES]     = { sizeof(NetStatusIfDevice),  0 },
     [NETSTATUS_HOSTSOURCE]    = { sizeof(NetStatusHostSource), 1 },
-    [NETSTATUS_IFBYTES]       = { sizeof(NetStatusIfBytes),   0 }
+    [NETSTATUS_IFBYTES]       = { sizeof(NetStatusIfBytes),   0 },
+    [NETSTATUS_IFQUEUE]       = { sizeof(NetStatusIfQueue),   0 }
 };
 
 typedef struct NsWriter
@@ -1641,6 +1643,38 @@ static VOID ns_fill_ifbytes(NX_IP *ip, NsWriter *w)
     }
 }
 
+/* The same slots again, with the shim's transmit queue. */
+static VOID ns_fill_ifqueue(NX_IP *ip, NsWriter *w)
+{
+    UINT i;
+
+    for (i = 0; i < (UINT)NX_MAX_PHYSICAL_INTERFACES; i++)
+    {
+        NX_INTERFACE     *nxif = &ip->nx_ip_interface[i];
+        NetStatusIfQueue *out  = (NetStatusIfQueue *)ns_writer_next(w);
+        AmiSana2If       *sana;
+        AmiSana2Stats     stats;
+
+        if (out == NULL)
+            continue;
+
+        out->nsq_Index = (UWORD)i;
+
+        if (nxif->nx_interface_valid == 0)
+            continue;
+
+        sana = (AmiSana2If *)nxif->nx_interface_additional_link_info;
+        if (sana == NULL)
+            continue;
+
+        ami_sana2_get_stats(sana, &stats);
+        out->nsq_TxQueued     = stats.tx_queued;
+        out->nsq_TxQueueFull  = stats.tx_queue_full;
+        out->nsq_TxQueueLimit = stats.tx_queue_limit;
+        out->nsq_TxQueueStops = stats.tx_queue_stops;
+    }
+}
+
 
 /*
  * The header check, done before anything is written, so a caller that landed
@@ -1936,6 +1970,10 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
 
         case NETSTATUS_IFBYTES:
             ns_fill_ifbytes(ip, &w);
+            break;
+
+        case NETSTATUS_IFQUEUE:
+            ns_fill_ifqueue(ip, &w);
             break;
 
         case NETSTATUS_HOSTSOURCE:

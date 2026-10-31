@@ -445,9 +445,10 @@ static VOID t_query_contract(VOID)
         { NETSTATUS_SERVICES_TYPE, sizeof(NetStatusService), TRUE, TRUE },
         { NETSTATUS_IFDEVICES, sizeof(NetStatusIfDevice), FALSE, FALSE },
         { NETSTATUS_HOSTSOURCE, sizeof(NetStatusHostSource), TRUE, FALSE },
-        { NETSTATUS_IFBYTES, sizeof(NetStatusIfBytes), FALSE, FALSE }
+        { NETSTATUS_IFBYTES, sizeof(NetStatusIfBytes), FALSE, FALSE },
+        { NETSTATUS_IFQUEUE, sizeof(NetStatusIfQueue), FALSE, FALSE }
     };
-    static const ULONG invalid[] = { 0, 21, 25, 0x10001UL, 0xFFFFFFFFUL };
+    static const ULONG invalid[] = { 0, 21, 26, 0x10001UL, 0xFFFFFFFFUL };
     ULONG i;
 
     for (i = 0; i < sizeof(queries) / sizeof(queries[0]); i++)
