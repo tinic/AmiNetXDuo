@@ -150,7 +150,9 @@ TABLE = {
     "nx_tcp_socket_packet_process.c":    [("__nx_tcp_socket_packet_process",    515)],  # 474
     # Reviewed GSO/byte-credit path: exact 69-instruction increase approved by turo, 2026-10-29.
     # RFC 3465 slow-start limit from the interface (#354, netxduo #37): +11.
-    "nx_tcp_socket_state_ack_check.c":   [("__nx_tcp_socket_state_ack_check",   684)],  # 556
+    # The RTO walk's lost-copy check at the duplicate-ACK threshold, one call
+    # and compare with the decision out of line (netxduo #39): +6.
+    "nx_tcp_socket_state_ack_check.c":   [("__nx_tcp_socket_state_ack_check",   690)],  # 556
 }
 
 try:
