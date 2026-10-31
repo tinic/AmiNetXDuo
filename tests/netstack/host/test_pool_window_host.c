@@ -613,6 +613,35 @@ static void i_the_window_settles_for_the_path_and_the_link(void)
                                              hundm, 22UL, 50UL, 46720UL, FALSE)
                 == 8UL * 1460UL,
             "TCPWANWINDOW ignored a raised TCPGROWRTT line");
+    /* A slow card whose own line fills its fit within the round trip is
+       fitted on a long path too: plipbox states 491,520 bit/s, 61 bytes a
+       millisecond, and its ENC28J60 ring (6,656 bytes) fits four segments,
+       5,840 bytes, so every round trip up to 95 ms keeps the fit.  Its own
+       frame time makes a LAN handshake 8-10 ms, which tripped the 10 ms
+       line and offered a 1 MB window to a four-frame ring (2026-10-30,
+       A500: the peer resent 9-14% of an upload).  Past 95 ms, or with no
+       stated rate, it is a long path as before; TCPWANWINDOW still wins. */
+    h_check(ami_bsd_tcp_window_receive_bound(max, 6656UL, 1460UL, 491520UL,
+                                             rtt, 0UL, 0UL, FALSE)
+                == 4UL * 1460UL &&
+            ami_bsd_tcp_window_receive_bound(max, 6656UL, 1460UL, 491520UL,
+                                             95UL, 0UL, 0UL, FALSE)
+                == 4UL * 1460UL,
+            "a plipbox LAN round trip on the 10 ms line went unfitted");
+    h_check(ami_bsd_tcp_window_receive_bound(max, 6656UL, 1460UL, 491520UL,
+                                             96UL, 0UL, 0UL, FALSE) == max,
+            "a plipbox path past its ring's own time was fitted");
+    h_check(ami_bsd_tcp_window_receive_bound(max, 6656UL, 1460UL, 0UL,
+                                             rtt, 0UL, 0UL, FALSE) == max,
+            "an unstated rate was fitted on a long path");
+    h_check(ami_bsd_tcp_window_receive_bound(max, 6656UL, 1460UL, 491520UL,
+                                             rtt, 0UL, 46720UL, FALSE)
+                == 46720UL,
+            "the slow-card fit overrode TCPWANWINDOW");
+    h_check(ami_bsd_tcp_window_receive_bound(max, 0UL, 1460UL, 491520UL,
+                                             rtt, 0UL, 0UL, FALSE) == max,
+            "a card with no stated memory was fitted on a long path");
+
     /* A gigabit card on a long path is never burst-bound, and TCPWANWINDOW
        still sets its window: #354, genet kept 802,816 under
        TCPWANWINDOW=300000.  Unset, the settled window stands, overruns or

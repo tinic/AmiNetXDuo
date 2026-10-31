@@ -217,6 +217,30 @@ BOOL ami_bsd_tcp_window_long_path(ULONG rtt_ms, ULONG grow_rtt_ms)
     return (rtt_ms >= bsd_grow_rtt(grow_rtt_ms)) ? TRUE : FALSE;
 }
 
+/*
+ * Whether the card's own line, at the rate the driver states (`bps`), puts
+ * no more in flight over `rtt_ms` than the `fit` its memory holds.  Then the
+ * fit is the most the path can use, and a round trip this long is the card's
+ * own frame time, not distance.  plipbox states 491,520 bit/s: 61 bytes a
+ * millisecond, so its 5,840-byte fit covers any round trip up to 95 ms, and
+ * its 8-10 ms handshake no longer lifts the cap (2026-10-30, A500: a 1 MB
+ * window had the peer resend 9-14% of an upload).  An X-Surf 100 states
+ * 100 Mbit/s and a gigabit card more: neither is ever covered.  Unknown
+ * rate, memory or round trip: not covered.
+ */
+static BOOL bsd_ring_covers_path(ULONG fit, ULONG hw_bytes, ULONG bps,
+                                 ULONG rtt_ms)
+{
+    ULONG per_ms = bps / 8000UL;
+
+    if (hw_bytes == 0UL || bps == 0UL || rtt_ms == 0UL)
+        return FALSE;
+    if (per_ms == 0UL)
+        per_ms = 1UL;
+
+    return (per_ms <= fit / rtt_ms) ? TRUE : FALSE;
+}
+
 /* TCPWANWINDOW within the window settled for the socket, never below
    `floor`. */
 static ULONG bsd_wan_window(ULONG want, ULONG wan_window, ULONG floor)
@@ -249,11 +273,15 @@ ULONG ami_bsd_tcp_window_receive_bound(ULONG want, ULONG hw_bytes, ULONG mss,
     /* A long path: an upstream link spaces the data, so the settled window
        stands until the card has overrun under it; TCPWANWINDOW, when set,
        is the window instead -- never less than the fit, never more than the
-       window settled for the socket. */
+       window settled for the socket.  Not when the card's own line fills the
+       fit within the round trip (bsd_ring_covers_path): then no larger
+       window is any faster, and the round trip is the card's own slowness. */
     if (rtt_ms >= bsd_grow_rtt(grow_rtt_ms))
     {
         if (wan_window == 0UL)
-            return wan_fitted ? fit : want;
+            return (wan_fitted || bsd_ring_covers_path(fit, hw_bytes, bps,
+                                                       rtt_ms))
+                   ? fit : want;
         return bsd_wan_window(want, wan_window, fit);
     }
 
