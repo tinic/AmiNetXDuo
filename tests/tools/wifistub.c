@@ -1086,17 +1086,41 @@ int main(void)
     }
 
     /* A self-contained installation: AmiNetXDuo:Devs/NetInterfaces is the
-       drawer the stack reads, and it is the one searched. */
+       drawer the stack reads, and it is the one searched -- but only while
+       AmiNetXDuo:Devs is a member of DEVS:.  Outside DEVS: it is what a
+       removed drawer install leaves under a system install's AmiNetXDuo:,
+       and it is not read. */
     DeleteFile((CONST_STRPTR)"DEVS:NetInterfaces/wifi0");
     {
         BPTR lock = Lock((CONST_STRPTR)"DH0:anxd", ACCESS_READ);
 
         if (lock != (BPTR)0 && AssignLock((CONST_STRPTR)"AmiNetXDuo", lock))
         {
+            BPTR devs;
+
             ws->connected = TRUE;
             rc = run("DH0:NetWirelessPrefs STATUS");
-            check(rc != RETURN_ERROR && has("prism2.device, unit 0"),
-                  "drawer layout: the interface in AmiNetXDuo:Devs is found");
+            check(!has("prism2.device, unit 0"),
+                  "stale drawer: AmiNetXDuo:Devs outside DEVS: is not read");
+
+            devs = Lock((CONST_STRPTR)"AmiNetXDuo:Devs", ACCESS_READ);
+            if (devs != (BPTR)0 && AssignAdd((CONST_STRPTR)"DEVS", devs))
+            {
+                rc = run("DH0:NetWirelessPrefs STATUS");
+                check(rc != RETURN_ERROR && has("prism2.device, unit 0"),
+                      "drawer layout: the interface in AmiNetXDuo:Devs is found");
+                devs = Lock((CONST_STRPTR)"AmiNetXDuo:Devs", ACCESS_READ);
+                if (devs != (BPTR)0)
+                {
+                    RemAssignList((CONST_STRPTR)"DEVS", devs);
+                    UnLock(devs);
+                }
+            }
+            else
+            {
+                if (devs != (BPTR)0) UnLock(devs);
+                check(FALSE, "drawer layout: AmiNetXDuo:Devs added to DEVS:");
+            }
             AssignLock((CONST_STRPTR)"AmiNetXDuo", (BPTR)0);
         }
         else
