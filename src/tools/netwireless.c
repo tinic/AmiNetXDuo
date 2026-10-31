@@ -204,7 +204,8 @@ static VOID nw_icon_add(VOID)
 
     /* Workbench remaps its own copy to the current desktop palette. Keep
        no public-screen lock or screen pointer across desktop mode changes. */
-    if (nw.color_icon != NULL && LayoutIconA(nw.color_icon, NULL, NULL))
+    if (nw.color_icon != NULL && LayoutIconA(nw.color_icon, NULL, NULL) &&
+        nw.color_icon->do_Gadget.GadgetRender != NULL)
     {
         nw.color_icon->do_CurrentX = nw_dob.do_CurrentX;
         nw.color_icon->do_CurrentY = nw_dob.do_CurrentY;
