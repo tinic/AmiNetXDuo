@@ -99,8 +99,9 @@ BUDGETS=(
     # fast recovery (netxduo #39): +388, 375,892 -> 376,280.
     # The adaptive transmit queue limit and the slow-card window fit (A500
     # plipbox ping loss, #401): +820, 376,280 -> 377,100.  Quick devices
-    # skip the counting: +56, 377,100 -> 377,156.
-    "default:src/bsdsocket/bsdsocket.library:377156"
+    # skip the counting: +56, 377,100 -> 377,156.  The rc3 review TCP fixes
+    # (netxduo #40): +40, 377,156 -> 377,196.
+    "default:src/bsdsocket/bsdsocket.library:377196"
     # 41,412 after stateless receive-checksum verification was added to the
     # EL3 and word/long NE2000 direct paths, 2026-09-15.  43,620 with
     # ANXD_CMD_RX_BATCH in the shell (claim, completion, staging copy, the
@@ -181,8 +182,9 @@ BUDGETS=(
     # The RTO walk's lost-copy repair (netxduo #39): +308, 253,940 -> 254,248.
     # Adaptive transmit queue limit, slow-card window fit (#401): +672,
     # 254,248 -> 254,920.  Quick devices skip the counting: +56,
-    # 254,920 -> 254,976.
-    "minimal:src/bsdsocket/bsdsocket.library:254976"
+    # 254,920 -> 254,976.  The rc3 review TCP fixes (netxduo #40): +24,
+    # 254,976 -> 255,000.
+    "minimal:src/bsdsocket/bsdsocket.library:255000"
     "minimal:src/netdev/anxnet.device:46000"
     # 29,088 on e806188f after the audited device fixes.
     # Batched transmit adds 632, 29,120 -> 29,752, approved by turo 2026-10-29.
