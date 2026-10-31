@@ -34,17 +34,6 @@ ami_sana2_dev_put(AmiSana2If *iface)
 #endif
 }
 
-static inline VOID __attribute__((always_inline))
-ami_sana2_lim_count(AmiSana2If *iface, ULONG n)
-{
-#if defined(__mc68000__) || defined(__m68k__)
-    __asm__ __volatile__("add.l %1,%0"
-                         : "+m"(iface->tx_lim_done) : "d"(n) : "cc", "memory");
-#else
-    (VOID)__atomic_add_fetch(&iface->tx_lim_done, n, __ATOMIC_SEQ_CST);
-#endif
-}
-
 VOID ami_sana2_tx_init(AmiSana2If *iface)
 {
     UWORD i;
@@ -98,7 +87,8 @@ VOID ami_sana2_tx_init(AmiSana2If *iface)
     iface->tx_lim_limit  = (UWORD)(AMI_SANA2_TX_STOP_AT + iface->tx_slots);
     iface->tx_lim_target = AMI_SANA2_TX_TARGET_MS;
     iface->tx_lim_clean  = 0;
-    iface->tx_lim_done   = 0;
+    iface->tx_lim_posted = 0;
+    iface->tx_lim_base   = 0;
     iface->tx_lim_tick   = 0;
     iface->tx_lim_ms     = 0;
     iface->tx_lim_held   = 0;
@@ -261,7 +251,7 @@ VOID ami_sana2_tx_lazy_stop(AmiSana2If *iface)
  * nx_packet_transmit_release() does its own TX_DISABLE.
  */
 static VOID ami_sana2_tx_complete(AmiSana2If *iface, AmiTxSlot *slot);
-static VOID ami_sana2_tx_settle(AmiSana2If *iface, ULONG n);
+static VOID ami_sana2_tx_settle(AmiSana2If *iface);
 
 static VOID __attribute__((noinline))
 ami_sana2_tx_reap_pending(AmiSana2If *iface)
@@ -270,7 +260,6 @@ ami_sana2_tx_reap_pending(AmiSana2If *iface)
     struct List     batch;
     struct Node    *node;
     struct Node    *next;
-    ULONG           n = 0;
 
     NewList(&batch);
     Disable();
@@ -302,7 +291,6 @@ ami_sana2_tx_reap_pending(AmiSana2If *iface)
         /* ios2_Req.io_Message is the first member of the first member of
            AmiTxSlot, so the reply message is the slot. */
         ami_sana2_tx_complete(iface, (AmiTxSlot *)msg);
-        n++;
     }
 
     /* The slots just handed back are what the queued writes were waiting
@@ -311,7 +299,7 @@ ami_sana2_tx_reap_pending(AmiSana2If *iface)
         ami_sana2_tx_kick(iface);
 
     /* The queue limit's measure and wake (ami_sana2_tx_flow). */
-    ami_sana2_tx_settle(iface, n);
+    ami_sana2_tx_settle(iface);
 }
 
 VOID ami_sana2_tx_reap(AmiSana2If *iface)
@@ -694,7 +682,8 @@ static VOID __attribute__((noinline)) ami_sana2_tx_flow(AmiSana2If *iface)
 /*
  * Close the measuring window (sana2_internal.h, AMI_SANA2_TX_WINDOW_TICKS):
  * the writes it completed over its E-clock length, times the target, is the
- * new limit.  Once a window, so the clock read costs nothing a frame.  No
+ * new limit.  Completed is posted less still held, so a write the device
+ * finished inside BeginIO() counts as one it replied later.  Once a window, so the clock read costs nothing a frame.  No
  * Forbid(): the tick is claimed first, and two reapers that both get past
  * the test make one short sample, which the next window replaces.  The new
  * limit stops TCP at the next write and wakes it at the next reap.
@@ -705,6 +694,7 @@ ami_sana2_tx_window(AmiSana2If *iface, ULONG now)
     ULONG ms;
     ULONG dt;
     ULONG done;
+    ULONG gone;
     ULONG limit;
     ULONG ceiling = (ULONG)AMI_SANA2_TX_STOP_AT + (ULONG)iface->tx_slots;
     UBYTE dry;
@@ -712,9 +702,10 @@ ami_sana2_tx_window(AmiSana2If *iface, ULONG now)
     iface->tx_lim_tick = now;
     ms   = ami_millis_quick();
     dt   = ms - iface->tx_lim_ms;
-    done = iface->tx_lim_done;
+    gone = iface->tx_lim_posted - (ULONG)iface->tx_dev_writes;
+    done = gone - iface->tx_lim_base;
     dry  = iface->tx_lim_dry;
-    iface->tx_lim_done = 0;
+    iface->tx_lim_base = gone;
     iface->tx_lim_dry  = 0;
     iface->tx_lim_ms   = ms;
 
@@ -759,17 +750,15 @@ ami_sana2_tx_window(AmiSana2If *iface, ULONG now)
 }
 
 /*
- * After the reap has handed `n` slots back: count them for the window, wake
- * TCP at half the limit, and note a queue that ran dry.  Dry after a stop
+ * After the reap has handed slots back: wake TCP at half the limit, note a
+ * queue that ran dry, and close the window when it is due.  Dry after a stop
  * means TCP did not refill it in time: the target grows a step.
  */
-static VOID ami_sana2_tx_settle(AmiSana2If *iface, ULONG n)
+static VOID ami_sana2_tx_settle(AmiSana2If *iface)
 {
     NX_INTERFACE *nxif  = iface->interface_ptr;
     UWORD         count;
     ULONG         now;
-
-    ami_sana2_lim_count(iface, n);
 
     count = (UWORD)(iface->tx_pend_count + iface->tx_dev_writes);
     if (count == 0)
@@ -790,7 +779,8 @@ static VOID ami_sana2_tx_settle(AmiSana2If *iface, ULONG n)
 
     now = tx_time_get();
     if (now - iface->tx_lim_tick >= (ULONG)AMI_SANA2_TX_WINDOW_TICKS &&
-        (iface->tx_lim_done >= (ULONG)AMI_SANA2_TX_WINDOW_WRITES ||
+        (iface->tx_lim_posted - (ULONG)iface->tx_dev_writes -
+             iface->tx_lim_base >= (ULONG)AMI_SANA2_TX_WINDOW_WRITES ||
          now - iface->tx_lim_tick >= (ULONG)AMI_SANA2_TX_WINDOW_LONG))
         ami_sana2_tx_window(iface, now);
 }
@@ -985,6 +975,7 @@ static AmiTxSlot *ami_sana2_tx_claim(AmiSana2If *iface)
                 slot = &iface->tx[i];
                 /* Nothing waits here, so the device's writes are the
                    whole count. */
+                iface->tx_lim_posted++;
                 if (++iface->tx_dev_writes >= iface->tx_lim_limit)
                     ami_sana2_tx_flow(iface);
                 break;
@@ -1011,6 +1002,7 @@ static ULONG ami_sana2_tx_claim_run(AmiSana2If *iface, UWORD want)
         {
             iface->tx[i].busy = TRUE;
             iface->tx_dev_writes++;
+            iface->tx_lim_posted++;
             mask |= 1UL << i;
             want--;
         }
@@ -1150,6 +1142,7 @@ VOID ami_sana2_tx_kick(AmiSana2If *iface)
                 {
                     iface->tx[i].busy = TRUE;
                     iface->tx_dev_writes++;
+                    iface->tx_lim_posted++;
                     slot = &iface->tx[i];
                     break;
                 }

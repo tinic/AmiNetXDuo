@@ -1214,14 +1214,16 @@ struct AmiSana2If
        tx_dev_writes: slots the device holds, raised under Forbid() where a
        slot is claimed, lowered by one instruction where it is handed back.
        tx_lim_limit: writes below TCP at which it stops; wake at half.
-       tx_lim_done: completions in the window opened at tx_lim_tick (ticks)
-       and tx_lim_ms (E-clock ms).  tx_lim_held: TCP was stopped since the
+       tx_lim_posted: slots ever claimed, raised with tx_dev_writes, so
+       posted less held is every write done; tx_lim_base is that at the
+       window opened at tx_lim_tick (ticks) and tx_lim_ms (E-clock ms).  tx_lim_held: TCP was stopped since the
        queue last ran dry; tx_lim_dry: it ran dry in this window. */
     volatile UWORD      tx_dev_writes;
     UWORD               tx_lim_limit;
     UWORD               tx_lim_target;      /* ms of drain */
     UWORD               tx_lim_clean;       /* ms of backlog without a dry run */
-    ULONG               tx_lim_done;
+    ULONG               tx_lim_posted;
+    ULONG               tx_lim_base;
     ULONG               tx_lim_tick;
     ULONG               tx_lim_ms;
     UBYTE               tx_lim_held;

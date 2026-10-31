@@ -1690,6 +1690,37 @@ static void test_queue_limit_invariants(void)
     h_check(iface.tx_dev_writes == 0 && iface.tx_pend_count == 0 &&
             q_nxif.nx_interface_tx_queue_stopped == 0,
             "a device that finishes in BeginIO() is never stopped");
+
+    /* One that finishes most writes in BeginIO() and queues the odd one
+       (a full hardware ring) is measured by every write it finished, not
+       only by the replies: thirty a millisecond keeps the ceiling. */
+    fixture_init(FALSE, S2WireType_Ethernet);
+    memset(&q_nxif, 0, sizeof(q_nxif));
+    iface.interface_ptr = &q_nxif;
+    iface.tx_quick_ok   = 1;
+    h_ms  = 1000UL;
+    h_now = h_ms / 20UL;
+    for (i = 0; i < 3000; i++)
+    {
+        UWORD k;
+
+        h_ms += 1UL;
+        h_now = h_ms / 20UL;
+        /* Twenty queued writes stay with the device: a backlog. */
+        if (i >= 20)
+            q_complete_one();
+        h_quick_kept = 1;
+        for (k = 0; k < 30; k++)
+            (void)q_send((UWORD)(k + 2));
+        h_quick_kept = 0;
+        (void)q_send((UWORD)(40 + i % 400));
+    }
+    h_check(iface.tx_dev_writes == 20 && iface.tx_pend_count == 0 &&
+            iface.stats.tx_queue_full == 0,
+            "twenty queued writes held throughout");
+    h_check(iface.tx_lim_limit == AMI_SANA2_TX_STOP_AT + Q_N,
+            "a mostly-quick device is measured by all it finished");
+    h_quick_kept = 0;
     iface.interface_ptr = NULL;
 }
 
