@@ -9,6 +9,8 @@ are history.
 
 ## 1.0.0-rc3
 
+- Replies from a host whose address ends in .0 or .255 on another network
+  are accepted, so DA-Player gets CD titles from gnudb.gnudb.org.
 - After a switch from the drawer installation to the system one, the tools no
   longer read interface files from the old drawer.
 - A TCP connection whose IPv6 address expires or is withdrawn by the router

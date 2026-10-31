@@ -1,15 +1,15 @@
-# Rc2 -> rc3 submodule review: netxduo +137, wifipi +6; no additions or removals.
+# Rc2 -> rc3 submodule review: netxduo +139, wifipi +6; no additions or removals.
 # ThreadX, bsdsocktest, dropbear, libcodesets, shelltools and zz9000-sdk did not move.
 # The named reviews cover the stated scopes. Product exact-SHA CI and emulator are separate release gates, not claims made by this manifest.
 # Agent attribution comes from AgentNet evidence and PR records, never git author.
 # reviewer=independent-review: fresh agents with no part in these PRs read the full diffs and the touched
 # functions in context (source only, nothing run), 2026-10-31; verdict and scope per range below.
 
-# Fast-forward by 137 commits (tinic/netxduo #25-#40, master, first-parent merges).
+# Fast-forward by 139 commits (tinic/netxduo #25-#41, master, first-parent merges).
 # #25/#26: upstream dev 1420d86d and master history (parents #349, #350). #27: SYN cache depth (#360).
 # #28-#33: RTO, FIN and SACK recovery (#375, #377, #378). #34/#35/#37: SACK scoreboard, PRR, GSO, lost-retransmit
 # repair, IW/ABC (#354, #385, #396). #36: SNTP year boundary. #38: TX queue stop (#398). #39: RTO-walk lost copy (#399).
-# #40: fixes for review notes 1, 2 and 4 below (AmiNetXDuo #411).
+# #40: fixes for review notes 1, 2 and 4 below (AmiNetXDuo #411). #41: off-link IPv4 source check (#419), reviewed by claudecode.
 # Fork PR CI green on every merge; all merges clean (remerge-diff empty) except 6be86f18 (11 conflicts, every fork fix kept).
 # Independent review GO-with-notes, no blocker: scope full common/, addons/ and test diffs, nx_tcp_socket_state_ack_check.c,
 # nx_tcp_socket_retransmit.c, nx_tcp_sack_recovery.c, nx_tcp_socket_send_internal.c, nx_ip_header_add.c, nx_ip_driver_packet_send.c.
@@ -18,7 +18,9 @@
 # subtraction (7c6f09c3). Open: the first scoreboard page (sack_recovery.c:485) skips the pool/8 reserve sack_grow applies,
 # and NX_SACK_ALLOC_FAILED holds until the sent queue drains; sack_lost_retransmit (sack_recovery.c:319) has no reorder window;
 # DHCP ADDRESS_PROBING case re-added by 6be86f18 is dead in the fork; upstream lowered the MQTT interop floor.
-third_party/netxduo 2c53ee850261b65f20b4d2cbfe245eab98f9d879..dfbe02caf1c5825299032a20cb2f6e634b1d5626
+third_party/netxduo 2c53ee850261b65f20b4d2cbfe245eab98f9d879..7f112389cfbfdbba2b38a8e2008c5e52af6c2f76
++7f112389cfbfdbba2b38a8e2008c5e52af6c2f76 reviewer=claudecode merge of netxduo #41 (AmiNetXDuo #419); no source change beyond its commit
++1d9b78420c37b447af8e6b1f2e75240461aa1568 reviewer=claudecode netxduo #41 IPv4 source check applies the zero/all-ones host-part tests only to sources on the attached network and refuses 255.255.255.255 explicitly, so an off-link x.x.x.0 host (gnudb.gnudb.org) is accepted; adds netx_ip_source_address_off_link_test; parent #419
 +dfbe02caf1c5825299032a20cb2f6e634b1d5626 reviewer=independent-review merge of netxduo #40 (AmiNetXDuo #411); tree identical to 7c6f09c3; no source change beyond its three commits
 +7c6f09c38defd2f6c997cc3fda92893bbc6be613 reviewer=independent-review netxduo #40 new-data PRR charge in send_internal saturates at zero, as _nx_tcp_sack_recovery_sent does, so a repair sent while the checksum ran unprotected cannot wrap prr_credit; adds netx_tcp_sack_prr_credit_race_test; review note 4
 +f5bbf4df4312eeca91fcd2335b4b109fd46cded0 reviewer=independent-review netxduo #40 timeout walk compares slice end and block end by signed difference, so a GSO block spanning 2^32 keeps tx_rto_next inside it; tcp_options_build gains LINK_CAP and NO_INTERFACE_CAPABILITY; adds netx_tcp_gso_rto_wrap_test; review note 2
