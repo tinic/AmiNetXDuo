@@ -7,6 +7,8 @@ are history.
 
 ## Unreleased
 
+- Replies from a host whose address ends in .0 or .255 on another network
+  are accepted, so DA-Player gets CD titles from gnudb.gnudb.org.
 - A TCP connection whose IPv6 address expires or is withdrawn by the router
   no longer stops the network when a tail loss probe fires.
 - A resent block that spans the 32-bit sequence number wrap is sent in full
