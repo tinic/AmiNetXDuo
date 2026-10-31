@@ -12,7 +12,7 @@
  * Kickstart 2.04: commodities.library, workbench.library and icon.library
  * are each optional.  A new picture is a new AppIcon; from Workbench 3.5 on
  * WBAPPICONA_PropagatePosition keeps the place it was dragged to, before
- * that it returns to a free place.
+ * that it reuses explicit XPOS/YPOS, or returns to a free place.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -29,6 +29,7 @@
 #include <dos/var.h>
 #include <intuition/intuition.h>
 #include <libraries/commodities.h>
+#include <utility/hooks.h>
 #include <workbench/icon.h>
 #include <workbench/startup.h>
 #include <workbench/workbench.h>
@@ -48,17 +49,19 @@ struct Library       *IconBase;
 struct IntuitionBase *IntuitionBase;
 
 #define TEMPLATE "CX_PRIORITY/K/N,CX_POPKEY/K,CX_POPUP/K,DEVICE/K,UNIT/K/N," \
-                 "INTERFACE/K,INTERVAL/K/N,APPICON/K,APPMENU/K,ENVVAR/K,QUIET/S"
+                 "INTERFACE/K,INTERVAL/K/N,APPICON/K,APPMENU/K,ENVVAR/K," \
+                 "XPOS/K,YPOS/K,QUIET/S"
 
 enum
 {
     ARG_PRI, ARG_POPKEY, ARG_POPUP, ARG_DEVICE, ARG_UNIT, ARG_INTERFACE,
-    ARG_INTERVAL, ARG_APPICON, ARG_APPMENU, ARG_ENVVAR, ARG_QUIET, ARG_COUNT
+    ARG_INTERVAL, ARG_APPICON, ARG_APPMENU, ARG_ENVVAR, ARG_XPOS, ARG_YPOS,
+    ARG_QUIET, ARG_COUNT
 };
 
 
-#define NW_ICON_W   32
-#define NW_ICON_H   16
+#define NW_ICON_W   NW_ICON_SIZE
+#define NW_ICON_H   NW_ICON_SIZE
 #define NW_PLANE    (((NW_ICON_W + 15) / 16) * 2 * NW_ICON_H)
 #define NW_HOTKEY   1
 
@@ -94,6 +97,10 @@ static struct
     struct AppMenuItem *appmenu;
     BOOL                want_icon;
     UBYTE              *planes;             /* chip memory                  */
+    struct DiskObject  *color_icon;          /* icon.library V44, optional   */
+    UBYTE              *color_pixels;        /* normal then selected         */
+    struct ColorRegister colors[NW_ICON_COLORS];
+    BOOL                color_shown;
 } nw;
 
 /* The AppIcon: a two-plane image whose planes are filled in chip memory. */
@@ -183,20 +190,108 @@ static VOID nw_icon_remove(VOID)
 {
     if (nw.appicon != NULL) RemoveAppIcon(nw.appicon);
     nw.appicon = NULL;
+    if (nw.color_shown)
+    {
+        nw_dob.do_CurrentX = nw.color_icon->do_CurrentX;
+        nw_dob.do_CurrentY = nw.color_icon->do_CurrentY;
+        nw.color_shown = FALSE;
+    }
 }
+
+/* Draw without clearing the backdrop. Returning FALSE replaces Workbench's
+   regular AppIcon rendering, so the hook must draw the label as well. The
+   native icon remains valid until RemoveAppIcon has finished. */
+static ULONG nw_icon_draw(register struct Hook *hook __asm("a0"),
+                          register APTR reserved __asm("a2"),
+                          register struct AppIconRenderMsg *arm __asm("a1"))
+{
+    struct TagItem tags[3];
+
+    (VOID)hook;
+    (VOID)reserved;
+    tags[0].ti_Tag = ICONDRAWA_EraseBackground; tags[0].ti_Data = FALSE;
+    tags[1].ti_Tag = ICONDRAWA_Frameless;       tags[1].ti_Data = TRUE;
+    tags[2].ti_Tag = TAG_MORE; tags[2].ti_Data = (ULONG)arm->arm_Tags;
+    DrawIconStateA(arm->arm_RastPort, nw.color_icon, arm->arm_Label,
+                   arm->arm_Left, arm->arm_Top, arm->arm_State, tags);
+    return FALSE;
+}
+
+static struct Hook nw_icon_hook;
 
 static VOID nw_icon_add(VOID)
 {
-    struct TagItem t[2];
+    struct TagItem t[3];
+    struct DiskObject *dob = &nw_dob;
+
+    /* Workbench remaps its own copy to the current desktop palette. Keep
+       no public-screen lock or screen pointer across desktop mode changes. */
+    if (nw.color_icon != NULL && LayoutIconA(nw.color_icon, NULL, NULL) &&
+        nw.color_icon->do_Gadget.GadgetRender != NULL)
+    {
+        nw.color_icon->do_CurrentX = nw_dob.do_CurrentX;
+        nw.color_icon->do_CurrentY = nw_dob.do_CurrentY;
+        dob = nw.color_icon;
+    }
 
     /* Workbench 3.5 and later write a position the user dragged the icon
        to back into nw_dob, so the next AddAppIcon puts it there again. */
     t[0].ti_Tag = WBAPPICONA_PropagatePosition;
     t[0].ti_Data = TRUE;
-    t[1].ti_Tag = TAG_DONE;
+    nw_icon_hook.h_Entry = (ULONG (*)())(APTR)nw_icon_draw;
+    t[1].ti_Tag = dob == nw.color_icon ? WBAPPICONA_RenderHook : TAG_IGNORE;
+    t[1].ti_Data = (ULONG)&nw_icon_hook;
+    t[2].ti_Tag = TAG_DONE; t[2].ti_Data = 0;
     /* Before V44 the tag list must be NULL. */
     nw.appicon = AddAppIconA(0, 0, (STRPTR)nw.label, nw.appport, (BPTR)0,
-                             &nw_dob, WorkbenchBase->lib_Version >= 44 ? t : NULL);
+                             dob, WorkbenchBase->lib_Version >= 44 ? t : NULL);
+    nw.color_shown = nw.appicon != NULL && dob == nw.color_icon;
+    if (nw.appicon == NULL && dob != &nw_dob)
+    {
+        t[1].ti_Tag = TAG_IGNORE;
+        nw.appicon = AddAppIconA(0, 0, (STRPTR)nw.label, nw.appport, (BPTR)0,
+                                &nw_dob, t);
+    }
+}
+
+/* A real library-allocated icon is required for palette-mapped imagery.
+   All V44 calls are guarded; failure leaves the classic picture usable. */
+static VOID nw_color_create(VOID)
+{
+    struct TagItem tags[12];
+    int i;
+
+    /* AddAppIcon needs a real planar image even with a render hook.
+       A blank NewDiskObject has none and is rejected by Workbench 3.2. */
+    nw.color_icon = DupDiskObjectA(&nw_dob, NULL);
+    if (nw.color_icon == NULL) return;
+    for (i = 0; i < NW_ICON_COLORS; i++)
+    {
+        nw.colors[i].red = nw_icon_palette[i][0];
+        nw.colors[i].green = nw_icon_palette[i][1];
+        nw.colors[i].blue = nw_icon_palette[i][2];
+    }
+    tags[0].ti_Tag = ICONCTRLA_SetWidth;             tags[0].ti_Data = NW_ICON_W;
+    tags[1].ti_Tag = ICONCTRLA_SetHeight;            tags[1].ti_Data = NW_ICON_H;
+    tags[2].ti_Tag = ICONCTRLA_SetPaletteSize1;      tags[2].ti_Data = NW_ICON_COLORS;
+    tags[3].ti_Tag = ICONCTRLA_SetPaletteSize2;      tags[3].ti_Data = NW_ICON_COLORS;
+    tags[4].ti_Tag = ICONCTRLA_SetPalette1;          tags[4].ti_Data = (ULONG)nw.colors;
+    tags[5].ti_Tag = ICONCTRLA_SetPalette2;          tags[5].ti_Data = (ULONG)nw.colors;
+    tags[6].ti_Tag = ICONCTRLA_SetImageData1;        tags[6].ti_Data = (ULONG)nw.color_pixels;
+    tags[7].ti_Tag = ICONCTRLA_SetImageData2;
+    tags[7].ti_Data = (ULONG)(nw.color_pixels + NW_ICON_W * NW_ICON_H);
+    tags[8].ti_Tag = ICONCTRLA_SetTransparentColor1; tags[8].ti_Data = 0;
+    tags[9].ti_Tag = ICONCTRLA_SetTransparentColor2; tags[9].ti_Data = 0;
+    tags[10].ti_Tag = ICONCTRLA_SetFrameless;        tags[10].ti_Data = TRUE;
+    tags[11].ti_Tag = TAG_DONE;                     tags[11].ti_Data = 0;
+    if (IconControlA(nw.color_icon, tags) == 11)
+    {
+        nw.color_icon->do_CurrentX = NO_ICON_POSITION;
+        nw.color_icon->do_CurrentY = NO_ICON_POSITION;
+        return;
+    }
+    FreeDiskObject(nw.color_icon);
+    nw.color_icon = NULL;
 }
 
 /* The AppIcon and the variable after a state change.  Workbench keeps its
@@ -209,8 +304,20 @@ static VOID nw_show(VOID)
 
     if (nw.want_icon && nw.planes != NULL)
     {
-        nw_icon_render((int)nw.icon, (int)nw.bars, NW_ICON_W, NW_ICON_H, nw.planes);
+        /* Retire Workbench's copy before changing any backing image data. */
         nw_icon_remove();
+        if (nw.color_icon != NULL) FreeDiskObject(nw.color_icon);
+        nw.color_icon = NULL;
+        nw_icon_render((int)nw.icon, (int)nw.bars, NW_ICON_W, NW_ICON_H, nw.planes);
+        if (nw.color_pixels != NULL)
+        {
+            nw_icon_render_color((int)nw.icon, (int)nw.bars, NW_ICON_W, NW_ICON_H,
+                                  nw.color_pixels,
+                                  nw.color_pixels + NW_ICON_W * NW_ICON_H);
+            /* Fresh native imagery avoids cached mapped pixels from the
+               preceding state. This runs only when the picture changes. */
+            nw_color_create();
+        }
         nw_icon_add();
     }
 
@@ -475,6 +582,7 @@ int main(int argc, char **argv)
     const char    *device, *iface;
     ULONG          sigs;
     BOOL           run = TRUE;
+    LONG           result = RETURN_OK;
 
     IconBase = OpenLibrary("icon.library", 37);
     if (argc == 0)
@@ -494,6 +602,33 @@ int main(int argc, char **argv)
         PrintFault(IoErr(), (CONST_STRPTR)tool_name);
         if (IconBase != NULL) CloseLibrary(IconBase);
         return RETURN_ERROR;
+    }
+
+    /* Set the initial position only. V44 position propagation updates this
+       same DiskObject after a drag, and nw_icon_remove carries the native
+       icon's position back here before replacing its picture. */
+    if (nw_icon_position(nw_opt(ARG_XPOS), nw_opt(ARG_YPOS),
+                         &nw_dob.do_CurrentX, &nw_dob.do_CurrentY) < 0)
+    {
+        static const char message[] =
+            "NetWireless: XPOS and YPOS require a pair of "
+            "decimal coordinates in 0..32767.\n";
+
+        if (argc == 0)
+        {
+            struct EasyStruct es =
+                { sizeof(es), 0, (STRPTR)"NetWireless", (STRPTR)message,
+                  (STRPTR)"OK" };
+
+            IntuitionBase = (struct IntuitionBase *)
+                OpenLibrary((CONST_STRPTR)"intuition.library", 37);
+            if (IntuitionBase != NULL)
+                (VOID)EasyRequestArgs(NULL, &es, NULL, NULL);
+        }
+        else
+            PutStr((CONST_STRPTR)message);
+        result = RETURN_ERROR;
+        goto out;
     }
 
     device = nw_opt(ARG_DEVICE);
@@ -548,6 +683,10 @@ int main(int argc, char **argv)
             (nw.planes = (UBYTE *)AllocMem(2 * NW_PLANE, MEMF_CHIP)) != NULL)
         {
             nw_img.ImageData = (UWORD *)nw.planes;
+            if (IconBase != NULL && IconBase->lib_Version >= 44 &&
+                WorkbenchBase->lib_Version >= 44)
+                nw.color_pixels = AllocVec(2 * NW_ICON_W * NW_ICON_H,
+                                           MEMF_ANY | MEMF_CLEAR);
         }
     }
 
@@ -613,6 +752,8 @@ int main(int argc, char **argv)
 
 out:
     nw_icon_remove();
+    if (nw.color_icon != NULL) FreeDiskObject(nw.color_icon);
+    if (nw.color_pixels != NULL) FreeVec(nw.color_pixels);
     if (nw.appmenu != NULL) RemoveAppMenuItem(nw.appmenu);
     if (nw.appport != NULL)
     {
@@ -648,5 +789,5 @@ out:
     if (nw_tool != NULL) FreeDiskObject(nw_tool);
     if (rda != NULL) FreeArgs(rda);
     if (IconBase != NULL) CloseLibrary(IconBase);
-    return RETURN_OK;
+    return result;
 }
