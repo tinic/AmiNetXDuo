@@ -57,8 +57,8 @@ enum
 };
 
 
-#define NW_ICON_W   32
-#define NW_ICON_H   16
+#define NW_ICON_W   NW_ICON_SIZE
+#define NW_ICON_H   NW_ICON_SIZE
 #define NW_PLANE    (((NW_ICON_W + 15) / 16) * 2 * NW_ICON_H)
 #define NW_HOTKEY   1
 
@@ -94,6 +94,10 @@ static struct
     struct AppMenuItem *appmenu;
     BOOL                want_icon;
     UBYTE              *planes;             /* chip memory                  */
+    struct DiskObject  *color_icon;          /* icon.library V44, optional   */
+    UBYTE              *color_pixels;        /* normal then selected         */
+    struct ColorRegister colors[NW_ICON_COLORS];
+    BOOL                color_shown;
 } nw;
 
 /* The AppIcon: a two-plane image whose planes are filled in chip memory. */
@@ -183,11 +187,27 @@ static VOID nw_icon_remove(VOID)
 {
     if (nw.appicon != NULL) RemoveAppIcon(nw.appicon);
     nw.appicon = NULL;
+    if (nw.color_shown)
+    {
+        nw_dob.do_CurrentX = nw.color_icon->do_CurrentX;
+        nw_dob.do_CurrentY = nw.color_icon->do_CurrentY;
+        nw.color_shown = FALSE;
+    }
 }
 
 static VOID nw_icon_add(VOID)
 {
     struct TagItem t[2];
+    struct DiskObject *dob = &nw_dob;
+
+    /* Workbench remaps its own copy to the current desktop palette. Keep
+       no public-screen lock or screen pointer across desktop mode changes. */
+    if (nw.color_icon != NULL && LayoutIconA(nw.color_icon, NULL, NULL))
+    {
+        nw.color_icon->do_CurrentX = nw_dob.do_CurrentX;
+        nw.color_icon->do_CurrentY = nw_dob.do_CurrentY;
+        dob = nw.color_icon;
+    }
 
     /* Workbench 3.5 and later write a position the user dragged the icon
        to back into nw_dob, so the next AddAppIcon puts it there again. */
@@ -196,7 +216,49 @@ static VOID nw_icon_add(VOID)
     t[1].ti_Tag = TAG_DONE;
     /* Before V44 the tag list must be NULL. */
     nw.appicon = AddAppIconA(0, 0, (STRPTR)nw.label, nw.appport, (BPTR)0,
-                             &nw_dob, WorkbenchBase->lib_Version >= 44 ? t : NULL);
+                             dob, WorkbenchBase->lib_Version >= 44 ? t : NULL);
+    nw.color_shown = nw.appicon != NULL && dob == nw.color_icon;
+    if (nw.appicon == NULL && dob != &nw_dob)
+        nw.appicon = AddAppIconA(0, 0, (STRPTR)nw.label, nw.appport, (BPTR)0,
+                                &nw_dob, t);
+}
+
+/* A real library-allocated icon is required for palette-mapped imagery.
+   All V44 calls are guarded; failure leaves the classic picture usable. */
+static VOID nw_color_create(VOID)
+{
+    struct TagItem tags[12];
+    int i;
+
+    nw.color_icon = NewDiskObject(WBTOOL);
+    if (nw.color_icon == NULL) return;
+    for (i = 0; i < NW_ICON_COLORS; i++)
+    {
+        nw.colors[i].red = nw_icon_palette[i][0];
+        nw.colors[i].green = nw_icon_palette[i][1];
+        nw.colors[i].blue = nw_icon_palette[i][2];
+    }
+    tags[0].ti_Tag = ICONCTRLA_SetWidth;             tags[0].ti_Data = NW_ICON_W;
+    tags[1].ti_Tag = ICONCTRLA_SetHeight;            tags[1].ti_Data = NW_ICON_H;
+    tags[2].ti_Tag = ICONCTRLA_SetPaletteSize1;      tags[2].ti_Data = NW_ICON_COLORS;
+    tags[3].ti_Tag = ICONCTRLA_SetPaletteSize2;      tags[3].ti_Data = NW_ICON_COLORS;
+    tags[4].ti_Tag = ICONCTRLA_SetPalette1;          tags[4].ti_Data = (ULONG)nw.colors;
+    tags[5].ti_Tag = ICONCTRLA_SetPalette2;          tags[5].ti_Data = (ULONG)nw.colors;
+    tags[6].ti_Tag = ICONCTRLA_SetImageData1;        tags[6].ti_Data = (ULONG)nw.color_pixels;
+    tags[7].ti_Tag = ICONCTRLA_SetImageData2;
+    tags[7].ti_Data = (ULONG)(nw.color_pixels + NW_ICON_W * NW_ICON_H);
+    tags[8].ti_Tag = ICONCTRLA_SetTransparentColor1; tags[8].ti_Data = 0;
+    tags[9].ti_Tag = ICONCTRLA_SetTransparentColor2; tags[9].ti_Data = 0;
+    tags[10].ti_Tag = ICONCTRLA_SetFrameless;        tags[10].ti_Data = TRUE;
+    tags[11].ti_Tag = TAG_DONE;                     tags[11].ti_Data = 0;
+    if (IconControlA(nw.color_icon, tags) == 11)
+    {
+        nw.color_icon->do_CurrentX = NO_ICON_POSITION;
+        nw.color_icon->do_CurrentY = NO_ICON_POSITION;
+        return;
+    }
+    FreeDiskObject(nw.color_icon);
+    nw.color_icon = NULL;
 }
 
 /* The AppIcon and the variable after a state change.  Workbench keeps its
@@ -209,8 +271,20 @@ static VOID nw_show(VOID)
 
     if (nw.want_icon && nw.planes != NULL)
     {
-        nw_icon_render((int)nw.icon, (int)nw.bars, NW_ICON_W, NW_ICON_H, nw.planes);
+        /* Retire Workbench's copy before changing any backing image data. */
         nw_icon_remove();
+        if (nw.color_icon != NULL) FreeDiskObject(nw.color_icon);
+        nw.color_icon = NULL;
+        nw_icon_render((int)nw.icon, (int)nw.bars, NW_ICON_W, NW_ICON_H, nw.planes);
+        if (nw.color_pixels != NULL)
+        {
+            nw_icon_render_color((int)nw.icon, (int)nw.bars, NW_ICON_W, NW_ICON_H,
+                                  nw.color_pixels,
+                                  nw.color_pixels + NW_ICON_W * NW_ICON_H);
+            /* Fresh native imagery avoids cached mapped pixels from the
+               preceding state. This runs only when the picture changes. */
+            nw_color_create();
+        }
         nw_icon_add();
     }
 
@@ -548,6 +622,10 @@ int main(int argc, char **argv)
             (nw.planes = (UBYTE *)AllocMem(2 * NW_PLANE, MEMF_CHIP)) != NULL)
         {
             nw_img.ImageData = (UWORD *)nw.planes;
+            if (IconBase != NULL && IconBase->lib_Version >= 44 &&
+                WorkbenchBase->lib_Version >= 44)
+                nw.color_pixels = AllocVec(2 * NW_ICON_W * NW_ICON_H,
+                                           MEMF_ANY | MEMF_CLEAR);
         }
     }
 
@@ -613,6 +691,8 @@ int main(int argc, char **argv)
 
 out:
     nw_icon_remove();
+    if (nw.color_icon != NULL) FreeDiskObject(nw.color_icon);
+    if (nw.color_pixels != NULL) FreeVec(nw.color_pixels);
     if (nw.appmenu != NULL) RemoveAppMenuItem(nw.appmenu);
     if (nw.appport != NULL)
     {

@@ -77,18 +77,30 @@ void nw_ssid_text(const unsigned char *ssid, int len, char *out);
 /* What the AppIcon shows. */
 enum
 {
-    NW_ICON_NODEV,                  /* bar outlines crossed out          */
-    NW_ICON_OFF,                    /* dotted outlines                   */
-    NW_ICON_JOINING,                /* bar outlines                      */
-    NW_ICON_CONNECTED,              /* 1-4 filled bars                   */
-    NW_ICON_ERROR                   /* outlines and a '!' for the tallest */
+    NW_ICON_NODEV,                  /* radio with a small unavailable X  */
+    NW_ICON_OFF,                    /* radio with a power badge          */
+    NW_ICON_JOINING,                /* hollow radio arcs                 */
+    NW_ICON_CONNECTED,              /* dot plus 0-3 filled radio arcs     */
+    NW_ICON_ERROR                   /* radio with a small '!' badge      */
 };
+
+#define NW_ICON_SIZE    32
+#define NW_ICON_COLORS   8
+
+/* Neutral greys, pen zero transparent. State is conveyed by shape as well
+   as shading; no theme palette or particular accent colour is required. */
+extern const unsigned char nw_icon_palette[NW_ICON_COLORS][3];
+
+/* Normal and selected palette indices, each w*h bytes. Selection changes
+   shading only: both states have exactly the same opaque silhouette. */
+void nw_icon_render_color(int state, int bars, int w, int h,
+                          unsigned char *normal, unsigned char *selected);
 
 /* Bar i (0..3) of a w x h picture, inclusive corners.  The four bars are
    apart and inside from 13 x 4 up; nothing smaller is drawn. */
 void nw_bar_rect(int i, int w, int h, int *x0, int *y0, int *x1, int *y1);
 
-/* The pen of pixel (x, y): 0 background, 1 outline, 3 fill. */
+/* Classic Workbench pens: 0 background, 1 dark, 2 light. */
 int nw_icon_pen(int state, int bars, int w, int h, int x, int y);
 
 /* The picture as a two-plane Intuition Image: plane 0's rows, then plane 1's,

@@ -157,78 +157,97 @@ static void test_bars(void)
           "a large change moves at once");
 }
 
-#define W 26
-#define H 14
+#define W NW_ICON_SIZE
+#define H NW_ICON_SIZE
+
+/* The preferences list still uses rectangular bars. Its geometry is
+   independent of the commodity's new radio symbol. */
+static void test_bar_geometry(void)
+{
+    int i, x0, y0, x1, y1, previous = -2;
+
+    for (i = 0; i < 4; i++)
+    {
+        nw_bar_rect(i, 26, 14, &x0, &y0, &x1, &y1);
+        check(x0 > previous + 1 && x1 < 26 && y1 == 13 && y0 >= 0 && x1 > x0 + 1,
+              "list bars apart, inside, standing on the bottom row");
+        previous = x1;
+    }
+    nw_bar_rect(0, 26, 14, &x0, &y0, &x1, &y1);
+    check(y0 > 0, "the first list bar is the shortest");
+    nw_bar_rect(3, 26, 14, &x0, &y0, &x1, &y1);
+    check(y0 == 0, "the fourth list bar is full height");
+}
 
 static void test_picture(void)
 {
-    unsigned char planes[2 * H * 4];
-    int i, x, y, x0, y0, x1, y1, px0, px1 = -2;
+    unsigned char normal[W * H], selected[W * H], previous[W * H];
+    unsigned char joining[W * H], planes[2 * H * 4];
+    int state, bars, i, x, y, filled, last_filled = 0;
 
-    for (i = 0; i < 4; i++)
-    {
-        nw_bar_rect(i, W, H, &x0, &y0, &x1, &y1);
-        check(x0 > px1 + 1 && x1 < W && y1 == H - 1 && y0 >= 0 && x1 > x0 + 1,
-              "bars apart, inside, standing on the bottom row");
-        px0 = x0;
-        px1 = x1;
-        (void)px0;
-    }
-    nw_bar_rect(0, W, H, &x0, &y0, &x1, &y1);
-    check(y0 > 0, "the first bar is the shortest");
-    nw_bar_rect(3, W, H, &x0, &y0, &x1, &y1);
-    check(y0 == 0, "the fourth bar is full height");
-
-    /* Two bars: the first two filled, the others hollow. */
-    for (i = 0; i < 4; i++)
-    {
-        nw_bar_rect(i, W, H, &x0, &y0, &x1, &y1);
-        check(nw_icon_pen(NW_ICON_CONNECTED, 2, W, H, x0, y1) == 1, "outline");
-        check(nw_icon_pen(NW_ICON_CONNECTED, 2, W, H, x0 + 1, y1 - 1) ==
-              (i < 2 ? 3 : 0), "filled up to the bar count");
-        check(nw_icon_pen(NW_ICON_JOINING, 0, W, H, x0 + 1, y1 - 1) == 0,
-              "joining is hollow");
-    }
-    check(nw_icon_pen(NW_ICON_CONNECTED, 4, W, H, 0, 0) == 0, "space above bars");
-
-    /* Off: dotted outline. */
-    nw_bar_rect(0, W, H, &x0, &y0, &x1, &y1);
-    check(nw_icon_pen(NW_ICON_OFF, 0, W, H, x0, y1) !=
-          nw_icon_pen(NW_ICON_OFF, 0, W, H, x0 + 1, y1), "off outline dotted");
-
-    /* No device: both diagonals reach the corners. */
-    check(nw_icon_pen(NW_ICON_NODEV, 0, W, H, 0, 0) == 1 &&
-          nw_icon_pen(NW_ICON_NODEV, 0, W, H, W - 1, H - 1) == 1 &&
-          nw_icon_pen(NW_ICON_NODEV, 0, W, H, 0, H - 1) == 1 &&
-          nw_icon_pen(NW_ICON_NODEV, 0, W, H, W - 1, 0) == 1, "crossed out");
-
-    /* Error: the tallest bar is a '!', its gap two rows from the bottom. */
-    nw_bar_rect(3, W, H, &x0, &y0, &x1, &y1);
-    x = (x0 + x1) / 2;
-    check(nw_icon_pen(NW_ICON_ERROR, 0, W, H, x, y0) == 1 &&
-          nw_icon_pen(NW_ICON_ERROR, 0, W, H, x, y1 - 2) == 0 &&
-          nw_icon_pen(NW_ICON_ERROR, 0, W, H, x, y1) == 1 &&
-          nw_icon_pen(NW_ICON_ERROR, 0, W, H, x0, y1) == 0, "exclamation mark");
-
-    /* Planes: pen 1 in plane 0, pen 3 in both, MSB first, 2-byte rows. */
-    nw_icon_render(NW_ICON_CONNECTED, 4, W, H, planes);
-    for (y = 0; y < H; y++)
-        for (x = 0; x < W; x++)
+    for (i = 0; i < NW_ICON_COLORS; i++)
+        check(nw_icon_palette[i][0] == nw_icon_palette[i][1] &&
+              nw_icon_palette[i][1] == nw_icon_palette[i][2], "neutral palette");
+    for (state = NW_ICON_NODEV; state <= NW_ICON_ERROR; state++)
+        for (bars = 0; bars <= 4; bars++)
         {
-            int pen = nw_icon_pen(NW_ICON_CONNECTED, 4, W, H, x, y);
+            nw_icon_render_color(state, bars, W, H, normal, selected);
+            for (i = 0; i < W * H; i++)
+            {
+                check(normal[i] < NW_ICON_COLORS && selected[i] < NW_ICON_COLORS,
+                      "palette bounds");
+                check((normal[i] == 0) == (selected[i] == 0),
+                      "selection keeps the opaque silhouette");
+            }
+            check(normal[0] == 0 && normal[W - 1] == 0 &&
+                  normal[(H - 1) * W] == 0, "no enclosing rectangle or full cross");
+        }
+    for (bars = 1; bars <= 4; bars++)
+    {
+        nw_icon_render_color(NW_ICON_CONNECTED, bars, W, H, normal, selected);
+        filled = 0;
+        for (i = 0; i < W * H; i++) filled += normal[i] != 0;
+        check(filled > last_filled, "each signal level fills another radio arc");
+        if (bars > 1)
+            for (i = 0; i < W * H; i++)
+                check(previous[i] == 0 || normal[i] != 0,
+                      "stronger signal keeps existing visible pixels");
+        check(memcmp(normal, selected, sizeof(normal)) != 0,
+              "selection has a distinct highlight");
+        memcpy(previous, normal, sizeof(previous));
+        last_filled = filled;
+    }
+    nw_icon_render_color(NW_ICON_JOINING, 0, W, H, joining, selected);
+    memset(previous, 0, sizeof(previous));
+    for (state = NW_ICON_NODEV; state <= NW_ICON_ERROR; state++)
+    {
+        if (state == NW_ICON_JOINING || state == NW_ICON_CONNECTED) continue;
+        nw_icon_render_color(state, 0, W, H, normal, selected);
+        check(memcmp(normal, joining, 22 * W) == 0,
+              "status badge leaves the radio unobscured");
+        check(memcmp(normal, joining, sizeof(normal)) != 0 &&
+              memcmp(normal, previous, sizeof(normal)) != 0,
+              "unavailable, off and error badges are distinguishable");
+        memcpy(previous, normal, sizeof(previous));
+    }
+
+    /* The classic planar image uses the same geometry, on Workbench pens.
+       Width 26 also verifies the word-aligned row padding. */
+    nw_icon_render(NW_ICON_CONNECTED, 3, 26, H, planes);
+    for (y = 0; y < H; y++)
+        for (x = 0; x < 26; x++)
+        {
+            int pen = nw_icon_pen(NW_ICON_CONNECTED, 3, 26, H, x, y);
             int b0 = (planes[y * 4 + x / 8] >> (7 - x % 8)) & 1;
             int b1 = (planes[H * 4 + y * 4 + x / 8] >> (7 - x % 8)) & 1;
-            if (b0 != (pen & 1) || b1 != ((pen >> 1) & 1))
-            {
-                check(0, "plane bits match the pens");
-                return;
-            }
+            check(pen >= 0 && pen <= 3, "classic pen bounds");
+            check(b0 == (pen & 1) && b1 == ((pen >> 1) & 1),
+                  "plane bits match the pens");
         }
     for (y = 0; y < H; y++)
-        check((planes[y * 4 + 3] & 0x3f) == 0 && (planes[H * 4 + y * 4 + 3] & 0x3f) == 0,
+        check((planes[y * 4 + 3] & 0x3f) == 0 &&
+              (planes[H * 4 + y * 4 + 3] & 0x3f) == 0,
               "padding bits past the width are clear");
-
-    /* Below 13 x 4 the bars cannot be apart: nothing is drawn. */
     memset(planes, 0xff, sizeof(planes));
     nw_icon_render(NW_ICON_CONNECTED, 4, 12, 4, planes);
     for (y = 0, x = 0; y < 2 * 4 * 2; y++) x |= planes[y];
@@ -260,6 +279,7 @@ int main(void)
     test_rank_sort();
     test_security();
     test_bars();
+    test_bar_geometry();
     test_scan();
     test_picture();
     if (failures == 0) printf("netwireless sig: all passed\n");
