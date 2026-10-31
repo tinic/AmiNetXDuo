@@ -294,7 +294,9 @@
       "INTERFACE": "eth0",
       "INTERVAL": "1",
       "QUIET": true,
-      "UNIT": "1"
+      "UNIT": "1",
+      "XPOS": "100",
+      "YPOS": "80"
     }
   },
   "NetWirelessPrefs": {
