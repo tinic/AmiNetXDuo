@@ -534,7 +534,9 @@ host_test_targets() { # builddir
 #      never saved, saved east and saved west (all hosts).
 #      593 with netenv_configuration (#402): IPv4/IPv6 projection and
 #      changed-value publication/withdrawal (all hosts).
-HOST_TESTS_EXPECTED=593
+#      594 with config_devs_redirect: the NetInterfaces drawer each install
+#      layout reads, a stale drawer outside DEVS: included (all hosts).
+HOST_TESTS_EXPECTED=594
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,

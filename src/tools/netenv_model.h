@@ -58,4 +58,28 @@ const char *ne_value(const NeTable *table, const char *name);
 int ne_own(NeOwned *owned, const char *name);
 int ne_publish(NeOwned *owned, const NeTable *desired,
                NeRead read_value, NeWrite write_value, void *ctx);
+/* AmigaDOS IoErr() values for an ENV: object that is already gone. */
+#define NE_ERR_DIR_NOT_FOUND 204
+#define NE_ERR_OBJECT_NOT_FOUND 205
+/* DeleteFile() of an ENV: path: 0 = deleted, else its IoErr(). */
+typedef long (*NeDelete)(void *, const char *);
+/* Delete ENV:<name>, then its directories bottom-up while they are empty.
+ * Never ENV: itself. A missing variable or directory counts as deleted. */
+int ne_remove(const char *name, NeDelete delete_path, void *ctx);
+/* One refresh through bsdsocket.library. open: base or NULL; collect: 0 =
+ * failed; pending: CTRL-C set, cleared when clear is nonzero. NetShutdown
+ * sends CTRL-C to every opener: one that arrives while the base is open
+ * means "let go", is taken, and leaves the stack DOWN. One already set
+ * before open is a user break and is left for the caller's Wait(). A user
+ * break inside the refresh reads as the first case; Break again. */
+typedef struct NeStack {
+    void *(*open)(void *ctx);
+    int (*collect)(void *ctx, void *base, NeSnapshot *s);
+    void (*close)(void *ctx, void *base);
+    int (*pending)(void *ctx, int clear);
+    void *ctx;
+} NeStack;
+void ne_refresh(NeSnapshot *s, const NeStack *stack);
+/* The $VER: string without its "$VER: " prefix. */
+const char *ne_version(const char *verstag);
 #endif

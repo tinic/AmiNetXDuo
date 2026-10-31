@@ -977,7 +977,8 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     # Configuration projection, withdrawal and change-only ENV publication.
     add_executable(test_netenv test/test_netenv.c netenv_model.c)
-    target_include_directories(test_netenv PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    target_include_directories(test_netenv PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_BINARY_DIR}/include")
     target_compile_options(test_netenv PRIVATE -Wall -Wextra)
     set_target_properties(test_netenv PROPERTIES C_STANDARD 11)
 

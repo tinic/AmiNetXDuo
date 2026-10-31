@@ -35,8 +35,11 @@ static union {
 
 static LONG query(struct Library *base, ULONG what, ULONG size, ULONG entry_size)
 {
-    LONG count = tool_netstatus_query(base, what, &answer, size, entry_size);
+    LONG count;
     NetStatusHeader *h = (NetStatusHeader *)&answer;
+    /* NetShutdown is waiting for the base: no further queries. */
+    if (SetSignal(0, 0) & SIGBREAKF_CTRL_C) return -1;
+    count = tool_netstatus_query(base, what, &answer, size, entry_size);
     if (count < 0 || h->nsh_Available != h->nsh_Count ||
         (ULONG)count > (size - sizeof(*h)) / entry_size) return -1;
     return count;
@@ -121,17 +124,23 @@ static int collect(struct Library *base)
     return 1;
 }
 
+static void *stack_open(void *ctx) { (void)ctx; return tool_netstatus_open_resident(); }
+static int stack_collect(void *ctx, void *base, NeSnapshot *s)
+{
+    (void)ctx; (void)s;
+    return collect((struct Library *)base);
+}
+static void stack_close(void *ctx, void *base) { (void)ctx; tool_netstatus_close((struct Library *)base); }
+static int stack_pending(void *ctx, int clear)
+{
+    (void)ctx;
+    return (SetSignal(0, clear ? SIGBREAKF_CTRL_C : 0) & SIGBREAKF_CTRL_C) != 0;
+}
+
 static void refresh(void)
 {
-    struct Library *base;
-    memset(&snapshot, 0, sizeof(snapshot));
-    snapshot.state = "DOWN";
-    base = tool_netstatus_open_resident();
-    if (base) {
-        snapshot.state = "UP";
-        if (!collect(base)) snapshot.state = "ERROR";
-        tool_netstatus_close(base);
-    }
+    static const NeStack stack = { stack_open, stack_collect, stack_close, stack_pending, NULL };
+    ne_refresh(&snapshot, &stack);
     if (!ne_build(&snapshot, &desired)) {
         memset(&snapshot, 0, sizeof(snapshot));
         snapshot.state = "ERROR";
@@ -147,6 +156,15 @@ static int env_read(void *ctx, const char *name, char *value, size_t size)
     if (n < 0 || (ULONG)n >= size) return 0;
     value[n] = 0;
     return 1;
+}
+
+typedef char ne_dos_errors[(NE_ERR_DIR_NOT_FOUND == ERROR_DIR_NOT_FOUND &&
+                            NE_ERR_OBJECT_NOT_FOUND == ERROR_OBJECT_NOT_FOUND) ? 1 : -1];
+
+static long env_delete(void *ctx, const char *path)
+{
+    (void)ctx;
+    return DeleteFile((CONST_STRPTR)path) ? 0 : IoErr();
 }
 
 static int env_write(void *ctx, const char *name, const char *value)
@@ -167,13 +185,10 @@ static int env_write(void *ctx, const char *name, const char *value)
         }
         return SetVar((CONST_STRPTR)name, (CONST_STRPTR)value, -1, GVF_GLOBAL_ONLY) != 0;
     }
-    if (!DeleteVar((CONST_STRPTR)name, GVF_GLOBAL_ONLY) &&
-        IoErr() != ERROR_OBJECT_NOT_FOUND) return 0;
-    /* Only empty directories, and only inside our namespace. */
-    strcat(path, name);
-    p = strrchr(path, '/');
-    if (p) { *p = 0; (void)DeleteFile((CONST_STRPTR)path); }
-    return 1;
+    /* Not DeleteVar(): on 3.1 it fails when the directory is missing, on
+       3.2 it leaves an unreadable stub, even for a variable that never
+       existed, and the stubs keep the directories. */
+    return ne_remove(name, env_delete, NULL);
 }
 
 /* Recover only the documented keys after an earlier abnormal termination.
@@ -254,7 +269,7 @@ int main(int argc, char **argv)
     } else {
         rda = ReadArgs((CONST_STRPTR)TEMPLATE, args, NULL);
         if (!rda) { tool_fault(IoErr()); goto out; }
-        if (args[ARG_VERSION]) { tool_printf("%s\n", (LONG)(version_tag + 7)); rc = RETURN_OK; goto out; }
+        if (args[ARG_VERSION]) { tool_printf("%s\n", (LONG)ne_version(version_tag)); rc = RETURN_OK; goto out; }
         if (args[ARG_INTERVAL]) interval = *(LONG *)args[ARG_INTERVAL];
     }
     if (interval < 1 || interval > 3600) { tool_error("INTERVAL must be 1 to 3600 seconds"); goto out; }
@@ -320,8 +335,6 @@ int main(int argc, char **argv)
     if (!ne_publish(&owned, &desired, env_read, env_write, NULL)) {
         tool_error("could not remove all exported variables"); rc = RETURN_ERROR;
     }
-    (void)DeleteFile((CONST_STRPTR)"ENV:ANXD/IF");
-    (void)DeleteFile((CONST_STRPTR)"ENV:ANXD");
 out:
     if (armed) {
         if (!CheckIO((struct IORequest *)timer)) AbortIO((struct IORequest *)timer);

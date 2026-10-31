@@ -1,6 +1,7 @@
 /* Real projection/publication transitions, without AmigaOS or a new harness.
  * SPDX-License-Identifier: MIT */
 #include "netenv_model.h"
+#include "aminetxduo/version.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -48,6 +49,82 @@ static int write_env(void *ctx, const char *key, const char *value)
     if(!env[slot].value)abort();
     strcpy(env[slot].key,key);strcpy(env[slot].value,value);writes++;return 1;
 }
+/* A small ENV: volume: missing parents, non-empty directories, and the
+ * unreadable empty stub that DeleteVar() leaves on Kickstart 3.2. */
+static struct { char path[48]; int used, dir, stub; char value[64]; } fs[64];
+static int fs_find(const char *path)
+{
+    int i;
+    for (i=0;i<64;i++) if (fs[i].used && !strcmp(fs[i].path,path)) return i;
+    return -1;
+}
+static int fs_parent_exists(const char *path)
+{
+    char parent[48]; char *p;
+    strcpy(parent,path); p=strrchr(parent,'/');
+    if (!p) return 1;
+    *p=0; return fs_find(parent)>=0;
+}
+static void fs_add(const char *path, int dir, int stub, const char *value)
+{
+    int i=fs_find(path);
+    if (i<0) for (i=0;i<64 && fs[i].used;i++) ;
+    if (i==64) abort();
+    fs[i].used=1;fs[i].dir=dir;fs[i].stub=stub;
+    strcpy(fs[i].path,path);strcpy(fs[i].value,value?value:"");
+}
+static unsigned fs_count(void)
+{
+    unsigned i,n=0;
+    for (i=0;i<64;i++) n+=fs[i].used!=0;
+    return n;
+}
+static long fs_delete(void *ctx, const char *path)
+{
+    int i=fs_find(path), j;
+    size_t n=strlen(path);
+    (void)ctx;
+    if (i<0) return fs_parent_exists(path) ? NE_ERR_OBJECT_NOT_FOUND : NE_ERR_DIR_NOT_FOUND;
+    for (j=0;j<64;j++)
+        if (fs[j].used && !strncmp(fs[j].path,path,n) && fs[j].path[n]=='/') return 216;
+    fs[i].used=0; return 0;
+}
+static long fs_refuse(void *ctx, const char *path) { (void)ctx;(void)path; return 222; }
+static int fs_read(void *ctx, const char *key, char *buf, size_t cap)
+{
+    char path[48]="ENV:"; int i;
+    (void)ctx; strcat(path,key); i=fs_find(path);
+    if (i<0) return 0;
+    if (fs[i].stub || strlen(fs[i].value)>=cap) return -1;
+    strcpy(buf,fs[i].value); return 1;
+}
+static int fs_write(void *ctx, const char *key, const char *value)
+{
+    char path[48]="ENV:"; char *p;
+    if (!value) return ne_remove(key,fs_delete,ctx);
+    strcat(path,key);
+    for (p=path+4;*p;p++) if (*p=='/') { *p=0; if (fs_find(path)<0) fs_add(path,1,0,NULL); *p='/'; }
+    fs_add(path,0,0,value); return 1;
+}
+/* A resident stack and this task's CTRL-C; shutdown signals during collect. */
+static struct { int up, shutdown, ctrl_c, opened, closed; } rig;
+static void *rig_open(void *ctx) { (void)ctx; if (!rig.up) return NULL; rig.opened++; return &rig; }
+static int rig_collect(void *ctx, void *base, NeSnapshot *x)
+{
+    (void)ctx;(void)base;
+    x->interfaces=1;strcpy(x->iface[0].name,"eth0");x->iface[0].index=1;x->iface[0].up=1;
+    x->iface[0].address=0xc0a80102;x->iface[0].mask=0xffffff00;
+    if (rig.shutdown) { rig.ctrl_c=1; rig.up=0; return 0; }
+    return 1;
+}
+static void rig_close(void *ctx, void *base) { (void)ctx;(void)base; rig.closed++; }
+static int rig_pending(void *ctx, int clear)
+{
+    int was=rig.ctrl_c;
+    (void)ctx; if (clear) rig.ctrl_c=0;
+    return was;
+}
+static const NeStack rig_stack={rig_open,rig_collect,rig_close,rig_pending,NULL};
 static void value(const char *key,const char *want)
 {
     const char *got=ne_value(&t,key);
@@ -132,6 +209,50 @@ int main(void)
     check(ne_own(&owned,"ANXD/IF/old0/ADDRESS"),"recover previous instance key");
     check(write_env(NULL,"ANXD/IF/old0/ADDRESS","10.0.0.2"),"old ENV value");
     publish();check(!get("ANXD/IF/old0/ADDRESS"),"recovered stale key removed");
+    /* A fresh ENV: without ENV:ANXD/DEFAULT: withdrawing recovered keys is
+       not a failure, so STATE stays DOWN (KS3.1 read ERROR). */
+    memset(fs,0,sizeof(fs));
+    check(ne_remove("ANXD/DEFAULT/ADDRESS",fs_delete,NULL),"missing directory counts as deleted");
+    fs_add("ENV:ANXD",1,0,NULL);
+    check(ne_remove("ANXD/STATE",fs_delete,NULL),"missing variable counts as deleted");
+    check(!ne_remove("ANXD/STATE",fs_refuse,NULL),"other delete errors surface");
+    fs_delete(NULL,"ENV:ANXD");
+    memset(&owned,0,sizeof(owned));
+    check(ne_own(&owned,"ANXD/DEFAULT/ADDRESS")&&ne_own(&owned,"ANXD/DEFAULT6/GATEWAY"),"own recovered keys");
+    memset(&s,0,sizeof(s));s.state="DOWN";build();
+    check(ne_publish(&owned,&t,fs_read,fs_write,NULL),"fresh ENV: publish succeeds");
+    check(fs_find("ENV:ANXD/DEFAULT")<0,"no directory made for a withdrawn key");
+    /* KS3.2 DeleteVar() stubs: a withdrawn key is really gone, and the
+       directories it held go with it, bottom-up, but never ENV:. */
+    fs_add("ENV:ANXD/DEFAULT",1,0,NULL);fs_add("ENV:ANXD/DEFAULT/ADDRESS",0,1,NULL);
+    fs_add("ENV:ANXD/IF",1,0,NULL);fs_add("ENV:ANXD/IF/eth0",1,0,NULL);
+    fs_add("ENV:ANXD/IF/eth0/STATE",0,1,NULL);
+    check(ne_remove("ANXD/DEFAULT/ADDRESS",fs_delete,NULL),"stub deleted");
+    check(fs_find("ENV:ANXD/DEFAULT/ADDRESS")<0&&fs_find("ENV:ANXD/DEFAULT")<0,"stub and its directory gone");
+    check(fs_find("ENV:ANXD")>=0,"non-empty parent kept");
+    setup();build();check(ne_publish(&owned,&t,fs_read,fs_write,NULL),"publish over stubs");
+    i=(unsigned)fs_find("ENV:ANXD/IF/eth0/STATE");
+    check(i<64&&!fs[i].stub&&!strcmp(fs[i].value,"UP"),"stub replaced by value");
+    t.count=t.used=0;
+    check(ne_publish(&owned,&t,fs_read,fs_write,NULL)&&owned.count==0,"exit withdraws all keys");
+    check(fs_count()==0,"exit leaves no ENV:ANXD at all");
+    /* NetShutdown's CTRL-C during an open refresh: let go, stay, STATE=DOWN. */
+    memset(&rig,0,sizeof(rig));rig.up=1;ne_refresh(&s,&rig_stack);build();publish();
+    value("ANXD/STATE","UP");value("ANXD/INTERFACES","eth0");
+    rig.shutdown=1;ne_refresh(&s,&rig_stack);build();publish();
+    check(rig.closed==rig.opened,"base closed after shutdown break");
+    check(!rig.ctrl_c,"shutdown break taken, NetEnv keeps running");
+    value("ANXD/STATE","DOWN");value("ANXD/INTERFACES","");
+    check(!get("ANXD/IF/eth0/ADDRESS"),"shutdown withdraws interface values");
+    rig.shutdown=0;ne_refresh(&s,&rig_stack);build();publish();value("ANXD/STATE","DOWN");
+    rig.up=1;ne_refresh(&s,&rig_stack);build();publish();
+    value("ANXD/STATE","UP");value("ANXD/IF/eth0/ADDRESS","192.168.1.2");
+    /* A user break while idle stays set for Wait(): exit withdraws all. */
+    before=(unsigned)rig.opened;rig.ctrl_c=1;ne_refresh(&s,&rig_stack);
+    check(rig.ctrl_c&&rig.opened==(int)before,"idle break left set, base not opened");
+    t.count=t.used=0;publish();check(owned.count==0&&!get("ANXD/STATE"),"idle break exits clean");
+    check(!strncmp(ne_version(TOOL_VERSTAG("NetEnv")),"NetEnv ",7),"VERSION prints NetEnv");
+    check(!strcmp(ne_version("NetEnv 1"),"NetEnv 1"),"VERSION without prefix unchanged");
     printf("NetEnv: %u checks, %u failures; %u writes, %u deletions\n",checks,failures,writes,deletes);
     return failures ? 1 : 0;
 }

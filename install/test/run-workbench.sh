@@ -122,6 +122,12 @@
 #       then installs -a over it: an update.  Its kept interface file carries
 #       a user edit that must survive; the replaced library is kept as .old.
 #       A C:.info there goes to Backup, with its Restore line, and out of C:.
+#   AMINETXDUO_STALE_DRAWER=1  first installs the archive in the drawer
+#       layout, saves a user interface file (prism2) in its
+#       Devs/NetInterfaces and uninstalls it, which keeps that file; then -a
+#       is installed in the system layout.  With AmiNetXDuo: assigned to the
+#       drawer, as the httpd answer assigns it, ShowNetStatus must call the
+#       system interface configured and list no prism2.
 #   AMINETXDUO_PRIOR_CINFO=custom  with it, C:.info is given bytes of its own
 #       before the update, as a user's drawer icon would be; =marked gives it
 #       bytes that name AmiNetXDuo, which must not pass for ours.
@@ -259,6 +265,16 @@ if [ -n "$PRIOR_ARCHIVE" ]; then
                 "and no configuration-only mode" >&2; exit 2 ;;
     esac
     [ -z "$FOREIGN_MODE" ] || { echo "AMINETXDUO_PRIOR_ARCHIVE and -f conflict" >&2; exit 2; }
+fi
+STALE_DRAWER="${AMINETXDUO_STALE_DRAWER:-0}"
+if [ "$STALE_DRAWER" = 1 ]; then
+    case "$DRAWER$RERUN$RECONFIGURE$UNINSTALL$CONFIG_ONLY" in
+        00000) ;;
+        *) echo "AMINETXDUO_STALE_DRAWER is one system install: no -D -R -U -u," \
+                "and no configuration-only mode" >&2; exit 2 ;;
+    esac
+    [ -z "$PRIOR_ARCHIVE" ] && [ -z "$FOREIGN_MODE" ] ||
+        { echo "AMINETXDUO_STALE_DRAWER conflicts with a prior archive and -f" >&2; exit 2; }
 fi
 case "${AMINETXDUO_PRIOR_CINFO:-}" in
     "") ;;
@@ -2719,6 +2735,56 @@ Echo >DH0:.done "0"'
     RUN1_MODE=nouserstartup
 fi
 
+# ---------------------------------------- run S: a removed drawer install --
+#
+# AMINETXDUO_STALE_DRAWER: the archive installed in the drawer layout, a user
+# interface file saved in its NetInterfaces, then Uninstall-AmiNetXDuo in the
+# same boot.  The uninstall keeps the user's file, so SYS:AmiNetXDuo/Devs is
+# left behind with it, and run 1 installs the system layout over that.
+if [ "$STALE_DRAWER" = 1 ]; then
+    echo
+    echo "============================================================"
+    echo "  S    drawer install, a user interface file, uninstall"
+    echo "============================================================"
+    [ ! -f "$HD/install-scenario.txt" ] ||
+        mv "$HD/install-scenario.txt" "$ROOT/build/$TAG-install-scenario.txt"
+    printf '%s\n' \
+        '1|PREUNINSTALL|Echo >SYS:AmiNetXDuo/Devs/NetInterfaces/prism2 "DEVICE=prism2.device"' \
+        > "$HD/install-scenario.txt"
+    chmod 644 "$HD/install-scenario.txt"
+    : > "$HD/S/AmiNetXDuo-drawer"
+    chmod 644 "$HD/S/AmiNetXDuo-drawer"
+    UNINSTALL_DEF='-DDRIVE_UNINSTALL="SYS:AmiNetXDuo/Uninstall-AmiNetXDuo"'
+    build_driver "$ROOT/build/installdrive-$TAG-stale" 1 "" ""
+    UNINSTALL_DEF=""
+    cp "$ROOT/build/installdrive-$TAG-stale" "$HD/C/installdrive-stale"
+    chmod 755 "$HD/C/installdrive-stale"
+    startup_with 'FailAt 9999
+C:installdrive-stale >DH0:stale-console.txt
+Echo >DH0:.done "$RC"'
+    boot stale-drawer "$INSTALL_TIMEOUT"
+    STALE_STATUS=$BOOT_STATUS
+    for _f in installdrive.txt install-log.txt installer-out.txt; do
+        [ ! -f "$HD/$_f" ] || mv "$HD/$_f" "$HD/stale-$_f"
+    done
+    echo "---- stale-drawer installdrive report ----"
+    cat "$HD/stale-installdrive.txt" 2>/dev/null || echo "(none)"
+    rm -f "$HD/C/installdrive-stale" "$HD/S/AmiNetXDuo-drawer" "$HD/install-scenario.txt"
+    [ ! -f "$ROOT/build/$TAG-install-scenario.txt" ] ||
+        mv "$ROOT/build/$TAG-install-scenario.txt" "$HD/install-scenario.txt"
+    STALE_IF=$(amiga_path AmiNetXDuo/Devs/NetInterfaces/prism2 2>/dev/null || true)
+    STALE_LIB=$(amiga_path AmiNetXDuo/Libs/bsdsocket.library 2>/dev/null || true)
+    echo "stale_drawer_status=$STALE_STATUS"
+    echo "stale_drawer_file=$([ -n "$STALE_IF" ] && echo kept || echo none)"
+    echo "stale_drawer_library=$([ -n "$STALE_LIB" ] && echo present || echo removed)"
+    if [ "$STALE_STATUS" != 0 ] || [ -z "$STALE_IF" ] || [ -n "$STALE_LIB" ]; then
+        echo "!! the drawer install and its uninstall did not leave only the user file"
+        echo "workbench_e2e=FAIL board=$BOARD model=$MODEL driver=$SANA2_DRIVER" \
+             "stack=stale boot_status=stale-drawer-$STALE_STATUS"
+        exit 1
+    fi
+fi
+
 # ------------------------------------------------------------------ run 1 ---
 
 echo
@@ -4838,6 +4904,10 @@ if [ -n "$CHIPMEM_KB" ] &&
    [ $(( CHIPMEM_KB + ${SLOWMEM_KB:-0} + ${FASTMEM_MB:-0} * 1024 )) -lt 2048 ]; then
     CHECK_STACK=""
 fi
+# The line a system install writes with the httpd answer: AmiNetXDuo: names
+# the documentation drawer, which holds the removed drawer install's Devs.
+STALE_ASSIGN=""
+[ "$STALE_DRAWER" != 1 ] || STALE_ASSIGN='Assign AmiNetXDuo: "SYS:AmiNetXDuo"'
 cat > "$HD/S/AmiNetXDuo-Check" <<EOF
 ; Written by install/test/run-workbench.sh.  Nothing here is installed
 ; by AmiNetXDuo, it is what a user would type.
@@ -4847,6 +4917,7 @@ $MANUAL_START
 
 Echo >DH0:usercheck.txt "=== 1. the installed network"
 C:Wait 5
+$STALE_ASSIGN
 C:ShowNetStatus >>DH0:usercheck.txt
 Echo >>DH0:usercheck.txt "RESULT network rc=\$RC"
 
@@ -5090,6 +5161,27 @@ fi
 
 report "ShowNetStatus"                 network
 report "fetch http://example.com/"     fetch-http
+
+# The system interface is the configured one; the drawer outside DEVS: is not
+# read, so its prism2 is not listed.
+if [ "$STALE_DRAWER" = 1 ]; then
+    STALE_CONFIGURED=$(awk -v want="Interface $EXPECTED_IF " '{ sub(/\r$/, "") }
+        index($0, want) == 1 { inside = 1; next }
+        /^[^ ]/ { inside = 0 }
+        inside && $1 == "configured" { $1 = ""; sub(/^ +/, ""); print; exit }' \
+        "$HD/usercheck.txt" 2>/dev/null || true)
+    STALE_LISTED=no
+    grep -q "^Interface prism2 " "$HD/usercheck.txt" 2>/dev/null && STALE_LISTED=yes
+    echo "stale_drawer_configured=${STALE_CONFIGURED:-none}"
+    echo "stale_drawer_listed=$STALE_LISTED"
+    case "$STALE_CONFIGURED:$STALE_LISTED" in
+        :*|unknown*|*:yes)
+            printf '  %-34s %s, prism2 listed %s\n' "system NetInterfaces wins" \
+                   "${STALE_CONFIGURED:-none}" "$STALE_LISTED"
+            bad=1 ;;
+        *)  printf '  %-34s %s\n' "system NetInterfaces wins" "$STALE_CONFIGURED" ;;
+    esac
+fi
 
 # An install with no tls.library on it, which is the minimal stack rather than
 # any particular processor, has to fail against every host.

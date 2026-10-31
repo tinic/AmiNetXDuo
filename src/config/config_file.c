@@ -28,10 +28,15 @@
  * DEVS:NetInterfaces is Roadshow's drawer and DEVS:Internet/routes is
  * Roadshow's file, and the files this installer wrote would never be read.
  * Every DEVS: path this layer opens is therefore redirected into that drawer
- * when it exists; the strings stay "DEVS:..." everywhere else because that is
- * the documented name and the right one on a system install, where
- * AmiNetXDuo: is either the documentation drawer, which has no Devs, or not
- * assigned at all.
+ * when it is a member of DEVS:; the strings stay "DEVS:..." everywhere else
+ * because that is the documented name and the right one on a system install.
+ *
+ * A member, not merely there: a system install assigns AmiNetXDuo: to its
+ * documentation drawer, and that drawer can still hold the Devs a removed
+ * drawer install left behind, because the uninstall keeps the user's own
+ * interface files.  Only a drawer install's S:User-Startup adds the drawer to
+ * DEVS: (Assign DEVS: AmiNetXDuo:Devs ADD), so membership is the layout
+ * actually in use; a leftover drawer outside DEVS: is not read.
  *
  * A path the caller gave with DEVS: in it is redirected too, deliberately:
  * the installer's own S:Network-Startup line names DEVS:NetInterfaces/eth0,
@@ -66,9 +71,41 @@ static BOOL exists_quietly(const char *name)
     return TRUE;
 }
 
-static BOOL own_devs_exists(VOID)
+/* GetDeviceProc() hands out the members of a multi-assign one per call. */
+static BOOL own_devs_in_devs(VOID)
 {
-    return exists_quietly(AMI_CFG_OWN_DEVS);
+    struct Process *me = (struct Process *)FindTask(NULL);
+    struct DevProc *dp = NULL;
+    APTR            saved;
+    BPTR            own;
+    BOOL            found = FALSE;
+
+    if (me == NULL || me->pr_Task.tc_Node.ln_Type != NT_PROCESS)
+        return FALSE;
+
+    saved = me->pr_WindowPtr;
+    me->pr_WindowPtr = (APTR)-1L;
+
+    own = Lock((STRPTR)AMI_CFG_OWN_DEVS, ACCESS_READ);
+    if (own != 0)
+    {
+        while ((dp = GetDeviceProc((STRPTR)AMI_CFG_DEVS_PREFIX, dp)) != NULL)
+        {
+            if (dp->dvp_Lock != 0 && SameLock(dp->dvp_Lock, own) == LOCK_SAME)
+            {
+                found = TRUE;
+                break;
+            }
+            if (!(dp->dvp_Flags & DVPF_ASSIGN))
+                break;
+        }
+        if (dp != NULL)
+            FreeDeviceProc(dp);
+        UnLock(own);
+    }
+
+    me->pr_WindowPtr = saved;
+    return found;
 }
 
 /*
@@ -109,7 +146,7 @@ const char *ami_cfg_resolve(const char *path, char *buf, ULONG buflen)
 
     i = sizeof(AMI_CFG_DEVS_PREFIX) - 1;    /* length of "DEVS:" */
 
-    if (!own_devs_exists())
+    if (!own_devs_in_devs())
         return path;
 
     ami_cfg_join3(buf, buflen, AMI_CFG_OWN_DEVS "/", path + i, NULL);
