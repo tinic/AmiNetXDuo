@@ -1791,6 +1791,24 @@ stage_cross() {
                 fail "bsdsocket.library links libc's memcpy ($name)"
             fi
 
+            # And that bsdsocket.library's hot functions are still first in
+            # the code hunk, in list order, on their 16-byte lines.  default
+            # and symbols carry every option the list was taken from, so
+            # there every listed function must be in the image.
+            hot_complete=""
+            case "$name" in default|symbols) hot_complete="--complete" ;; esac
+            # shellcheck disable=SC2086
+            if tools/check-hot-layout.sh $hot_complete "$BUILD/$name" \
+                    > "$BUILD/$name-hot-layout.log" 2>&1; then
+                note "$(sed -n 's/^hot_layout=PASS /hot layout: /p' \
+                      "$BUILD/$name-hot-layout.log" | head -1)"
+            elif grep -q 'hot_layout=skipped' "$BUILD/$name-hot-layout.log"; then
+                : # LTO off or no library: nothing laid out to check
+            else
+                cat "$BUILD/$name-hot-layout.log"
+                fail "bsdsocket.library's hot-function layout drifted ($name)"
+            fi
+
             # And how big the resident images came out.  bsdsocket.library and
             # anxnet.device are open for the life of the machine, so their
             # size is RAM; nothing above measures it, which is how 0.26.0

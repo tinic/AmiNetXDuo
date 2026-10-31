@@ -64,6 +64,7 @@ want ram-size       tools/ci.sh                      'check-ram-size\.sh'
 want rate           tools/ci.sh                      'check-rate\.sh'
 want diag-strings   tools/ci.sh                      'check-no-diag-strings\.sh'
 want memcpy-hook    tools/ci.sh                      'check-memcpy-hook\.sh'
+want hot-layout     tools/ci.sh                      'check-hot-layout\.sh'
 want backlog        tools/ci.sh                      'check-backlog\.sh'
 want doc-budget     tools/ci.sh                      'check-doc-budget\.sh'
 # stage-coverage is the gate that caught stage_rate being declared and invoked
@@ -201,7 +202,7 @@ done
 for g in check-changelog-prose check-image-size check-ram-size check-rate \
          check-stage-coverage check-rx-posted check-option-stubs \
          check-lvo-matrix check-lvo-clobbers check-generated \
-         check-hot-calls check-rearm-invariants check-hotpath-budget \
+         check-hot-calls check-hot-layout check-rearm-invariants check-hotpath-budget \
          check-gates-wired; do
     if [ ! -x "tools/$g.sh" ]; then
         echo "gates_wired=NOT_EXECUTABLE gate=$g"

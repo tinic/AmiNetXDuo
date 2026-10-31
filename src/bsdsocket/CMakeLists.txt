@@ -182,6 +182,48 @@ if(AMINETXDUO_BSDSOCKET_LINK)
         -Wl,--gc-sections
         "-Wl,-Map=$<TARGET_FILE_DIR:bsdsocket_library>/bsdsocket.library.map")
 
+    # Hot-function layout.  LTO cuts the program into size-balanced
+    # partitions, so an edit anywhere moves the partition boundaries and the
+    # hot functions with them: A3000 upload moved 1-2% between builds that
+    # differed only in code it never runs (#396, #398).  So: one section per
+    # function at the link (-ffunction-sections reaches the LTRANS units from
+    # here), and hot-functions.txt placed first, in its order, each on a
+    # 16-byte cache line.  The entry stub goes ahead of them by name.  Cost
+    # and the stability check are in the PR that added this.
+    # tools/check-hot-layout.sh reads the map and fails on any drift.
+    if(CMAKE_CROSSCOMPILING)
+        set(_hot_list "${CMAKE_CURRENT_SOURCE_DIR}/hot-functions.txt")
+        set(_hot_ld "${CMAKE_CURRENT_BINARY_DIR}/hot-order.ld")
+        set_property(DIRECTORY APPEND PROPERTY
+            CMAKE_CONFIGURE_DEPENDS "${_hot_list}")
+        file(STRINGS "${_hot_list}" _hot_lines)
+        set(_hot_text ".text : {\n    KEEP(*(.text.bsdsocket_entry))\n")
+        foreach(_hot IN LISTS _hot_lines)
+            string(REGEX REPLACE "#.*" "" _hot "${_hot}")
+            string(STRIP "${_hot}" _hot)
+            if(_hot STREQUAL "")
+                continue()
+            elseif(_hot MATCHES "^@([A-Za-z0-9_.+-]+)$")
+                set(_hot_in "*:${CMAKE_MATCH_1}(.text)")
+            elseif(_hot MATCHES "^[A-Za-z_][A-Za-z0-9_]*$")
+                set(_hot_in "*(.text.${_hot} .text.${_hot}.*)")
+            else()
+                message(FATAL_ERROR "${_hot_list}: bad entry '${_hot}'")
+            endif()
+            string(APPEND _hot_text "    . = ALIGN(16);\n    ${_hot_in}\n")
+        endforeach()
+        string(APPEND _hot_text "    . = ALIGN(16);\n}\n")
+        # Written only when it changes, so a reconfigure does not relink.
+        file(CONFIGURE OUTPUT "${_hot_ld}" CONTENT "${_hot_text}" @ONLY)
+        target_link_options(bsdsocket_library PRIVATE
+            "-Wl,--section-ordering-file=${_hot_ld}")
+        set_property(TARGET bsdsocket_library APPEND PROPERTY
+            LINK_DEPENDS "${_hot_ld}")
+        if(AMINETXDUO_LTO)
+            target_link_options(bsdsocket_library PRIVATE -ffunction-sections)
+        endif()
+    endif()
+
     # 39,948 bytes, 11% of the library, and nothing on the Amiga reads them:
     # profreport.py --lib works from the map above and the objects, not from
     # HUNK_SYMBOL, which is why the map is written before the strip runs.

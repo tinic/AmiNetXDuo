@@ -50,7 +50,8 @@ typedef struct AmiEventMark
     ((const NetStatusEvent *)((const UBYTE *)(mark) + (mark)->em_Size))
 
 /* index is an interface index, or NETEVENT_NOINDEX. */
-VOID  ami_event(UWORD code, UWORD index, ULONG value);
+/* Every event is a failure or a state change: cold, see bsd_errno_from_nx(). */
+VOID  ami_event(UWORD code, UWORD index, ULONG value) __attribute__((cold));
 
 /* Oldest first.  Returns how many were written, and sets *held to how many the
    ring holds. */

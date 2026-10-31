@@ -1,0 +1,120 @@
+# bsdsocket.library hot functions, in link order.
+#
+# The link puts these first in the code hunk, in this order, each on a
+# 16-byte boundary (src/bsdsocket/CMakeLists.txt, hot-order.ld), so their
+# addresses do not move when other code changes.  tools/check-hot-layout.sh
+# fails the build if the map disagrees.
+#
+# A name is a C function: its section .text.NAME, plus the LTO clones
+# .text.NAME.* (.lto_priv.N, .isra.N, .constprop.N, .part.N).
+# @FILE is the .text of an object or archive member (asm, libc).
+#
+# Source: busy share per function in the A1200 profiles of
+# evidence/354-upload-prof3 (AmiSpeedTest UP and DOWN, TCP RX, TCP TX),
+# every bsdsocket.library function at >= 0.1% busy in one of them, hottest
+# first.  A function that LTO inlines has no section and is not listed.
+# All four CPU variants of the copy and checksum are listed; one runs.
+#
+# Max busy share (%) is the comment on each line.
+
+@n68k_copy_mv60.S.obj                    # 10.33
+@n68k_copy_mv40.S.obj                    # 10.33
+@n68k_copy_mv20.S.obj                    # 10.33
+@n68k_copy_mv0.S.obj                     # 10.33
+ami_sana2_rx_thread                      # 5.90
+ami_sana2_gso_copy                       # 2.89
+ami_sana2_tx_launch                      # 2.68
+bsd_send_tcp                             # 2.45
+ami_sana2_rx_post_batch                  # 2.43
+ami_sana2_gso_walk                       # 2.26
+bsd_recv_iov                             # 2.05
+_tx_amiga_thread_park                    # 1.81
+ami_sana2_gro_be32                       # 1.67
+ami_sana2_rx_drain_batch                 # 1.62
+bsd_WaitSelect                           # 1.45
+ami_sana2_rx_settle                      # 1.43
+_nx_tcp_socket_send_internal             # 1.39
+ami_sana2_gso_put                        # 1.38
+ami_sana2_gso_fields                     # 1.35
+ami_sana2_copy_bytes                     # 1.30
+_nx_packet_data_append                   # 1.23
+_nx_packet_release                       # 1.15
+n68k_ip_checksum_compute                 # 1.03
+_nx_tcp_socket_state_data_check          # 1.02
+ami_sana2_rx_hand_up                     # 1.00
+_nx_packet_data_extract_offset           # 0.96
+_nx_packet_tcp_gso_segments              # 0.94
+n68k_rx_verify                           # 0.94
+ami_sana2_tx_complete                    # 0.93
+_nx_packet_allocate                      # 0.90
+_nx_tcp_socket_packet_process            # 0.89
+_nx_tcp_socket_state_transmit_check      # 0.85
+ami_sana2_copy_from_buff                 # 0.85
+_nx_tcp_packet_process                   # 0.84
+_tx_thread_system_suspend                # 0.80
+_tx_thread_identify                      # 0.79
+_tx_amiga_signal                         # 0.78
+ami_sana2_tx_reap_pending                # 0.76
+ami_sana2_gso_emit                       # 0.75
+ami_sana2_gso_send                       # 0.74
+_nx_ipv4_packet_receive                  # 0.71
+memcpy                                   # 0.58
+bsd_packet_append_iov                    # 0.52
+_nx_tcp_packet_send_control              # 0.50
+_nx_tcp_socket_receive                   # 0.50
+_tx_time_get                             # 0.49
+_nx_ip_packet_receive                    # 0.46
+n68k_rx_verify_sum                       # 0.45
+@n68k_checksum_mv60.S.obj                # 0.42
+@n68k_checksum_mv40.S.obj                # 0.42
+@n68k_checksum_mv20.S.obj                # 0.42
+@n68k_checksum_mv0.S.obj                 # 0.42
+_tx_thread_system_resume                 # 0.40
+ami_netstack_baton_release               # 0.39
+ami_sana2_tx_send_now                    # 0.38
+tx_amiga_adopt_resume                    # 0.38
+bsd_recv                                 # 0.38
+ami_sana2_rx_deliver                     # 0.36
+_nx_ip_dispatch_process                  # 0.36
+_tx_amiga_slot_of                        # 0.34
+_tx_thread_suspend                       # 0.34
+_nx_tcp_socket_rx_window_cap             # 0.33
+_nx_ip_packet_send                       # 0.33
+_tx_mutex_put                            # 0.33
+_tx_mutex_get                            # 0.32
+ami_sana2_driver_entry                   # 0.31
+ami_sana2_gro_flush                      # 0.31
+ami_sana2_tx_flags                       # 0.27
+_nx_tcp_socket_window_update_step        # 0.27
+@libc_a-__udivsi3.o                      # 0.26
+bsd_budget_left                          # 0.26
+_tx_amiga_slot_held                      # 0.25
+_tx_thread_resume                        # 0.25
+ami_netstack_baton_acquire               # 0.24
+_nx_tcp_socket_rx_window_advertised      # 0.24
+bsd_nx_enter                             # 0.23
+tx_amiga_exec_wait_owner_locked          # 0.23
+bsd_event_post                           # 0.23
+bsd_transfer_check                       # 0.22
+_nx_tcp_socket_rx_window_open            # 0.21
+_nx_tcp_packet_receive                   # 0.21
+@libc_a-__mulsi3.o                       # 0.20
+bsd_send                                 # 0.20
+ami_sana2_gso_tcp_field                  # 0.19
+bsd_send_iov                             # 0.18
+netstack_pool_mark_low                   # 0.18
+_nx_packet_transmit_release              # 0.17
+bsd_fd_peek                              # 0.16
+bsd_wait_sliced                          # 0.15
+bsd_tcp_window_notify                    # 0.15
+_tx_amiga_task_stamp                     # 0.14
+_nx_tcp_socket_thread_suspend            # 0.14
+ami_sana2_tx_reap                        # 0.13
+ami_sana2_tx_send                        # 0.13
+bsd_nx_leave                             # 0.13
+_tx_thread_system_return                 # 0.13
+ami_baton_observe_state                  # 0.12
+_nx_tcp_socket_thread_resume             # 0.11
+_nx_tcp_packet_send_ack                  # 0.11
+bsd_poll_sets                            # 0.10
+tx_amiga_caller_is_thread                # 0.10

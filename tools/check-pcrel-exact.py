@@ -320,6 +320,34 @@ def parse_map(mapfile):
     return text_out, entries
 
 
+def parse_discarded(mapfile):
+    """-> {(input section, file): size} that --gc-sections dropped."""
+    lines = open(mapfile, encoding="latin-1").read().split("\n")
+    out, on, pending = {}, False, None
+    for l in lines:
+        if l.startswith("Discarded input sections"):
+            on = True
+            continue
+        if on and (l.startswith("Memory Configuration") or
+                   l.startswith("Linker script and memory map")):
+            break
+        if not on:
+            continue
+        m = re.match(r"^ (\.\S+)\s+0x[0-9a-f]+\s+0x([0-9a-f]+)\s+(\S.*)$", l)
+        if m:
+            out[(m.group(1), m.group(3).strip())] = int(m.group(2), 16)
+            pending = None
+            continue
+        m = re.match(r"^\s+0x[0-9a-f]+\s+0x([0-9a-f]+)\s+(\S.*)$", l)
+        if m and pending:
+            out[(pending, m.group(2).strip())] = int(m.group(1), 16)
+            pending = None
+            continue
+        m = re.match(r"^ (\.\S+)\s*$", l)
+        pending = m.group(1) if m else None
+    return out
+
+
 def main():
     if len(sys.argv) < 3:
         die("usage")
@@ -337,6 +365,7 @@ def main():
 
     code, syms = parse_exe(binary)
     text_out, entries = parse_map(mapfile)
+    discarded = parse_discarded(mapfile)
     if text_out[1] > len(code):
         die("map_text_larger_than_code_hunk")
 
@@ -376,6 +405,7 @@ def main():
         return e[0] == ".text" or e[0].startswith(".text.")
 
     checked = bad = unscanned = branches = objects = verbatim = mismatches = covered = 0
+    dropped = 0
     for path, ents in byfile.items():
         if not any(text_entry(e) and e[2] for e in ents):
             continue
@@ -414,6 +444,13 @@ def main():
             if h["type"] != HUNK_CODE:
                 continue
             if h["idx"] not in base:
+                # A section --gc-sections dropped is not in the image, so
+                # its relocations were never applied.  One section per
+                # function makes these common.
+                dsize = discarded.get((h["name"], path))
+                if dsize is not None and h["size"] in (dsize, (dsize + 3) & ~3):
+                    dropped += 1
+                    continue
                 if h["relrel"] or h["extrel"]:
                     print("pcrel_unscanned=%s hunk=%d reason=not_in_map" % (path, h["idx"]))
                     unscanned += 1
@@ -479,8 +516,9 @@ def main():
     verdict = "FAIL" if bad else ("INCOMPLETE" if unscanned else "PASS")
     print("pcrel_exact=%s binary=%s objects=%d checked=%d branches=%d ok=%d "
           "mismatches=%d unscanned=%d text_bytes=%d covered_bytes=%d verbatim_bytes=%d"
+          " discarded=%d"
           % (verdict, bname, objects, checked, branches, checked - mismatches, bad,
-             unscanned, text_out[1], covered, verbatim))
+             unscanned, text_out[1], covered, verbatim, dropped))
     sys.exit(1 if bad else (2 if unscanned else 0))
 
 

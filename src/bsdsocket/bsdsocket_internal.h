@@ -848,7 +848,8 @@ VOID  bsd_set_herrno(struct AmiSocketBase *base, LONG code);
    outer bsd_nx_leave() in netx_call.c. */
 VOID  bsd_error_hook_flush(struct AmiSocketBase *base);
 const char *bsd_errno_string(LONG code);
-LONG  bsd_errno_from_nx(UINT status);
+/* Only on a failed NetX call: cold, so callers lay that path out of line. */
+LONG  bsd_errno_from_nx(UINT status) __attribute__((cold));
 /* The same, for a status from a call that was given `wait`, see errno.c. */
 LONG  bsd_wait_errno(ULONG wait, UINT status);
 LONG  bsd_fail(struct AmiSocketBase *base, LONG code);   /* set errno, ret -1 */

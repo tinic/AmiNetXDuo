@@ -1,8 +1,8 @@
 /*
  * bsdsocket.library, library skeleton and per-opener child bases.
  *
- * Link this file first so the "moveq #-1,d0 / rts" below sits at offset 0 of
- * the first code hunk, which makes the library file harmless when it is run.
+ * The "moveq #-1,d0 / rts" below sits at offset 0 of the first code hunk,
+ * which makes the library file harmless when it is run.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -34,12 +34,18 @@
  */
 struct ExecBase *SysBase;
 
-/* Running the library file returns a failure code rather than crashing. */
-asm("    .text                       \n"
+/*
+ * Running the library file returns a failure code rather than crashing.
+ * Its own section, which the link places first by name (hot-order.ld, see
+ * src/bsdsocket/CMakeLists.txt), ahead of the hot functions.  The closing
+ * .text leaves the assembler where this asm always left it.
+ */
+asm("    .section .text.bsdsocket_entry\n"
     "    .globl _bsdsocket_entry     \n"
     "_bsdsocket_entry:               \n"
     "    moveq  #-1,%d0              \n"
-    "    rts                         \n");
+    "    rts                         \n"
+    "    .text                       \n");
 
 static char bsd_lib_name[]  = BSD_LIB_NAME;
 #define BSD_STR2(x)         #x
