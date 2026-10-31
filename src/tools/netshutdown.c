@@ -408,6 +408,24 @@ int main(int argc, char **argv)
 
     holding = others_holding(base, &listed);
 
+    /* A program that opened the library while the interfaces went down
+       (NetEnv polls) was not asked yet: ask it, out of what is left. */
+    if (holding > 0 && !stopped_waiting &&
+        tool_netstatus_control(base, NETCTRL_STACK_NOTIFY, &ctl, NULL) == 0)
+    {
+        while ((holding = others_holding(base, &listed)) > 0 &&
+               waited < timeout)
+        {
+            if (tool_delay_ticks((ULONG)TICKS_PER_SECOND))
+            {
+                stopped_waiting = TRUE;
+                break;
+            }
+
+            waited++;
+        }
+    }
+
     tool_netstatus_close(base);
 
     unload_library();

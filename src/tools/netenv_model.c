@@ -248,6 +248,21 @@ int ne_remove(const char *name, NeDelete delete_path, void *ctx)
     return 1;
 }
 
+void ne_refresh(NeSnapshot *s, const NeStack *k)
+{
+    void *base;
+    memset(s, 0, sizeof(*s));
+    s->state = "DOWN";
+    if (k->pending(k->ctx, 0) || !(base = k->open(k->ctx))) return;
+    s->state = "UP";
+    if (!k->collect(k->ctx, base, s)) s->state = "ERROR";
+    k->close(k->ctx, base);
+    if (k->pending(k->ctx, 1)) {
+        memset(s, 0, sizeof(*s));
+        s->state = "DOWN";
+    }
+}
+
 const char *ne_version(const char *verstag)
 {
     static const char prefix[] = "$VER: ";
