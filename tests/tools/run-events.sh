@@ -176,8 +176,10 @@ echo
 # ------------------------------------------------------------ assertions ---
 
 FAILED=0
-fail() { echo "FAIL: $*" >&2; FAILED=1; }
-pass() { echo "  ok: $*"; }
+CHECKS=0
+BAD=0
+fail() { echo "FAIL: $*" >&2; FAILED=1; CHECKS=$((CHECKS + 1)); BAD=$((BAD + 1)); }
+pass() { echo "  ok: $*"; CHECKS=$((CHECKS + 1)); }
 
 # The Nth run of a command, as ToolsSmoke brackets them.
 block() {
@@ -204,6 +206,23 @@ hasnt() { # banner nth phrase description
     fi
 }
 
+# The exit code of the Nth run, from its "----- rc N," trailer.
+rc_of() {
+    awk -v banner="$1" -v want="$2" '
+        index($0, "===== " banner " =====") == 1 { n++; if (n == want) on = 1; next }
+        on && /^----- rc / { sub(/^----- rc /, ""); sub(/,.*/, ""); print; exit }
+    ' "$REPORT"
+}
+
+rc_is() { # banner nth rc description
+    local got; got=$(rc_of "$1" "$2")
+    if [ "$got" = "$3" ]; then
+        pass "$4 (rc $got)"
+    else
+        fail "$4: run $2 of $1 returned rc '${got:-none}', not $3"
+    fi
+}
+
 EV="SYS:ShowNetStatus EVENTS"
 
 # ---- 1: it answers with the stack up -------------------------------------
@@ -217,15 +236,32 @@ has "$EV" 1 "the SANA-II device did not open" \
 has "$EV" 2 "the stack came up" \
     "an Offline/Online cycle did not clear the record"
 
-# ---- 3: it answers with the stack DOWN, which is the point ---------------
-has "$EV" 3 "the stack began shutting down" \
-    "the shutdown is readable after the stack has gone"
-has "$EV" 3 "network hold released" \
-    "and so is the release half of it"
+# ---- 3: the shutdown happened and took the library with it (#389) --------
+NS="SYS:NetShutdown"
+has "$NS" 1 "Network stopped." \
+    "NetShutdown reports the network stopped"
+has "$NS" 1 "TCP: stopped" \
+    "and the TCP: handler stopped with it"
+rc_is "$NS" 1 0 \
+    "NetShutdown returns OK"
+
+# The ring lives in bsdsocket.library, and NetShutdown removes that from
+# memory: the read after it says so, and still answers cleanly.
+has "$EV" 3 "Network stack:  not started" \
+    "the read after the shutdown sees no stack"
+if block "$EV" 3 | grep -A1 -x "Events" |
+        grep -qxF "(bsdsocket.library not in memory)"; then
+    pass "the Events section says the library is gone from memory"
+else
+    fail "the Events section of run 3 of $EV does not say" \
+         "'(bsdsocket.library not in memory)'"
+fi
+rc_is "$EV" 3 0 \
+    "ShowNetStatus EVENTS returns OK with the stack gone"
 
 # Reading it must not have restarted anything.
-hasnt "$EV" 3 "is not in memory" \
-    "the record survived the stack it describes"
+hasnt "$EV" 3 "Network stack:  running" \
+    "reading the events did not load the stack again"
 if block "SYS:netstat -i" 1 | grep -qiE 'eth0.*UP'; then
     fail "the network came back: reading the ring restarted the stack"
 else
@@ -242,9 +278,12 @@ else
 fi
 
 echo
+echo "events_checks=$CHECKS failures=$BAD"
 if [ "$FAILED" = 0 ]; then
+    echo "events=PASS"
     echo "PASS: the ring records and the command decodes, on the machine"
 else
+    echo "events=FAIL"
     echo "FAIL: see above" >&2
 fi
 exit "$FAILED"
