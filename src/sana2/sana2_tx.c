@@ -704,6 +704,9 @@ ami_sana2_tx_window(AmiSana2If *iface, ULONG now)
     dt   = ms - iface->tx_lim_ms;
     gone = iface->tx_lim_posted - (ULONG)iface->tx_dev_writes;
     done = gone - iface->tx_lim_base;
+    /* A claim between the two loads reads one short: never below none. */
+    if ((LONG)done < 0)
+        done = 0;
     dry  = iface->tx_lim_dry;
     iface->tx_lim_base = gone;
     iface->tx_lim_dry  = 0;
@@ -723,23 +726,24 @@ ami_sana2_tx_window(AmiSana2If *iface, ULONG now)
         if (limit < (ULONG)iface->tx_lim_limit)
             limit = iface->tx_lim_limit;
     }
-    else
+    else if (limit < (ULONG)(iface->tx_lim_limit >> 1))
     {
-        if (limit < (ULONG)(iface->tx_lim_limit >> 1))
-            limit = (ULONG)(iface->tx_lim_limit >> 1);
-
-        /* A backlog that never ran dry: the target comes back a step. */
-        dt += iface->tx_lim_clean;
-        if (dt >= (ULONG)AMI_SANA2_TX_DECAY_MS &&
-            iface->tx_lim_target > AMI_SANA2_TX_TARGET_MS)
-        {
-            iface->tx_lim_target = (UWORD)(iface->tx_lim_target -
-                                           AMI_SANA2_TX_TARGET_STEP_MS);
-            dt = 0;
-        }
-        iface->tx_lim_clean = (UWORD)((dt < (ULONG)AMI_SANA2_TX_DECAY_MS)
-                                          ? dt : 0UL);
+        limit = (ULONG)(iface->tx_lim_limit >> 1);
     }
+
+    /* Traffic without a starved stop: the target comes back a step.  On
+       time, not on backlog, so a sender whose bursts end at a stop (the
+       stop cannot tell that from a slow refill) does not hold it high. */
+    dt += iface->tx_lim_clean;
+    if (dt >= (ULONG)AMI_SANA2_TX_DECAY_MS &&
+        iface->tx_lim_target > AMI_SANA2_TX_TARGET_MS)
+    {
+        iface->tx_lim_target = (UWORD)(iface->tx_lim_target -
+                                       AMI_SANA2_TX_TARGET_STEP_MS);
+        dt = 0;
+    }
+    iface->tx_lim_clean = (UWORD)((dt < (ULONG)AMI_SANA2_TX_DECAY_MS)
+                                      ? dt : 0UL);
     if (limit < (ULONG)AMI_SANA2_TX_LIMIT_MIN)
         limit = AMI_SANA2_TX_LIMIT_MIN;
     if (limit > ceiling)
@@ -1403,6 +1407,18 @@ ami_sana2_gso_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
                     iface, (UWORD)(AMI_SANA2_GSO_WRITES(blk) - i));
             Permit();
         }
+    }
+
+    /* Children the device finished inside BeginIO() handed their slots back
+       with no reply to come, and a reply is what runs the wake: the stop
+       claim_run stored for them is looked at again here.  A single write
+       cannot strand one -- at a limit of two another write is held. */
+    if (held && iface->interface_ptr != NX_NULL &&
+        iface->interface_ptr->nx_interface_tx_queue_stopped != 0)
+    {
+        Forbid();
+        ami_sana2_tx_flow(iface);
+        Permit();
     }
 
     if (i < AMI_SANA2_GSO_WRITES(blk))

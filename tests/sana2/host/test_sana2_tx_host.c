@@ -2654,6 +2654,35 @@ static void test_gso_one_forbid_per_block(void)
     h_check(h_forbids == 4, "and one Forbid() per round of four slots");
 }
 
+/* A block of children a quick device finishes inside BeginIO(): claim_run
+   stops TCP for the whole block before the first BeginIO(), and no reply
+   will ever come to wake it.  The send looks again once they are back. */
+static void test_gso_quick_block_leaves_no_stop(void)
+{
+    static const ULONG cuts[] = { 400, 400, 400, 400 };
+    static NX_INTERFACE nxif;
+    NX_PACKET *p;
+
+    printf("sana2: a quick device's GSO block never strands a stop\n");
+
+    fixture_init(FALSE, S2WireType_Ethernet);
+    memset(&nxif, 0, sizeof(nxif));
+    iface.interface_ptr = &nxif;
+    h_quick_kept      = 1;
+    iface.tx_quick_ok = TRUE;
+    iface.tx_lim_limit = 4;
+    p = gso_parent(20, 1600, 100, 0x18, 1, 1, 37, cuts, 4);
+    (VOID)ami_sana2_tx_send(&iface, p, AMI_ETHERTYPE_IPV4, 0xBC24, 0x11EF103A);
+    h_check(h_sends == 16 && iface.tx_dev_writes == 0 &&
+            iface.tx_pend_count == 0,
+            "sixteen children, all finished in BeginIO()");
+    h_check(nxif.nx_interface_tx_queue_stopped == 0 &&
+            iface.stats.tx_queue_stops == 1,
+            "the stop claim_run stored is cleared, not stranded");
+    iface.interface_ptr = NULL;
+    h_quick_kept = 0;
+}
+
 /* The kick's race again with a GSO block as the other task's write: its
    children go behind the write the kick has dequeued, per child or as one
    batch (#354). */
@@ -3167,6 +3196,7 @@ int main(void)
     test_gso_no_table();
     test_gso_fills_slots_and_queue();
     test_gso_one_forbid_per_block();
+    test_gso_quick_block_leaves_no_stop();
     test_gso_refused();
     test_gso_record_v1();
     test_gso_repair();
