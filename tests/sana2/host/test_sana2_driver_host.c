@@ -1324,6 +1324,10 @@ static void test_gso_advertised_with_the_link(void)
     iface.tx_lim_limit = 1;
     h_check(ami_sana2_gso_max_segs(&interface_obj) == 2,
             "and never fewer than two");
+    iface.tx_quick_ok = 1;
+    h_check(ami_sana2_gso_max_segs(&interface_obj) == 16,
+            "a device that finishes writes in BeginIO() keeps the full block");
+    iface.tx_quick_ok = 0;
 #ifdef AMINETXDUO_TX_BATCH
     iface.tx_batch_ok = 1;
     h_check(ami_sana2_gso_max_segs(&interface_obj) == 16,

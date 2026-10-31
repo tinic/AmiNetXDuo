@@ -1522,7 +1522,7 @@ static void test_queue_stops_and_wakes_tcp(void)
             q_nxif.nx_interface_tx_queue_stopped != 0,
             "at the stop it asks TCP to hold new data");
     h_check(iface.stats.tx_queue_full == 0 && iface.stats.tx_errors == 0 &&
-            iface.stats.tx_queue_stops == 1,
+            iface.tx_lim_stops == 1,
             "with nothing dropped, and the stop counted");
 
     while (q_below() > wake + 1)
@@ -1594,8 +1594,7 @@ static void test_queue_limit_follows_the_card(void)
     h_ms = 1000UL;
     h_now = h_ms / 20UL;
     most = q_drive(12000UL, 14UL, 1);
-    h_check(iface.tx_lim_limit == AMI_SANA2_TX_LIMIT_MIN &&
-            iface.stats.tx_queue_limit == AMI_SANA2_TX_LIMIT_MIN,
+    h_check(iface.tx_lim_limit == AMI_SANA2_TX_LIMIT_MIN,
             "a 70-frame-a-second card stops TCP at the floor");
     h_check(most <= AMI_SANA2_TX_LIMIT_MIN + 1,
             "and holds no more than that below it");
@@ -1669,8 +1668,9 @@ static void test_queue_limit_invariants(void)
     /* A queue that ran dry after it had stopped TCP was too short: the
        target grows a step, and comes back after a clean backlog. */
     target = iface.tx_lim_target;
-    h_check(target == AMI_SANA2_TX_TARGET_MS + AMI_SANA2_TX_TARGET_STEP_MS,
-            "a dry run after a stop grows the target a step");
+    h_check(target == AMI_SANA2_TX_TARGET_MS + AMI_SANA2_TX_TARGET_STEP_MS &&
+            iface.tx_lim_limit == 4,
+            "a dry run after a stop doubles the limit, target a step up");
     h_ms = 1000UL;
     h_now = h_ms / 20UL;
     (void)q_drive(3000UL, 1UL, 1);
@@ -1692,8 +1692,8 @@ static void test_queue_limit_invariants(void)
             "a device that finishes in BeginIO() is never stopped");
 
     /* One that finishes most writes in BeginIO() and queues the odd one
-       (a full hardware ring) is measured by every write it finished, not
-       only by the replies: thirty a millisecond keeps the ceiling. */
+       (a full hardware ring) keeps the ceiling: its replies measure only
+       the writes the card could not take. */
     fixture_init(FALSE, S2WireType_Ethernet);
     memset(&q_nxif, 0, sizeof(q_nxif));
     iface.interface_ptr = &q_nxif;
@@ -1719,7 +1719,7 @@ static void test_queue_limit_invariants(void)
             iface.stats.tx_queue_full == 0,
             "twenty queued writes held throughout");
     h_check(iface.tx_lim_limit == AMI_SANA2_TX_STOP_AT + Q_N,
-            "a mostly-quick device is measured by all it finished");
+            "a mostly-quick device keeps the ceiling");
     h_quick_kept = 0;
     iface.interface_ptr = NULL;
 }
@@ -2677,7 +2677,7 @@ static void test_gso_quick_block_leaves_no_stop(void)
             iface.tx_pend_count == 0,
             "sixteen children, all finished in BeginIO()");
     h_check(nxif.nx_interface_tx_queue_stopped == 0 &&
-            iface.stats.tx_queue_stops == 1,
+            iface.tx_lim_stops == 1,
             "the stop claim_run stored is cleared, not stranded");
     iface.interface_ptr = NULL;
     h_quick_kept = 0;

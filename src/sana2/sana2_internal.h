@@ -422,19 +422,20 @@ UINT ami_sana2_gso_max_segs(NX_INTERFACE *interface_ptr);
  * (2026-10-30, A500).  So each interface measures how fast its writes
  * complete while it has a backlog and stops TCP at AMI_SANA2_TX_TARGET_MS of
  * that, never below AMI_SANA2_TX_LIMIT_MIN writes and never above the stop
- * plus the ring, which is where every interface stood before: a gigabit card
- * drains its ceiling in a few milliseconds and keeps it.  It wakes at half.
+ * plus the ring, which is where every interface stood before.  It wakes at
+ * half.  A device that finishes writes inside BeginIO() (IOF_QUICK: anxnet,
+ * anxgenet) holds none of them and keeps the ceiling.
  *
  * A queue that runs dry after it stopped TCP was too short for the time TCP
  * takes to refill it (an acknowledgment's round trip, a stretch ACK): the
- * target grows a step, up to AMI_SANA2_TX_TARGET_MAX_MS, and comes back a
- * step after AMI_SANA2_TX_DECAY_MS of backlog that never ran dry.
+ * limit doubles and the target grows a step, up to
+ * AMI_SANA2_TX_TARGET_MAX_MS; the target comes back a step per
+ * AMI_SANA2_TX_DECAY_MS without such a starved stop.
  *
  * A window closes at a completion after AMI_SANA2_TX_WINDOW_TICKS ticks with
  * AMI_SANA2_TX_WINDOW_WRITES writes done, or after AMI_SANA2_TX_WINDOW_LONG
- * ticks with any; its length is E-clock milliseconds.  A window in which the
- * queue ran empty was the sender's pace, not the card's: it may raise the
- * limit, never lower it.  A backlogged one lowers it at most by half.
+ * ticks with any; its length is E-clock milliseconds.  A window lowers the
+ * limit at most by half; a starved stop doubles it at once.
  */
 #define AMI_SANA2_TX_LIMIT_MIN          2
 #define AMI_SANA2_TX_TARGET_MS          20      /* one 50 Hz tick          */
@@ -1217,7 +1218,7 @@ struct AmiSana2If
        tx_lim_posted: slots ever claimed, raised with tx_dev_writes, so
        posted less held is every write done; tx_lim_base is that at the
        window opened at tx_lim_tick (ticks) and tx_lim_ms (E-clock ms).  tx_lim_held: TCP was stopped since the
-       queue last ran dry; tx_lim_dry: it ran dry in this window. */
+       queue last ran dry; tx_lim_stops counts the stops. */
     volatile UWORD      tx_dev_writes;
     UWORD               tx_lim_limit;
     UWORD               tx_lim_target;      /* ms of drain */
@@ -1227,7 +1228,8 @@ struct AmiSana2If
     ULONG               tx_lim_tick;
     ULONG               tx_lim_ms;
     UBYTE               tx_lim_held;
-    UBYTE               tx_lim_dry;
+    UBYTE               tx_lim_pad;
+    ULONG               tx_lim_stops;
 
     /* GSO blocks in flight, under Forbid() with the slots: gso_count of
        them, NULL until GSO is first advertised; gso_next is where the

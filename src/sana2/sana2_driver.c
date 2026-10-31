@@ -301,9 +301,12 @@ UINT ami_sana2_gso_max_segs(NX_INTERFACE *interface_ptr)
        as Linux sizes TSO to its pacing: a block's children go below TCP
        all at once, past the stop.  On plipbox 16 children are a quarter of
        a second of the wire in front of a ping.  A batch is one write
-       whatever its length. */
+       whatever its length, and a device that finishes writes inside
+       BeginIO() keeps the ceiling (sana2_tx.c, ami_sana2_tx_settle). */
 #ifdef AMINETXDUO_TX_BATCH
-    if (!iface->tx_batch_ok)
+    if (!iface->tx_batch_ok && !iface->tx_quick_ok)
+#else
+    if (!iface->tx_quick_ok)
 #endif
     {
         if ((UWORD)iface->gso_max_segs > iface->tx_lim_limit)

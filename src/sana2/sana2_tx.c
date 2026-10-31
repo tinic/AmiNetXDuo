@@ -92,8 +92,7 @@ VOID ami_sana2_tx_init(AmiSana2If *iface)
     iface->tx_lim_tick   = 0;
     iface->tx_lim_ms     = 0;
     iface->tx_lim_held   = 0;
-    iface->tx_lim_dry    = 0;
-    iface->stats.tx_queue_limit = iface->tx_lim_limit;
+    iface->tx_lim_stops  = 0;
 
 #ifdef AMINETXDUO_TX_RUN
     /* The run flush: the opened request's device, unit and cookie, the
@@ -670,7 +669,7 @@ static VOID __attribute__((noinline)) ami_sana2_tx_flow(AmiSana2If *iface)
         {
             nxif->nx_interface_tx_queue_stopped = 1;
             iface->tx_lim_held = 1;
-            iface->stats.tx_queue_stops++;
+            iface->tx_lim_stops++;
         }
     }
     else if (count <= (UWORD)(iface->tx_lim_limit >> 1))
@@ -697,7 +696,6 @@ ami_sana2_tx_window(AmiSana2If *iface, ULONG now)
     ULONG gone;
     ULONG limit;
     ULONG ceiling = (ULONG)AMI_SANA2_TX_STOP_AT + (ULONG)iface->tx_slots;
-    UBYTE dry;
 
     iface->tx_lim_tick = now;
     ms   = ami_millis_quick();
@@ -707,9 +705,7 @@ ami_sana2_tx_window(AmiSana2If *iface, ULONG now)
     /* A claim between the two loads reads one short: never below none. */
     if ((LONG)done < 0)
         done = 0;
-    dry  = iface->tx_lim_dry;
     iface->tx_lim_base = gone;
-    iface->tx_lim_dry  = 0;
     iface->tx_lim_ms   = ms;
 
     /* No clock yet, the first window, or one that spans an idle spell: a
@@ -720,16 +716,11 @@ ami_sana2_tx_window(AmiSana2If *iface, ULONG now)
         return;
 
     limit = (done * (ULONG)iface->tx_lim_target + dt - 1UL) / dt;
-    if (dry)
-    {
-        /* The sender's pace, not the card's: up only. */
-        if (limit < (ULONG)iface->tx_lim_limit)
-            limit = iface->tx_lim_limit;
-    }
-    else if (limit < (ULONG)(iface->tx_lim_limit >> 1))
-    {
+    /* At most half a window down.  A window the sender left idle measures
+       less than the card can do; a limit that falls too far stops TCP, the
+       queue runs dry behind the stop, and the settle doubles it again. */
+    if (limit < (ULONG)(iface->tx_lim_limit >> 1))
         limit = (ULONG)(iface->tx_lim_limit >> 1);
-    }
 
     /* Traffic without a starved stop: the target comes back a step.  On
        time, not on backlog, so a sender whose bursts end at a stop (the
@@ -749,14 +740,15 @@ ami_sana2_tx_window(AmiSana2If *iface, ULONG now)
     if (limit > ceiling)
         limit = ceiling;
 
-    iface->tx_lim_limit         = (UWORD)limit;
-    iface->stats.tx_queue_limit = limit;
+    iface->tx_lim_limit = (UWORD)limit;
 }
 
 /*
- * After the reap has handed slots back: wake TCP at half the limit, note a
- * queue that ran dry, and close the window when it is due.  Dry after a stop
- * means TCP did not refill it in time: the target grows a step.
+ * After the reap has handed slots back: wake TCP at half the limit, answer a
+ * starved queue, and close the window when it is due.  A queue that runs dry
+ * after it stopped TCP was too short for TCP's refill, BQL's starvation: the
+ * limit doubles at once and the target grows a step, so a limit that fell
+ * too far never holds the card idle for long.
  */
 static VOID ami_sana2_tx_settle(AmiSana2If *iface)
 {
@@ -774,12 +766,24 @@ static VOID ami_sana2_tx_settle(AmiSana2If *iface)
                 iface->tx_lim_target = (UWORD)(iface->tx_lim_target +
                                                AMI_SANA2_TX_TARGET_STEP_MS);
             iface->tx_lim_clean = 0;
+            if (iface->tx_lim_limit < (UWORD)AMI_SANA2_TX_STOP_AT)
+                iface->tx_lim_limit = (UWORD)(iface->tx_lim_limit << 1);
+            if (iface->tx_lim_limit > (UWORD)(AMI_SANA2_TX_STOP_AT +
+                                              iface->tx_slots))
+                iface->tx_lim_limit = (UWORD)(AMI_SANA2_TX_STOP_AT +
+                                              iface->tx_slots);
         }
-        iface->tx_lim_dry = 1;
     }
     if (nxif != NX_NULL && nxif->nx_interface_tx_queue_stopped != 0 &&
         count <= (UWORD)(iface->tx_lim_limit >> 1))
         nxif->nx_interface_tx_queue_stopped = 0;
+
+    /* A device that finishes writes inside BeginIO() holds none of them:
+       its queue is the card's own, its replies are the odd write it could
+       not take, and a window of those measures nothing.  It keeps the
+       ceiling, where #398 left it. */
+    if (iface->tx_quick_ok)
+        return;
 
     now = tx_time_get();
     if (now - iface->tx_lim_tick >= (ULONG)AMI_SANA2_TX_WINDOW_TICKS &&
