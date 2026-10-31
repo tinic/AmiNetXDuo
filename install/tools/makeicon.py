@@ -388,6 +388,22 @@ def _arc(c, cx, cy, r, a0, a1, colour):
               int(round(cy - r * 1.0 * math.sin(a))), colour)
 
 
+def env_icon():
+    """NetEnv: one network port feeding three exported value cards."""
+    c = Canvas(48, 26, GREY)
+    c.fill(2, 2, 45, 23, WHITE)
+    c.bevel(1, 1, 46, 24)
+    c.box(5, 8, 17, 18, BLACK)
+    c.fill(7, 10, 15, 16, BLUE)
+    c.hline(18, 25, 13, BLUE)
+    c.vline(25, 6, 20, BLUE)
+    for y in (6, 13, 20):
+        c.hline(26, 30, y, BLUE)
+        c.box(31, y - 2, 42, y + 2, BLACK)
+        c.hline(34, 39, y, BLUE)
+    return c
+
+
 def wireless_icon():
     """NetWireless: an antenna mast sending arcs to both sides."""
     c = Canvas(48, 26, GREY)
@@ -505,7 +521,7 @@ def main(argv):
             stack=8192),
         # Resident tools: DONOTWAIT keeps WBStartup from waiting for exit.
         "NetEnv.info": diskobject(
-            switch_icon(), WBTOOL,
+            env_icon(), WBTOOL,
             tooltypes=["DONOTWAIT", "INTERVAL=2"],
             stack=8192),
         "NetMeter.info": diskobject(
@@ -533,7 +549,7 @@ def main(argv):
 
     for name, blob in icons.items():
         if args.style == "glow":
-            artwork = {"Guide.info": "Document", "NetEnv.info": "NetSwitch"}.get(name, name[:-5])
+            artwork = "Document" if name == "Guide.info" else name[:-5]
             path = os.path.join(os.path.dirname(__file__), "..", "icons",
                                 "glow", artwork + ".glow")
             with open(path, "rb") as fh:

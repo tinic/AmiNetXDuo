@@ -1,6 +1,6 @@
 # GlowIcon artwork
 
-Nine original designs. `Guide` shares the document artwork; NetWireless,
+Original designs for the AmiNetXDuo launcher icons. `Guide` shares the document artwork; NetWireless,
 NetWirelessPrefs and Uninstall-AmiNetXDuo add artwork for the wireless tools
 and removal action. Each icon has 48x48 normal and selected images with a shared 128-color
 palette and transparent pen zero. The selected state is derived from the normal image with an inward golden
@@ -8,7 +8,7 @@ outline. Its opaque silhouette and interior pixel positions are identical,
 preventing a jump when Workbench selects it. The original second master cell
 is retained as an artwork reference; it no longer supplies selection pixels.
 
-The transparent PNG masters were generated with Codex's built-in image tool on
+The initial transparent PNG masters were generated with Codex's built-in image tool on
 2026-10-11. They are original artwork, not copies of Commodore or third-party
 icon packs. The tool does not expose a model selector; no specific underlying
 model is claimed. The earlier model recommendation was separate from the tool
@@ -80,3 +80,37 @@ Use case: stylized-concept. Create an original transparent PNG master sprite she
 ### Uninstall-AmiNetXDuo
 
 Use case: stylized-concept. Create an original transparent PNG master sprite sheet for Amiga Workbench Uninstall-AmiNetXDuo GlowIcon. The attached Install-AmiNetXDuo image is a STYLE REFERENCE ONLY, not an edit target. Match its blue enamel metal package/tray, silver edging, dark outlines, top-left lighting, hand-painted late-1990s look and slight three-quarter perspective. New subject: a compact blue/silver software package box with one very bold orange-red removal arrow pointing outward to the RIGHT, leaving the package, unmistakably different from the attached green downward installation arrow. Simple clean silhouette readable at 48x48. Exactly two equal horizontal square cells: normal left, selected right. Package and rightward arrow have identical geometry, scale, orientation and framing in both cells, centered with generous equal transparent padding. Selected adds a restrained thin golden rim. No downward green arrow, no trash bin, no text, labels, logos, checkerboard, floor, extra unrelated objects or external cast shadow. Genuinely transparent background. Our encoder derives stationary selection from normal, so prioritize a clean left normal icon.
+
+## NetEnv addition (2026-10-31)
+
+The built-in image tool generated the transparent two-cell NetEnv master
+using NetPrefs as the style reference. A network port feeds three value
+cards, representing configuration exported to other desktop programs.
+NetEnv has its own classic image and compiled GlowIcon instead of borrowing
+NetSwitch. Launch tooltypes and the 8192-byte stack are unchanged.
+
+Normal and selected color images still come from the existing stationary
+selection algorithm. The compiler pads unused palette entries to retain
+the 128-entry shipping format when quantization needs fewer colors; it
+does not add or change image pixels. `NetEnv-preview.png` compares the
+compiled normal/selected images and the classic fallback at 3x scale.
+
+Exact generation prompt:
+
+Use case: stylized-concept. Asset: original NetEnv launcher GlowIcon for an Amiga
+Workbench network suite. The attached NetPrefs image is a STYLE REFERENCE ONLY: match
+the glossy cobalt-blue enamel, broad silver chrome trim, dark outlines, upper-left
+lighting, hand-painted late-1990s Workbench style and slight three-quarter view. NetEnv
+publishes network address/settings values for other desktop programs; it is not an
+editor, switch, wireless antenna or traffic meter. New subject: a compact blue chrome-
+edged network module, with one bold network-node symbol on its front, feeding THREE
+small off-white value cards to the right through a simple clear branching silver
+connector. The three cards each have just one short dark-blue horizontal mark; no actual
+text or numbers. One unified balanced object, very simple bold silhouette, legible when
+reduced to 48x48 pixels. No toggle levers, sliders, gear, Wi-Fi arcs, cloud, plant or
+globe scenery. Exactly TWO EQUAL horizontal square cells: normal icon on left, same icon
+selected on right with restrained thin golden rim. Identical geometry, scale,
+perspective and placement in both cells, generous equal transparent padding and all
+content fully inside each half. Genuinely transparent background, no checkerboard,
+floor, exterior cast shadow, labels, logos, watermarks or extra unrelated objects. Our
+compiler derives stationary selection from normal, so prioritize the left normal image.
