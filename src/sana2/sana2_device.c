@@ -1966,6 +1966,8 @@ ULONG ami_sana2_get_tcp_wan_window(const AmiSana2If *iface)
  *     the receive side sixteen 1.5 KB buffers.
  *   3c589, etherlink3: the 3C589's 8 KB packet buffer less its 3 KB
  *     transmit FIFO.
+ *   plipbox: the firmware's ENC28J60 receive ring, 0x0000-0x19FF of the
+ *     chip's 8 KB (avr/src/eth/enc28j60.c, RXSTOP_INIT): four full frames.
  *
  * Anything else is 0: no cap, which is what every driver got before.
  */
@@ -1988,6 +1990,7 @@ ULONG ami_sana2_known_rx_bytes(const char *device)
         { "ariadne.device",    16UL * 1536UL },
         { "3c589.device",      5UL * 1024UL },
         { "etherlink3.device", 5UL * 1024UL },
+        { "plipbox.device",    26UL * 256UL },
     };
     const char *base;
     UWORD       i;

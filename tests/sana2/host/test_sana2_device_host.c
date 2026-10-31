@@ -1639,6 +1639,53 @@ static void case_rx_capacity_refresh(void)
     h_check(h_tear_down(iface), "the capacity interface closes");
 }
 
+/* 12. A driver that cannot be asked gets its card's ring by name: the
+   plipbox firmware's 6,656-byte ENC28J60 ring holds four full frames, so a
+   LAN peer's window stays inside it (2026-10-30, A500: a 1 MB window had
+   the peer resend 11-12% of an upload).  A path or another case is the same
+   driver; RXBUFFER wins; a driver nobody knows is not capped. */
+static void case_known_rx_bytes(void)
+{
+    AmiSana2If *iface;
+    LONG        err = 0;
+
+    h_check(ami_sana2_known_rx_bytes("plipbox.device") == 6656UL &&
+            ami_sana2_known_rx_bytes("DEVS:Networks/PLIPBOX.device")
+                == 6656UL,
+            "plipbox.device holds its ENC28J60 ring, by any path or case");
+    h_check(ami_sana2_known_rx_bytes("x-surf-100.device") == 52UL * 256UL,
+            "the X-Surf 100 keeps its 52 pages");
+    h_check(ami_sana2_known_rx_bytes("anxplipbox.device") == 0UL &&
+            ami_sana2_known_rx_bytes(NULL) == 0UL,
+            "a different name, or no name, is not capped");
+
+    h_device_reset();
+    h_ext_accept = 0;
+    h_config();
+    strcpy(h_cfg.device, "DEVS:Networks/plipbox.device");
+    iface = ami_sana2_open(&h_cfg, &err);
+    h_check(iface != NULL, "plipbox.device opens");
+    if (iface == NULL)
+        return;
+    h_check(iface->hw_rx_bytes == 6656UL && iface->rx_capacity_changed &&
+            !iface->rx_capacity_live && h_dev.rx_capacity_cmds == 0,
+            "and holds 6,656 bytes by name, without being asked");
+    h_check(ami_bsd_tcp_window_fit(800000UL, iface->hw_rx_bytes, 1460UL)
+                == 4UL * 1460UL,
+            "which keeps a LAN window at four segments");
+    h_check(ami_sana2_close(iface), "the plipbox interface closes");
+
+    h_device_reset();
+    h_config();
+    strcpy(h_cfg.device, "plipbox.device");
+    h_cfg.rx_buffer = 3000UL;
+    iface = ami_sana2_open(&h_cfg, &err);
+    h_check(iface != NULL && iface->hw_rx_bytes == 3000UL,
+            "RXBUFFER wins over the name");
+    if (iface != NULL)
+        h_check(ami_sana2_close(iface), "the RXBUFFER interface closes");
+}
+
 /* A status query does not run the device commands itself: it asks reader 0
    (ami_sana2_stats_request()) and reads the epoch.  Without a reader there is
    nothing to ask and the answer says so; with one the flag is raised and the
@@ -2520,6 +2567,7 @@ int main(void)
     case_special_recovery_stats();
     case_stats_request();
     case_rx_capacity_refresh();
+    case_known_rx_bytes();
     case_keeps_online();
     case_request_counts();
     case_tcp_grow_rtt();
