@@ -407,12 +407,43 @@ UINT ami_sana2_gso_max_segs(NX_INTERFACE *interface_ptr);
 #define AMI_SANA2_TX_PEND           (AMI_SANA2_TX_SLOTS * 16)
 #endif
 
-/* Where the queue stops new TCP data and where it takes it again
-   (sana2_tx.c, ami_sana2_tx_flow).  The half above the stop is for what is
-   already on its way: a GSO block per sending connection, retransmissions,
-   acknowledgments and other protocols. */
+/* The most the wait queue holds before it stops new TCP data (sana2_tx.c,
+   ami_sana2_tx_flow): the ceiling of the queue limit below.  The half above
+   it is for what is already on its way: a GSO block per sending connection,
+   retransmissions, acknowledgments and other protocols. */
 #define AMI_SANA2_TX_STOP_AT        (AMI_SANA2_TX_PEND / 2)
-#define AMI_SANA2_TX_WAKE_AT        (AMI_SANA2_TX_PEND / 4)
+
+/*
+ * THE QUEUE LIMIT, BQL/TSQ-STYLE.  Writes below TCP -- waiting here or held
+ * by the device -- are what a ping, an ACK or another connection waits
+ * behind.  A fixed stop at AMI_SANA2_TX_STOP_AT was seconds of queue on a
+ * slow card: plipbox drains ~70 frames a second, so 256 waiting writes plus
+ * 32 in the driver put a ping 4 s behind a download and lost 62-66% of them
+ * (2026-10-30, A500).  So each interface measures how fast its writes
+ * complete while it has a backlog and stops TCP at AMI_SANA2_TX_TARGET_MS of
+ * that, never below AMI_SANA2_TX_LIMIT_MIN writes and never above the stop
+ * plus the ring, which is where every interface stood before: a gigabit card
+ * drains its ceiling in a few milliseconds and keeps it.  It wakes at half.
+ *
+ * A queue that runs dry after it stopped TCP was too short for the time TCP
+ * takes to refill it (an acknowledgment's round trip, a stretch ACK): the
+ * target grows a step, up to AMI_SANA2_TX_TARGET_MAX_MS, and comes back a
+ * step after AMI_SANA2_TX_DECAY_MS of backlog that never ran dry.
+ *
+ * A window closes at a completion after AMI_SANA2_TX_WINDOW_TICKS ticks with
+ * AMI_SANA2_TX_WINDOW_WRITES writes done, or after AMI_SANA2_TX_WINDOW_LONG
+ * ticks with any; its length is E-clock milliseconds.  A window in which the
+ * queue ran empty was the sender's pace, not the card's: it may raise the
+ * limit, never lower it.  A backlogged one lowers it at most by half.
+ */
+#define AMI_SANA2_TX_LIMIT_MIN          2
+#define AMI_SANA2_TX_TARGET_MS          20      /* one 50 Hz tick          */
+#define AMI_SANA2_TX_TARGET_STEP_MS     20
+#define AMI_SANA2_TX_TARGET_MAX_MS      160
+#define AMI_SANA2_TX_DECAY_MS           2000
+#define AMI_SANA2_TX_WINDOW_TICKS       2
+#define AMI_SANA2_TX_WINDOW_WRITES      16
+#define AMI_SANA2_TX_WINDOW_LONG        10
 
 /* `gso` names the GSO block (AmiTxGso below) this entry is the next child
    of, and `packet` is then its parent; AMI_SANA2_GSO_NONE for an ordinary
@@ -1178,6 +1209,23 @@ struct AmiSana2If
     UWORD               tx_pend_head;
     UWORD               tx_pend_count;
     volatile BOOL       tx_kicking;
+
+    /* The queue limit (AMI_SANA2_TX_LIMIT_MIN and below, sana2_tx.c).
+       tx_dev_writes: slots the device holds, raised under Forbid() where a
+       slot is claimed, lowered by one instruction where it is handed back.
+       tx_lim_limit: writes below TCP at which it stops; wake at half.
+       tx_lim_done: completions in the window opened at tx_lim_tick (ticks)
+       and tx_lim_ms (E-clock ms).  tx_lim_held: TCP was stopped since the
+       queue last ran dry; tx_lim_dry: it ran dry in this window. */
+    volatile UWORD      tx_dev_writes;
+    UWORD               tx_lim_limit;
+    UWORD               tx_lim_target;      /* ms of drain */
+    UWORD               tx_lim_clean;       /* ms of backlog without a dry run */
+    ULONG               tx_lim_done;
+    ULONG               tx_lim_tick;
+    ULONG               tx_lim_ms;
+    UBYTE               tx_lim_held;
+    UBYTE               tx_lim_dry;
 
     /* GSO blocks in flight, under Forbid() with the slots: gso_count of
        them, NULL until GSO is first advertised; gso_next is where the

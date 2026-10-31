@@ -294,7 +294,22 @@ UINT ami_sana2_gso_max_segs(NX_INTERFACE *interface_ptr)
 #endif
 
     iface = (const AmiSana2If *)interface_ptr->nx_interface_additional_link_info;
-    return (iface != NULL) ? (UINT)iface->gso_max_segs : 0;
+    if (iface == NULL)
+        return 0;
+
+    /* No block longer than the queue limit (sana2_tx.c, ami_sana2_tx_flow),
+       as Linux sizes TSO to its pacing: a block's children go below TCP
+       all at once, past the stop.  On plipbox 16 children are a quarter of
+       a second of the wire in front of a ping.  A batch is one write
+       whatever its length. */
+#ifdef AMINETXDUO_TX_BATCH
+    if (!iface->tx_batch_ok)
+#endif
+    {
+        if ((UWORD)iface->gso_max_segs > iface->tx_lim_limit)
+            return (iface->tx_lim_limit < 2) ? 2U : (UINT)iface->tx_lim_limit;
+    }
+    return (UINT)iface->gso_max_segs;
 }
 #else /* !AMINETXDUO_TCP_GSO */
 

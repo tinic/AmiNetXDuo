@@ -315,6 +315,8 @@ static void fixture_init(UWORD addr_bytes)
     iface.bps        = 10000000UL;
     iface.hw_type    = S2WireType_Ethernet;
     iface.addr_bytes = addr_bytes;
+    /* The queue limit unmeasured, as ami_sana2_tx_init() leaves it. */
+    iface.tx_lim_limit = (UWORD)(AMI_SANA2_TX_STOP_AT + AMI_SANA2_TX_SLOTS);
 
     interface_obj.nx_interface_index                = 0;
     interface_obj.nx_interface_additional_link_info = NULL;
@@ -1303,6 +1305,34 @@ static void test_gso_advertised_with_the_link(void)
 
         ami_sana2_unbind(&iface);
     }
+
+    /* No block is longer than the queue limit, as Linux sizes TSO to its
+       pacing: a slow card's limit of four writes takes blocks of four, the
+       floor of two keeps two, and a batch is one write whatever its
+       length. */
+    fixture_init(AMI_ETH_ADDR_SIZE);
+    ami_sana2_attach(&iface, &ip, 0);
+    iface.tx_slots = 32;
+    iface.pool     = &pool;
+    pool.nx_packet_pool_total = 1024;
+    drive(NX_LINK_ENABLE);
+    h_check(ami_sana2_gso_max_segs(&interface_obj) == 16,
+            "an unmeasured queue takes the full block");
+    iface.tx_lim_limit = 4;
+    h_check(ami_sana2_gso_max_segs(&interface_obj) == 4,
+            "a four-write limit takes blocks of four");
+    iface.tx_lim_limit = 1;
+    h_check(ami_sana2_gso_max_segs(&interface_obj) == 2,
+            "and never fewer than two");
+#ifdef AMINETXDUO_TX_BATCH
+    iface.tx_batch_ok = 1;
+    h_check(ami_sana2_gso_max_segs(&interface_obj) == 16,
+            "a batch device keeps the full block");
+    iface.tx_batch_ok = 0;
+#endif
+    drive(NX_LINK_DISABLE);
+    ami_sana2_gso_free(&iface);
+    ami_sana2_unbind(&iface);
 
     /* No memory for the table: no GSO. */
     fixture_init(AMI_ETH_ADDR_SIZE);

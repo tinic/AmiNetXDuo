@@ -420,6 +420,15 @@ UINT _tx_thread_sleep(ULONG ticks)
     return TX_SUCCESS;
 }
 
+/* ThreadX ticks and E-clock milliseconds, both the test's: the lazy tick
+   and the queue limit's measuring window read them.  h_ms 0 is "no clock
+   yet", which takes no sample. */
+static ULONG h_now;
+static ULONG h_ms;
+
+ULONG _tx_time_get(VOID) { return h_now; }
+ULONG ami_millis_quick(VOID) { return h_ms; }
+
 #ifdef AMINETXDUO_TX_LAZY_COLLECT
 /* The lazy-collect tick's ThreadX surface.  The timer is real to the code
    under test -- create succeeds, so tx_lazy_timer_up is set and the parking
@@ -427,9 +436,6 @@ UINT _tx_thread_sleep(ULONG ticks)
    rather than a running ThreadX. */
 static VOID (*h_tick_fn)(ULONG);
 static ULONG h_tick_arg;
-static ULONG h_now;
-
-ULONG _tx_time_get(VOID) { return h_now; }
 
 UINT _txe_timer_create(TX_TIMER *timer_ptr, CHAR *name_ptr,
                        VOID (*expiration_function)(ULONG), ULONG input,
@@ -512,6 +518,7 @@ static void fixture_init(BOOL raw, ULONG hw_type)
     h_flush_held   = NULL;
     h_flush_reply_on_sleep = 0;
     h_current      = &h_thread_a;
+    h_ms           = 0;
     h_before_disable = NULL;
     h_copy_on_begin  = 0;
     h_released       = NULL;
@@ -1460,10 +1467,12 @@ static void test_full_ring_queues_in_order(void)
 }
 
 /* The queue stops new TCP data before it can overflow and drop it
-   (nx_interface_tx_queue_stopped, ami_sana2_tx_flow): set when half the wait
-   queue is in use, cleared again at a quarter and by the drain.  On Wi-Fi a
-   connection's 1024-segment transmit queue overran the 544 writes this holds
-   and the refused writes stalled the upload in TCP repair. */
+   (nx_interface_tx_queue_stopped, ami_sana2_tx_flow): set when the writes
+   below TCP reach the queue limit, cleared again at half of it and by the
+   drain.  Unmeasured, the limit is its ceiling, the stop plus the ring, so
+   a full ring stops at AMI_SANA2_TX_STOP_AT waiting as before.  On Wi-Fi a
+   connection's 1024-segment transmit queue overran the 544 writes this
+   holds and the refused writes stalled the upload in TCP repair. */
 static NX_INTERFACE q_nxif;
 
 static void q_complete_one(void)
@@ -1481,37 +1490,48 @@ static void q_complete_one(void)
     }
 }
 
+/* Writes below TCP: waiting, and held by the device. */
+static UWORD q_below(void)
+{
+    return (UWORD)(iface.tx_pend_count + iface.tx_dev_writes);
+}
+
 static void test_queue_stops_and_wakes_tcp(void)
 {
     UWORD i;
+    UWORD wake;
 
-    printf("sana2: the wait queue stops new TCP data at half and wakes it "
-           "at a quarter\n");
+    printf("sana2: the wait queue stops new TCP data at the limit and wakes "
+           "it at half\n");
 
     fixture_init(FALSE, S2WireType_Ethernet);
     memset(&q_nxif, 0, sizeof(q_nxif));
     iface.interface_ptr = &q_nxif;
+    h_check(iface.tx_lim_limit == AMI_SANA2_TX_STOP_AT + Q_N,
+            "the limit starts at its ceiling, the stop plus the ring");
+    wake = (UWORD)(iface.tx_lim_limit / 2);
 
     for (i = 0; i < Q_N + AMI_SANA2_TX_STOP_AT - 1; i++)
         (void)q_send(i);
     h_check(iface.tx_pend_count == AMI_SANA2_TX_STOP_AT - 1 &&
+            iface.tx_dev_writes == Q_N &&
             q_nxif.nx_interface_tx_queue_stopped == 0,
             "below the stop the queue takes TCP data");
     (void)q_send((UWORD)(Q_N + AMI_SANA2_TX_STOP_AT - 1));
     h_check(iface.tx_pend_count == AMI_SANA2_TX_STOP_AT &&
             q_nxif.nx_interface_tx_queue_stopped != 0,
             "at the stop it asks TCP to hold new data");
-    h_check(iface.stats.tx_queue_full == 0 && iface.stats.tx_errors == 0,
-            "with nothing dropped");
+    h_check(iface.stats.tx_queue_full == 0 && iface.stats.tx_errors == 0 &&
+            iface.stats.tx_queue_stops == 1,
+            "with nothing dropped, and the stop counted");
 
-    while (iface.tx_pend_count > AMI_SANA2_TX_WAKE_AT + 1)
+    while (q_below() > wake + 1)
         q_complete_one();
     h_check(q_nxif.nx_interface_tx_queue_stopped != 0,
             "it stays stopped above the wake mark");
     q_complete_one();
-    h_check(iface.tx_pend_count == AMI_SANA2_TX_WAKE_AT &&
-            q_nxif.nx_interface_tx_queue_stopped == 0,
-            "and wakes at a quarter");
+    h_check(q_below() == wake && q_nxif.nx_interface_tx_queue_stopped == 0,
+            "and wakes at half the limit");
 
     for (i = 0; iface.tx_pend_count < AMI_SANA2_TX_STOP_AT; i++)
         (void)q_send(i);
@@ -1521,6 +1541,155 @@ static void test_queue_stops_and_wakes_tcp(void)
     h_check(iface.tx_pend_count == 0 &&
             q_nxif.nx_interface_tx_queue_stopped == 0,
             "the drain empties the queue and wakes it");
+    iface.interface_ptr = NULL;
+}
+
+/*
+ * The limit follows the card (sana2_internal.h, AMI_SANA2_TX_LIMIT_MIN): a
+ * device that completes one write every `step_ms` and a sender that keeps
+ * the queue full whenever it is not stopped, for `ms` of simulated time.
+ * Ticks follow the milliseconds at 20 ms a tick.  Returns the most writes
+ * below TCP seen over the last second.
+ */
+static UWORD q_drive(ULONG ms, ULONG step_ms, UWORD per_step)
+{
+    ULONG t;
+    ULONG end  = h_ms + ms;
+    UWORD most = 0;
+    UWORD next = 0;
+
+    for (t = h_ms; h_ms < end; )
+    {
+        UWORD k;
+
+        h_ms += step_ms;
+        h_now = h_ms / 20UL;
+        for (k = 0; k < per_step; k++)
+            q_complete_one();
+        while (q_nxif.nx_interface_tx_queue_stopped == 0 &&
+               iface.tx_pend_count < AMI_SANA2_TX_PEND)
+        {
+            (void)q_send(next);
+            next = (UWORD)((next + 1) % Q_MANY);
+        }
+        if (h_ms + 1000UL >= end && q_below() > most)
+            most = q_below();
+    }
+    (void)t;
+    return most;
+}
+
+static void test_queue_limit_follows_the_card(void)
+{
+    UWORD most;
+
+    printf("sana2: the queue limit is a tick of what the card drains\n");
+
+    /* plipbox: about 70 frames a second.  The ceiling's 288 writes are four
+       seconds of wire; the limit comes down to the floor, and a ping then
+       waits behind two writes, not 288. */
+    fixture_init(FALSE, S2WireType_Ethernet);
+    memset(&q_nxif, 0, sizeof(q_nxif));
+    iface.interface_ptr = &q_nxif;
+    h_ms = 1000UL;
+    h_now = h_ms / 20UL;
+    most = q_drive(12000UL, 14UL, 1);
+    h_check(iface.tx_lim_limit == AMI_SANA2_TX_LIMIT_MIN &&
+            iface.stats.tx_queue_limit == AMI_SANA2_TX_LIMIT_MIN,
+            "a 70-frame-a-second card stops TCP at the floor");
+    h_check(most <= AMI_SANA2_TX_LIMIT_MIN + 1,
+            "and holds no more than that below it");
+    h_check(iface.stats.tx_queue_full == 0 && iface.stats.tx_errors == 0,
+            "with nothing dropped on the way down");
+    iface.interface_ptr = NULL;
+
+    /* A Wi-Fi-like card, a write a millisecond: twenty, one tick's worth. */
+    fixture_init(FALSE, S2WireType_Ethernet);
+    memset(&q_nxif, 0, sizeof(q_nxif));
+    iface.interface_ptr = &q_nxif;
+    h_ms = 1000UL;
+    h_now = h_ms / 20UL;
+    most = q_drive(6000UL, 1UL, 1);
+    h_check(iface.tx_lim_limit >= 18 && iface.tx_lim_limit <= 24,
+            "a 1000-frame-a-second card stops TCP at about a tick of it");
+    h_check(most <= iface.tx_lim_limit + 1, "and holds that much below it");
+    iface.interface_ptr = NULL;
+
+    /* A fast card, the whole ring a millisecond: a tick is far past the
+       ceiling, which it keeps. */
+    fixture_init(FALSE, S2WireType_Ethernet);
+    memset(&q_nxif, 0, sizeof(q_nxif));
+    iface.interface_ptr = &q_nxif;
+    h_ms = 1000UL;
+    h_now = h_ms / 20UL;
+    (void)q_drive(3000UL, 1UL, Q_N);
+    h_check(iface.tx_lim_limit == AMI_SANA2_TX_STOP_AT + Q_N,
+            "a card that drains the ring every millisecond keeps the "
+            "ceiling");
+    h_check(iface.stats.tx_queue_full == 0 && iface.stats.tx_errors == 0,
+            "and drops nothing");
+    iface.interface_ptr = NULL;
+}
+
+static void test_queue_limit_invariants(void)
+{
+    UWORD i;
+    UWORD target;
+
+    printf("sana2: the queue limit never leaves a stale stop, never refuses "
+           "a write, and grows when TCP is starved\n");
+
+    /* The device's writes count: two direct writes stop TCP at a limit of
+       two, with nothing waiting at all. */
+    fixture_init(FALSE, S2WireType_Ethernet);
+    memset(&q_nxif, 0, sizeof(q_nxif));
+    iface.interface_ptr = &q_nxif;
+    iface.tx_lim_limit  = 2;
+    (void)q_send(0);
+    h_check(q_nxif.nx_interface_tx_queue_stopped == 0, "one write: not yet");
+    (void)q_send(1);
+    h_check(iface.tx_pend_count == 0 && iface.tx_dev_writes == 2 &&
+            q_nxif.nx_interface_tx_queue_stopped != 0,
+            "two in the device: stopped, nothing waiting");
+
+    /* Stopped is a hold on new TCP data, not a refusal: retransmissions,
+       ACKs and other protocols still go, behind what waits. */
+    for (i = 2; i < 40; i++)
+        h_check(q_send(i) == NX_SUCCESS, "a write while stopped is taken");
+    h_check(iface.stats.tx_queue_full == 0 && iface.stats.tx_errors == 0 &&
+            h_releases == 0,
+            "and none is dropped");
+
+    /* Empty is never stopped, whichever task's reap emptied it. */
+    while (q_below() != 0)
+        q_complete_one();
+    h_check(q_nxif.nx_interface_tx_queue_stopped == 0,
+            "the queue run dry is not left stopped");
+
+    /* A queue that ran dry after it had stopped TCP was too short: the
+       target grows a step, and comes back after a clean backlog. */
+    target = iface.tx_lim_target;
+    h_check(target == AMI_SANA2_TX_TARGET_MS + AMI_SANA2_TX_TARGET_STEP_MS,
+            "a dry run after a stop grows the target a step");
+    h_ms = 1000UL;
+    h_now = h_ms / 20UL;
+    (void)q_drive(3000UL, 1UL, 1);
+    h_check(iface.tx_lim_target == AMI_SANA2_TX_TARGET_MS,
+            "and a clean backlog brings it back");
+
+    /* A quick device finishes inside BeginIO(): the device holds nothing
+       and the queue never stops, whatever the limit. */
+    fixture_init(FALSE, S2WireType_Ethernet);
+    memset(&q_nxif, 0, sizeof(q_nxif));
+    iface.interface_ptr = &q_nxif;
+    iface.tx_quick_ok   = 1;
+    h_quick_kept        = 1;
+    iface.tx_lim_limit  = 2;
+    for (i = 0; i < 64; i++)
+        (void)q_send(i);
+    h_check(iface.tx_dev_writes == 0 && iface.tx_pend_count == 0 &&
+            q_nxif.nx_interface_tx_queue_stopped == 0,
+            "a device that finishes in BeginIO() is never stopped");
     iface.interface_ptr = NULL;
 }
 
@@ -2936,6 +3105,8 @@ int main(void)
 #endif
     test_full_ring_queues_in_order();
     test_queue_stops_and_wakes_tcp();
+    test_queue_limit_follows_the_card();
+    test_queue_limit_invariants();
     test_kick_launch_is_not_overtaken();
 
     test_pad_cooked_no_fusion();
