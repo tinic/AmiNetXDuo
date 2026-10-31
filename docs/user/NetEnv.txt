@@ -69,7 +69,9 @@ interfaces. IPv4-only builds simply omit IPv6 variables.
 
 Addresses, masks and defaults disappear when they are no longer valid.
 Removed interfaces disappear from INTERFACES and lose their variables.
-On stack shutdown only ANXD/STATE=DOWN and an empty ANXD/INTERFACES remain.
+On stack shutdown only ANXD/STATE=DOWN and an empty ANXD/INTERFACES remain,
+and NetEnv keeps running. A Ctrl-C that arrives while NetEnv reads the stack
+counts as such a shutdown request; a second Ctrl-C stops NetEnv.
 On normal NetEnv exit all its variables are removed. Nothing is saved to
 ENVARC:. Do not save this namespace yourself: these are live values.
 
