@@ -149,6 +149,15 @@ static int env_read(void *ctx, const char *name, char *value, size_t size)
     return 1;
 }
 
+typedef char ne_dos_errors[(NE_ERR_DIR_NOT_FOUND == ERROR_DIR_NOT_FOUND &&
+                            NE_ERR_OBJECT_NOT_FOUND == ERROR_OBJECT_NOT_FOUND) ? 1 : -1];
+
+static long env_delete(void *ctx, const char *path)
+{
+    (void)ctx;
+    return DeleteFile((CONST_STRPTR)path) ? 0 : IoErr();
+}
+
 static int env_write(void *ctx, const char *name, const char *value)
 {
     char path[40] = "ENV:", *p;
@@ -167,13 +176,9 @@ static int env_write(void *ctx, const char *name, const char *value)
         }
         return SetVar((CONST_STRPTR)name, (CONST_STRPTR)value, -1, GVF_GLOBAL_ONLY) != 0;
     }
-    if (!DeleteVar((CONST_STRPTR)name, GVF_GLOBAL_ONLY) &&
-        IoErr() != ERROR_OBJECT_NOT_FOUND) return 0;
-    /* Only empty directories, and only inside our namespace. */
-    strcat(path, name);
-    p = strrchr(path, '/');
-    if (p) { *p = 0; (void)DeleteFile((CONST_STRPTR)path); }
-    return 1;
+    /* Not DeleteVar(): on 3.2 it leaves an unreadable stub, even for a
+       variable that never existed, and the stubs keep the directories. */
+    return ne_remove(name, env_delete, NULL);
 }
 
 /* Recover only the documented keys after an earlier abnormal termination.
@@ -254,7 +259,7 @@ int main(int argc, char **argv)
     } else {
         rda = ReadArgs((CONST_STRPTR)TEMPLATE, args, NULL);
         if (!rda) { tool_fault(IoErr()); goto out; }
-        if (args[ARG_VERSION]) { tool_printf("%s\n", (LONG)(version_tag + 7)); rc = RETURN_OK; goto out; }
+        if (args[ARG_VERSION]) { tool_printf("%s\n", (LONG)ne_version(version_tag)); rc = RETURN_OK; goto out; }
         if (args[ARG_INTERVAL]) interval = *(LONG *)args[ARG_INTERVAL];
     }
     if (interval < 1 || interval > 3600) { tool_error("INTERVAL must be 1 to 3600 seconds"); goto out; }
@@ -320,8 +325,6 @@ int main(int argc, char **argv)
     if (!ne_publish(&owned, &desired, env_read, env_write, NULL)) {
         tool_error("could not remove all exported variables"); rc = RETURN_ERROR;
     }
-    (void)DeleteFile((CONST_STRPTR)"ENV:ANXD/IF");
-    (void)DeleteFile((CONST_STRPTR)"ENV:ANXD");
 out:
     if (armed) {
         if (!CheckIO((struct IORequest *)timer)) AbortIO((struct IORequest *)timer);

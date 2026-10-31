@@ -229,3 +229,28 @@ int ne_publish(NeOwned *owned, const NeTable *desired,
     }
     return ok;
 }
+
+int ne_remove(const char *name, NeDelete delete_path, void *ctx)
+{
+    char path[40] = "ENV:", *p;
+    long error;
+    if (!append(path, sizeof(path), name)) return 0;
+    error = delete_path(ctx, path);
+    if (error && error != NE_ERR_DIR_NOT_FOUND && error != NE_ERR_OBJECT_NOT_FOUND)
+        return 0;
+    /* A directory still holding something refuses; that ends the walk. */
+    while ((p = strrchr(path, '/'))) {
+        *p = 0;
+        error = delete_path(ctx, path);
+        if (error && error != NE_ERR_DIR_NOT_FOUND && error != NE_ERR_OBJECT_NOT_FOUND)
+            break;
+    }
+    return 1;
+}
+
+const char *ne_version(const char *verstag)
+{
+    static const char prefix[] = "$VER: ";
+    return strncmp(verstag, prefix, sizeof(prefix) - 1) ? verstag
+                                                        : verstag + sizeof(prefix) - 1;
+}
