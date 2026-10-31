@@ -6,7 +6,8 @@
  * tests/tools/host/test_tool_ifdev_host.c.
  *
  * NETSTATUS_IFBYTES rides the same slots: each interface's byte counts, 64
- * bits in two halves, from the shim's AmiSana2Stats.
+ * bits in two halves, from the shim's AmiSana2Stats.  NETSTATUS_IFQUEUE
+ * rides them too, with the shim's transmit-queue counters.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -463,15 +464,60 @@ static VOID t_bytes_record_shape(VOID)
     CHECK(NETSTATUS_IFBYTES == 24, "the selector number is 24");
 }
 
+/* ------------------------------------------------- NETSTATUS_IFQUEUE --- */
+
+static const NetStatusIfQueue *h_queue(UWORD i)
+{
+    return (const NetStatusIfQueue *)NETSTATUS_ENTRIES(h_hdr) + i;
+}
+
+static VOID t_queue_arrives_per_slot(VOID)
+{
+    LONG rc;
+
+    h_reset();
+    h_attach_sana(0, "a2065.device");
+    h_attach(1, "nodevice");
+    h_stats[0].tx_queued      = 4321;
+    h_stats[0].tx_queue_full  = 17;
+    h_stats[0].tx_queue_limit = 544;
+    h_stats[0].tx_queue_stops = 0x80000001UL;
+
+    rc = h_query(NETSTATUS_IFQUEUE, (ULONG)sizeof(h_buffer),
+                 (UWORD)AMI_NETSTATUS_VERSION);
+
+    CHECK(rc == (LONG)H_SLOTS, "IFQUEUE: one row per slot");
+    CHECK(h_hdr->nsh_Type == NETSTATUS_IFQUEUE, "IFQUEUE: the header names it");
+    CHECK(h_hdr->nsh_EntrySize == (UWORD)sizeof(NetStatusIfQueue),
+          "IFQUEUE: the header states the entry size");
+    CHECK(h_queue(0)->nsq_Index == 0 && h_queue(0)->nsq_TxQueued == 4321 &&
+          h_queue(0)->nsq_TxQueueFull == 17,
+          "the writes queued and dropped arrive");
+    CHECK(h_queue(0)->nsq_TxQueueLimit == 544 &&
+          h_queue(0)->nsq_TxQueueStops == 0x80000001UL,
+          "and the queue limit and its stops");
+    CHECK(h_queue(1)->nsq_Index == 1 && h_queue(1)->nsq_TxQueued == 0 &&
+          h_queue(1)->nsq_TxQueueLimit == 0,
+          "a slot with no SANA-II device reads zero");
+    CHECK(h_queue(2)->nsq_Index == 2 && h_queue(2)->nsq_TxQueueStops == 0,
+          "an unused slot is present and zero, not stale buffer");
+}
+
+static VOID t_queue_record_shape(VOID)
+{
+    CHECK(sizeof(NetStatusIfQueue) == 20, "NetStatusIfQueue is 20 bytes");
+    CHECK(NETSTATUS_IFQUEUE == 25, "the selector number is 25");
+}
+
 /* The number above the last selector is still EINVAL: what an older library
-   says to IFDEVICES and IFBYTES, and what the tools fall back on.  25: 23 is
-   NETSTATUS_HOSTSOURCE and 24 NETSTATUS_IFBYTES. */
+   says to IFDEVICES, IFBYTES and IFQUEUE, and what the tools fall back on.
+   26: 23 is NETSTATUS_HOSTSOURCE, 24 NETSTATUS_IFBYTES, 25 NETSTATUS_IFQUEUE. */
 static VOID t_unknown_selector_is_einval(VOID)
 {
     LONG rc;
 
     h_reset();
-    rc = h_query(25, (ULONG)sizeof(h_buffer), (UWORD)AMI_NETSTATUS_VERSION);
+    rc = h_query(26, (ULONG)sizeof(h_buffer), (UWORD)AMI_NETSTATUS_VERSION);
     CHECK(rc == -1 && h_error == AMI_EINVAL, "an unknown selector is EINVAL");
 }
 
@@ -593,6 +639,8 @@ int main(void)
     t_version_mismatch_is_refused();
     t_bytes_arrive_per_slot();
     t_bytes_record_shape();
+    t_queue_arrives_per_slot();
+    t_queue_record_shape();
     t_unknown_selector_is_einval();
     t_interface_scalars();
 

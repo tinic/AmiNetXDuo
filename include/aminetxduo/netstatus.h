@@ -250,6 +250,27 @@ typedef struct NetStatusIfBytes
     ULONG   nsb_TxBytes;
 } NetStatusIfBytes;
 
+/*
+ * NetStatusIfQueue[], one per NETSTATUS_INTERFACES slot: the SANA-II shim's
+ * transmit queue (sana2_tx.c).  nsq_TxQueued counts writes that found every
+ * slot busy and waited; nsq_TxQueueFull the ones dropped because the wait
+ * queue was full too (also in nsi_TxErrors).  nsq_TxQueueLimit is the writes
+ * below TCP at which TCP is stopped, as it stands; nsq_TxQueueStops counts the
+ * stops.  Zero for a slot with no SANA-II device.  A library without this
+ * selector answers EINVAL.
+ */
+#define NETSTATUS_IFQUEUE       25
+
+typedef struct NetStatusIfQueue
+{
+    UWORD   nsq_Index;                  /* nsi_Index                         */
+    UWORD   nsq_Pad;
+    ULONG   nsq_TxQueued;
+    ULONG   nsq_TxQueueFull;
+    ULONG   nsq_TxQueueLimit;
+    ULONG   nsq_TxQueueStops;
+} NetStatusIfQueue;
+
 /* ---------------------------------------------- NETSTATUS_HOSTSOURCE --- */
 
 /*

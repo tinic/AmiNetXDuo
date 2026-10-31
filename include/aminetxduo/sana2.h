@@ -253,6 +253,11 @@ typedef struct AmiSana2Stats {
     ULONG   rx_bytes;
     ULONG   tx_bytes_hi;
     ULONG   tx_bytes;
+    /* Appended.  The transmit queue limit as it stands and the times TCP was
+       stopped at it (sana2_tx.c, ami_sana2_tx_flow).  The shim keeps them
+       beside the queue; ami_sana2_get_stats() copies them in. */
+    ULONG   tx_queue_limit;
+    ULONG   tx_queue_stops;
 } AmiSana2Stats;
 
 VOID ami_sana2_get_stats(const AmiSana2If *iface, AmiSana2Stats *out);
