@@ -112,6 +112,46 @@ static VOID tool_netstatus_bytes(struct Library *base, ToolSnapshot *out)
     }
 }
 
+/*
+ * The transmit queue, from NETSTATUS_IFQUEUE, joined the same way.  A library
+ * without the selector answers -1 and the four counters stay zero.
+ */
+static struct
+{
+    NetStatusHeader  hdr;
+    NetStatusIfQueue e[TOOL_MAX_IF];
+} nx_queue;
+
+static VOID tool_netstatus_queue(struct Library *base, ToolSnapshot *out)
+{
+    LONG n;
+    LONG i;
+    UWORD j;
+
+    n = tool_netstatus_query(base, NETSTATUS_IFQUEUE, &nx_queue,
+                             sizeof(nx_queue), sizeof(NetStatusIfQueue));
+    if (n > (LONG)TOOL_MAX_IF)
+        n = (LONG)TOOL_MAX_IF;
+
+    for (i = 0; i < n; i++)
+    {
+        const NetStatusIfQueue *src = &nx_queue.e[i];
+
+        for (j = 0; j < out->iface_count; j++)
+        {
+            ToolIfInfo *info = &out->iface[j];
+
+            if (info->nx_index != src->nsq_Index || !info->have_sana2)
+                continue;
+            info->stats.tx_queued      = src->nsq_TxQueued;
+            info->stats.tx_queue_full  = src->nsq_TxQueueFull;
+            info->stats.tx_queue_limit = src->nsq_TxQueueLimit;
+            info->stats.tx_queue_stops = src->nsq_TxQueueStops;
+            break;
+        }
+    }
+}
+
 LONG tool_snapshot(ToolSnapshot *out, BOOL want_sockets)
 {
     struct Library *base;
@@ -231,6 +271,7 @@ LONG tool_snapshot(ToolSnapshot *out, BOOL want_sockets)
     out->iface_count = (UWORD)n;
 
     tool_netstatus_bytes(base, out);
+    tool_netstatus_queue(base, out);
 
     if (tool_netstatus_query(base, NETSTATUS_SYSTEM, &nx_answer,
                              sizeof(nx_answer.system),

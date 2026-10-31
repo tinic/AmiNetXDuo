@@ -218,6 +218,9 @@ static VOID show_counters(const char *name, const AmiSana2Stats *st)
        that found the wait queue full too and were dropped. */
     tool_printf("  writes queued     %10lu    write queue full  %10lu\n",
                 st->tx_queued, st->tx_queue_full);
+    /* The limit on writes below TCP, and the times TCP was stopped at it. */
+    tool_printf("  TX queue limit    %10lu    TX queue stops    %10lu\n",
+                st->tx_queue_limit, st->tx_queue_stops);
     if (st->ack_paced != 0 || st->ack_unpaced != 0)
         tool_printf("  ACKs paced        %10lu    ACKs out of turn  %10lu\n",
                     st->ack_paced, st->ack_unpaced);
