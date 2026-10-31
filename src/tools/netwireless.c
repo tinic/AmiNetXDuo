@@ -29,6 +29,7 @@
 #include <dos/var.h>
 #include <intuition/intuition.h>
 #include <libraries/commodities.h>
+#include <utility/hooks.h>
 #include <workbench/icon.h>
 #include <workbench/startup.h>
 #include <workbench/workbench.h>
@@ -197,9 +198,30 @@ static VOID nw_icon_remove(VOID)
     }
 }
 
+/* Draw without clearing the backdrop. Returning FALSE replaces Workbench's
+   regular AppIcon rendering, so the hook must draw the label as well. The
+   native icon remains valid until RemoveAppIcon has finished. */
+static ULONG nw_icon_draw(register struct Hook *hook __asm("a0"),
+                          register APTR reserved __asm("a2"),
+                          register struct AppIconRenderMsg *arm __asm("a1"))
+{
+    struct TagItem tags[3];
+
+    (VOID)hook;
+    (VOID)reserved;
+    tags[0].ti_Tag = ICONDRAWA_EraseBackground; tags[0].ti_Data = FALSE;
+    tags[1].ti_Tag = ICONDRAWA_Frameless;       tags[1].ti_Data = TRUE;
+    tags[2].ti_Tag = TAG_MORE; tags[2].ti_Data = (ULONG)arm->arm_Tags;
+    DrawIconStateA(arm->arm_RastPort, nw.color_icon, arm->arm_Label,
+                   arm->arm_Left, arm->arm_Top, arm->arm_State, tags);
+    return FALSE;
+}
+
+static struct Hook nw_icon_hook;
+
 static VOID nw_icon_add(VOID)
 {
-    struct TagItem t[2];
+    struct TagItem t[3];
     struct DiskObject *dob = &nw_dob;
 
     /* Workbench remaps its own copy to the current desktop palette. Keep
@@ -216,14 +238,20 @@ static VOID nw_icon_add(VOID)
        to back into nw_dob, so the next AddAppIcon puts it there again. */
     t[0].ti_Tag = WBAPPICONA_PropagatePosition;
     t[0].ti_Data = TRUE;
-    t[1].ti_Tag = TAG_DONE;
+    nw_icon_hook.h_Entry = (ULONG (*)())(APTR)nw_icon_draw;
+    t[1].ti_Tag = dob == nw.color_icon ? WBAPPICONA_RenderHook : TAG_IGNORE;
+    t[1].ti_Data = (ULONG)&nw_icon_hook;
+    t[2].ti_Tag = TAG_DONE; t[2].ti_Data = 0;
     /* Before V44 the tag list must be NULL. */
     nw.appicon = AddAppIconA(0, 0, (STRPTR)nw.label, nw.appport, (BPTR)0,
                              dob, WorkbenchBase->lib_Version >= 44 ? t : NULL);
     nw.color_shown = nw.appicon != NULL && dob == nw.color_icon;
     if (nw.appicon == NULL && dob != &nw_dob)
+    {
+        t[1].ti_Tag = TAG_IGNORE;
         nw.appicon = AddAppIconA(0, 0, (STRPTR)nw.label, nw.appport, (BPTR)0,
                                 &nw_dob, t);
+    }
 }
 
 /* A real library-allocated icon is required for palette-mapped imagery.
@@ -233,7 +261,9 @@ static VOID nw_color_create(VOID)
     struct TagItem tags[12];
     int i;
 
-    nw.color_icon = NewDiskObject(WBTOOL);
+    /* AddAppIcon needs a real planar image even with a render hook.
+       A blank NewDiskObject has none and is rejected by Workbench 3.2. */
+    nw.color_icon = DupDiskObjectA(&nw_dob, NULL);
     if (nw.color_icon == NULL) return;
     for (i = 0; i < NW_ICON_COLORS; i++)
     {
