@@ -484,7 +484,8 @@
              and the vendor drivers whose hardware is known are
              assumed: x-surf-100, x-surf, cnet and ariadne2 13312
              (16 KB SRAM less the transmit buffers), a2065 and
-             ariadne 24576, 3c589 and etherlink3 5120. Measured on an
+             ariadne 24576, 3c589 and etherlink3 5120, plipbox 6656.
+             Measured on an
              A3000 (25 MHz 68030) with an X-Surf 100: without it the
              ring overflowed 42 times in ten seconds and the card
              received 2.8 Mbit/s.
@@ -522,8 +523,11 @@
              whose handshake round trip is at or above TCPGROWRTT.
              Without it such a path gets the full window until the
              card counts an overrun, then the size the card's receive
-             memory allows until the interface is next attached. Set
-             it to fix the window whatever the card counts. Editing
+             memory allows until the interface is next attached. A
+             card whose own stated rate fills its receive memory within
+             the round trip keeps the window that memory allows on such
+             a path; for plipbox this covers round trips up to 95 ms.
+             Set it to fix the window whatever the card counts. Editing
              the file takes effect when the interface is next
              attached.
 
