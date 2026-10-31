@@ -230,7 +230,9 @@
   every program that opens bsdsocket.library after that gets that one.
   The library reads its configuration from AmiNetXDuo:Devs, so
   DEVS:NetInterfaces and DEVS:Internet mean that drawer's to it. Every
-  command opens the library beside itself the same way.
+  command opens the library beside itself the same way. AmiNetXDuo:Devs
+  is read only while that block adds it to DEVS:; a drawer left behind by
+  an uninstall is ignored.
 
   Because the drawer comes last, a bsdsocket.library already in LIBS:
   would keep answering every program and the drawer's would never run,
