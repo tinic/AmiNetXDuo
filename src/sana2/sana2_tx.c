@@ -20,6 +20,22 @@
 /* BeginIO(): a macro over the device's own vector, no amiga.lib to link. */
 #include <inline/alib.h>
 
+/* A slot back from the device: one instruction, which a task switch cannot
+   split on the one CPU, so the reapers need no Forbid() for it.  It is also
+   a compiler barrier.  A quick device is never counted (ami_sana2_tx_init). */
+static inline VOID __attribute__((always_inline))
+ami_sana2_dev_put(AmiSana2If *iface)
+{
+    if (iface->tx_quick_ok)
+        return;
+#if defined(__mc68000__) || defined(__m68k__)
+    __asm__ __volatile__("subq.w #1,%0"
+                         : "+m"(iface->tx_dev_writes) : : "cc", "memory");
+#else
+    (VOID)__atomic_sub_fetch(&iface->tx_dev_writes, 1, __ATOMIC_SEQ_CST);
+#endif
+}
+
 VOID ami_sana2_tx_init(AmiSana2If *iface)
 {
     UWORD i;
@@ -65,6 +81,26 @@ VOID ami_sana2_tx_init(AmiSana2If *iface)
     iface->tx_pend_head  = 0;
     iface->tx_pend_count = 0;
     iface->tx_kicking    = FALSE;
+
+    /* The queue limit starts at its ceiling, where every interface stood
+       before it was measured: a fast card loses nothing to the first
+       windows, a slow one comes down within its first backlog.  A device
+       that finishes writes inside BeginIO() (tx_quick_ok, every netdev
+       driver) holds none: its writes are not counted at all, and it stops
+       TCP at AMI_SANA2_TX_STOP_AT waiting and wakes at half, the #398
+       wait-queue stop, on the send path main has. */
+    iface->tx_dev_writes = 0;
+    iface->tx_lim_limit  = iface->tx_quick_ok
+                         ? (UWORD)AMI_SANA2_TX_STOP_AT
+                         : (UWORD)(AMI_SANA2_TX_STOP_AT + iface->tx_slots);
+    iface->tx_lim_target = AMI_SANA2_TX_TARGET_MS;
+    iface->tx_lim_clean  = 0;
+    iface->tx_lim_posted = 0;
+    iface->tx_lim_base   = 0;
+    iface->tx_lim_tick   = 0;
+    iface->tx_lim_ms     = 0;
+    iface->tx_lim_held   = 0;
+    iface->tx_lim_stops  = 0;
 
 #ifdef AMINETXDUO_TX_RUN
     /* The run flush: the opened request's device, unit and cookie, the
@@ -222,6 +258,7 @@ VOID ami_sana2_tx_lazy_stop(AmiSana2If *iface)
  * nx_packet_transmit_release() does its own TX_DISABLE.
  */
 static VOID ami_sana2_tx_complete(AmiSana2If *iface, AmiTxSlot *slot);
+static VOID ami_sana2_tx_settle(AmiSana2If *iface);
 
 static VOID __attribute__((noinline))
 ami_sana2_tx_reap_pending(AmiSana2If *iface)
@@ -267,6 +304,9 @@ ami_sana2_tx_reap_pending(AmiSana2If *iface)
        for. */
     if (iface->tx_pend_count != 0)
         ami_sana2_tx_kick(iface);
+
+    /* The queue limit's measure and wake (ami_sana2_tx_flow). */
+    ami_sana2_tx_settle(iface);
 }
 
 VOID ami_sana2_tx_reap(AmiSana2If *iface)
@@ -450,6 +490,7 @@ static VOID ami_sana2_tx_complete(AmiSana2If *iface, AmiTxSlot *slot)
         slot->consumed = 0;
         slot->total    = 0;
         __asm__ __volatile__("" ::: "memory");
+        ami_sana2_dev_put(iface);
         slot->busy     = FALSE;
     }
 }
@@ -609,26 +650,159 @@ static UWORD ami_sana2_gso_frames(const AmiSana2If *iface, UWORD gso)
 
 /*
  * Stop and wake the interface's transmit queue for NetX Duo
- * (nx_interface_tx_queue_stopped): stopped at half the wait queue, woken at
- * a quarter.  New TCP data then waits in its connection instead of
- * overflowing this queue.  A write the full queue refused was a hole the
- * peer reported and TCP had to repair: on Wi-Fi one connection's transmit
- * queue (1024 segments) outran the 544 this interface holds, and the upload
- * stalled for minutes.  Under Forbid(), in the region that changed the
- * count: a decision made outside it could store a stale "stopped" after the
- * queue had emptied, and an empty queue is never looked at again.
+ * (nx_interface_tx_queue_stopped): stopped when the writes below TCP --
+ * waiting here and held by the device -- reach the queue limit
+ * (sana2_internal.h, AMI_SANA2_TX_LIMIT_MIN), woken at half of it.  New TCP
+ * data then waits in its connection instead of in front of everything else.
+ * A write the full queue refused was a hole the peer reported and TCP had
+ * to repair: on Wi-Fi one connection's transmit queue (1024 segments)
+ * outran the 544 this interface holds, and the upload stalled for minutes.
+ *
+ * A stop is only ever stored under Forbid(), in the region that changed the
+ * count: one decided outside it could land after the queue had emptied, and
+ * an empty queue is never looked at again.  The wake after a completion
+ * (ami_sana2_tx_settle) is outside one: the worst a stale wake does is let
+ * one more burst in, which the next decision stops.
  */
-static VOID ami_sana2_tx_flow(AmiSana2If *iface)
+static VOID __attribute__((noinline)) ami_sana2_tx_flow(AmiSana2If *iface)
 {
     NX_INTERFACE *nxif  = iface->interface_ptr;
-    UWORD         count = iface->tx_pend_count;
+    UWORD         count = (UWORD)(iface->tx_pend_count + iface->tx_dev_writes);
 
     if (nxif == NX_NULL)
         return;
-    if (count >= (UWORD)AMI_SANA2_TX_STOP_AT)
-        nxif->nx_interface_tx_queue_stopped = 1;
-    else if (count <= (UWORD)AMI_SANA2_TX_WAKE_AT)
+    if (count >= iface->tx_lim_limit)
+    {
+        if (nxif->nx_interface_tx_queue_stopped == 0)
+        {
+            nxif->nx_interface_tx_queue_stopped = 1;
+            iface->tx_lim_held = 1;
+            iface->tx_lim_stops++;
+        }
+    }
+    else if (count <= (UWORD)(iface->tx_lim_limit >> 1))
+    {
         nxif->nx_interface_tx_queue_stopped = 0;
+    }
+}
+
+/*
+ * Close the measuring window (sana2_internal.h, AMI_SANA2_TX_WINDOW_TICKS):
+ * the writes it completed over its E-clock length, times the target, is the
+ * new limit.  Completed is posted less still held, so a write the device
+ * finished inside BeginIO() counts as one it replied later.  Once a window, so the clock read costs nothing a frame.  No
+ * Forbid(): the tick is claimed first, and two reapers that both get past
+ * the test make one short sample, which the next window replaces.  The new
+ * limit stops TCP at the next write and wakes it at the next reap.
+ */
+static VOID __attribute__((noinline))
+ami_sana2_tx_window(AmiSana2If *iface, ULONG now)
+{
+    ULONG ms;
+    ULONG dt;
+    ULONG done;
+    ULONG gone;
+    ULONG limit;
+    ULONG ceiling = (ULONG)AMI_SANA2_TX_STOP_AT + (ULONG)iface->tx_slots;
+
+    iface->tx_lim_tick = now;
+    ms   = ami_millis_quick();
+    dt   = ms - iface->tx_lim_ms;
+    gone = iface->tx_lim_posted - (ULONG)iface->tx_dev_writes;
+    done = gone - iface->tx_lim_base;
+    /* A claim between the two loads reads one short: never below none. */
+    if ((LONG)done < 0)
+        done = 0;
+    iface->tx_lim_base = gone;
+    iface->tx_lim_ms   = ms;
+
+    /* No clock yet, the first window, or one that spans an idle spell: a
+       start, not a sample. */
+    if (ms == 0UL || dt == 0UL ||
+        dt > 4UL * (ULONG)AMI_SANA2_TX_WINDOW_LONG *
+                 (1000UL / (ULONG)TX_TIMER_TICKS_PER_SECOND))
+        return;
+
+    limit = (done * (ULONG)iface->tx_lim_target + dt - 1UL) / dt;
+    /* At most half a window down.  A window of ACKs or light traffic
+       measures the sender, not the card, and may take the limit low; the
+       next burst then stops at it, the queue runs dry behind the stop, and
+       the settle doubles it -- an acknowledgment's round trip a step, so
+       2 to 256 in seven -- until the next window measures the card.  Only
+       lowering on a stop or a standing queue was tried (A500 plipbox,
+       2026-10-31): a download's queue runs dry often enough between ACKs
+       that the limit then stayed high, and pings behind it were lost as
+       before. */
+    if (limit < (ULONG)(iface->tx_lim_limit >> 1))
+        limit = (ULONG)(iface->tx_lim_limit >> 1);
+
+    /* The target comes back a step per AMI_SANA2_TX_DECAY_MS of windows,
+       whatever happened in them, so a sender whose bursts end at a stop
+       (which the stop cannot tell from a slow refill) does not hold it
+       high. */
+    dt += iface->tx_lim_clean;
+    if (dt >= (ULONG)AMI_SANA2_TX_DECAY_MS &&
+        iface->tx_lim_target > AMI_SANA2_TX_TARGET_MS)
+    {
+        iface->tx_lim_target = (UWORD)(iface->tx_lim_target -
+                                       AMI_SANA2_TX_TARGET_STEP_MS);
+        dt = 0;
+    }
+    iface->tx_lim_clean = (UWORD)((dt < (ULONG)AMI_SANA2_TX_DECAY_MS)
+                                      ? dt : 0UL);
+    if (limit < (ULONG)AMI_SANA2_TX_LIMIT_MIN)
+        limit = AMI_SANA2_TX_LIMIT_MIN;
+    if (limit > ceiling)
+        limit = ceiling;
+
+    iface->tx_lim_limit = (UWORD)limit;
+}
+
+/*
+ * After the reap has handed slots back: wake TCP at half the limit, answer a
+ * starved queue, and close the window when it is due.  A queue that runs dry
+ * after it stopped TCP was too short for TCP's refill, BQL's starvation: the
+ * limit doubles at once and the target grows a step, so a limit that fell
+ * too far never holds the card idle for long.
+ */
+static VOID ami_sana2_tx_settle(AmiSana2If *iface)
+{
+    NX_INTERFACE *nxif  = iface->interface_ptr;
+    UWORD         count;
+    ULONG         now;
+
+    /* A device that finishes writes inside BeginIO() is not measured: its
+       stop and wake are the wait queue's, in ami_sana2_tx_flow(). */
+    if (iface->tx_quick_ok)
+        return;
+
+    count = (UWORD)(iface->tx_pend_count + iface->tx_dev_writes);
+    if (count == 0)
+    {
+        if (iface->tx_lim_held)
+        {
+            iface->tx_lim_held = 0;
+            if (iface->tx_lim_target < AMI_SANA2_TX_TARGET_MAX_MS)
+                iface->tx_lim_target = (UWORD)(iface->tx_lim_target +
+                                               AMI_SANA2_TX_TARGET_STEP_MS);
+            if (iface->tx_lim_limit < (UWORD)AMI_SANA2_TX_STOP_AT)
+                iface->tx_lim_limit = (UWORD)(iface->tx_lim_limit << 1);
+            if (iface->tx_lim_limit > (UWORD)(AMI_SANA2_TX_STOP_AT +
+                                              iface->tx_slots))
+                iface->tx_lim_limit = (UWORD)(AMI_SANA2_TX_STOP_AT +
+                                              iface->tx_slots);
+        }
+    }
+    if (nxif != NX_NULL && nxif->nx_interface_tx_queue_stopped != 0 &&
+        count <= (UWORD)(iface->tx_lim_limit >> 1))
+        nxif->nx_interface_tx_queue_stopped = 0;
+
+    now = tx_time_get();
+    if (now - iface->tx_lim_tick >= (ULONG)AMI_SANA2_TX_WINDOW_TICKS &&
+        (iface->tx_lim_posted - (ULONG)iface->tx_dev_writes -
+             iface->tx_lim_base >= (ULONG)AMI_SANA2_TX_WINDOW_WRITES ||
+         now - iface->tx_lim_tick >= (ULONG)AMI_SANA2_TX_WINDOW_LONG))
+        ami_sana2_tx_window(iface, now);
 }
 
 /*
@@ -819,6 +993,14 @@ static AmiTxSlot *ami_sana2_tx_claim(AmiSana2If *iface)
                 iface->tx[i].busy = TRUE;
                 iface->tx_kicking = TRUE;
                 slot = &iface->tx[i];
+                /* Nothing waits here, so the device's writes are the
+                   whole count. */
+                if (!iface->tx_quick_ok)
+                {
+                    iface->tx_lim_posted++;
+                    if (++iface->tx_dev_writes >= iface->tx_lim_limit)
+                        ami_sana2_tx_flow(iface);
+                }
                 break;
             }
         }
@@ -842,10 +1024,19 @@ static ULONG ami_sana2_tx_claim_run(AmiSana2If *iface, UWORD want)
         if (!iface->tx[i].busy)
         {
             iface->tx[i].busy = TRUE;
+            if (!iface->tx_quick_ok)
+            {
+                iface->tx_dev_writes++;
+                iface->tx_lim_posted++;
+            }
             mask |= 1UL << i;
             want--;
         }
     }
+    /* Only when nothing waits (both callers), so the device's writes are
+       the whole count. */
+    if (mask != 0 && iface->tx_dev_writes >= iface->tx_lim_limit)
+        ami_sana2_tx_flow(iface);
 
     return mask;
 }
@@ -976,6 +1167,11 @@ VOID ami_sana2_tx_kick(AmiSana2If *iface)
                 if (!iface->tx[i].busy)
                 {
                     iface->tx[i].busy = TRUE;
+                    if (!iface->tx_quick_ok)
+                    {
+                        iface->tx_dev_writes++;
+                        iface->tx_lim_posted++;
+                    }
                     slot = &iface->tx[i];
                     break;
                 }
@@ -999,6 +1195,7 @@ VOID ami_sana2_tx_kick(AmiSana2If *iface)
         {
             /* The interface went down while the write waited: teardown.  A
                GSO child gives back its share of the parent and no more. */
+            ami_sana2_dev_put(iface);
             slot->busy = FALSE;
 #ifdef AMINETXDUO_TCP_GSO
             if (pend.gso != AMI_SANA2_GSO_NONE)
@@ -1235,6 +1432,20 @@ ami_sana2_gso_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
                     iface, (UWORD)(AMI_SANA2_GSO_WRITES(blk) - i));
             Permit();
         }
+    }
+
+    /* Children the device finished inside BeginIO() handed their slots back
+       with no reply to come, and a reply is what runs the wake: the stop
+       claim_run stored for them is looked at again here.  Defence: a quick
+       device keeps the ceiling, above its slots, so claim_run does not stop
+       it today.  A single write cannot strand one -- at a limit of two
+       another write is held. */
+    if (held && iface->interface_ptr != NX_NULL &&
+        iface->interface_ptr->nx_interface_tx_queue_stopped != 0)
+    {
+        Forbid();
+        ami_sana2_tx_flow(iface);
+        Permit();
     }
 
     if (i < AMI_SANA2_GSO_WRITES(blk))
@@ -1537,6 +1748,7 @@ static UINT ami_sana2_tx_launch(AmiSana2If *iface, AmiTxSlot *slot,
         if ((ULONG)(packet->nx_packet_prepend_ptr -
                     packet->nx_packet_data_start) < AMI_ETH_HEADER_SIZE)
         {
+            ami_sana2_dev_put(iface);
             slot->busy = FALSE;
             nx_packet_transmit_release(packet);
             iface->stats.tx_errors++;

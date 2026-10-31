@@ -11,6 +11,11 @@ are history.
   default routes in ENV: for desktop tools such as NewMeter. It writes only
   changed configuration, removes stale values, and exports no traffic counters.
 
+- A slow network driver such as plipbox is given only as many queued writes
+  as it completes in about 20 ms, which cuts lost pings and latency during
+  transfers; plipbox uploads no longer resend about one segment in ten.
+- plipbox keeps a TCP receive window that fits its receive memory on paths
+  with a round trip up to 95 ms.
 - TCP holds new data while a network driver's write queue is half full
   instead of overflowing it, which ends multi-minute upload stalls over
   Pi Wi-Fi and other links slower than the CPU.

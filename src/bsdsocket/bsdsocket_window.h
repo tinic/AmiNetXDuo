@@ -201,8 +201,10 @@ BOOL ami_bsd_tcp_window_long_path(ULONG rtt_ms, ULONG grow_rtt_ms);
  * the path is not burst-bound, else the ring fit (ami_bsd_tcp_window_fit) on
  * a LAN round trip.  On a long path (rtt_ms at or above the grow line) the
  * far end's link spaces the data, so the window is `want` -- unless the card
- * overran while a long path ran unfitted (`wan_fitted`), which then gets the
- * fit.  An interface that sets TCPWANWINDOW gets min(want, wan_window) on a
+ * overran while a long path ran unfitted (`wan_fitted`), or whose own stated
+ * rate (`bps`) fills the fit within `rtt_ms` -- a slow card such as plipbox,
+ * whose own frame time is the round trip -- which then gets the fit.  An
+ * interface that sets TCPWANWINDOW gets min(want, wan_window) on a
  * long path instead, on any link, overruns or not: never below the fit where
  * the path is burst-bound, never below two segments where it is not.
  * `wan_window` 0 = not set.  Pure arithmetic, host-tested.
