@@ -7,6 +7,11 @@ are history.
 
 ## Unreleased
 
+- TCP holds new data while a network driver's write queue is half full
+  instead of overflowing it, which ends multi-minute upload stalls over
+  Pi Wi-Fi and other links slower than the CPU.
+- After a retransmission timeout, a resent segment that is lost again is
+  resent at once instead of after another timeout.
 - TCP uploads hand the network driver blocks of up to 16 segments, which
   cuts the CPU cost per packet (all profiles except micro).
 - Socket calls check for Ctrl-C by reading the task's received signals
