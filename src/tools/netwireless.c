@@ -580,8 +580,23 @@ int main(int argc, char **argv)
     if (nw_icon_position(nw_opt(ARG_XPOS), nw_opt(ARG_YPOS),
                          &nw_dob.do_CurrentX, &nw_dob.do_CurrentY) < 0)
     {
-        PutStr((CONST_STRPTR)"NetWireless: XPOS and YPOS require a pair of "
-                            "decimal coordinates in 0..32767.\n");
+        static const char message[] =
+            "NetWireless: XPOS and YPOS require a pair of "
+            "decimal coordinates in 0..32767.\n";
+
+        if (argc == 0)
+        {
+            struct EasyStruct es =
+                { sizeof(es), 0, (STRPTR)"NetWireless", (STRPTR)message,
+                  (STRPTR)"OK" };
+
+            IntuitionBase = (struct IntuitionBase *)
+                OpenLibrary((CONST_STRPTR)"intuition.library", 37);
+            if (IntuitionBase != NULL)
+                (VOID)EasyRequestArgs(NULL, &es, NULL, NULL);
+        }
+        else
+            PutStr((CONST_STRPTR)message);
         result = RETURN_ERROR;
         goto out;
     }
