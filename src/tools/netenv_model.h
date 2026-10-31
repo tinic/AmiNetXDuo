@@ -1,0 +1,61 @@
+/* Configuration-only ENV exports. No AmigaOS calls or network traffic.
+ * SPDX-License-Identifier: MIT */
+#ifndef AMINETXDUO_NETENV_MODEL_H
+#define AMINETXDUO_NETENV_MODEL_H
+#include <stddef.h>
+#include <stdint.h>
+#define NE_IF_MAX 32
+#define NE_ADDR6_MAX 128
+#define NE_ROUTE_MAX 96
+#define NE_KEY_MAX (NE_IF_MAX * 4 + 9)
+#define NE_TEXT_MAX 12288
+#define NE_VALUE_MAX 8192
+
+typedef struct NeInterface {
+    char name[16];
+    uint16_t index;
+    int up;
+    uint32_t address, mask;
+} NeInterface;
+typedef struct NeAddress6 {
+    char text[48];
+    uint16_t index;
+    unsigned prefix;
+    int ready, scoped;
+} NeAddress6;
+typedef struct NeRoute {
+    char gateway[48];
+    uint16_t index;
+    int ipv6, scoped;
+} NeRoute;
+typedef struct NeSnapshot {
+    const char *state; /* UP, DOWN, ERROR */
+    unsigned interfaces, addresses6, routes;
+    NeInterface iface[NE_IF_MAX];
+    NeAddress6 addr6[NE_ADDR6_MAX];
+    NeRoute route[NE_ROUTE_MAX];
+} NeSnapshot;
+typedef struct NeEntry {
+    char name[32];
+    unsigned offset;
+} NeEntry;
+typedef struct NeTable {
+    unsigned count, used;
+    NeEntry entry[NE_KEY_MAX];
+    char text[NE_TEXT_MAX];
+} NeTable;
+typedef struct NeOwned {
+    unsigned count;
+    char name[NE_KEY_MAX][32];
+} NeOwned;
+/* read: 1 = found, 0 = absent, -1 = unreadable; write: nonzero = success.
+ * NULL value deletes. Only successful deletions relinquish ownership. */
+typedef int (*NeRead)(void *, const char *, char *, size_t);
+typedef int (*NeWrite)(void *, const char *, const char *);
+int ne_name_valid(const char *name);
+int ne_build(const NeSnapshot *snapshot, NeTable *out);
+const char *ne_value(const NeTable *table, const char *name);
+int ne_own(NeOwned *owned, const char *name);
+int ne_publish(NeOwned *owned, const NeTable *desired,
+               NeRead read_value, NeWrite write_value, void *ctx);
+#endif

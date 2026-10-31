@@ -7,6 +7,16 @@ are history.
 
 ## Unreleased
 
+- A blocking connect() returns as soon as the handshake completes instead of
+  330 to 380 ms later.
+- A listening socket holds new connections in the SYN cache once its backlog
+  is full instead of refusing them, so a busy httpd no longer drops connects.
+- WiFiPi no longer writes through a NULL pointer on a chip without an SDIO
+  core, and BeginInterfaceConfig no longer crashes when no stack is running.
+- Optional NetEnv commodity publishes current IPv4 and IPv6 addresses and
+  default routes in ENV: for desktop tools such as NewMeter. It writes only
+  changed configuration, removes stale values, and exports no traffic counters.
+
 - A slow network driver such as plipbox is given only as many queued writes
   as it completes in about 20 ms, which cuts lost pings and latency during
   transfers; plipbox uploads no longer resend about one segment in ten.

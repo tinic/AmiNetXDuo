@@ -100,8 +100,11 @@ def compile_sheet(path, outdir, size):
     samples.putdata(colors)
     quantized = samples.quantize(colors=127, method=Image.Quantize.MEDIANCUT,
                                 dither=Image.Dither.NONE)
-    color_count = max(values(quantized)) + 1
-    palette = b"\0\0\0" + bytes(quantized.getpalette()[:color_count * 3])
+    # Quantization can use fewer pens than requested. Keep the shipping
+    # 128-entry palette contract by padding unused entries, not pixels.
+    color_count = 127
+    palette = (b"\0\0\0" + bytes(quantized.getpalette()[:color_count * 3])).ljust(
+        (color_count + 1) * 3, b"\0")
     indices = iter(values(quantized))
     payloads = []
     for name, state in zip(("normal", "selected"), rendered):

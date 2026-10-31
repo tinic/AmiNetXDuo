@@ -196,38 +196,130 @@ void nw_bar_rect(int i, int w, int h, int *x0, int *y0, int *x1, int *y1)
     *y1 = h - 1;
 }
 
-int nw_icon_pen(int state, int bars, int w, int h, int x, int y)
+static int nw_position_number(const char *text, long *value)
 {
+    long n = 0;
+
+    while (*text == ' ' || *text == '\t') text++;
+    if (*text == '+') text++;
+    if (*text < '0' || *text > '9') return 0;
+    do
+    {
+        int digit = *text++ - '0';
+
+        if (n > (32767 - digit) / 10) return 0;
+        n = n * 10 + digit;
+    } while (*text >= '0' && *text <= '9');
+    while (*text == ' ' || *text == '\t') text++;
+    if (*text != '\0') return 0;
+    *value = n;
+    return 1;
+}
+
+int nw_icon_position(const char *x, const char *y, long *xpos, long *ypos)
+{
+    long xx, yy;
+
+    if (x == NULL && y == NULL) return 0;
+    if (x == NULL || y == NULL || !nw_position_number(x, &xx) ||
+        !nw_position_number(y, &yy)) return -1;
+    *xpos = xx;
+    *ypos = yy;
+    return 1;
+}
+
+const unsigned char nw_icon_palette[NW_ICON_COLORS][3] =
+{
+    { 0, 0, 0 }, { 35, 35, 35 }, { 246, 246, 246 }, { 185, 185, 185 },
+    { 105, 105, 105 }, { 65, 65, 65 }, { 220, 220, 220 }, { 145, 145, 145 }
+};
+
+/* Integer geometry at 32x32. Four strength levels are the dot and three
+   arcs, with an outlined light edge readable on dark and light desktops.
+   The small status badge stays below the radio, never crossing it out. */
+static int nw_radio_pixel(int state, int bars, int x, int y)
+{
+    int dx = 2 * x - 31, dy = 2 * y - 51;
+    int radius = dx * dx + dy * dy;
     int i;
 
-    if (state == NW_ICON_NODEV && w > 1 && h > 1)
+    if ((state == NW_ICON_NODEV || state == NW_ICON_OFF || state == NW_ICON_ERROR)
+        && x >= 22 && x <= 31 && y >= 22 && y <= 31)
     {
-        /* Both diagonals, one pixel each. */
-        int d = (x * (h - 1) + (w - 1) / 2) / (w - 1);
-        if (y == d || y == h - 1 - d) return 1;
+        int bx = x - 22, by = y - 22;
+
+        /* Rounded plaque: dark keyline, light inner rim, neutral face. */
+        if ((bx == 0 || bx == 9) && (by == 0 || by == 9)) return 0;
+        if (bx == 0 || bx == 9 || by == 0 || by == 9) return 1;
+        if (bx == 1 || bx == 8 || by == 1 || by == 8) return 2;
+        if (state == NW_ICON_NODEV &&
+            ((bx == by || bx + by == 9) && bx >= 2 && bx <= 7)) return 1;
+        if (state == NW_ICON_ERROR && (bx == 4 || bx == 5) &&
+            (by <= 5 || by == 7)) return 1;
+        if (state == NW_ICON_OFF)
+        {
+            int px = 2 * bx - 9, py = 2 * by - 10, r = px * px + py * py;
+            if (((bx == 4 || bx == 5) && by <= 4) ||
+                (r >= 13 && r <= 39 && (by >= 4 || bx <= 3 || bx >= 6)))
+                return 1;
+        }
+        return 3;
     }
 
-    for (i = 0; i < 4; i++)
+    /* The central dot. */
+    if (radius <= 35)
     {
-        int x0, y0, x1, y1;
+        if (radius >= 18) return state == NW_ICON_CONNECTED ? 1 : 4;
+        if (radius >= 9) return 2;
+        return state == NW_ICON_CONNECTED ? 5 : 4;
+    }
 
-        nw_bar_rect(i, w, h, &x0, &y0, &x1, &y1);
-        if (x < x0 || x > x1 || y < y0 || y > y1) continue;
+    /* A radio fan pointing up; the angled ends have their own keyline. */
+    if (dy >= 0 || dx * 5 < dy * 4 || dx * 5 > -dy * 4) return 0;
+    for (i = 0; i < 3; i++)
+    {
+        int outer = 18 + 14 * i, inner = outer - 10;
+        int active = state == NW_ICON_CONNECTED && bars >= i + 2;
 
-        if (state == NW_ICON_ERROR && i == 3)
-        {
-            int cx = (x0 + x1) / 2;
-            if (x != cx && x != cx + 1) return 0;
-            return (y == y1 - 2) ? 0 : 1;
-        }
-        if (x == x0 || x == x1 || y == y0 || y == y1)
-        {
-            if (state == NW_ICON_OFF) return ((x + y) & 1) == 0 ? 1 : 0;
-            return 1;
-        }
-        return (state == NW_ICON_CONNECTED && i < bars) ? 3 : 0;
+        if (radius < inner * inner || radius > outer * outer) continue;
+        if (radius > (outer - 2) * (outer - 2) ||
+            radius < (inner + 2) * (inner + 2) ||
+            dx * 5 <= dy * 4 + 6 || dx * 5 >= -dy * 4 - 6)
+            return active ? 1 : 4;
+        if (radius > (outer - 4) * (outer - 4)) return active ? 2 : 7;
+        return active ? 5 : 0;
     }
     return 0;
+}
+
+static int nw_color_pixel(int state, int bars, int w, int h, int x, int y)
+{
+    if (w < 16 || h < 16 || x < 0 || y < 0 || x >= w || y >= h) return 0;
+    return nw_radio_pixel(state, bars, x * NW_ICON_SIZE / w, y * NW_ICON_SIZE / h);
+}
+
+void nw_icon_render_color(int state, int bars, int w, int h,
+                          unsigned char *normal, unsigned char *selected)
+{
+    static const unsigned char highlight[NW_ICON_COLORS] = { 0, 1, 2, 6, 7, 4, 2, 3 };
+    int x, y;
+
+    for (y = 0; y < h; y++)
+        for (x = 0; x < w; x++)
+        {
+            int pen = nw_color_pixel(state, bars, w, h, x, y);
+            size_t at = (size_t)y * (size_t)w + (size_t)x;
+
+            normal[at] = (unsigned char)pen;
+            selected[at] = highlight[pen];
+        }
+}
+
+int nw_icon_pen(int state, int bars, int w, int h, int x, int y)
+{
+    static const unsigned char classic[NW_ICON_COLORS] = { 0, 1, 2, 2, 1, 1, 2, 2 };
+
+    return classic[nw_color_pixel(state, bars, w, h, x, y)];
 }
 
 void nw_icon_render(int state, int bars, int w, int h, unsigned char *planes)

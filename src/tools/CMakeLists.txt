@@ -287,6 +287,8 @@ aminetxduo_add_tool(tool_netprefs NetPrefs SOURCES netprefs.c netprefs_text.c
 aminetxduo_add_tool(tool_netswitch NetSwitch SOURCES netswitch.c
     netswitch_banner.c)
 aminetxduo_add_tool(tool_netmeter NetMeter NX SOURCES netmeter.c netmeter_fmt.c netmeter_tui.c)
+# Optional configuration-only ENV publisher; no stack or driver code.
+aminetxduo_add_tool(tool_netenv NetEnv SOURCES netenv.c netenv_model.c)
 
 # The Wi-Fi window.  Scans, joins through WirelessManager's
 # ENV:Sys/Wireless.prefs and restarts it; never joins or sets a key itself.
@@ -709,7 +711,7 @@ add_dependencies(tools
     tool_addnetroute tool_deletenetroute
     tool_getnetstatus tool_netshutdown tool_removenetinterface
     tool_configurenetinterface
-    tool_netsetup tool_netprefs tool_netswitch tool_netmeter tool_netwireless tool_netwirelessprefs
+    tool_netsetup tool_netprefs tool_netswitch tool_netmeter tool_netenv tool_netwireless tool_netwirelessprefs
     tool_online tool_offline tool_host tool_hostname
     tool_fetch tool_nc tool_telnet tool_nettrace tool_netcapture
     tool_traceroute tool_nslookup tool_arp
@@ -972,6 +974,12 @@ if(NOT CMAKE_CROSSCOMPILING)
         "${CMAKE_SOURCE_DIR}/include")
     target_compile_options(test_clipftxt PRIVATE -Wall -Wextra)
     set_target_properties(test_clipftxt PROPERTIES C_STANDARD 11)
+
+    # Configuration projection, withdrawal and change-only ENV publication.
+    add_executable(test_netenv test/test_netenv.c netenv_model.c)
+    target_include_directories(test_netenv PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    target_compile_options(test_netenv PRIVATE -Wall -Wextra)
+    set_target_properties(test_netenv PROPERTIES C_STANDARD 11)
 
     # NetMeter's rate and total text, the delta of a byte count kept in two
     # 32-bit halves across its carry, the bar scale, and the Shell window
@@ -1300,6 +1308,7 @@ if(NOT CMAKE_CROSSCOMPILING)
     add_test(NAME devicehome_rewrites_only_ours COMMAND test_devicehome)
     add_test(NAME netprefs_font_layout COMMAND test_netprefs_layout)
     add_test(NAME netmeter_arithmetic COMMAND test_netmeter_fmt)
+    add_test(NAME netenv_configuration COMMAND test_netenv)
     add_test(NAME netprobe_pcmcia_kind COMMAND test_netprobe_card)
     add_test(NAME netwireless_prefs_text COMMAND test_netwireless_prefs)
     add_test(NAME netwireless_wpa_key COMMAND test_netwireless_key)

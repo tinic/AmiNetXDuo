@@ -100,7 +100,10 @@ BUDGETS=(
     # The adaptive transmit queue limit and the slow-card window fit (A500
     # plipbox ping loss, #401): +820, 376,280 -> 377,100.  Quick devices
     # skip the counting: +56, 377,100 -> 377,156.
-    "default:src/bsdsocket/bsdsocket.library:377156"
+    # NETSTATUS_IFQUEUE, the transmit-queue counters for ShowNetStatus and
+    # NetMeter: +164, 377,156 -> 377,320.  The rc3 review TCP fixes
+    # (netxduo #40): +40, 377,320 -> 377,360.
+    "default:src/bsdsocket/bsdsocket.library:377360"
     # 41,412 after stateless receive-checksum verification was added to the
     # EL3 and word/long NE2000 direct paths, 2026-09-15.  43,620 with
     # ANXD_CMD_RX_BATCH in the shell (claim, completion, staging copy, the
@@ -128,7 +131,9 @@ BUDGETS=(
     # Batched transmit (AMINETXDUO_TX_BATCH: the batch write path, its pump
     # budget and the GENET batch runner): exact 632-byte increase,
     # 29,120 -> 29,752, approved by turo 2026-10-29.
-    "default:src/netdev/anxgenet.device:29752"
+    # The queue limit and its stops in ami_sana2_get_stats(): +8,
+    # 29,752 -> 29,760.
+    "default:src/netdev/anxgenet.device:29760"
     "default:src/wifipi/anxwifipi.device:56000"
     # +832 bytes for Roadshow's native users/groups ReadArgs syntax, strict
     # /N validation and bounded member-vector sizing: existing UID/GID maps
@@ -181,12 +186,14 @@ BUDGETS=(
     # The RTO walk's lost-copy repair (netxduo #39): +308, 253,940 -> 254,248.
     # Adaptive transmit queue limit, slow-card window fit (#401): +672,
     # 254,248 -> 254,920.  Quick devices skip the counting: +56,
-    # 254,920 -> 254,976.
-    "minimal:src/bsdsocket/bsdsocket.library:254976"
+    # 254,920 -> 254,976.  NETSTATUS_IFQUEUE: +164, 254,976 -> 255,140.
+    # The rc3 review TCP fixes (netxduo #40): +24, 255,140 -> 255,164.
+    "minimal:src/bsdsocket/bsdsocket.library:255164"
     "minimal:src/netdev/anxnet.device:46000"
     # 29,088 on e806188f after the audited device fixes.
     # Batched transmit adds 632, 29,120 -> 29,752, approved by turo 2026-10-29.
-    "minimal:src/netdev/anxgenet.device:29752"
+    # The queue limit and its stops in ami_sana2_get_stats(): +8, -> 29,760.
+    "minimal:src/netdev/anxgenet.device:29760"
     "minimal:src/wifipi/anxwifipi.device:56000"
     # 10,172 on e806188f after the audited parser fixes.
     "minimal:src/usergroup/usergroup.library:10240"

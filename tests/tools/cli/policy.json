@@ -239,6 +239,16 @@
       "UNIT": "1"
     }
   },
+  "NetEnv": {
+    "binary": "src/tools/NetEnv",
+    "mode": "interrupt",
+    "parser": "readargs",
+    "source": "src/tools/netenv.c",
+    "values": {
+      "INTERVAL": "1",
+      "VERSION": true
+    }
+  },
   "NetShutdown": {
     "binary": "src/tools/NetShutdown",
     "parser": "readargs",
@@ -294,7 +304,9 @@
       "INTERFACE": "eth0",
       "INTERVAL": "1",
       "QUIET": true,
-      "UNIT": "1"
+      "UNIT": "1",
+      "XPOS": "100",
+      "YPOS": "80"
     }
   },
   "NetWirelessPrefs": {

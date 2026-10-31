@@ -6,7 +6,7 @@ A missing tool or newly added option fails the host gate instead of silently
 reducing coverage. Vendored Installer and WirelessManager contracts are tied to
 the exact binary hashes; their option sets require review when those files change.
 
-The current inventory contains 47 Amiga executables, including installer helpers,
+The current inventory contains 51 Amiga executables, including installer helpers,
 SSH/SCP, WirelessManager and the optional Developer/Profile commands. The suite
 requires them all. Tools not shipped in the archive are outside this inventory.
 The shipped Python `profreport.py` is exercised separately by the host CLI test,

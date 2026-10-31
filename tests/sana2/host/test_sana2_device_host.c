@@ -1566,6 +1566,13 @@ static void case_special_recovery_stats(void)
     h_check(stats.rx_kicks == 7,
             "the deaf-receiver reset count crossed the device boundary");
 
+    /* The queue limit and its stops live beside the queue, not in stats. */
+    iface->tx_lim_limit = 544;
+    iface->tx_lim_stops = 9;
+    ami_sana2_get_stats(iface, &stats);
+    h_check(stats.tx_queue_limit == 544 && stats.tx_queue_stops == 9,
+            "the transmit queue limit and its stops reach the counters");
+
     h_check(h_tear_down(iface), "the statistics interface closes");
 }
 
