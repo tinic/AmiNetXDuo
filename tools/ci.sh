@@ -3084,8 +3084,9 @@ stage_bridged() {
     rc=0
     "$ROOT/tests/tools/run-events.sh" -b "$BUILD/default" || rc=$?
     case "$rc" in
-        0) note "PASS  the bring-up and the shutdown both came back as" \
-                "sentences, and reading them did not restart the stack" ;;
+        0) note "PASS  the bring-up came back as sentences, the shutdown" \
+                "unloaded the library and the read said so without" \
+                "restarting the stack" ;;
         2) fail "events: an ingredient is missing on this machine" ; bad=1 ;;
         *) fail "events: the transcript above is the whole run" ; bad=1 ;;
     esac
