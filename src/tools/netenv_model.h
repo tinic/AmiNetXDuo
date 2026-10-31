@@ -70,7 +70,8 @@ int ne_remove(const char *name, NeDelete delete_path, void *ctx);
  * failed; pending: CTRL-C set, cleared when clear is nonzero. NetShutdown
  * sends CTRL-C to every opener: one that arrives while the base is open
  * means "let go", is taken, and leaves the stack DOWN. One already set
- * before open is a user break and is left for the caller's Wait(). */
+ * before open is a user break and is left for the caller's Wait(). A user
+ * break inside the refresh reads as the first case; Break again. */
 typedef struct NeStack {
     void *(*open)(void *ctx);
     int (*collect)(void *ctx, void *base, NeSnapshot *s);
