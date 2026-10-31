@@ -503,8 +503,11 @@ def main(argv):
             prefs_icon(), WBTOOL,
             tooltypes=[],
             stack=8192),
-        # DONOTWAIT: NetMeter stays open, and from WBStartup Workbench would
-        # otherwise wait for it to exit and then call it not responding.
+        # Resident tools: DONOTWAIT keeps WBStartup from waiting for exit.
+        "NetEnv.info": diskobject(
+            switch_icon(), WBTOOL,
+            tooltypes=["DONOTWAIT", "INTERVAL=2"],
+            stack=8192),
         "NetMeter.info": diskobject(
             meter_icon(), WBTOOL,
             tooltypes=["DONOTWAIT"],
@@ -530,7 +533,7 @@ def main(argv):
 
     for name, blob in icons.items():
         if args.style == "glow":
-            artwork = {"Guide.info": "Document"}.get(name, name[:-5])
+            artwork = {"Guide.info": "Document", "NetEnv.info": "NetSwitch"}.get(name, name[:-5])
             path = os.path.join(os.path.dirname(__file__), "..", "icons",
                                 "glow", artwork + ".glow")
             with open(path, "rb") as fh:

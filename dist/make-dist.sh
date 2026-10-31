@@ -76,7 +76,7 @@ DEVICES=(netdev/anxnet netdev/anxgenet wifipi/anxwifipi)
 if grep -q '^AMINETXDUO_ZZ9000:BOOL=ON$' "$BUILD/CMakeCache.txt" 2>/dev/null; then
     DEVICES+=(netdev/anxzz9000)
 fi
-CMDS=(AddNetInterface NetSetup NetPrefs NetMeter NetSwitch NetWireless NetWirelessPrefs Online Offline ShowNetStatus ShowNetServices
+CMDS=(AddNetInterface NetSetup NetPrefs NetMeter NetSwitch NetEnv NetWireless NetWirelessPrefs Online Offline ShowNetStatus ShowNetServices
       ping netstat host hostname
       nslookup arp fetch nc telnet NetTrace NetCapture sntp traceroute tftp
       whois httpd
@@ -443,7 +443,7 @@ chmod 755 "$TREE"/C/*
 # copies them beside the tools in SYS:Prefs, SYS:Utilities,
 # SYS:Tools/Commodities or the drawer.  Icons/ has no drawer icon of its own.
 mkdir -p "$TREE/Icons"
-for tool in NetPrefs NetMeter NetSwitch NetWireless NetWirelessPrefs; do
+for tool in NetPrefs NetMeter NetSwitch NetEnv NetWireless NetWirelessPrefs; do
     cp "$INSTALL/$tool.info" "$TREE/Icons/$tool.info"
 done
 # NetSwitch's banner, installed beside it (install/tools/png2ilbm.py).

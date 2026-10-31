@@ -186,6 +186,7 @@ the NDK does not declare and the CPU profiler.
 |---|---|
 | `NetSetup` | ask the questions for one interface, and write the configuration files |
 | `NetPrefs` | Workbench editor for interface, address, device and tuning settings; preserves comments and unknown keywords |
+| `NetEnv` | optional commodity exporting IPv4/IPv6 configuration to `ENV:` for desktop widgets; [usage](docs/user/NetEnv.txt) |
 | `NetMeter` | small Workbench window: each interface's addresses (click one to copy it) and its receive and send rates |
 | `NetSwitch` | Workbench window listing each interface's state and address; takes the selected interface online or offline |
 | `NetWireless` | Wi-Fi commodity: the link's state and signal as an AppIcon, a Tools menu item and `ENV:WiFi`; reads the signal only while connected |
@@ -217,7 +218,7 @@ the NDK does not declare and the CPU profiler.
 
 The installer copies all of them into `C:`; a system installation also places
 the `NetPrefs` and `NetWirelessPrefs` programs and icons in `SYS:Prefs`, `NetMeter` and
-`NetSwitch` in `SYS:Utilities` and `NetWireless` in `SYS:Tools/Commodities`; a drawer
+`NetSwitch` in `SYS:Utilities` and `NetWireless` and `NetEnv` in `SYS:Tools/Commodities`; a drawer
 installation places all five in its drawer. `C:` carries no icons. Every command that resolves a name
 takes `-4` and `-6`.
 

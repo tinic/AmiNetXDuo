@@ -31,6 +31,7 @@
   @{b}Reference@{ub}
 
     @{"The commands              " link COMMANDS}
+    @{"Desktop environment values" link NETENV}
     @{"Running network software  " link SOFTWARE}
     @{"TCP:, a connection as a file" link TCPDEVICE}
     @{"Where everything lives    " link FILES}
@@ -1202,6 +1203,7 @@
     NetSetup          write the configuration files from a Shell
     NetPrefs          edit interfaces and boot policy from Workbench
     NetMeter          addresses and live rates, in a window or in a Shell
+    NetEnv            IPv4/IPv6 configuration in ENV: (optional commodity)
     NetWirelessPrefs  Wi-Fi networks in range, joining one, link state
     NetWireless       Wi-Fi state and signal as an AppIcon and in ENV:WiFi
     CheckNetConfig    read the configuration files back and report faults
@@ -3817,5 +3819,37 @@
   printed, and what ShowNetStatus EVENTS lists -- see
   @{"Reading the debug log" link LOGGING}. Check @{"Known limitations" link LIMITS}
   first, in case the fault is already known.
+
+@endnode
+
+
+@node NETENV "NetEnv - desktop environment values"
+@toc MAIN
+
+  NetEnv optionally publishes live IPv4 and IPv6 configuration in ENV:.
+  It writes changed values only, and exports no traffic statistics.
+
+      Run >NIL: C:NetEnv
+      Run >NIL: C:NetEnv INTERVAL 5
+      NetEnv VERSION
+
+  INTERVAL is 1 to 3600 seconds; default 2. The same INTERVAL tooltype
+  works from Workbench. Copy the program and its DONOTWAIT icon to
+  WBStartup if wanted; installation does not start it. Stop or disable
+  it through Commodities Exchange, or use Ctrl-C from its Shell.
+
+  Each interface has ANXD/IF/<name>/ADDRESS, NETMASK, STATE and ADDR6.
+  ADDR6 lists ready IPv6 addresses with prefix lengths and link-local
+  scopes. ANXD/DEFAULT contains the IPv4 default interface and gateway;
+  ANXD/DEFAULT6 exists only for an unambiguous IPv6 default router.
+  Removed addresses disappear, and normal exit removes the variables.
+  Nothing is written to ENVARC:.
+
+  In NewMeter, for example, the FOOTER tooltype can contain:
+
+      FOOTER=IP: %{ANXD/DEFAULT/ADDRESS}
+
+  The complete variable reference, multi-interface examples and recovery
+  limits are in NetEnv.txt beside this guide.
 
 @endnode

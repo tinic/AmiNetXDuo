@@ -7,6 +7,10 @@ are history.
 
 ## Unreleased
 
+- Optional NetEnv commodity publishes current IPv4 and IPv6 addresses and
+  default routes in ENV: for desktop tools such as NewMeter. It writes only
+  changed configuration, removes stale values, and exports no traffic counters.
+
 - TCP holds new data while a network driver's write queue is half full
   instead of overflowing it, which ends multi-minute upload stalls over
   Pi Wi-Fi and other links slower than the CPU.
