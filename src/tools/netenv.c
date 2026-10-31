@@ -35,8 +35,11 @@ static union {
 
 static LONG query(struct Library *base, ULONG what, ULONG size, ULONG entry_size)
 {
-    LONG count = tool_netstatus_query(base, what, &answer, size, entry_size);
+    LONG count;
     NetStatusHeader *h = (NetStatusHeader *)&answer;
+    /* NetShutdown is waiting for the base: no further queries. */
+    if (SetSignal(0, 0) & SIGBREAKF_CTRL_C) return -1;
+    count = tool_netstatus_query(base, what, &answer, size, entry_size);
     if (count < 0 || h->nsh_Available != h->nsh_Count ||
         (ULONG)count > (size - sizeof(*h)) / entry_size) return -1;
     return count;
@@ -121,17 +124,23 @@ static int collect(struct Library *base)
     return 1;
 }
 
+static void *stack_open(void *ctx) { (void)ctx; return tool_netstatus_open_resident(); }
+static int stack_collect(void *ctx, void *base, NeSnapshot *s)
+{
+    (void)ctx; (void)s;
+    return collect((struct Library *)base);
+}
+static void stack_close(void *ctx, void *base) { (void)ctx; tool_netstatus_close((struct Library *)base); }
+static int stack_pending(void *ctx, int clear)
+{
+    (void)ctx;
+    return (SetSignal(0, clear ? SIGBREAKF_CTRL_C : 0) & SIGBREAKF_CTRL_C) != 0;
+}
+
 static void refresh(void)
 {
-    struct Library *base;
-    memset(&snapshot, 0, sizeof(snapshot));
-    snapshot.state = "DOWN";
-    base = tool_netstatus_open_resident();
-    if (base) {
-        snapshot.state = "UP";
-        if (!collect(base)) snapshot.state = "ERROR";
-        tool_netstatus_close(base);
-    }
+    static const NeStack stack = { stack_open, stack_collect, stack_close, stack_pending, NULL };
+    ne_refresh(&snapshot, &stack);
     if (!ne_build(&snapshot, &desired)) {
         memset(&snapshot, 0, sizeof(snapshot));
         snapshot.state = "ERROR";
