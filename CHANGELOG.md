@@ -7,6 +7,10 @@ are history.
 
 ## Unreleased
 
+- A TCP connection whose IPv6 address expires or is withdrawn by the router
+  no longer stops the network when a tail loss probe fires.
+- A resent block that spans the 32-bit sequence number wrap is sent in full
+  instead of waiting for another retransmission timeout.
 - A blocking connect() returns as soon as the handshake completes instead of
   330 to 380 ms later.
 - A listening socket holds new connections in the SYN cache once its backlog
