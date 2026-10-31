@@ -424,8 +424,9 @@ UINT ami_sana2_gso_max_segs(NX_INTERFACE *interface_ptr);
  * that, never below AMI_SANA2_TX_LIMIT_MIN writes and never above the stop
  * plus the ring, which is where every interface stood before.  It wakes at
  * half.  A device that finishes writes inside BeginIO() (IOF_QUICK: every
- * netdev driver -- anxnet's cards, anxgenet) holds none of them and keeps
- * the ceiling, as before; its queue is in the card.
+ * netdev driver -- anxnet's cards, anxgenet) holds none of them: its writes
+ * are not counted, and it keeps the #398 stop, AMI_SANA2_TX_STOP_AT waiting;
+ * its queue is in the card.
  *
  * A queue that runs dry after it stopped TCP was too short for the time TCP
  * takes to refill it (an acknowledgment's round trip, a stretch ACK): the

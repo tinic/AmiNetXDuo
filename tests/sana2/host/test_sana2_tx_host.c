@@ -1692,12 +1692,13 @@ static void test_queue_limit_invariants(void)
             "a device that finishes in BeginIO() is never stopped");
 
     /* One that finishes most writes in BeginIO() and queues the odd one
-       (a full hardware ring) keeps the ceiling: its replies measure only
-       the writes the card could not take. */
+       (a full hardware ring) is never counted and keeps the wait-queue
+       stop: its replies measure only the writes the card could not take. */
     fixture_init(FALSE, S2WireType_Ethernet);
     memset(&q_nxif, 0, sizeof(q_nxif));
     iface.interface_ptr = &q_nxif;
     iface.tx_quick_ok   = 1;
+    ami_sana2_tx_init(&iface);
     h_ms  = 1000UL;
     h_now = h_ms / 20UL;
     for (i = 0; i < 3000; i++)
@@ -1715,12 +1716,63 @@ static void test_queue_limit_invariants(void)
         h_quick_kept = 0;
         (void)q_send((UWORD)(40 + i % 400));
     }
-    h_check(iface.tx_dev_writes == 20 && iface.tx_pend_count == 0 &&
-            iface.stats.tx_queue_full == 0,
-            "twenty queued writes held throughout");
-    h_check(iface.tx_lim_limit == AMI_SANA2_TX_STOP_AT + Q_N,
-            "a mostly-quick device keeps the ceiling");
+    h_check(iface.tx_dev_writes == 0 && iface.tx_lim_posted == 0 &&
+            iface.tx_pend_count == 0 && iface.stats.tx_queue_full == 0,
+            "twenty queued writes held throughout, none counted");
+    h_check(iface.tx_lim_limit == AMI_SANA2_TX_STOP_AT,
+            "a mostly-quick device keeps the wait-queue stop");
     h_quick_kept = 0;
+    iface.interface_ptr = NULL;
+}
+
+/* A device that finishes writes inside BeginIO() is never counted, so its
+   send path is the #398 one: the stop is the wait queue reaching
+   AMI_SANA2_TX_STOP_AT behind a full ring, the wake half of it, whatever
+   the device holds; the limit never moves and nothing is measured. */
+static void test_quick_device_keeps_the_wait_queue_stop(void)
+{
+    UWORD i;
+
+    printf("sana2: a quick device is never counted and stops at the wait "
+           "queue, as before\n");
+
+    fixture_init(FALSE, S2WireType_Ethernet);
+    memset(&q_nxif, 0, sizeof(q_nxif));
+    iface.interface_ptr = &q_nxif;
+    iface.tx_quick_ok   = 1;
+    ami_sana2_tx_init(&iface);
+    h_quick_kept        = 0;    /* this time the device queues every write */
+    h_ms  = 1000UL;
+    h_now = h_ms / 20UL;
+    h_check(iface.tx_lim_limit == AMI_SANA2_TX_STOP_AT,
+            "the limit is the wait-queue stop");
+
+    for (i = 0; i < Q_N + AMI_SANA2_TX_STOP_AT - 1; i++)
+        (void)q_send(i);
+    h_check(iface.tx_dev_writes == 0 && iface.tx_lim_posted == 0 &&
+            iface.tx_pend_count == AMI_SANA2_TX_STOP_AT - 1 &&
+            q_nxif.nx_interface_tx_queue_stopped == 0,
+            "a full ring and one short of the stop: nothing counted, not "
+            "stopped");
+    (void)q_send((UWORD)(Q_N + AMI_SANA2_TX_STOP_AT - 1));
+    h_check(q_nxif.nx_interface_tx_queue_stopped != 0,
+            "stopped at AMI_SANA2_TX_STOP_AT waiting");
+    while (iface.tx_pend_count > AMI_SANA2_TX_STOP_AT / 2 + 1)
+    {
+        h_ms += 14UL;
+        h_now = h_ms / 20UL;
+        q_complete_one();
+    }
+    h_check(q_nxif.nx_interface_tx_queue_stopped != 0,
+            "stopped above half");
+    q_complete_one();
+    h_check(iface.tx_pend_count == AMI_SANA2_TX_STOP_AT / 2 &&
+            q_nxif.nx_interface_tx_queue_stopped == 0 &&
+            iface.tx_lim_limit == AMI_SANA2_TX_STOP_AT &&
+            iface.tx_dev_writes == 0,
+            "woken at half, the limit unmoved, nothing counted");
+    h_reply_on_sleep = 0;
+    ami_sana2_tx_drain(&iface);
     iface.interface_ptr = NULL;
 }
 
@@ -2677,8 +2729,8 @@ static void test_gso_quick_block_leaves_no_stop(void)
             iface.tx_pend_count == 0,
             "sixteen children, all finished in BeginIO()");
     h_check(nxif.nx_interface_tx_queue_stopped == 0 &&
-            iface.tx_lim_stops == 1,
-            "the stop claim_run stored is cleared, not stranded");
+            iface.tx_lim_stops == 0,
+            "a quick device's block is not counted, so never stops");
     iface.interface_ptr = NULL;
     h_quick_kept = 0;
 }
@@ -3167,6 +3219,7 @@ int main(void)
     test_queue_stops_and_wakes_tcp();
     test_queue_limit_follows_the_card();
     test_queue_limit_invariants();
+    test_quick_device_keeps_the_wait_queue_stop();
     test_kick_launch_is_not_overtaken();
 
     test_pad_cooked_no_fusion();

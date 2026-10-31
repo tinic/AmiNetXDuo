@@ -22,10 +22,12 @@
 
 /* A slot back from the device: one instruction, which a task switch cannot
    split on the one CPU, so the reapers need no Forbid() for it.  It is also
-   a compiler barrier. */
+   a compiler barrier.  A quick device is never counted (ami_sana2_tx_init). */
 static inline VOID __attribute__((always_inline))
 ami_sana2_dev_put(AmiSana2If *iface)
 {
+    if (iface->tx_quick_ok)
+        return;
 #if defined(__mc68000__) || defined(__m68k__)
     __asm__ __volatile__("subq.w #1,%0"
                          : "+m"(iface->tx_dev_writes) : : "cc", "memory");
@@ -82,9 +84,15 @@ VOID ami_sana2_tx_init(AmiSana2If *iface)
 
     /* The queue limit starts at its ceiling, where every interface stood
        before it was measured: a fast card loses nothing to the first
-       windows, a slow one comes down within its first backlog. */
+       windows, a slow one comes down within its first backlog.  A device
+       that finishes writes inside BeginIO() (tx_quick_ok, every netdev
+       driver) holds none: its writes are not counted at all, and it stops
+       TCP at AMI_SANA2_TX_STOP_AT waiting and wakes at half, the #398
+       wait-queue stop, on the send path main has. */
     iface->tx_dev_writes = 0;
-    iface->tx_lim_limit  = (UWORD)(AMI_SANA2_TX_STOP_AT + iface->tx_slots);
+    iface->tx_lim_limit  = iface->tx_quick_ok
+                         ? (UWORD)AMI_SANA2_TX_STOP_AT
+                         : (UWORD)(AMI_SANA2_TX_STOP_AT + iface->tx_slots);
     iface->tx_lim_target = AMI_SANA2_TX_TARGET_MS;
     iface->tx_lim_clean  = 0;
     iface->tx_lim_posted = 0;
@@ -763,6 +771,11 @@ static VOID ami_sana2_tx_settle(AmiSana2If *iface)
     UWORD         count;
     ULONG         now;
 
+    /* A device that finishes writes inside BeginIO() is not measured: its
+       stop and wake are the wait queue's, in ami_sana2_tx_flow(). */
+    if (iface->tx_quick_ok)
+        return;
+
     count = (UWORD)(iface->tx_pend_count + iface->tx_dev_writes);
     if (count == 0)
     {
@@ -783,13 +796,6 @@ static VOID ami_sana2_tx_settle(AmiSana2If *iface)
     if (nxif != NX_NULL && nxif->nx_interface_tx_queue_stopped != 0 &&
         count <= (UWORD)(iface->tx_lim_limit >> 1))
         nxif->nx_interface_tx_queue_stopped = 0;
-
-    /* A device that finishes writes inside BeginIO() holds none of them:
-       its queue is the card's own, its replies are the odd write it could
-       not take, and a window of those measures nothing.  It keeps the
-       ceiling, where #398 left it. */
-    if (iface->tx_quick_ok)
-        return;
 
     now = tx_time_get();
     if (now - iface->tx_lim_tick >= (ULONG)AMI_SANA2_TX_WINDOW_TICKS &&
@@ -989,9 +995,12 @@ static AmiTxSlot *ami_sana2_tx_claim(AmiSana2If *iface)
                 slot = &iface->tx[i];
                 /* Nothing waits here, so the device's writes are the
                    whole count. */
-                iface->tx_lim_posted++;
-                if (++iface->tx_dev_writes >= iface->tx_lim_limit)
-                    ami_sana2_tx_flow(iface);
+                if (!iface->tx_quick_ok)
+                {
+                    iface->tx_lim_posted++;
+                    if (++iface->tx_dev_writes >= iface->tx_lim_limit)
+                        ami_sana2_tx_flow(iface);
+                }
                 break;
             }
         }
@@ -1015,8 +1024,11 @@ static ULONG ami_sana2_tx_claim_run(AmiSana2If *iface, UWORD want)
         if (!iface->tx[i].busy)
         {
             iface->tx[i].busy = TRUE;
-            iface->tx_dev_writes++;
-            iface->tx_lim_posted++;
+            if (!iface->tx_quick_ok)
+            {
+                iface->tx_dev_writes++;
+                iface->tx_lim_posted++;
+            }
             mask |= 1UL << i;
             want--;
         }
@@ -1155,8 +1167,11 @@ VOID ami_sana2_tx_kick(AmiSana2If *iface)
                 if (!iface->tx[i].busy)
                 {
                     iface->tx[i].busy = TRUE;
-                    iface->tx_dev_writes++;
-                    iface->tx_lim_posted++;
+                    if (!iface->tx_quick_ok)
+                    {
+                        iface->tx_dev_writes++;
+                        iface->tx_lim_posted++;
+                    }
                     slot = &iface->tx[i];
                     break;
                 }
