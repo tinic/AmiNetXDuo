@@ -876,15 +876,23 @@ static void timeout_hole(void)
     h_sock.nx_tcp_socket_timeout = _nx_tcp_fast_timer_rate;
     _nx_tcp_fast_periodic_processing(&h_ip);
     (VOID)h_ack(1, 0, 0, 0, 0);
+    before = h_datagrams;
     (VOID)h_ack(1, 0, 0, 0, 0);
     (VOID)h_ack(1, 0, 0, 0, 0);
     (VOID)h_ack(1, 0, 0, 0, 0);
-    h_check_eq(h_sock.nx_tcp_socket_fast_recovery, NX_TRUE, "duplicate ACKs enter new fast recovery after RTO");
-    h_check_eq(h_sock.nx_tcp_socket_tx_rto_next, h_sock.nx_tcp_socket_tx_rto_end,
-               "fast recovery supersedes timeout mode");
+    /* Below the timeout's recovery point the duplicates say a walk copy
+       was lost.  RFC 6675 section 5.1 starts no new recovery there: that
+       copy alone goes again and the walk keeps the rest of the old flight
+       (tinic/netxduo#39).  */
+    h_check_eq(h_sock.nx_tcp_socket_fast_recovery, NX_FALSE,
+               "duplicate ACKs below the timeout recovery point start no fast recovery");
+    h_check_eq(h_datagrams - before, 1, "the lost walk copy alone is resent");
+    h_check_eq(h_resent(1), 2, "the copy at SND.UNA goes a second time");
+    h_check((INT)(h_sock.nx_tcp_socket_tx_rto_end - h_sock.nx_tcp_socket_tx_rto_next) > 0,
+            "the timeout walk keeps the rest of the old flight");
     before = h_datagrams;
     (VOID)h_ack(8, 0, 0, 0, 0);
-    h_check_eq(h_datagrams, before, "fast recovery exit cannot revive stale timeout sends");
+    h_check_eq(h_datagrams, before, "acknowledging the old flight ends the walk without more resends");
 
     h_fixture();
     for (i = 0; i < 8; i++)
