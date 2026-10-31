@@ -1677,6 +1677,26 @@ static void test_queue_limit_invariants(void)
     h_check(iface.tx_lim_target == AMI_SANA2_TX_TARGET_MS,
             "and a clean backlog brings it back");
 
+    /* A window in which the limit never held TCP back and no queue stood
+       leaves it where it is: ACKs or light traffic measure the sender, not
+       the card. */
+    fixture_init(FALSE, S2WireType_Ethernet);
+    memset(&q_nxif, 0, sizeof(q_nxif));
+    iface.interface_ptr = &q_nxif;
+    iface.tx_lim_limit  = 100;
+    h_ms  = 1000UL;
+    h_now = h_ms / 20UL;
+    for (i = 0; i < 400; i++)
+    {
+        h_ms += 14UL;
+        h_now = h_ms / 20UL;
+        q_complete_one();
+        (void)q_send((UWORD)(i % 400));
+    }
+    h_check(iface.tx_lim_limit == 100 && iface.tx_lim_stops == 0,
+            "a limit that never stopped TCP, over no queue, is not lowered");
+    iface.interface_ptr = NULL;
+
     /* A quick device finishes inside BeginIO(): the device holds nothing
        and the queue never stops, whatever the limit. */
     fixture_init(FALSE, S2WireType_Ethernet);

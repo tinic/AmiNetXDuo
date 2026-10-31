@@ -93,6 +93,8 @@ VOID ami_sana2_tx_init(AmiSana2If *iface)
     iface->tx_lim_ms     = 0;
     iface->tx_lim_held   = 0;
     iface->tx_lim_stops  = 0;
+    iface->tx_lim_hit    = 0;
+    iface->tx_lim_least  = 0xFFFF;
 
 #ifdef AMINETXDUO_TX_RUN
     /* The run flush: the opened request's device, unit and cookie, the
@@ -669,6 +671,7 @@ static VOID __attribute__((noinline)) ami_sana2_tx_flow(AmiSana2If *iface)
         {
             nxif->nx_interface_tx_queue_stopped = 1;
             iface->tx_lim_held = 1;
+            iface->tx_lim_hit  = 1;
             iface->tx_lim_stops++;
         }
     }
@@ -696,6 +699,7 @@ ami_sana2_tx_window(AmiSana2If *iface, ULONG now)
     ULONG gone;
     ULONG limit;
     ULONG ceiling = (ULONG)AMI_SANA2_TX_STOP_AT + (ULONG)iface->tx_slots;
+    UBYTE hit;
 
     iface->tx_lim_tick = now;
     ms   = ami_millis_quick();
@@ -716,15 +720,27 @@ ami_sana2_tx_window(AmiSana2If *iface, ULONG now)
         return;
 
     limit = (done * (ULONG)iface->tx_lim_target + dt - 1UL) / dt;
-    /* At most half a window down.  A window the sender left idle measures
-       less than the card can do; a limit that falls too far stops TCP, the
-       queue runs dry behind the stop, and the settle doubles it again. */
+    /* Down only in a window with a queue to show for it -- the limit held
+       TCP back, or writes stood below it throughout (never fewer than
+       AMI_SANA2_TX_LIMIT_MIN after a reap, BQL's slack) -- and then at most
+       by half.  A window of ACKs or light traffic measures the sender, not
+       the card.  One that falls too far stops TCP, the queue runs dry
+       behind the stop, and the settle doubles it again. */
+    hit = (UBYTE)(iface->tx_lim_hit ||
+                  iface->tx_lim_least >= (UWORD)AMI_SANA2_TX_LIMIT_MIN ||
+                  (iface->interface_ptr != NX_NULL &&
+                   iface->interface_ptr->nx_interface_tx_queue_stopped != 0));
+    iface->tx_lim_hit   = 0;
+    iface->tx_lim_least = 0xFFFF;
+    if (limit < (ULONG)iface->tx_lim_limit && !hit)
+        limit = iface->tx_lim_limit;
     if (limit < (ULONG)(iface->tx_lim_limit >> 1))
         limit = (ULONG)(iface->tx_lim_limit >> 1);
 
-    /* Traffic without a starved stop: the target comes back a step.  On
-       time, not on backlog, so a sender whose bursts end at a stop (the
-       stop cannot tell that from a slow refill) does not hold it high. */
+    /* The target comes back a step per AMI_SANA2_TX_DECAY_MS of windows,
+       whatever happened in them, so a sender whose bursts end at a stop
+       (which the stop cannot tell from a slow refill) does not hold it
+       high. */
     dt += iface->tx_lim_clean;
     if (dt >= (ULONG)AMI_SANA2_TX_DECAY_MS &&
         iface->tx_lim_target > AMI_SANA2_TX_TARGET_MS)
@@ -757,6 +773,8 @@ static VOID ami_sana2_tx_settle(AmiSana2If *iface)
     ULONG         now;
 
     count = (UWORD)(iface->tx_pend_count + iface->tx_dev_writes);
+    if (count < iface->tx_lim_least)
+        iface->tx_lim_least = count;
     if (count == 0)
     {
         if (iface->tx_lim_held)
@@ -765,7 +783,6 @@ static VOID ami_sana2_tx_settle(AmiSana2If *iface)
             if (iface->tx_lim_target < AMI_SANA2_TX_TARGET_MAX_MS)
                 iface->tx_lim_target = (UWORD)(iface->tx_lim_target +
                                                AMI_SANA2_TX_TARGET_STEP_MS);
-            iface->tx_lim_clean = 0;
             if (iface->tx_lim_limit < (UWORD)AMI_SANA2_TX_STOP_AT)
                 iface->tx_lim_limit = (UWORD)(iface->tx_lim_limit << 1);
             if (iface->tx_lim_limit > (UWORD)(AMI_SANA2_TX_STOP_AT +
@@ -1415,8 +1432,10 @@ ami_sana2_gso_send(AmiSana2If *iface, NX_PACKET *packet, UWORD ether_type,
 
     /* Children the device finished inside BeginIO() handed their slots back
        with no reply to come, and a reply is what runs the wake: the stop
-       claim_run stored for them is looked at again here.  A single write
-       cannot strand one -- at a limit of two another write is held. */
+       claim_run stored for them is looked at again here.  Defence: a quick
+       device keeps the ceiling, above its slots, so claim_run does not stop
+       it today.  A single write cannot strand one -- at a limit of two
+       another write is held. */
     if (held && iface->interface_ptr != NX_NULL &&
         iface->interface_ptr->nx_interface_tx_queue_stopped != 0)
     {

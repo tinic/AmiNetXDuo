@@ -423,8 +423,9 @@ UINT ami_sana2_gso_max_segs(NX_INTERFACE *interface_ptr);
  * complete while it has a backlog and stops TCP at AMI_SANA2_TX_TARGET_MS of
  * that, never below AMI_SANA2_TX_LIMIT_MIN writes and never above the stop
  * plus the ring, which is where every interface stood before.  It wakes at
- * half.  A device that finishes writes inside BeginIO() (IOF_QUICK: anxnet,
- * anxgenet) holds none of them and keeps the ceiling.
+ * half.  A device that finishes writes inside BeginIO() (IOF_QUICK: every
+ * netdev driver -- anxnet's cards, anxgenet) holds none of them and keeps
+ * the ceiling, as before; its queue is in the card.
  *
  * A queue that runs dry after it stopped TCP was too short for the time TCP
  * takes to refill it (an acknowledgment's round trip, a stretch ACK): the
@@ -1228,7 +1229,8 @@ struct AmiSana2If
     ULONG               tx_lim_tick;
     ULONG               tx_lim_ms;
     UBYTE               tx_lim_held;
-    UBYTE               tx_lim_pad;
+    UBYTE               tx_lim_hit;         /* stopped TCP in this window */
+    UWORD               tx_lim_least;       /* fewest below TCP after a reap */
     ULONG               tx_lim_stops;
 
     /* GSO blocks in flight, under Forbid() with the slots: gso_count of
