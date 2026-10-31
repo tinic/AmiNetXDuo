@@ -98,9 +98,9 @@ BUDGETS=(
     # A lost copy of the RTO walk is resent alone instead of starting a
     # fast recovery (netxduo #39): +388, 375,892 -> 376,280.
     # Pinned hot-function layout (hot-functions.txt, one section per
-    # function): +14,468, 376,280 -> 390,748.  Code hunk +5,948; the rest is
+    # function): +14,456, 376,280 -> 390,736.  Code hunk +5,944; the rest is
     # relocations, as calls inside an LTO partition become jsr abs.l.
-    "default:src/bsdsocket/bsdsocket.library:390748"
+    "default:src/bsdsocket/bsdsocket.library:390736"
     # 41,412 after stateless receive-checksum verification was added to the
     # EL3 and word/long NE2000 direct paths, 2026-09-15.  43,620 with
     # ANXD_CMD_RX_BATCH in the shell (claim, completion, staging copy, the
@@ -179,8 +179,8 @@ BUDGETS=(
     # BeginInterfaceConfig() with no stack: +12, 253,728 -> 253,740.
     # Transmit queue stop for TCP (netxduo #38): +200, 253,740 -> 253,940.
     # The RTO walk's lost-copy repair (netxduo #39): +308, 253,940 -> 254,248.
-    # Pinned hot-function layout: +11,204, 254,248 -> 265,452.
-    "minimal:src/bsdsocket/bsdsocket.library:265452"
+    # Pinned hot-function layout: +11,188, 254,248 -> 265,436.
+    "minimal:src/bsdsocket/bsdsocket.library:265436"
     "minimal:src/netdev/anxnet.device:46000"
     # 29,088 on e806188f after the audited device fixes.
     # Batched transmit adds 632, 29,120 -> 29,752, approved by turo 2026-10-29.
@@ -204,8 +204,8 @@ BUDGETS=(
     # 2026-09-26.
     # 204,052 with the bounded S2_OFFLINE (#90, see the default row).
     # 208,132 on e806188f with the same F-series fixes as the full build.
-    # Pinned hot-function layout: +10,308, 207,436 -> 217,744.
-    "micro:src/bsdsocket/bsdsocket.library:217744"
+    # Pinned hot-function layout: +10,296, 207,436 -> 217,732.
+    "micro:src/bsdsocket/bsdsocket.library:217732"
     "micro:src/netdev/anxnet.device:46000"
     "micro:src/netdev/anxgenet.device:29120"
     "micro:src/wifipi/anxwifipi.device:56000"
