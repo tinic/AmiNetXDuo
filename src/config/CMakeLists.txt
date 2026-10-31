@@ -75,4 +75,29 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     include(CTest)
     add_test(NAME config_parsers COMMAND test_config)
+
+    # config_file.c as it ships, over the volume model in test/fileshim:
+    # which NetInterfaces drawer each installation layout reads.
+    add_executable(test_config_file
+        test/test_config_file.c
+        config_file.c
+        config_advice.c
+        config_text.c
+        config_text6.c
+        config_parse.c
+        config_hostname.c
+        config_list.c
+        netdb.c
+        netdb_check.c
+        config_keyword.c)
+
+    target_include_directories(test_config_file PRIVATE
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/test/fileshim"
+        "${CMAKE_CURRENT_SOURCE_DIR}/test/shim")
+
+    target_compile_options(test_config_file PRIVATE -Wall -Wextra)
+
+    add_test(NAME config_devs_redirect COMMAND test_config_file)
 endif()

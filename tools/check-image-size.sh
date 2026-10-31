@@ -103,7 +103,9 @@ BUDGETS=(
     # NETSTATUS_IFQUEUE, the transmit-queue counters for ShowNetStatus and
     # NetMeter: +164, 377,156 -> 377,320.  The rc3 review TCP fixes
     # (netxduo #40): +40, 377,320 -> 377,360.
-    "default:src/bsdsocket/bsdsocket.library:377360"
+    # AmiNetXDuo:Devs read only while a member of DEVS: (a removed drawer
+    # install left under a system install): +156, 377,360 -> 377,516.
+    "default:src/bsdsocket/bsdsocket.library:377516"
     # 41,412 after stateless receive-checksum verification was added to the
     # EL3 and word/long NE2000 direct paths, 2026-09-15.  43,620 with
     # ANXD_CMD_RX_BATCH in the shell (claim, completion, staging copy, the
@@ -188,7 +190,8 @@ BUDGETS=(
     # 254,248 -> 254,920.  Quick devices skip the counting: +56,
     # 254,920 -> 254,976.  NETSTATUS_IFQUEUE: +164, 254,976 -> 255,140.
     # The rc3 review TCP fixes (netxduo #40): +24, 255,140 -> 255,164.
-    "minimal:src/bsdsocket/bsdsocket.library:255164"
+    # AmiNetXDuo:Devs only as a member of DEVS: +140, 255,164 -> 255,304.
+    "minimal:src/bsdsocket/bsdsocket.library:255304"
     "minimal:src/netdev/anxnet.device:46000"
     # 29,088 on e806188f after the audited device fixes.
     # Batched transmit adds 632, 29,120 -> 29,752, approved by turo 2026-10-29.
