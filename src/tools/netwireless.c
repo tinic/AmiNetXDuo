@@ -12,7 +12,7 @@
  * Kickstart 2.04: commodities.library, workbench.library and icon.library
  * are each optional.  A new picture is a new AppIcon; from Workbench 3.5 on
  * WBAPPICONA_PropagatePosition keeps the place it was dragged to, before
- * that it returns to a free place.
+ * that it reuses explicit XPOS/YPOS, or returns to a free place.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -48,12 +48,14 @@ struct Library       *IconBase;
 struct IntuitionBase *IntuitionBase;
 
 #define TEMPLATE "CX_PRIORITY/K/N,CX_POPKEY/K,CX_POPUP/K,DEVICE/K,UNIT/K/N," \
-                 "INTERFACE/K,INTERVAL/K/N,APPICON/K,APPMENU/K,ENVVAR/K,QUIET/S"
+                 "INTERFACE/K,INTERVAL/K/N,APPICON/K,APPMENU/K,ENVVAR/K," \
+                 "XPOS/K,YPOS/K,QUIET/S"
 
 enum
 {
     ARG_PRI, ARG_POPKEY, ARG_POPUP, ARG_DEVICE, ARG_UNIT, ARG_INTERFACE,
-    ARG_INTERVAL, ARG_APPICON, ARG_APPMENU, ARG_ENVVAR, ARG_QUIET, ARG_COUNT
+    ARG_INTERVAL, ARG_APPICON, ARG_APPMENU, ARG_ENVVAR, ARG_XPOS, ARG_YPOS,
+    ARG_QUIET, ARG_COUNT
 };
 
 
@@ -549,6 +551,7 @@ int main(int argc, char **argv)
     const char    *device, *iface;
     ULONG          sigs;
     BOOL           run = TRUE;
+    LONG           result = RETURN_OK;
 
     IconBase = OpenLibrary("icon.library", 37);
     if (argc == 0)
@@ -568,6 +571,18 @@ int main(int argc, char **argv)
         PrintFault(IoErr(), (CONST_STRPTR)tool_name);
         if (IconBase != NULL) CloseLibrary(IconBase);
         return RETURN_ERROR;
+    }
+
+    /* Set the initial position only. V44 position propagation updates this
+       same DiskObject after a drag, and nw_icon_remove carries the native
+       icon's position back here before replacing its picture. */
+    if (nw_icon_position(nw_opt(ARG_XPOS), nw_opt(ARG_YPOS),
+                         &nw_dob.do_CurrentX, &nw_dob.do_CurrentY) < 0)
+    {
+        PutStr((CONST_STRPTR)"NetWireless: XPOS and YPOS require a pair of "
+                            "decimal coordinates in 0..32767.\n");
+        result = RETURN_ERROR;
+        goto out;
     }
 
     device = nw_opt(ARG_DEVICE);
@@ -728,5 +743,5 @@ out:
     if (nw_tool != NULL) FreeDiskObject(nw_tool);
     if (rda != NULL) FreeArgs(rda);
     if (IconBase != NULL) CloseLibrary(IconBase);
-    return RETURN_OK;
+    return result;
 }

@@ -196,6 +196,38 @@ void nw_bar_rect(int i, int w, int h, int *x0, int *y0, int *x1, int *y1)
     *y1 = h - 1;
 }
 
+static int nw_position_number(const char *text, long *value)
+{
+    long n = 0;
+
+    while (*text == ' ' || *text == '\t') text++;
+    if (*text == '+') text++;
+    if (*text < '0' || *text > '9') return 0;
+    do
+    {
+        int digit = *text++ - '0';
+
+        if (n > (32767 - digit) / 10) return 0;
+        n = n * 10 + digit;
+    } while (*text >= '0' && *text <= '9');
+    while (*text == ' ' || *text == '\t') text++;
+    if (*text != '\0') return 0;
+    *value = n;
+    return 1;
+}
+
+int nw_icon_position(const char *x, const char *y, long *xpos, long *ypos)
+{
+    long xx, yy;
+
+    if (x == NULL && y == NULL) return 0;
+    if (x == NULL || y == NULL || !nw_position_number(x, &xx) ||
+        !nw_position_number(y, &yy)) return -1;
+    *xpos = xx;
+    *ypos = yy;
+    return 1;
+}
+
 const unsigned char nw_icon_palette[NW_ICON_COLORS][3] =
 {
     { 0, 0, 0 }, { 35, 35, 35 }, { 246, 246, 246 }, { 185, 185, 185 },

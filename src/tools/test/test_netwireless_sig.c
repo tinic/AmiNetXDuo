@@ -160,6 +160,31 @@ static void test_bars(void)
 #define W NW_ICON_SIZE
 #define H NW_ICON_SIZE
 
+static void test_position(void)
+{
+    static const char *const bad[][2] = {
+        { "1", NULL }, { NULL, "2" }, { "", "0" }, { "0", "" },
+        { "-1", "0" }, { "0", "-1" }, { "32768", "0" },
+        { "0", "32768" }, { "9999999999999999999999999999", "0" },
+        { "12px", "34" }, { "1.5", "2" }, { "+", "2" },
+        { "0x10", "2" }, { "1", "2 trailing" }
+    };
+    long x = 77, y = 88;
+    size_t i;
+
+    check(nw_icon_position(NULL, NULL, &x, &y) == 0 && x == 77 && y == 88,
+          "omitted coordinates leave automatic placement alone");
+    check(nw_icon_position("0", "0", &x, &y) == 1 && x == 0 && y == 0,
+          "desktop origin is a real position, not omitted");
+    check(nw_icon_position("32767", "32767", &x, &y) == 1 &&
+          x == 32767 && y == 32767, "signed screen-coordinate limit");
+    check(nw_icon_position(" +40 ", "\t120\t", &x, &y) == 1 && x == 40 && y == 120,
+          "ordinary tooltype whitespace and positive sign");
+    for (i = 0; i < sizeof(bad) / sizeof(bad[0]); i++)
+        check(nw_icon_position(bad[i][0], bad[i][1], &x, &y) == -1 &&
+              x == 40 && y == 120, "invalid pair cannot partially change position");
+}
+
 /* The preferences list still uses rectangular bars. Its geometry is
    independent of the commodity's new radio symbol. */
 static void test_bar_geometry(void)
@@ -282,6 +307,7 @@ int main(void)
     test_bar_geometry();
     test_scan();
     test_picture();
+    test_position();
     if (failures == 0) printf("netwireless sig: all passed\n");
     return failures == 0 ? 0 : 1;
 }

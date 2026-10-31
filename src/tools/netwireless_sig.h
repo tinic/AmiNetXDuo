@@ -87,6 +87,11 @@ enum
 #define NW_ICON_SIZE    32
 #define NW_ICON_COLORS   8
 
+/* Optional desktop coordinates: 0 if neither is set, 1 for a valid pair,
+   -1 for a partial/invalid pair. Decimal 0..32767; outputs change only
+   for a valid pair. Shared by Shell arguments and Workbench tooltypes. */
+int nw_icon_position(const char *x, const char *y, long *xpos, long *ypos);
+
 /* Neutral greys, pen zero transparent. State is conveyed by shape as well
    as shading; no theme palette or particular accent colour is required. */
 extern const unsigned char nw_icon_palette[NW_ICON_COLORS][3];

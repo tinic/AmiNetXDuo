@@ -3651,10 +3651,11 @@
   ENVARC: and ENV:.
 
   NetWireless is installed in SYS:Tools/Commodities by a system
-  installation. NetWireless is the Wi-Fi commodity. It shows the link as an AppIcon: one
-  to four bars by signal (from -55, -66 and -77 dBm), bar outlines while
-  not connected, dotted outlines when the Wi-Fi is off, crossed out with
-  no Wi-Fi unit, and a '!' when the unit does not answer; the label is the
+  installation. NetWireless is the Wi-Fi commodity. Its neutral radio
+  AppIcon shows four signal levels (from -55, -66 and -77 dBm): a dot and
+  three arcs fill as the signal improves. Hollow arcs mean not connected;
+  small power, cross and '!' badges mean off, no Wi-Fi unit and no answer.
+  The icon has a classic Workbench fallback. The label is the
   network's name while connected (on Kickstart 3.0 and later; "Wi-Fi"
   before), "Not connected" or "Wi-Fi off" otherwise. It also adds "Wi-
   Fi..." to Workbench's Tools menu and keeps the state in the variable
@@ -3676,8 +3677,11 @@
   it starts WirelessManager. WirelessManager is recognised by its Shell
   command name; one started from a Workbench icon is not seen. A changed
   picture replaces the AppIcon; on Workbench 3.5 and later it keeps the
-  place it was dragged to, before that it returns to a free place on the
-  desktop.
+  place it was dragged to. Optional XPOS and YPOS set the initial desktop
+  position in pixels. They do not lock dragging: on Workbench 3.5 and later
+  the next update keeps the dragged position. Earlier Workbench versions
+  cannot report a dragged AppIcon position, so updates reuse the configured
+  coordinates, or return to a free place when neither coordinate was set.
 
   ToolTypes, also Shell arguments:
 
@@ -3688,10 +3692,21 @@
       INTERFACE=wifipi      the interface file DEVICE and UNIT come from
       INTERVAL=5            seconds between signal readings
       APPICON=YES           NO: no AppIcon
+      XPOS, YPOS            optional initial desktop coordinates; supply both
+                            as decimal pixels in 0..32767, including zero
       APPMENU=YES           NO: no Tools menu item
       ENVVAR=WiFi           the variable; an empty name ("" from a
                             Shell): none
       QUIET                 with no Wi-Fi unit, end at once
+
+  For example, add XPOS=40 and YPOS=120 as two tooltypes, or start:
+
+      Run >NIL: NetWireless XPOS=40 YPOS=120
+
+  A partial, negative, malformed or overflowing coordinate pair is an
+  error; neither position is silently applied. Coordinates outside the
+  visible desktop are accepted within the range, so choose values that fit
+  the current screen. APPICON=NO continues to suppress the icon.
 
   Without commodities.library there is no hotkey and no Exchange entry;
   without Workbench there is no AppIcon and no menu item; the variable is
