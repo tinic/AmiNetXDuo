@@ -299,11 +299,15 @@ int main(int argc, char **argv)
                 if (type == CXM_COMMAND) {
                     if (id == CXCMD_KILL) run = FALSE;
                     if (id == CXCMD_DISABLE) {
+                        (void)ActivateCxObj(broker, 0);
                         enabled = FALSE; desired.count = desired.used = 0;
                         if (!ne_publish(&owned, &desired, env_read, env_write, NULL))
                             tool_error("cannot clear ENV:");
                     }
-                    if (id == CXCMD_ENABLE) enabled = TRUE;
+                    if (id == CXCMD_ENABLE) {
+                        (void)ActivateCxObj(broker, 1);
+                        enabled = TRUE;
+                    }
                 }
             }
             if (!run || (signals & (1UL << timer_port->mp_SigBit))) break;
