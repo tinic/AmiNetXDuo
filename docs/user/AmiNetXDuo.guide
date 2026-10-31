@@ -1080,9 +1080,9 @@
   @{b}Stopping@{ub}
 
   NetShutdown removes every interface, closes the connections and tells
-  the programs holding sockets to stop. It releases the stack's own library
-  reference; after every program closes bsdsocket.library, Exec can expunge
-  the library. A later AddNetInterface starts it again.
+  the programs holding sockets to stop. Once no program has them open,
+  it removes bsdsocket.library and usergroup.library from memory. A later
+  AddNetInterface starts the stack again.
   @{"Offline" link OFFLINE}
   takes one interface off the wire, which stops its traffic, and
   @{"Online" link ONLINE} puts it back. An uncooperative program which keeps
@@ -1636,8 +1636,10 @@
               behind. The library keeps the last few dozen of these
               and this command puts them into words.
 
-              It answers after the network has been stopped, which is
-              when it matters. Reading it does not start the network.
+              The events live in bsdsocket.library: after NetShutdown
+              removes the library, they are gone and this command
+              reports that bsdsocket.library is not in memory.
+              Reading it does not start the network.
   @{b}NAMES@{ub}       Put names to the addresses and ports printed, from
               DEVS:Internet and then from the name servers.
   @{b}ALL@{ub}         With TCPSOCKETS or UDPSOCKETS, include the sockets
