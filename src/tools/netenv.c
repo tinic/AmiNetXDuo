@@ -201,11 +201,12 @@ static void recover(void)
                 strcpy(key, "ANXD/IF/"); strcat(key, saved); strcat(key, "/"); strcat(key, fields[i]);
                 if (!ne_own(&owned, key)) {
                     tool_error("too many old interface exports to recover");
-                    break;
+                    goto scan_done;
                 }
             }
         }
     }
+scan_done:
     if (fib) FreeDosObject(DOS_FIB, fib);
     if (directory) UnLock(directory);
     if (!env_read(NULL, "ANXD/INTERFACES", list, sizeof(list))) return;
