@@ -460,26 +460,127 @@ static char *nw_read_prefs(ULONG *len, BOOL *missing)
     return t;
 }
 
-/* A new file beside the old one, then renamed over it. */
-static BOOL nw_write(const char *path, const char *data, ULONG len)
+static const char *nw_write_error(const char *path, const char *op, LONG error)
 {
-    char tmp[sizeof(nw.to) + 8];
-    BPTR fh;
-    BOOL ok;
+    static char text[320];
+    char detail[96];
 
+    tool_copy_string(text, sizeof(text), "Could not ");
+    nw_append(text, sizeof(text), op);
+    nw_append(text, sizeof(text), " ");
+    nw_append(text, sizeof(text), path);
+    nw_append(text, sizeof(text), ": ");
+    if (error != 0 && Fault(error, NULL, detail, sizeof(detail)))
+        nw_append(text, sizeof(text), detail);
+    else
+        nw_append(text, sizeof(text), "incomplete file operation");
+    SetIoErr(error);
+    return text;
+}
+
+/* ENV: can be an OS 3.2 copy-on-demand link to ENVARC:. Removing or
+   renaming its file lets the handler recreate it before Rename(.new),
+   which then fails with ERROR_OBJECT_EXISTS. Keep the live name present. */
+static const char *nw_write_live(const char *path, const char *data, ULONG len)
+{
+    BPTR fh = Open((CONST_STRPTR)path, MODE_READWRITE);
+    LONG error;
+    const char *op;
+
+    if (fh == (BPTR)0) return nw_write_error(path, "open", IoErr());
+    if (Write(fh, (APTR)data, (LONG)len) != (LONG)len)
+        op = "write";
+    else if (SetFileSize(fh, (LONG)len, OFFSET_BEGINNING) == -1)
+        op = "truncate";
+    else
+        return Close(fh) ? NULL : nw_write_error(path, "close", IoErr());
+    error = IoErr();
+    Close(fh);
+    return nw_write_error(path, op, error);
+}
+
+static const char *nw_write_env(const char *data, ULONG len)
+{
+    ULONG old_len;
+    BOOL missing;
+    char *old = nw_read(nw_prefs_env, &old_len, &missing);
+    const char *why;
+
+    if (old == NULL && !missing)
+        return nw_write_error(nw_prefs_env, "read original", IoErr());
+    why = nw_write_live(nw_prefs_env, data, len);
+    /* Keep the first diagnostic when rollback succeeds. Its error buffer
+       is only changed by a failing operation. */
+    if (why != NULL && old != NULL &&
+        nw_write_live(nw_prefs_env, old, old_len) != NULL)
+        why = nw_write_error(nw_prefs_env, "restore original", IoErr());
+    nw_free_file(old, old_len);
+    return why;
+}
+
+/* Keep the original until the completed replacement has its final name.
+   Leave earlier recovery backups alone and choose an unused suffix. */
+static const char *nw_write(const char *path, const char *data, ULONG len)
+{
+    char tmp[sizeof(nw.to) + 8], backup[sizeof(nw.to) + 8];
+    char digits[12];
+    BPTR fh;
+    BOOL old = FALSE;
+    LONG error;
+    ULONG attempt;
+    const char *op = "write";
+
+    if (tool_stricmp(path, nw_prefs_env) == 0) return nw_write_env(data, len);
     tool_copy_string(tmp, sizeof(tmp), path);
     nw_append(tmp, sizeof(tmp), ".new");
-    fh = Open((CONST_STRPTR)tmp, MODE_NEWFILE);
-    if (fh == (BPTR)0) return FALSE;
-    ok = Write(fh, (APTR)data, (LONG)len) == (LONG)len;
-    Close(fh);
-    if (ok)
+    for (attempt = 0; attempt < 16; attempt++)
     {
-        (VOID)DeleteFile((CONST_STRPTR)path);
-        ok = Rename((CONST_STRPTR)tmp, (CONST_STRPTR)path) ? TRUE : FALSE;
+        tool_copy_string(backup, sizeof(backup), path);
+        nw_append(backup, sizeof(backup), ".old");
+        if (attempt != 0)
+        {
+            nw_decimal((LONG)attempt, digits);
+            nw_append(backup, sizeof(backup), digits);
+        }
+        if (!tool_exists(backup)) break;
     }
-    if (!ok) (VOID)DeleteFile((CONST_STRPTR)tmp);
-    return ok;
+    if (attempt == 16)
+        return nw_write_error(path, "reserve backup for", ERROR_OBJECT_EXISTS);
+    fh = Open((CONST_STRPTR)tmp, MODE_NEWFILE);
+    if (fh == (BPTR)0) return nw_write_error(tmp, "create", IoErr());
+    if (Write(fh, (APTR)data, (LONG)len) != (LONG)len)
+    {
+        error = IoErr();
+        Close(fh);
+        goto failed;
+    }
+    if (!Close(fh))
+    {
+        error = IoErr();
+        op = "close";
+        goto failed;
+    }
+    if (Rename((CONST_STRPTR)path, (CONST_STRPTR)backup))
+        old = TRUE;
+    else if ((error = IoErr()) != ERROR_OBJECT_NOT_FOUND)
+    {
+        op = "back up";
+        goto failed;
+    }
+    if (!Rename((CONST_STRPTR)tmp, (CONST_STRPTR)path))
+    {
+        error = IoErr();
+        op = "replace";
+        if (old && !Rename((CONST_STRPTR)backup, (CONST_STRPTR)path))
+            return nw_write_error(backup, "restore original from", IoErr());
+        goto failed;
+    }
+    if (old) (VOID)DeleteFile((CONST_STRPTR)backup);
+    return NULL;
+
+failed:
+    (VOID)DeleteFile((CONST_STRPTR)tmp);
+    return nw_write_error(path, op, error);
 }
 
 static VOID nw_make_dir(const char *path)
@@ -521,12 +622,10 @@ static const char *nw_store_order(const char *text, ULONG tlen,
         if (save)
         {
             nw_make_dir("ENVARC:Sys");
-            if (!nw_write(nw_prefs_envarc, out, (ULONG)len))
-                why = "Wireless.prefs could not be written.";
+            why = nw_write(nw_prefs_envarc, out, (ULONG)len);
         }
         nw_make_dir("ENV:Sys");
-        if (why == NULL && !nw_write(nw_prefs_env, out, (ULONG)len))
-            why = "Wireless.prefs could not be written.";
+        if (why == NULL) why = nw_write_env(out, (ULONG)len);
     }
     nw_free_file(out, (ULONG)len);
     return why;
@@ -606,16 +705,14 @@ static const char *nw_save_network(const UBYTE *ssid, LONG ssid_len,
     }
     else if (nw.to[0] != '\0')
     {
-        if (!nw_write(nw.to, out, (ULONG)new_len))
-            why = "Wireless.prefs could not be written.";
+        why = nw_write(nw.to, out, (ULONG)new_len);
     }
     else
     {
         nw_make_dir("ENVARC:Sys");
         nw_make_dir("ENV:Sys");
-        if (!nw_write(nw_prefs_envarc, out, (ULONG)new_len) ||
-            !nw_write(nw_prefs_env, out, (ULONG)new_len))
-            why = "Wireless.prefs could not be written.";
+        why = nw_write(nw_prefs_envarc, out, (ULONG)new_len);
+        if (why == NULL) why = nw_write_env(out, (ULONG)new_len);
     }
     nw_free_file(out, (ULONG)new_len);
     nw_free_file(old, old_len);
