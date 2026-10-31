@@ -93,8 +93,6 @@ VOID ami_sana2_tx_init(AmiSana2If *iface)
     iface->tx_lim_ms     = 0;
     iface->tx_lim_held   = 0;
     iface->tx_lim_stops  = 0;
-    iface->tx_lim_hit    = 0;
-    iface->tx_lim_least  = 0xFFFF;
 
 #ifdef AMINETXDUO_TX_RUN
     /* The run flush: the opened request's device, unit and cookie, the
@@ -671,7 +669,6 @@ static VOID __attribute__((noinline)) ami_sana2_tx_flow(AmiSana2If *iface)
         {
             nxif->nx_interface_tx_queue_stopped = 1;
             iface->tx_lim_held = 1;
-            iface->tx_lim_hit  = 1;
             iface->tx_lim_stops++;
         }
     }
@@ -699,7 +696,6 @@ ami_sana2_tx_window(AmiSana2If *iface, ULONG now)
     ULONG gone;
     ULONG limit;
     ULONG ceiling = (ULONG)AMI_SANA2_TX_STOP_AT + (ULONG)iface->tx_slots;
-    UBYTE hit;
 
     iface->tx_lim_tick = now;
     ms   = ami_millis_quick();
@@ -720,20 +716,15 @@ ami_sana2_tx_window(AmiSana2If *iface, ULONG now)
         return;
 
     limit = (done * (ULONG)iface->tx_lim_target + dt - 1UL) / dt;
-    /* Down only in a window with a queue to show for it -- the limit held
-       TCP back, or writes stood below it throughout (never fewer than
-       AMI_SANA2_TX_LIMIT_MIN after a reap, BQL's slack) -- and then at most
-       by half.  A window of ACKs or light traffic measures the sender, not
-       the card.  One that falls too far stops TCP, the queue runs dry
-       behind the stop, and the settle doubles it again. */
-    hit = (UBYTE)(iface->tx_lim_hit ||
-                  iface->tx_lim_least >= (UWORD)AMI_SANA2_TX_LIMIT_MIN ||
-                  (iface->interface_ptr != NX_NULL &&
-                   iface->interface_ptr->nx_interface_tx_queue_stopped != 0));
-    iface->tx_lim_hit   = 0;
-    iface->tx_lim_least = 0xFFFF;
-    if (limit < (ULONG)iface->tx_lim_limit && !hit)
-        limit = iface->tx_lim_limit;
+    /* At most half a window down.  A window of ACKs or light traffic
+       measures the sender, not the card, and may take the limit low; the
+       next burst then stops at it, the queue runs dry behind the stop, and
+       the settle doubles it -- an acknowledgment's round trip a step, so
+       2 to 256 in seven -- until the next window measures the card.  Only
+       lowering on a stop or a standing queue was tried (A500 plipbox,
+       2026-10-31): a download's queue runs dry often enough between ACKs
+       that the limit then stayed high, and pings behind it were lost as
+       before. */
     if (limit < (ULONG)(iface->tx_lim_limit >> 1))
         limit = (ULONG)(iface->tx_lim_limit >> 1);
 
@@ -773,8 +764,6 @@ static VOID ami_sana2_tx_settle(AmiSana2If *iface)
     ULONG         now;
 
     count = (UWORD)(iface->tx_pend_count + iface->tx_dev_writes);
-    if (count < iface->tx_lim_least)
-        iface->tx_lim_least = count;
     if (count == 0)
     {
         if (iface->tx_lim_held)

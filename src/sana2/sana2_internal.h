@@ -1229,8 +1229,7 @@ struct AmiSana2If
     ULONG               tx_lim_tick;
     ULONG               tx_lim_ms;
     UBYTE               tx_lim_held;
-    UBYTE               tx_lim_hit;         /* stopped TCP in this window */
-    UWORD               tx_lim_least;       /* fewest below TCP after a reap */
+    UBYTE               tx_lim_pad;
     ULONG               tx_lim_stops;
 
     /* GSO blocks in flight, under Forbid() with the slots: gso_count of
