@@ -58,4 +58,14 @@ const char *ne_value(const NeTable *table, const char *name);
 int ne_own(NeOwned *owned, const char *name);
 int ne_publish(NeOwned *owned, const NeTable *desired,
                NeRead read_value, NeWrite write_value, void *ctx);
+/* AmigaDOS IoErr() values for an ENV: object that is already gone. */
+#define NE_ERR_DIR_NOT_FOUND 204
+#define NE_ERR_OBJECT_NOT_FOUND 205
+/* DeleteFile() of an ENV: path: 0 = deleted, else its IoErr(). */
+typedef long (*NeDelete)(void *, const char *);
+/* Delete ENV:<name>, then its directories bottom-up while they are empty.
+ * Never ENV: itself. A missing variable or directory counts as deleted. */
+int ne_remove(const char *name, NeDelete delete_path, void *ctx);
+/* The $VER: string without its "$VER: " prefix. */
+const char *ne_version(const char *verstag);
 #endif
