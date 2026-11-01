@@ -92,6 +92,12 @@ static struct
 
     BOOL         udp_from_peer;     /* what bsd_udp_from_peer() answers      */
     ULONG        ticks;
+
+    /* The adoption pool (#383): short or not, and what a park answers. */
+    BOOL         slots_short;
+    LONG         park_result;       /* BSD_PARK_*; 0 is BSD_PARK_NONE        */
+    ULONG        parks;
+    ULONG        park_mask;
 } h;
 
 static void h_unreachable(const char *what)
@@ -258,6 +264,23 @@ struct IORequest *CheckIO(struct IORequest *io)
 {
     h.checkios++;
     return h.io_done ? io : NULL;
+}
+
+BOOL ami_netstack_slots_short(VOID) { return h.slots_short; }
+
+/* netx_call.c's park: Wait() in Exec with the slot given back.  The Wait() is
+   the scripted one; what the bracket does around it is test_nx_nest's. */
+LONG bsd_nx_park(struct AmiSocketBase *base, ULONG mask, ULONG *received)
+{
+    (VOID)base;
+    h.parks++;
+    h.park_mask = mask;
+
+    if (h.park_result == BSD_PARK_NONE)
+        return BSD_PARK_NONE;
+
+    *received = Wait(mask);
+    return h.park_result;
 }
 
 BYTE ami_signal_alloc(VOID)        { return (BYTE)H_TIMER_BIT; }
@@ -1593,6 +1616,139 @@ static void t_event_signal_once(void)
           "with only its own bit once the event bit is pending");
 }
 
+/*
+ * #383: a receive with no deadline, suspended in NetX, holds an adoption slot
+ * until its data comes.  Fifteen of them took the whole pool and every other
+ * caller of the stack waited in it.  bsd_wait_event() is the receive's and
+ * accept's wait: while the pool is short it asks once without waiting and
+ * Wait()s in Exec for the event, holding no slot.
+ */
+static ULONG h_sliced_waits[8];
+static ULONG h_sliced_n;
+static ULONG h_sliced_ready_at;  /* the call that finds data, 1-based      */
+
+static UINT h_sliced_call(VOID *arg, ULONG wait)
+{
+    (VOID)arg;
+
+    if (h_sliced_n < 8)
+        h_sliced_waits[h_sliced_n] = wait;
+    h_sliced_n++;
+
+    return (h_sliced_n >= h_sliced_ready_at) ? NX_SUCCESS : NX_NO_PACKET;
+}
+
+static void h_sliced_reset(ULONG ready_at)
+{
+    memset(h_sliced_waits, 0, sizeof(h_sliced_waits));
+    h_sliced_n        = 0;
+    h_sliced_ready_at = ready_at;
+}
+
+static void t_wait_event_pool_short(void)
+{
+    BOOL aborted;
+    UINT status;
+
+    printf("bsd_wait_event(): a full adoption pool takes the slot back\n");
+
+    /* The pool has room: the wait is NetX's, in slices, and never parks. */
+    h_reset();
+    h_sliced_reset(3);
+    status = bsd_wait_event(&h_base, NX_WAIT_FOREVER, h_sliced_call, NX_NULL,
+                            &aborted);
+    CHECK(status == NX_SUCCESS && !aborted, "room: the data is returned");
+    CHECK(h.parks == 0, "room: no park");
+    CHECK(h_sliced_n == 3 && h_sliced_waits[0] == 10 && h_sliced_waits[1] == 10,
+          "room: two NetX slices, then the data");
+
+    /* THE CASE.  The pool is short: one look without waiting, then a Wait()
+       on the event and the break, outside the stack; the event's look finds
+       the data. */
+    h_reset();
+    h.slots_short  = TRUE;
+    h.park_result  = BSD_PARK_DONE;
+    h.wait_plan[0] = H_EVENT_SIG;
+    h.wait_planned = 1;
+    h.signals      = H_EVENT_SIG;   /* a stale event bit, from before */
+    h_sliced_reset(2);
+    status = bsd_wait_event(&h_base, NX_WAIT_FOREVER, h_sliced_call, NX_NULL,
+                            &aborted);
+    CHECK(status == NX_SUCCESS && !aborted, "short: the data is returned");
+    CHECK(h.parks == 1, "short: parked once");
+    CHECK(h.park_mask == (H_EVENT_SIG | H_BREAK_SIG),
+          "short: on the event signal and the break mask");
+    CHECK(h.last_wait_mask == (H_EVENT_SIG | H_BREAK_SIG),
+          "short: that is what Wait() was given");
+    CHECK(h_sliced_n == 2 && h_sliced_waits[0] == NX_NO_WAIT &&
+          h_sliced_waits[1] == NX_NO_WAIT,
+          "short: both looks are NX_NO_WAIT, none suspends in NetX");
+
+    /* Ctrl-C while parked: EINTR, and the break goes back to the caller. */
+    h_reset();
+    h.slots_short  = TRUE;
+    h.park_result  = BSD_PARK_DONE;
+    h.wait_plan[0] = H_BREAK_SIG;
+    h.wait_planned = 1;
+    h_sliced_reset(99);
+    status = bsd_wait_event(&h_base, NX_WAIT_FOREVER, h_sliced_call, NX_NULL,
+                            &aborted);
+    CHECK(status == NX_SUCCESS && aborted, "break: aborted");
+    CHECK((h.signals & H_BREAK_SIG) != 0, "break: put back on the caller");
+
+    /* The stack went away while parked. */
+    h_reset();
+    h.slots_short  = TRUE;
+    h.park_result  = BSD_PARK_LOST;
+    h.wait_plan[0] = H_EVENT_SIG;
+    h.wait_planned = 1;
+    h_sliced_reset(99);
+    status = bsd_wait_event(&h_base, NX_WAIT_FOREVER, h_sliced_call, NX_NULL,
+                            &aborted);
+    CHECK(status == NX_NOT_ENABLED && !aborted, "lost: NX_NOT_ENABLED");
+
+    /* A base another Task shares: no park, the NetX slice. */
+    h_reset();
+    h.slots_short = TRUE;
+    h.park_result = BSD_PARK_NONE;
+    h_sliced_reset(4);
+    status = bsd_wait_event(&h_base, NX_WAIT_FOREVER, h_sliced_call, NX_NULL,
+                            &aborted);
+    CHECK(status == NX_SUCCESS && h.parks == 2,
+          "not parkable: asked each time round");
+    CHECK(h_sliced_waits[1] == 10, "not parkable: and sliced in NetX");
+
+    /* No break mask: a forever receive is sliced all the same, so it can see
+       the pool go short. */
+    h_reset();
+    h_base.sb_BreakMask = 0;
+    h.slots_short  = TRUE;
+    h.park_result  = BSD_PARK_DONE;
+    h.wait_plan[0] = H_EVENT_SIG;
+    h.wait_planned = 1;
+    h_sliced_reset(2);
+    status = bsd_wait_event(&h_base, NX_WAIT_FOREVER, h_sliced_call, NX_NULL,
+                            &aborted);
+    CHECK(status == NX_SUCCESS && h.parks == 1,
+          "no break mask: parked all the same");
+    CHECK(h.park_mask == H_EVENT_SIG, "no break mask: on the event alone");
+
+    /* A finite wait keeps NetX's timeout, and so does a call whose wake is
+       not the event signal (bsd_wait_sliced). */
+    h_reset();
+    h.slots_short = TRUE;
+    h_sliced_reset(2);
+    status = bsd_wait_event(&h_base, 50, h_sliced_call, NX_NULL, &aborted);
+    CHECK(status == NX_SUCCESS && h.parks == 0, "finite: never parked");
+
+    h_reset();
+    h.slots_short = TRUE;
+    h_sliced_reset(2);
+    status = bsd_wait_sliced(&h_base, NX_WAIT_FOREVER, h_sliced_call, NX_NULL,
+                             &aborted);
+    CHECK(status == NX_SUCCESS && h.parks == 0, "not evented: never parked");
+}
+
 int main(void)
 {
     printf("select.c host tests\n");
@@ -1611,6 +1767,7 @@ int main(void)
     t_waitselect_terminal();
     t_events();
     t_event_signal_once();
+    t_wait_event_pool_short();
 
     printf("%lu checks, %lu failures\n", h_checks, h_failures);
     return h_failures == 0 ? 0 : 1;

@@ -1090,6 +1090,305 @@ static VOID ct_kill_phase(struct Library *base)
     }
 }
 
+/* ------------------------------ every adoption slot held by a reader -- */
+
+/*
+ * #383.  A Task blocked in recv() was suspended in NetX Duo and held one of
+ * the port's adoption slots (tx_amiga_pool.c) until its data came.  Fifteen
+ * such readers took every slot a program may have, and the sixteenth caller
+ * of the stack -- any program, a browser's next connection, httpd -- waited
+ * in the pool, deaf to Ctrl-C, for as long as the fifteen did.
+ *
+ * Here twenty readers block in recv() on loopback connections whose server
+ * sends nothing, and a probe opens the library and makes a socket while they
+ * wait.  All twenty must connect and the probe must finish inside the
+ * deadline; then the server closes them all and every reader must see the
+ * end of its stream.  Bounded at three deadlines, 15 s, inside the margin
+ * run-concurrent.sh keeps; a passing run takes about two.
+ */
+#define CP_READERS      20
+#define CP_PORT         7440
+#define CP_STACK        (16UL * 1024UL)
+#define CP_TICKS        250             /* 5 s per step                      */
+
+#define C_SO_RCVTIMEO   0x1006
+#define C_EWOULDBLOCK   35
+
+typedef struct CpTimeval
+{
+    ULONG tv_secs;
+    ULONG tv_micro;
+} CpTimeval;
+
+#define CP_SERVER       1
+#define CP_READER       2
+#define CP_PROBE        3
+
+typedef struct CtPool
+{
+    UWORD           cp_Role;
+    volatile UWORD  cp_Done;
+    volatile LONG   cp_Result;          /* 0 clean, else the failing errno   */
+} CtPool;
+
+static CtPool          cp_server;
+static CtPool          cp_reader[CP_READERS];
+static CtPool          cp_probe;
+static volatile UWORD  cp_listening;
+static volatile UWORD  cp_accepted;
+static volatile UWORD  cp_connected;
+static volatile UWORD  cp_release;
+
+static VOID cp_server_body(struct Library *base)
+{
+    LONG   ls;
+    LONG   cs[CP_READERS];
+    UWORD  n = 0;
+    LONG   one = 1;
+    CtAddr sa;
+
+    ls = c_socket(base, C_AF_INET, C_SOCK_STREAM, 0);
+    if (ls < 0)
+    {
+        cp_server.cp_Result = c_errno(base);
+        return;
+    }
+
+    (VOID)c_setsockopt(base, ls, C_SOL_SOCKET, C_SO_REUSEADDR,
+                       (APTR)&one, (LONG)sizeof(one));
+
+    sa.sin_len    = (UBYTE)sizeof(sa);
+    sa.sin_family = C_AF_INET;
+    sa.sin_port   = CP_PORT;
+    sa.sin_addr   = 0x7F000001UL;
+
+    if (c_bind(base, ls, &sa) < 0 || c_listen(base, ls, CP_READERS) < 0)
+    {
+        cp_server.cp_Result = c_errno(base);
+        (VOID)c_close(base, ls);
+        return;
+    }
+
+    /* Half a second at a time, so a run whose readers never all arrive
+       still reaches the release below and ends with a verdict. */
+    {
+        CpTimeval tv;
+
+        tv.tv_secs  = 0;
+        tv.tv_micro = 500000UL;
+        (VOID)c_setsockopt(base, ls, C_SOL_SOCKET, C_SO_RCVTIMEO,
+                           (APTR)&tv, (LONG)sizeof(tv));
+    }
+
+    cp_listening = 1U;
+
+    while (n < CP_READERS && cp_release == 0U)
+    {
+        LONG s = c_accept(base, ls);
+
+        if (s < 0)
+        {
+            if (c_errno(base) == C_EWOULDBLOCK)
+                continue;
+            cp_server.cp_Result = c_errno(base);
+            break;
+        }
+        cs[n++] = s;
+        cp_accepted = n;
+    }
+
+    /* Sends nothing: every reader stays blocked until this lets go. */
+    while (cp_release == 0U)
+        Delay(5);
+
+    while (n > 0)
+        (VOID)c_close(base, cs[--n]);
+    (VOID)c_close(base, ls);
+}
+
+static VOID cp_reader_body(CtPool *p, struct Library *base)
+{
+    LONG   s;
+    UBYTE  byte;
+    CtAddr sa;
+
+    s = c_socket(base, C_AF_INET, C_SOCK_STREAM, 0);
+    if (s < 0)
+    {
+        p->cp_Result = c_errno(base);
+        return;
+    }
+
+    sa.sin_len    = (UBYTE)sizeof(sa);
+    sa.sin_family = C_AF_INET;
+    sa.sin_port   = CP_PORT;
+    sa.sin_addr   = 0x7F000001UL;
+
+    if (c_connect(base, s, &sa) < 0)
+    {
+        p->cp_Result = c_errno(base);
+        (VOID)c_close(base, s);
+        return;
+    }
+
+    Forbid();
+    cp_connected++;
+    Permit();
+
+    /* Blocks: the server sends nothing.  The end of the stream is 0. */
+    if (c_recv(base, s, (APTR)&byte, 1) != 0)
+        p->cp_Result = -1;
+
+    (VOID)c_close(base, s);
+}
+
+static VOID cp_entry(VOID)
+{
+    struct Process *me = (struct Process *)FindTask((STRPTR)0);
+    struct Library *base;
+    CtPool         *p;
+
+    Wait(SIGF_SINGLE);
+
+    p = (CtPool *)me->pr_Task.tc_UserData;
+
+    base = OpenLibrary((CONST_STRPTR)"bsdsocket.library", 4UL);
+    if (base == NULL)
+    {
+        p->cp_Result = -2;
+        p->cp_Done   = 1U;
+        return;
+    }
+
+    if (p->cp_Role == CP_SERVER)
+        cp_server_body(base);
+    else if (p->cp_Role == CP_READER)
+        cp_reader_body(p, base);
+    else
+    {
+        LONG s = c_socket(base, C_AF_INET, C_SOCK_STREAM, 0);
+
+        if (s < 0)
+            p->cp_Result = c_errno(base);
+        else
+            (VOID)c_close(base, s);
+    }
+
+    CloseLibrary(base);
+    p->cp_Done = 1U;
+}
+
+static BOOL cp_spawn(CtPool *p, UWORD role)
+{
+    struct Process *proc;
+
+    p->cp_Role   = role;
+    p->cp_Done   = 0U;
+    p->cp_Result = 0;
+
+    Forbid();
+    proc = CreateNewProcTags(NP_Entry,     (ULONG)cp_entry,
+                             NP_Name,      (ULONG)"anxd-conc-pool",
+                             NP_Priority,  (ULONG)0,
+                             NP_StackSize, CP_STACK,
+                             NP_Cli,       (ULONG)FALSE,
+                             TAG_DONE);
+    if (proc != NULL)
+        proc->pr_Task.tc_UserData = (APTR)p;
+    Permit();
+
+    if (proc == NULL)
+    {
+        p->cp_Done = 1U;
+        return FALSE;
+    }
+
+    Signal(&proc->pr_Task, SIGF_SINGLE);
+    return TRUE;
+}
+
+/* Ticks until `*count` reaches `want`, or CP_TICKS. */
+static ULONG cp_wait(volatile UWORD *count, UWORD want)
+{
+    ULONG t = 0;
+
+    while (*count < want && t < CP_TICKS)
+    {
+        Delay(5);
+        t += 5;
+    }
+    return t;
+}
+
+static VOID ct_pool_phase(VOID)
+{
+    UWORD i;
+    UWORD spawned = 0;
+    UWORD done;
+    ULONG t;
+
+    ct_log("concurrent: %ld readers blocked in recv(), then one more caller\n",
+           (LONG)CP_READERS);
+    ct_trace("pool: start");
+
+    cp_listening = cp_accepted = cp_connected = cp_release = 0U;
+
+    ct_check(cp_spawn(&cp_server, CP_SERVER), "pool: spawn server", 0);
+    (VOID)cp_wait(&cp_listening, 1U);
+    ct_check(cp_listening != 0U, "pool: server listens", cp_server.cp_Result);
+
+    for (i = 0; i < CP_READERS; i++)
+        if (cp_spawn(&cp_reader[i], CP_READER))
+            spawned++;
+    ct_check(spawned == CP_READERS, "pool: spawn readers", (LONG)spawned);
+
+    (VOID)cp_wait(&cp_accepted, CP_READERS);
+    (VOID)cp_wait(&cp_connected, CP_READERS);
+    ct_trace("pool: %ld accepted, %ld connected", (LONG)cp_accepted,
+             (LONG)cp_connected);
+    ct_check(cp_accepted == CP_READERS && cp_connected == CP_READERS,
+             "pool: every reader connects while the others wait in recv()",
+             (LONG)cp_connected);
+
+    /* Let the last of them reach recv(). */
+    Delay(50);
+
+    ct_check(cp_spawn(&cp_probe, CP_PROBE), "pool: spawn probe", 0);
+    t = cp_wait(&cp_probe.cp_Done, 1U);
+    ct_trace("pool: probe %s after %ld ticks",
+             (LONG)(cp_probe.cp_Done ? "done" : "STUCK"), (LONG)t);
+    ct_check(cp_probe.cp_Done != 0U && cp_probe.cp_Result == 0,
+             "pool: another program makes a socket while they wait", (LONG)t);
+
+    cp_release = 1U;
+
+    /* Every Process must be gone before the segment is: wait for all of
+       them, however long, as the phases above do. */
+    t = 0;
+    for (;;)
+    {
+        done = (UWORD)(cp_server.cp_Done + cp_probe.cp_Done);
+        for (i = 0; i < CP_READERS; i++)
+            done = (UWORD)(done + cp_reader[i].cp_Done);
+
+        if (done >= (UWORD)(CP_READERS + 2))
+            break;
+
+        if (t == (ULONG)CP_TICKS)
+            ct_check(0, "pool: everything ends once the server closes",
+                     (LONG)done);
+        Delay(5);
+        t += 5;
+    }
+
+    for (i = 0; i < CP_READERS; i++)
+        ct_check(cp_reader[i].cp_Result == 0, "pool: reader sees the end",
+                 cp_reader[i].cp_Result);
+    ct_check(cp_server.cp_Result == 0, "pool: server clean",
+             cp_server.cp_Result);
+    ct_trace("pool: done");
+}
+
 static VOID ct_main_body(VOID)
 {
     struct Library *base;
@@ -1239,6 +1538,8 @@ static VOID ct_main_body(VOID)
     }
 
     ct_kill_phase(base);
+
+    ct_pool_phase();
 
     ct_log("%ld checks, %ld failures, %s\n",
            (LONG)ct_checks, (LONG)ct_failures,

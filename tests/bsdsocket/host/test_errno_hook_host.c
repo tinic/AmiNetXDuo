@@ -115,6 +115,14 @@ struct Task *FindTask(const char *name)
     return &h_task;
 }
 
+/* netx_call.c's bsd_nx_park() (#383) is not reached from these vectors. */
+ULONG Wait(ULONG signalSet)
+{
+    printf("  FAIL Wait(0x%lx) reached\n", (unsigned long)signalSet);
+    abort();
+    return 0UL;
+}
+
 /* ------------------------------------------------------- the bracket ---- */
 
 static LONG h_enter(AmiNetCaller *caller)
