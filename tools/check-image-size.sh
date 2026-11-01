@@ -114,8 +114,8 @@ BUDGETS=(
     # No Signal() into a Task another program removed (#383): +268,
     # 378,400 -> 378,668.
     # Every blocking wait gives its slot back on a full pool, the timer's
-    # reply never signals a removed Task (#383): +1,148, 378,732 -> 379,880.
-    "default:src/bsdsocket/bsdsocket.library:379880"
+    # reply never signals a removed Task (#383): +1,144, 378,732 -> 379,876.
+    "default:src/bsdsocket/bsdsocket.library:379876"
     # 41,412 after stateless receive-checksum verification was added to the
     # EL3 and word/long NE2000 direct paths, 2026-09-15.  43,620 with
     # ANXD_CMD_RX_BATCH in the shell (claim, completion, staging copy, the
@@ -208,8 +208,8 @@ BUDGETS=(
     # No Signal() into a Task another program removed (#383): +228,
     # 256,212 -> 256,440.
     # Every blocking wait gives its slot back, the timer's reply never
-    # signals a removed Task (#383): +1,032, 256,524 -> 257,556.
-    "minimal:src/bsdsocket/bsdsocket.library:257556"
+    # signals a removed Task (#383): +1,028, 256,524 -> 257,552.
+    "minimal:src/bsdsocket/bsdsocket.library:257552"
     "minimal:src/netdev/anxnet.device:46000"
     # 29,088 on e806188f after the audited device fixes.
     # Batched transmit adds 632, 29,120 -> 29,752, approved by turo 2026-10-29.
@@ -238,9 +238,9 @@ BUDGETS=(
     # full pool (#383).
     # 209,392 with a break ending a wait for a slot (#383).
     # 209,656 with no Signal() into a Task another program removed (#383).
-    # 210,568 with every blocking wait giving its slot back and the timer's
+    # 210,556 with every blocking wait giving its slot back and the timer's
     # reply never signalling a removed Task (#383).
-    "micro:src/bsdsocket/bsdsocket.library:210568"
+    "micro:src/bsdsocket/bsdsocket.library:210556"
     "micro:src/netdev/anxnet.device:46000"
     "micro:src/netdev/anxgenet.device:29120"
     "micro:src/wifipi/anxwifipi.device:56000"

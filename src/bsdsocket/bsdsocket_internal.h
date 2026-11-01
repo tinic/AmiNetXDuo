@@ -355,19 +355,18 @@ struct AmiSocketBase
     BYTE                    sb_EventSignal;
     ULONG                   sb_EventSigMask;
 
-    /* LONGWORD ALIGNMENT: the 34-byte port then the 22-byte interrupt put
-       the request and every ULONG below on a longword, and the pad keeps
-       what follows sb_TimerSigMask where it was. */
-    struct Task            *sb_TimerTask;       /* the task the port serves */
     struct MsgPort          sb_TimerPort;       /* PA_SOFTINT, sb_TimerInt  */
-    struct Interrupt        sb_TimerInt;        /* signals sb_TimerTask, live */
     struct timerequest      sb_TimerReq;
     BOOL                    sb_TimerOpen;
     BOOL                    sb_TimerArmed;      /* sb_TimerReq is out at timer.device */
     ULONG                   sb_TimerDue;        /* the tick it fires at, tx_time_get() */
     BYTE                    sb_TimerSignal;
-    UWORD                   sb_TimerPad;
     ULONG                   sb_TimerSigMask;
+    /* 2 + 4 + 22 bytes, added after the fields above: every field of the base
+       keeps its offset modulo 4, and sb_TimerTask is a longword. */
+    UWORD                   sb_TimerPad;
+    struct Task            *sb_TimerTask;       /* the task the port serves */
+    struct Interrupt        sb_TimerInt;        /* signals sb_TimerTask, live */
 
     /* Scratch returned to callers by the non-reentrant entry points. Per
      * opener, never file statics: two tasks have two bases, and a shared
