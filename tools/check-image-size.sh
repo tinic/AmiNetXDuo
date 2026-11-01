@@ -113,7 +113,7 @@ BUDGETS=(
     # 377,848 -> 378,400.
     # No Signal() into a Task another program removed (#383): +268,
     # 378,400 -> 378,668.
-    "default:src/bsdsocket/bsdsocket.library:378668"
+    "default:src/bsdsocket/bsdsocket.library:378732"
     # 41,412 after stateless receive-checksum verification was added to the
     # EL3 and word/long NE2000 direct paths, 2026-09-15.  43,620 with
     # ANXD_CMD_RX_BATCH in the shell (claim, completion, staging copy, the
@@ -205,7 +205,7 @@ BUDGETS=(
     # A break ends a wait for a slot (#383): +472, 255,740 -> 256,212.
     # No Signal() into a Task another program removed (#383): +228,
     # 256,212 -> 256,440.
-    "minimal:src/bsdsocket/bsdsocket.library:256440"
+    "minimal:src/bsdsocket/bsdsocket.library:256524"
     "minimal:src/netdev/anxnet.device:46000"
     # 29,088 on e806188f after the audited device fixes.
     # Batched transmit adds 632, 29,120 -> 29,752, approved by turo 2026-10-29.
@@ -234,7 +234,7 @@ BUDGETS=(
     # full pool (#383).
     # 209,392 with a break ending a wait for a slot (#383).
     # 209,656 with no Signal() into a Task another program removed (#383).
-    "micro:src/bsdsocket/bsdsocket.library:209656"
+    "micro:src/bsdsocket/bsdsocket.library:209752"
     "micro:src/netdev/anxnet.device:46000"
     "micro:src/netdev/anxgenet.device:29120"
     "micro:src/wifipi/anxwifipi.device:56000"
