@@ -205,6 +205,13 @@ VOID Signal(struct Task *task, ULONG signalSet)
     h.last_signalled = signalSet;
 }
 
+/* The fixture's Tasks are never removed: Exec's lists would hold them. */
+UINT tx_amiga_exec_task_signal(VOID *task, ULONG sigmask)
+{
+    Signal((struct Task *)task, sigmask);
+    return TX_TRUE;
+}
+
 ULONG Wait(ULONG signalSet)
 {
     ULONG arrived;

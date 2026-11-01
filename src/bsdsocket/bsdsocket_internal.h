@@ -269,6 +269,7 @@ struct AmiSocketBase
     LONG                    sb_NextHandoffId;
 
     struct Task            *sb_Task;        /* the task that opened us       */
+    char                   *sb_TaskName;    /* its ln_Name then (select.c)   */
 
     /*
      * ThreadX context for this opener's task (netx_call.c). NetX Duo's

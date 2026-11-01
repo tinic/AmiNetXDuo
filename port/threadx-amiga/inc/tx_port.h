@@ -278,7 +278,8 @@ char   *execbase;
    reused by a new Task before the reclaim sees it; the stamp tells the two
    apart.  See tx_amiga_adopted_task_dead().  */
 #define TX_THREAD_EXTENSION_1                   ULONG  tx_thread_amiga_task_stamp;
-#define TX_THREAD_EXTENSION_2
+/* Its ln_Name, taken with the stamp: the dispatch's cheap look (#383).  */
+#define TX_THREAD_EXTENSION_2                   VOID  *tx_thread_amiga_task_name;
 #define TX_THREAD_EXTENSION_3
 
 /* tx_thread_amiga_flags bits.  */
