@@ -46,6 +46,9 @@ VOID  Forbid(VOID)  { }
 VOID  Permit(VOID)  { }
 struct Task *FindTask(const char *name) { (void) name; return &fake_task; }
 VOID  Signal(struct Task *task, ULONG s) { task->tc_SigRecvd |= s; }
+VOID  Disable(VOID) { }
+VOID  Enable(VOID)  { }
+UINT  tx_amiga_task_alive_locked(struct Task *task) { (void) task; return TX_TRUE; }
 ULONG Wait(ULONG s)                     { return s; }
 BYTE  AllocSignal(LONG n)               { (void) n; return -1; }
 VOID  FreeSignal(LONG n)                { (void) n; }

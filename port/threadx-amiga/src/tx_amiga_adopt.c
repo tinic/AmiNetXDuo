@@ -380,6 +380,7 @@ struct Task *me;
        the last entry (StackSwap between calls), and the dead-holder check
        compares against this.  */
     thread_ptr -> tx_thread_amiga_task_stamp =  _tx_amiga_task_stamp(me);
+    thread_ptr -> tx_thread_amiga_task_name  =  me -> tc_Node.ln_Name;
 
     thread_ptr -> tx_thread_amiga_flags &=  ~TX_AMIGA_THREAD_DORMANT;
 

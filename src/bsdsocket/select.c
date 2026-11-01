@@ -84,8 +84,17 @@ VOID bsd_event_post(AmiSocket *sock, ULONG events)
 
     /* Only while Exec still lists it: another program can RemTask() the
        opener (IBrowse, #383), and the sweep forgets it up to a second later.
-       Signalled or gone, nothing follows here either way. */
-    if (signals != 0)
+       A live state under the name it opened with is enough to skip the list
+       walk, as at the port's dispatch.  Signalled or gone, nothing follows
+       here either way. */
+    if (signals == 0)
+        return;
+
+    if (base->sb_Task->tc_State >= TS_RUN &&
+        base->sb_Task->tc_State <= TS_EXCEPT &&
+        base->sb_Task->tc_Node.ln_Name == base->sb_TaskName)
+        Signal(base->sb_Task, signals);
+    else
         AMI_NX_EITHER_WAY(tx_amiga_exec_task_signal(base->sb_Task, signals));
 }
 

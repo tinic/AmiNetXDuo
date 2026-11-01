@@ -529,6 +529,7 @@ static struct AmiSocketBase *bsd_child_create(struct AmiSocketBase *master)
     child->sb_Lib.lib_Flags   = LIBF_CHANGED;
     child->sb_Master          = master;
     child->sb_Task            = FindTask(NULL);
+    child->sb_TaskName        = child->sb_Task->tc_Node.ln_Name;
 
     bsd_prof_segtag(child, master->sb_SegList);
 
