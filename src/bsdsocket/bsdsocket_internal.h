@@ -283,7 +283,8 @@ struct AmiSocketBase
     BsdFdSets               sb_SelReady;   /* and its result sets    */
     LONG                    sb_NxNest;      /* bracket depth, 0 == outside   */
     struct Task            *sb_NxTask;      /* who holds it; NULL == outside */
-    BOOL                    sb_NxBroken;    /* last enter ended by a break   */
+    LONG                    sb_NxBroken;    /* last enter ended by a break;
+                                               a LONG keeps what follows aligned */
     /* Where NetX Duo leaves the packet for a receive this base waits in.
        Not the caller's stack: another program can RemTask() the caller
        while it waits, and the packet then lands in freed memory (#383). */
