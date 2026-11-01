@@ -1281,6 +1281,11 @@ UINT bsd_wait_event(struct AmiSocketBase *base, ULONG wait,
 
 ULONG bsd_wait_option(AmiSocket *sock, ULONG timeout_ticks, LONG flags);
 
+/* nx_packet_allocate() whose wait for an empty pool is bsd_wait_sliced()'s:
+   NX_WAIT_ABORTED when the break ended it (transfer.c, #383). */
+UINT bsd_packet_get(struct AmiSocketBase *base, NX_PACKET_POOL *pool,
+                    NX_PACKET **packet, ULONG type, ULONG wait);
+
 /*
  * The break-signal test the resolver's retransmission ladder asks between
  * queries (resolver.c). `arg` is the struct AmiSocketBase whose sb_BreakMask

@@ -168,8 +168,92 @@ static VOID bsd_drop_pending(AmiSocket *sock)
 }
 
 /*
+ * A packet from an empty pool is a blocking wait like any other (#383): the
+ * sliced wait, so the break ends it and a full adoption pool takes the slot
+ * back.  Nothing signals a packet coming free, so a parked one asks again
+ * each slice (bsd_wait_sliced()).
+ */
+typedef struct
+{
+    NX_PACKET_POOL *pool;
+    NX_PACKET     **packet;
+    ULONG           type;
+} BsdGetArgs;
+
+static UINT bsd_get_once(VOID *arg, ULONG wait)
+{
+    BsdGetArgs *a = (BsdGetArgs *)arg;
+
+    return nx_packet_allocate(a->pool, a->packet, a->type, wait);
+}
+
+UINT bsd_packet_get(struct AmiSocketBase *base, NX_PACKET_POOL *pool,
+                    NX_PACKET **packet, ULONG type, ULONG wait)
+{
+    UINT status = nx_packet_allocate(pool, packet, type, NX_NO_WAIT);
+
+    if (status == NX_NO_PACKET && wait != NX_NO_WAIT)
+    {
+        BsdGetArgs args;
+        BOOL       aborted;
+
+        args.pool   = pool;
+        args.packet = packet;
+        args.type   = type;
+
+        status = bsd_wait_sliced(base, wait, bsd_get_once, &args, &aborted);
+        if (aborted)
+            status = NX_WAIT_ABORTED;
+    }
+
+    return status;
+}
+
+/* One append: all of it or nothing, since a refused _nx_packet_data_append()
+   releases what it took for it, so asking again appends it once. */
+typedef struct
+{
+    NX_PACKET      *packet;
+    UBYTE          *src;
+    ULONG           chunk;
+    NX_PACKET_POOL *pool;
+} BsdAppendArgs;
+
+static UINT bsd_append_once(VOID *arg, ULONG wait)
+{
+    BsdAppendArgs *a = (BsdAppendArgs *)arg;
+
+    return _nx_packet_data_append(a->packet, a->src, a->chunk, a->pool, wait);
+}
+
+static UINT bsd_append_wait(struct AmiSocketBase *base, NX_PACKET *packet,
+                            UBYTE *src, ULONG chunk, NX_PACKET_POOL *pool,
+                            ULONG wait)
+{
+    UINT status = _nx_packet_data_append(packet, src, chunk, pool, NX_NO_WAIT);
+
+    if (status == NX_NO_PACKET && wait != NX_NO_WAIT)
+    {
+        BsdAppendArgs args;
+        BOOL          aborted;
+
+        args.packet = packet;
+        args.src    = src;
+        args.chunk  = chunk;
+        args.pool   = pool;
+
+        status = bsd_wait_sliced(base, wait, bsd_append_once, &args, &aborted);
+        if (aborted)
+            status = NX_WAIT_ABORTED;
+    }
+
+    return status;
+}
+
+/*
  * Append up to `want` bytes from the cursor onto `packet`, coalescing across
- * iovec boundaries. Returns the number appended, or -1 on failure.
+ * iovec boundaries. Returns the number appended, or -1 on failure.  *why is
+ * NX_WAIT_ABORTED when the break ended a wait for a packet.
  *
  * _nx_ and not nx_ for a chunk past the first buffer, as bsd_send_once() is:
  * every test the _nxe_ wrapper makes is proved here.  `pool` just allocated
@@ -180,7 +264,8 @@ static VOID bsd_drop_pending(AmiSocket *sock)
  * base under a non-zero length.  A waiting call is a thread's, for
  * bsd_nx_enter()'s reason; a GSO block's chunk never waits.
  */
-static LONG bsd_packet_append_iov(NX_PACKET *packet, BsdIovCursor *cur,
+static LONG bsd_packet_append_iov(struct AmiSocketBase *base,
+                                  NX_PACKET *packet, BsdIovCursor *cur,
                                   ULONG want, NX_PACKET_POOL *pool, ULONG wait,
                                   UINT *why)
 {
@@ -218,7 +303,7 @@ static LONG bsd_packet_append_iov(NX_PACKET *packet, BsdIovCursor *cur,
         }
         else
 #endif
-            status = _nx_packet_data_append(packet, src, chunk, pool, wait);
+            status = bsd_append_wait(base, packet, src, chunk, pool, wait);
         if (status != NX_SUCCESS)
         {
             if (why != NULL)
@@ -683,13 +768,15 @@ static LONG bsd_send_tcp_run(struct AmiSocketBase *base, AmiSocket *sock,
 
         /* A block's chain comes out of the room counted above, without a
            wait; a short one still goes, as the bytes it holds. */
-        filled = bsd_packet_append_iov(packet, cur, chunk, pool,
+        filled = bsd_packet_append_iov(base, packet, cur, chunk, pool,
                                        (wait == NX_NO_WAIT || gso != 0)
                                            ? NX_NO_WAIT : bsd_budget_left(tb),
                                        &why);
         if (filled <= 0)
         {
             nx_packet_release(packet);
+            if (why == NX_WAIT_ABORTED)
+                return (sent > 0) ? sent : bsd_fail(base, AMI_EINTR);
             break;
         }
 
@@ -1392,6 +1479,7 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
                          const NXD_ADDRESS *addr, UINT port, ULONG scope,
                          const BsdCmsgSource *src)
 {
+    UINT        why = NX_SUCCESS;
     NX_PACKET_POOL *pool   = bsd_stack_pool(base);
     NX_IP          *ip     = bsd_stack_ip(base);
     NX_PACKET      *packet = NX_NULL;
@@ -1480,21 +1568,23 @@ static LONG bsd_send_udp(struct AmiSocketBase *base, AmiSocket *sock,
 
     wait = bsd_wait_option(sock, sock->as_SndTimeout, flags);
 
-    status = nx_packet_allocate(pool, &packet, NX_UDP_PACKET, wait);
+    status = bsd_packet_get(base, pool, &packet, NX_UDP_PACKET, wait);
     if (status != NX_SUCCESS)
     {
-        return bsd_fail(base, bsd_wait_errno(wait, status));
+        return bsd_fail(base, (status == NX_WAIT_ABORTED)
+                                  ? AMI_EINTR : bsd_wait_errno(wait, status));
     }
 
     /* A zero-length datagram is legal and is sent as an empty packet. */
     filled = (len > 0)
-                 ? bsd_packet_append_iov(packet, cur, (ULONG)len, pool, wait,
-                                         NULL)
+                 ? bsd_packet_append_iov(base, packet, cur, (ULONG)len, pool,
+                                         wait, &why)
                  : 0;
     if (filled < len)
     {
         nx_packet_release(packet);
-        return bsd_fail(base, AMI_ENOBUFS);
+        return bsd_fail(base, (why == NX_WAIT_ABORTED) ? AMI_EINTR
+                                                       : AMI_ENOBUFS);
     }
 
     /* All branches below synchronously consume the packet. Keep the sender's
@@ -1564,6 +1654,7 @@ static LONG bsd_send_raw(struct AmiSocketBase *base, AmiSocket *sock,
                          const NXD_ADDRESS *addr, ULONG scope,
                          const BsdCmsgSource *src)
 {
+    UINT        why = NX_SUCCESS;
     NX_PACKET_POOL *pool   = bsd_stack_pool(base);
     NX_PACKET      *packet = NX_NULL;
     ULONG           wait;
@@ -1587,18 +1678,20 @@ static LONG bsd_send_raw(struct AmiSocketBase *base, AmiSocket *sock,
 
     wait = bsd_wait_option(sock, sock->as_SndTimeout, flags);
 
-    status = nx_packet_allocate(pool, &packet, NX_IP_PACKET, wait);
+    status = bsd_packet_get(base, pool, &packet, NX_IP_PACKET, wait);
     if (status != NX_SUCCESS)
-        return bsd_fail(base, bsd_wait_errno(wait, status));
+        return bsd_fail(base, (status == NX_WAIT_ABORTED)
+                                  ? AMI_EINTR : bsd_wait_errno(wait, status));
 
     filled = (len > 0)
-                 ? bsd_packet_append_iov(packet, cur, (ULONG)len, pool, wait,
-                                         NULL)
+                 ? bsd_packet_append_iov(base, packet, cur, (ULONG)len, pool,
+                                         wait, &why)
                  : 0;
     if (filled < len)
     {
         nx_packet_release(packet);
-        return bsd_fail(base, AMI_EMSGSIZE);
+        return bsd_fail(base, (why == NX_WAIT_ABORTED) ? AMI_EINTR
+                                                       : AMI_EMSGSIZE);
     }
 
     /* Consumes the packet either way. */
