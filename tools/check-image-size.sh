@@ -109,7 +109,9 @@ BUDGETS=(
     # netxduo #41): +16, 377,516 -> 377,532.
     # A blocked recv() or accept() gives its adoption slot back while the
     # pool is full (#383): +316, 377,532 -> 377,848.
-    "default:src/bsdsocket/bsdsocket.library:377848"
+    # No Signal() into a Task another program removed (#383): +144,
+    # 377,848 -> 377,992.
+    "default:src/bsdsocket/bsdsocket.library:377992"
     # 41,412 after stateless receive-checksum verification was added to the
     # EL3 and word/long NE2000 direct paths, 2026-09-15.  43,620 with
     # ANXD_CMD_RX_BATCH in the shell (claim, completion, staging copy, the
@@ -198,7 +200,9 @@ BUDGETS=(
     # Off-link .0/.255 sources (#419, netxduo #41): +16, 255,304 -> 255,320.
     # A blocked recv() or accept() gives its slot back on a full pool (#383):
     # +420, 255,320 -> 255,740.
-    "minimal:src/bsdsocket/bsdsocket.library:255740"
+    # No Signal() into a Task another program removed (#383): +120,
+    # 255,740 -> 255,860.
+    "minimal:src/bsdsocket/bsdsocket.library:255860"
     "minimal:src/netdev/anxnet.device:46000"
     # 29,088 on e806188f after the audited device fixes.
     # Batched transmit adds 632, 29,120 -> 29,752, approved by turo 2026-10-29.

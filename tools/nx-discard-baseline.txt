@@ -6,7 +6,7 @@
 1	port/threadx-amiga/src/tx_initialize_low_level.c	_tx_amiga_timer_clock_advance
 1	port/threadx-amiga/src/tx_initialize_low_level.c	tx_amiga_eclock_ms
 1	port/threadx-amiga/src/tx_thread_interrupt_control.c	_tx_amiga_int_restore
-1	port/threadx-amiga/src/tx_thread_schedule.c	_tx_amiga_signal
+1	port/threadx-amiga/src/tx_thread_schedule.c	_tx_amiga_signal_thread
 1	port/threadx-amiga/src/tx_thread_schedule.c	tx_amiga_kernel_stop
 1	port/threadx-amiga/src/tx_thread_stack_build.c	_tx_amiga_task_destroy
 1	port/threadx-amiga/src/tx_thread_system_return.c	tx_thread_delete

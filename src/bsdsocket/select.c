@@ -6,6 +6,7 @@
 
 #include "bsdsocket_vectors.h"
 #include "aminetxduo/budget.h"
+#include "aminetxduo/exec_port.h"
 #include "aminetxduo/nxstatus.h"
 #include "connfail.h"
 
@@ -81,8 +82,11 @@ VOID bsd_event_post(AmiSocket *sock, ULONG events)
     if ((events & FD_OOB) != 0)
         signals |= base->sb_SigUrgMask;
 
+    /* Only while Exec still lists it: another program can RemTask() the
+       opener (IBrowse, #383), and the sweep forgets it up to a second later.
+       Signalled or gone, nothing follows here either way. */
     if (signals != 0)
-        Signal(base->sb_Task, signals);
+        AMI_NX_EITHER_WAY(tx_amiga_exec_task_signal(base->sb_Task, signals));
 }
 
 static VOID bsd_tcp_receive_notify(NX_TCP_SOCKET *socket_ptr)
