@@ -672,17 +672,25 @@ struct _tx_amiga_adopt_slot *slot;
    slot is another Task completing its own teardown, and nothing here can stop
    one doing that.
 
-   Returns the claimed slot, or 0 when the waiter table was full or the kernel
-   went away while we waited.  */
-struct _tx_amiga_adopt_slot *_tx_amiga_slot_claim_or_park(struct Task *me, UINT reserved)
+   One of the caller's break signals, `break_mask`, ends the wait too and is
+   left set for the caller to see: a program stopped with Ctrl-C while every
+   slot was taken waited here until another program let one go (#383).
+
+   Returns the claimed slot, or 0 when the waiter table was full, the kernel
+   went away while we waited, or a break came (*broke set).  */
+struct _tx_amiga_adopt_slot *_tx_amiga_slot_claim_or_park(struct Task *me, UINT reserved,
+                                                          ULONG break_mask, UINT *broke)
 {
 
 struct _tx_amiga_adopt_slot *slot;
 LONG                         index;
 BYTE                         sig;
 ULONG                        sigmask;
+ULONG                        got;
 ULONG                        i;
 
+
+    *broke =  TX_FALSE;
 
     Forbid();
     slot =  _tx_amiga_slot_claim_evict_locked(reserved);
@@ -741,7 +749,14 @@ ULONG                        i;
             break;
         }
 
-        (VOID) Wait(sigmask);
+        got =  Wait(sigmask | break_mask);
+        if ((got & break_mask) != 0UL)
+        {
+            /* Wait() took the break bits: put them back for the caller.  */
+            (VOID) SetSignal(got & break_mask, got & break_mask);
+            *broke =  TX_TRUE;
+            break;
+        }
 
         Forbid();
         slot =  _tx_amiga_slot_claim_evict_locked(reserved);

@@ -545,8 +545,9 @@ static struct AmiSocketBase *bsd_child_create(struct AmiSocketBase *master)
     child->sb_NextHandoffId      = 0;
 
     bsd_bzero(&child->sb_NxCaller, sizeof(child->sb_NxCaller));
-    child->sb_NxNest = 0;
-    child->sb_NxTask = NULL;
+    child->sb_NxNest   = 0;
+    child->sb_NxTask   = NULL;
+    child->sb_NxBroken = FALSE;
 
     child->sb_Table     = NULL;
     child->sb_TableSize = 0;
@@ -643,6 +644,12 @@ static VOID bsd_child_destroy(struct AmiSocketBase *child)
     struct AmiSocketBase *master = child->sb_Master;
     ULONG                 neg    = child->sb_Lib.lib_NegSize;
     ULONG                 pos    = child->sb_Lib.lib_PosSize;
+
+    /* Nothing calls on this base after its close, and its teardown must not
+       be ended by a Ctrl-C the program left set: with the adoption pool full
+       a break would end the bracket's wait for a slot (#383), and the
+       sockets would be left to the stack's teardown. */
+    child->sb_BreakMask = 0;
 
     bsd_close_all(child);
 

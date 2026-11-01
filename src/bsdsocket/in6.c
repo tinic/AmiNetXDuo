@@ -212,7 +212,7 @@ LONG bsd_setsockopt_ipv6(struct AmiSocketBase *base, AmiSocket *sock,
             sock->as_Tos = (value < 0) ? 0 : value;
 
         if (bsd_nx_enter(base) != 0)
-            return bsd_fail(base, AMI_ENETDOWN);
+            return bsd_fail(base, bsd_nx_errno(base));
         bsd_opt_apply_ip(sock);
         bsd_nx_leave(base);
 

@@ -139,7 +139,7 @@ static LONG bsd_mcast_update(struct AmiSocketBase *base, AmiSocket *sock,
         return bsd_fail(base, AMI_EINVAL);
 
     if (bsd_nx_enter(base) != 0)
-        return bsd_fail(base, AMI_ENETDOWN);
+        return bsd_fail(base, bsd_nx_errno(base));
 
     iface = bsd_mcast_iface_of(ip, BSD_NTOHL(mreq->imr_interface.s_addr));
     if (iface < 0)
@@ -406,7 +406,7 @@ LONG bsd_mcast_setopt(struct AmiSocketBase *base, AmiSocket *sock,
             }
 
             if (bsd_nx_enter(base) != 0)
-                return bsd_fail(base, AMI_ENETDOWN);
+                return bsd_fail(base, bsd_nx_errno(base));
             iface = bsd_mcast_iface_of(ip, BSD_NTOHL(in.s_addr));
             if (iface >= 0)
             {
@@ -456,7 +456,7 @@ LONG bsd_mcast_getopt(struct AmiSocketBase *base, AmiSocket *sock,
 
             in.s_addr = 0UL;
             if (bsd_nx_enter(base) != 0)
-                return bsd_fail(base, AMI_ENETDOWN);
+                return bsd_fail(base, bsd_nx_errno(base));
             if (bsd_mcast_preference(&sock->as_McastIf,
                                       sock->as_McastIfEpoch) >= 0 &&
                 ip != NULL &&
@@ -650,7 +650,7 @@ static LONG bsd_mcast6_update(struct AmiSocketBase *base, AmiSocket *sock,
         return bsd_fail(base, AMI_EINVAL);
 
     if (bsd_nx_enter(base) != 0)
-        return bsd_fail(base, AMI_ENETDOWN);
+        return bsd_fail(base, bsd_nx_errno(base));
 
     iface = bsd_mcast6_iface_of(ip, mreq->ipv6mr_interface);
     if (iface < 0)
@@ -861,7 +861,7 @@ LONG bsd_mcast6_setopt(struct AmiSocketBase *base, AmiSocket *sock,
                 return bsd_fail(base, AMI_EINVAL);
 
             if (bsd_nx_enter(base) != 0)
-                return bsd_fail(base, AMI_ENETDOWN);
+                return bsd_fail(base, bsd_nx_errno(base));
             iface = bsd_mcast6_iface_of(ip, (ULONG)value);
             if (iface >= 0)
             {
@@ -912,7 +912,7 @@ LONG bsd_mcast6_getopt(struct AmiSocketBase *base, AmiSocket *sock,
             /* Back in the caller's numbering, one higher, and 0 for "the
                route decides". */
             if (bsd_nx_enter(base) != 0)
-                return bsd_fail(base, AMI_ENETDOWN);
+                return bsd_fail(base, bsd_nx_errno(base));
             iface = bsd_mcast_preference(&sock->as_Mcast6If,
                                           sock->as_Mcast6IfEpoch);
             bsd_nx_leave(base);

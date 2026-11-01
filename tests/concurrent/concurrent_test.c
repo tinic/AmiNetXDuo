@@ -1389,6 +1389,279 @@ static VOID ct_pool_phase(VOID)
     ct_trace("pool: done");
 }
 
+/* ------------------------ a caller waiting for a slot hears its break -- */
+
+/*
+ * #383.  A full adoption pool parks the next caller in the port
+ * (tx_amiga_pool.c) until a slot comes back.  The park waited on its private
+ * signal only, so a program stopped with Ctrl-C there -- IBrowse quitting
+ * with its transfers inside, NetShutdown's notify -- stayed until another
+ * program let a slot go.
+ *
+ * Fifteen readers block in recv() with a receive timeout, which holds a slot
+ * for as long as they wait: a wait with a deadline does not give its slot
+ * back (bsd_wait_event()).  A probe then makes a socket and waits for a slot.
+ * Ctrl-C to the probe must end its call with EINTR.  Ctrl-C to the readers
+ * then ends theirs, and the server closes.
+ */
+#define CB_READERS      15
+#define CB_PORT         7441            /* and 7442: a backlog holds 8       */
+#define CB_TIMEOUT_SECS 60
+
+#define C_EINTR         4
+
+static CtPool          cb_server;
+static CtPool          cb_reader[CB_READERS];
+static CtPool          cb_probe;
+static struct Task    *cb_task[CB_READERS + 1];
+static volatile UWORD  cb_listening;
+static volatile UWORD  cb_connected;
+static volatile UWORD  cb_release;
+
+static VOID cb_server_body(struct Library *base)
+{
+    LONG   ls[2];
+    LONG   one = 1;
+    UWORD  i;
+    CtAddr sa;
+
+    ls[0] = ls[1] = -1;
+
+    for (i = 0; i < 2; i++)
+    {
+        ls[i] = c_socket(base, C_AF_INET, C_SOCK_STREAM, 0);
+        if (ls[i] < 0)
+        {
+            cb_server.cp_Result = c_errno(base);
+            break;
+        }
+
+        (VOID)c_setsockopt(base, ls[i], C_SOL_SOCKET, C_SO_REUSEADDR,
+                           (APTR)&one, (LONG)sizeof(one));
+
+        sa.sin_len    = (UBYTE)sizeof(sa);
+        sa.sin_family = C_AF_INET;
+        sa.sin_port   = (UWORD)(CB_PORT + i);
+        sa.sin_addr   = 0x7F000001UL;
+
+        if (c_bind(base, ls[i], &sa) < 0 || c_listen(base, ls[i], 8) < 0)
+        {
+            cb_server.cp_Result = c_errno(base);
+            break;
+        }
+    }
+
+    if (cb_server.cp_Result == 0)
+    {
+        cb_listening = 1U;
+
+        /* Never accepts: the handshakes complete in the queues and every
+           reader waits in recv() on a connection nobody serves. */
+        while (cb_release == 0U)
+            Delay(5);
+    }
+
+    for (i = 0; i < 2; i++)
+        if (ls[i] >= 0)
+            (VOID)c_close(base, ls[i]);
+}
+
+static VOID cb_reader_body(CtPool *p, struct Library *base, UWORD port)
+{
+    LONG      s;
+    UBYTE     byte;
+    CtAddr    sa;
+    CpTimeval tv;
+
+    s = c_socket(base, C_AF_INET, C_SOCK_STREAM, 0);
+    if (s < 0)
+    {
+        p->cp_Result = c_errno(base);
+        return;
+    }
+
+    tv.tv_secs  = CB_TIMEOUT_SECS;
+    tv.tv_micro = 0;
+    (VOID)c_setsockopt(base, s, C_SOL_SOCKET, C_SO_RCVTIMEO,
+                       (APTR)&tv, (LONG)sizeof(tv));
+
+    sa.sin_len    = (UBYTE)sizeof(sa);
+    sa.sin_family = C_AF_INET;
+    sa.sin_port   = port;
+    sa.sin_addr   = 0x7F000001UL;
+
+    if (c_connect(base, s, &sa) < 0)
+    {
+        p->cp_Result = c_errno(base);
+        (VOID)c_close(base, s);
+        return;
+    }
+
+    Forbid();
+    cb_connected++;
+    Permit();
+
+    /* Blocks until the break below. */
+    if (c_recv(base, s, (APTR)&byte, 1) >= 0 || c_errno(base) != C_EINTR)
+        p->cp_Result = -1;
+
+    (VOID)c_close(base, s);
+}
+
+static VOID cb_entry(VOID)
+{
+    struct Process *me = (struct Process *)FindTask((STRPTR)0);
+    struct Library *base;
+    CtPool         *p;
+
+    Wait(SIGF_SINGLE);
+
+    p = (CtPool *)me->pr_Task.tc_UserData;
+
+    base = OpenLibrary((CONST_STRPTR)"bsdsocket.library", 4UL);
+    if (base == NULL)
+    {
+        p->cp_Result = -2;
+        p->cp_Done   = 1U;
+        return;
+    }
+
+    if (p->cp_Role == CP_SERVER)
+        cb_server_body(base);
+    else if (p->cp_Role == CP_READER)
+        cb_reader_body(p, base, (UWORD)(CB_PORT + ((p - cb_reader) & 1)));
+    else
+    {
+        LONG s = c_socket(base, C_AF_INET, C_SOCK_STREAM, 0);
+
+        if (s < 0)
+            p->cp_Result = c_errno(base);
+        else
+            (VOID)c_close(base, s);
+    }
+
+    CloseLibrary(base);
+    p->cp_Done = 1U;
+}
+
+static struct Task *cb_spawn(CtPool *p, UWORD role)
+{
+    struct Process *proc;
+
+    p->cp_Role   = role;
+    p->cp_Done   = 0U;
+    p->cp_Result = 0;
+
+    Forbid();
+    proc = CreateNewProcTags(NP_Entry,     (ULONG)cb_entry,
+                             NP_Name,      (ULONG)"anxd-conc-break",
+                             NP_Priority,  (ULONG)0,
+                             NP_StackSize, CP_STACK,
+                             NP_Cli,       (ULONG)FALSE,
+                             TAG_DONE);
+    if (proc != NULL)
+        proc->pr_Task.tc_UserData = (APTR)p;
+    Permit();
+
+    if (proc == NULL)
+    {
+        p->cp_Done = 1U;
+        return NULL;
+    }
+
+    Signal(&proc->pr_Task, SIGF_SINGLE);
+    return &proc->pr_Task;
+}
+
+/* Ctrl-C to a Task that is still running.  Forbid(): a finished one may be
+   gone, and cp_Done is set as its last act. */
+static VOID cb_break(CtPool *p, struct Task *task)
+{
+    Forbid();
+    if (task != NULL && p->cp_Done == 0U)
+        Signal(task, SIGBREAKF_CTRL_C);
+    Permit();
+}
+
+static VOID ct_pool_break_phase(VOID)
+{
+    UWORD i;
+    UWORD spawned = 0;
+    UWORD done;
+    ULONG t;
+
+    ct_log("concurrent: %ld readers hold every slot, a waiting caller "
+           "gets Ctrl-C\n", (LONG)CB_READERS);
+    ct_trace("break: start");
+
+    cb_listening = cb_connected = cb_release = 0U;
+
+    ct_check(cb_spawn(&cb_server, CP_SERVER) != NULL, "break: spawn server", 0);
+    (VOID)cp_wait(&cb_listening, 1U);
+    ct_check(cb_listening != 0U, "break: server listens", cb_server.cp_Result);
+
+    for (i = 0; i < CB_READERS; i++)
+    {
+        cb_task[i] = cb_spawn(&cb_reader[i], CP_READER);
+        if (cb_task[i] != NULL)
+            spawned++;
+    }
+    ct_check(spawned == CB_READERS, "break: spawn readers", (LONG)spawned);
+
+    (VOID)cp_wait(&cb_connected, CB_READERS);
+    ct_trace("break: %ld connected", (LONG)cb_connected);
+    ct_check(cb_connected == CB_READERS, "break: every reader connects",
+             (LONG)cb_connected);
+
+    /* Let the last of them reach recv(). */
+    Delay(50);
+
+    cb_task[CB_READERS] = cb_spawn(&cb_probe, CP_PROBE);
+    ct_check(cb_task[CB_READERS] != NULL, "break: spawn probe", 0);
+    Delay(50);
+    ct_check(cb_probe.cp_Done == 0U, "break: the probe waits for a slot",
+             cb_probe.cp_Result);
+
+    cb_break(&cb_probe, cb_task[CB_READERS]);
+    t = cp_wait(&cb_probe.cp_Done, 1U);
+    ct_trace("break: probe %s after %ld ticks, errno %ld",
+             (LONG)(cb_probe.cp_Done ? "done" : "STUCK"), (LONG)t,
+             cb_probe.cp_Result);
+    ct_check(cb_probe.cp_Done != 0U && cb_probe.cp_Result == C_EINTR,
+             "break: Ctrl-C ends the wait for a slot with EINTR",
+             cb_probe.cp_Result);
+
+    for (i = 0; i < CB_READERS; i++)
+        cb_break(&cb_reader[i], cb_task[i]);
+
+    t = 0;
+    for (;;)
+    {
+        done = cb_probe.cp_Done;
+        for (i = 0; i < CB_READERS; i++)
+            done = (UWORD)(done + cb_reader[i].cp_Done);
+
+        if (done >= (UWORD)(CB_READERS + 1))
+            break;
+
+        if (t == (ULONG)CP_TICKS)
+            ct_check(0, "break: every reader ends on Ctrl-C", (LONG)done);
+        Delay(5);
+        t += 5;
+    }
+
+    cb_release = 1U;
+    while (cb_server.cp_Done == 0U)
+        Delay(5);
+
+    for (i = 0; i < CB_READERS; i++)
+        ct_check(cb_reader[i].cp_Result == 0, "break: reader ends with EINTR",
+                 cb_reader[i].cp_Result);
+    ct_check(cb_server.cp_Result == 0, "break: server clean",
+             cb_server.cp_Result);
+    ct_trace("break: done");
+}
+
 static VOID ct_main_body(VOID)
 {
     struct Library *base;
@@ -1540,6 +1813,8 @@ static VOID ct_main_body(VOID)
     ct_kill_phase(base);
 
     ct_pool_phase();
+
+    ct_pool_break_phase();
 
     ct_log("%ld checks, %ld failures, %s\n",
            (LONG)ct_checks, (LONG)ct_failures,

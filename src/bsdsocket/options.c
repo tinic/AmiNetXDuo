@@ -229,7 +229,7 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
                     UINT st;
 
                     if (bsd_nx_enter(SocketBase) != 0)
-                        return bsd_fail(SocketBase, AMI_ENETDOWN);
+                        return bsd_fail(SocketBase, bsd_nx_errno(SocketBase));
                     /* REQUIRED: answering 0 promises the option is in force. */
                     st = nx_tcp_socket_reuse_address_set(
                              &sock->as_Nx.tcp,
@@ -271,7 +271,7 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
                        neighbouring option takes. The IP thread reads this
                        field in nx_tcp_periodic_processing(). */
                     if (bsd_nx_enter(SocketBase) != 0)
-                        return bsd_fail(SocketBase, AMI_ENETDOWN);
+                        return bsd_fail(SocketBase, bsd_nx_errno(SocketBase));
                     sock->as_Nx.tcp.nx_tcp_socket_keepalive_enabled =
                         (value != 0) ? NX_TRUE : NX_FALSE;
                     bsd_nx_leave(SocketBase);
@@ -324,7 +324,7 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
                     value > 0)
                 {
                     if (bsd_nx_enter(SocketBase) != 0)
-                        return bsd_fail(SocketBase, AMI_ENETDOWN);
+                        return bsd_fail(SocketBase, bsd_nx_errno(SocketBase));
                     /*
                       * REQUIRED.  setsockopt() answering 0 is a promise the
                       * option is in force, and docs/CONFORMANCE.md says this
@@ -347,7 +347,7 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
                     value > 0)
                 {
                     if (bsd_nx_enter(SocketBase) != 0)
-                        return bsd_fail(SocketBase, AMI_ENETDOWN);
+                        return bsd_fail(SocketBase, bsd_nx_errno(SocketBase));
                     sock->as_Nx.udp.nx_udp_socket_queue_maximum =
                         bsd_opt_packets(value, BSD_UDP_QUEUE_CEILING);
                     bsd_nx_leave(SocketBase);
@@ -371,7 +371,7 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
                        sets nx_tcp_socket_rtt_configured, which stops the RTT
                        estimator for the life of the socket. */
                     if (bsd_nx_enter(SocketBase) != 0)
-                        return bsd_fail(SocketBase, AMI_ENETDOWN);
+                        return bsd_fail(SocketBase, bsd_nx_errno(SocketBase));
                     sock->as_Nx.tcp.nx_tcp_socket_transmit_queue_maximum =
                         bsd_opt_packets(value, NX_TCP_MAXIMUM_TX_QUEUE);
                     sock->as_Nx.tcp.nx_tcp_socket_transmit_queue_maximum_default =
@@ -433,7 +433,7 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
                     LONG rc;
 
                     if (bsd_nx_enter(SocketBase) != 0)
-                        return bsd_fail(SocketBase, AMI_ENETDOWN);
+                        return bsd_fail(SocketBase, bsd_nx_errno(SocketBase));
                     rc = bsd_cork_set(SocketBase, sock, (BOOL)(value == 0));
                     bsd_nx_leave(SocketBase);
                     if (rc != 0)
@@ -465,7 +465,7 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
                     return bsd_fail(SocketBase, AMI_EINVAL);
 
                 if (bsd_nx_enter(SocketBase) != 0)
-                    return bsd_fail(SocketBase, AMI_ENETDOWN);
+                    return bsd_fail(SocketBase, bsd_nx_errno(SocketBase));
                 status = nx_tcp_socket_mss_set(&sock->as_Nx.tcp, (ULONG)value);
                 bsd_nx_leave(SocketBase);
 
@@ -488,7 +488,7 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
                     return bsd_fail(SocketBase, AMI_EINVAL);
 
                 if (bsd_nx_enter(SocketBase) != 0)
-                    return bsd_fail(SocketBase, AMI_ENETDOWN);
+                    return bsd_fail(SocketBase, bsd_nx_errno(SocketBase));
                 sock->as_UserTimeout = (ULONG)value;
                 sock->as_Nx.tcp.nx_tcp_socket_user_timeout =
                     bsd_ms_ticks((ULONG)value,
@@ -535,7 +535,7 @@ LONG bsd_setsockopt(register LONG sock_fd    __asm("d0"),
                 else
                     sock->as_Tos = (value < 0) ? 0 : value;
                 if (bsd_nx_enter(SocketBase) != 0)
-                    return bsd_fail(SocketBase, AMI_ENETDOWN);
+                    return bsd_fail(SocketBase, bsd_nx_errno(SocketBase));
                 bsd_opt_apply_ip(sock);
                 bsd_nx_leave(SocketBase);
                 return 0;
@@ -749,7 +749,7 @@ LONG bsd_getsockopt(register LONG sock_fd     __asm("d0"),
                 if ((sock->as_Flags & (ASF_TCP | ASF_DELETED)) != ASF_TCP)
                     return bsd_fail(SocketBase, AMI_ENOPROTOOPT);
                 if (bsd_nx_enter(SocketBase) != 0)
-                    return bsd_fail(SocketBase, AMI_ENETDOWN);
+                    return bsd_fail(SocketBase, bsd_nx_errno(SocketBase));
                 nx_tcp_socket_mss_get(&sock->as_Nx.tcp, &mss);
                 bsd_nx_leave(SocketBase);
                 return bsd_opt_get_long(SocketBase, optval, optlen, (LONG)mss);
@@ -777,7 +777,7 @@ LONG bsd_getsockopt(register LONG sock_fd     __asm("d0"),
                     return bsd_fail(SocketBase, AMI_EINVAL);
 
                 if (bsd_nx_enter(SocketBase) != 0)
-                    return bsd_fail(SocketBase, AMI_ENETDOWN);
+                    return bsd_fail(SocketBase, bsd_nx_errno(SocketBase));
                 info.tsi_Stalled =
                     bsd_ticks_ms(sock->as_Nx.tcp.nx_tcp_socket_stall_ticks);
                 info.tsi_Retransmits =
@@ -894,7 +894,7 @@ LONG bsd_IoctlSocket(register LONG sock_fd __asm("d0"),
             }
 
             if (bsd_nx_enter(SocketBase) != 0)
-                return bsd_fail(SocketBase, AMI_ENETDOWN);
+                return bsd_fail(SocketBase, bsd_nx_errno(SocketBase));
 
             if ((sock->as_Flags & ASF_RAW) != 0)
             {
@@ -1041,7 +1041,7 @@ LONG bsd_getsockname(register LONG sock_fd          __asm("d0"),
         ))
     {
         if (bsd_nx_enter(SocketBase) != 0)
-            return bsd_fail(SocketBase, AMI_ENETDOWN);
+            return bsd_fail(SocketBase, bsd_nx_errno(SocketBase));
         bracketed = TRUE;
     }
 
