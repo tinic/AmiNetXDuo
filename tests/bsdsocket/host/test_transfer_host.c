@@ -311,6 +311,14 @@ UINT bsd_wait_sliced(struct AmiSocketBase *base, ULONG wait,
     return *aborted ? NX_SUCCESS : call(arg, wait);
 }
 
+/* The receive's wait: the same stub.  Its pool-pressure path is
+   test_select's (bsd_wait_event, #383). */
+UINT bsd_wait_event(struct AmiSocketBase *base, ULONG wait,
+                    BsdSlicedCall call, VOID *arg, BOOL *aborted)
+{
+    return bsd_wait_sliced(base, wait, call, arg, aborted);
+}
+
 ULONG SetSignal(ULONG new_signals, ULONG signal_set)
 {
     ULONG old = h.signals;

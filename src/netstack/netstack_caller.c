@@ -186,6 +186,11 @@ VOID ami_netstack_leave_cached(AmiNetCaller *caller)
     caller->nc_Gen    = 0UL;
 }
 
+BOOL ami_netstack_slots_short(VOID)
+{
+    return (_tx_amiga_adopt_waiting != 0UL) ? TRUE : FALSE;
+}
+
 VOID ami_netstack_release(AmiNetCaller *caller)
 {
     struct Task *me;

@@ -116,6 +116,11 @@ VOID ami_netstack_leave_cached(AmiNetCaller *caller);
 
 VOID ami_netstack_release(AmiNetCaller *caller);
 
+/* TRUE while a Task waits for an adoption slot: every slot holds a Task
+   inside the stack.  A caller that is only waiting for a socket event gives
+   its slot back for the wait when this says so (bsdsocket select.c, #383). */
+BOOL ami_netstack_slots_short(VOID);
+
 /* Bracket counters, kept in memory because a freeze in here leaves no log.
    bs_StateShared counts times another task had the interrupt state raised
    while this one was running: it must stay zero. */

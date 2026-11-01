@@ -288,6 +288,7 @@ UINT tx_amiga_adopt_thread(TX_THREAD **thread_ptr, ULONG *generation,
 
 ULONG tx_amiga_adopt_slots(VOID)   { return 1UL; }
 ULONG tx_amiga_adopt_reserve(VOID) { return 0UL; }
+ULONG _tx_amiga_adopt_waiting;
 ULONG tx_amiga_adopt_slots_free(VOID) { return nsh_pool_busy == 0UL ? 1UL : 0UL; }
 VOID  tx_amiga_adopt_sweep_unpublished(VOID) { }
 UINT  tx_amiga_adopt_claim_orphan(VOID) { return (UINT)TX_FALSE; }

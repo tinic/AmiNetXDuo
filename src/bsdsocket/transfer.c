@@ -1886,8 +1886,8 @@ static LONG bsd_recv_tcp(struct AmiSocketBase *base, AmiSocket *sock,
                     args.tcp    = &sock->as_Nx.tcp;
                     args.packet = &packet;
 
-                    status = bsd_wait_sliced(base, now, bsd_recv_once, &args,
-                                             &aborted);
+                    status = bsd_wait_event(base, now, bsd_recv_once, &args,
+                                            &aborted);
                 }
 
                 if (aborted)
@@ -2016,8 +2016,8 @@ static LONG bsd_recv_udp(struct AmiSocketBase *base, AmiSocket *sock,
 
         for (;;)
         {
-            status = bsd_wait_sliced(base, wait, bsd_recv_udp_once, &args,
-                                     &aborted);
+            status = bsd_wait_event(base, wait, bsd_recv_udp_once, &args,
+                                    &aborted);
             if (aborted)
                 return bsd_fail(base, AMI_EINTR);
             if (status != NX_SUCCESS)

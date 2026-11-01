@@ -375,13 +375,29 @@ VOID bsd_events_attach(AmiSocket *sock)
 
 #define BSD_BREAK_SLICE_TICKS   10
 
+/* The statuses a sliced call answers while it would still block. */
+static BOOL bsd_wait_again(UINT status)
+{
+    return (BOOL)(status == NX_NO_PACKET || status == NX_TX_QUEUE_DEPTH ||
+                  status == NX_WINDOW_OVERFLOW);
+}
+
 /*
  * Wait in slices, checking the break mask between them.
  * Returns NX_SUCCESS with *aborted set when the break arrived, so the caller
  * fails with EINTR. Otherwise it returns whatever the sliced call last said.
+ *
+ * `evented`: the call's wake posts the base's event signal.  Such a wait with
+ * no deadline gives its adoption slot back while every slot is taken: it
+ * clears the event bit, asks once without waiting, and Wait()s in Exec for
+ * the event or the break (bsd_nx_park()).  Suspended in NetX it would hold
+ * its slot until its data came, and fifteen of those stopped every other
+ * caller of the stack (#383).  It is looked at between slices, so a forever
+ * wait with no break mask is sliced too.
  */
-UINT bsd_wait_sliced(struct AmiSocketBase *base, ULONG wait,
-                     BsdSlicedCall call, VOID *arg, BOOL *aborted)
+static UINT bsd_wait_slices(struct AmiSocketBase *base, ULONG wait,
+                            BsdSlicedCall call, VOID *arg, BOOL *aborted,
+                            BOOL evented)
 {
     ULONG break_mask = base->sb_BreakMask;
     ULONG remaining  = wait;
@@ -390,7 +406,7 @@ UINT bsd_wait_sliced(struct AmiSocketBase *base, ULONG wait,
     *aborted = FALSE;
 
     if (wait == NX_NO_WAIT ||
-        (wait == NX_WAIT_FOREVER && break_mask == 0))
+        (wait == NX_WAIT_FOREVER && break_mask == 0 && !evented))
         return call(arg, wait);
 
     for (;;)
@@ -407,6 +423,39 @@ UINT bsd_wait_sliced(struct AmiSocketBase *base, ULONG wait,
             return NX_SUCCESS;
         }
 
+        if (evented && wait == NX_WAIT_FOREVER && ami_netstack_slots_short())
+        {
+            ULONG received = 0;
+            LONG  parked;
+
+            /* Clear, then ask: an event after the clear sets the bit again
+               and the Wait() returns at once. */
+            SetSignal(0UL, base->sb_EventSigMask);
+
+            status = call(arg, NX_NO_WAIT);
+            if (!bsd_wait_again(status))
+                return status;
+
+            parked = bsd_nx_park(base, base->sb_EventSigMask | break_mask,
+                                 &received);
+            if (parked == BSD_PARK_LOST)
+                return NX_NOT_ENABLED;
+
+            if (parked == BSD_PARK_DONE)
+            {
+                if ((received & break_mask) != 0)
+                {
+                    /* Back to the caller, as WaitSelect() gives it back. */
+                    Signal(FindTask(NULL), received & break_mask);
+                    *aborted = TRUE;
+                    return NX_SUCCESS;
+                }
+                continue;
+            }
+
+            /* BSD_PARK_NONE: not this Task's bracket alone, so the slice. */
+        }
+
         if (wait == NX_WAIT_FOREVER)
             slice = BSD_BREAK_SLICE_TICKS;
         else if (remaining == 0)
@@ -419,8 +468,7 @@ UINT bsd_wait_sliced(struct AmiSocketBase *base, ULONG wait,
             started = tx_time_get();
 
         status = call(arg, slice);
-        if (status != NX_NO_PACKET && status != NX_TX_QUEUE_DEPTH &&
-            status != NX_WINDOW_OVERFLOW)
+        if (!bsd_wait_again(status))
             return status;
 
         if (wait != NX_WAIT_FOREVER)
@@ -433,6 +481,18 @@ UINT bsd_wait_sliced(struct AmiSocketBase *base, ULONG wait,
             remaining = (elapsed >= remaining) ? 0 : remaining - elapsed;
         }
     }
+}
+
+UINT bsd_wait_sliced(struct AmiSocketBase *base, ULONG wait,
+                     BsdSlicedCall call, VOID *arg, BOOL *aborted)
+{
+    return bsd_wait_slices(base, wait, call, arg, aborted, FALSE);
+}
+
+UINT bsd_wait_event(struct AmiSocketBase *base, ULONG wait,
+                    BsdSlicedCall call, VOID *arg, BOOL *aborted)
+{
+    return bsd_wait_slices(base, wait, call, arg, aborted, TRUE);
 }
 
 ULONG bsd_wait_option(AmiSocket *sock, ULONG timeout_ticks, LONG flags)
