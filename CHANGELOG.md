@@ -7,6 +7,10 @@ are history.
 
 ## Unreleased
 
+- A program waiting in connect(), send(), a receive with a timeout or a DNS
+  lookup no longer holds up other programs, and stops on Ctrl-C.
+- A program removed while it waits in WaitSelect() with a timeout is no
+  longer signalled by its timer afterwards.
 - A program removed while it waits in recv() no longer has a later packet
   written into its freed memory.
 - WaitSelect() interrupted by Ctrl-C while the stack is busy returns EINTR
