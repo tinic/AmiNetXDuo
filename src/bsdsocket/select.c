@@ -439,7 +439,13 @@ static UINT bsd_wait_slices(struct AmiSocketBase *base, ULONG wait,
             parked = bsd_nx_park(base, base->sb_EventSigMask | break_mask,
                                  &received);
             if (parked == BSD_PARK_LOST)
+            {
+                /* A break ends the wait to re-enter too (bsd_nx_park()):
+                   the no-bracket path of a stack that went away, as EINTR. */
+                if ((received & break_mask) != 0)
+                    return NX_WAIT_ABORTED;
                 return NX_NOT_ENABLED;
+            }
 
             if (parked == BSD_PARK_DONE)
             {

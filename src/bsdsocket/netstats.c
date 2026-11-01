@@ -345,7 +345,7 @@ LONG bsd_GetNetworkStatistics(register LONG type __asm("d0"),
         writer.bpw_Available = 0;
 
         if (bsd_nx_enter(SocketBase) != 0)
-            return bsd_fail(SocketBase, AMI_ENETDOWN);
+            return bsd_fail(SocketBase, bsd_nx_errno(SocketBase));
 
         if (type == NETSTATUS_tcp_sockets)
             bsd_pcd_tcp(ip, &writer);
@@ -367,7 +367,7 @@ LONG bsd_GetNetworkStatistics(register LONG type __asm("d0"),
     bsd_bzero(&fixed, sizeof(fixed));
 
     if (bsd_nx_enter(SocketBase) != 0)
-        return bsd_fail(SocketBase, AMI_ENETDOWN);
+        return bsd_fail(SocketBase, bsd_nx_errno(SocketBase));
 
     switch (type)
     {

@@ -98,6 +98,7 @@ LONG ami_netstack_enter_cached(AmiNetCaller *caller)
 {
     struct Task *me;
     UINT         status;
+    UINT         reserved;
 
     caller->nc_Adopted = FALSE;
 
@@ -145,11 +146,18 @@ LONG ami_netstack_enter_cached(AmiNetCaller *caller)
 
     /* Same question as ami_netstack_enter(): the reserve follows who holds
        ami_ns_lock, not whether the bracket is cached. */
-    status = tx_amiga_adopt_thread(&caller->nc_Thread, &caller->nc_Gen,
-                                   (CHAR *)"AmiNetXDuo caller",
-                                   AMI_CALLER_PRIORITY,
-                                   ami_ns_lock_held_by_me() ? (UINT)TX_TRUE
-                                                            : (UINT)TX_FALSE);
+    reserved = ami_ns_lock_held_by_me() ? (UINT)TX_TRUE : (UINT)TX_FALSE;
+    status   = tx_amiga_adopt_thread_break(&caller->nc_Thread, &caller->nc_Gen,
+                                           (CHAR *)"AmiNetXDuo caller",
+                                           AMI_CALLER_PRIORITY, reserved,
+                                           caller->nc_BreakMask);
+    if (status == TX_WAIT_ABORTED)
+    {
+        /* The caller's break came while every slot was taken (#383). */
+        caller->nc_Live = FALSE;
+        caller->nc_Task = NULL;
+        return AMI_NET_ERR_ABORTED;
+    }
     if (status != TX_SUCCESS)
     {
         caller->nc_Live = FALSE;

@@ -116,6 +116,14 @@ struct Task *FindTask(const char *name)
 }
 
 /* netx_call.c's bsd_nx_park() (#383) is not reached from these vectors. */
+ULONG SetSignal(ULONG newSignals, ULONG signalSet)
+{
+    printf("  FAIL SetSignal(0x%lx, 0x%lx) reached\n",
+           (unsigned long)newSignals, (unsigned long)signalSet);
+    abort();
+    return 0UL;
+}
+
 ULONG Wait(ULONG signalSet)
 {
     printf("  FAIL Wait(0x%lx) reached\n", (unsigned long)signalSet);

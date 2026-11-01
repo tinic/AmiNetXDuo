@@ -1975,7 +1975,7 @@ LONG bsd_socket(register LONG domain   __asm("d0"),
     if (bsd_nx_enter(SocketBase) != 0)
     {
         bsd_socket_dispose(sock);
-        return bsd_fail(SocketBase, AMI_ENETDOWN);
+        return bsd_fail(SocketBase, bsd_nx_errno(SocketBase));
     }
 
     bsd_closing_sweep();
@@ -2219,7 +2219,7 @@ LONG bsd_bind(register LONG sock_fd            __asm("d0"),
 #endif
 
     if (bsd_nx_enter(SocketBase) != 0)
-        return bsd_fail(SocketBase, AMI_ENETDOWN);
+        return bsd_fail(SocketBase, bsd_nx_errno(SocketBase));
     kind = bsd_bind_kind(SocketBase, &addr, scope);
     bsd_nx_leave(SocketBase);
 
@@ -2240,7 +2240,7 @@ LONG bsd_bind(register LONG sock_fd            __asm("d0"),
     if ((sock->as_Flags & ASF_RAW) != 0)
     {
         if (bsd_nx_enter(SocketBase) != 0)
-            return bsd_fail(SocketBase, AMI_ENETDOWN);
+            return bsd_fail(SocketBase, bsd_nx_errno(SocketBase));
 
         sock->as_LocalAddr    = addr;
         sock->as_LocalPort    = port;
@@ -2262,7 +2262,7 @@ LONG bsd_bind(register LONG sock_fd            __asm("d0"),
     if ((sock->as_Flags & ASF_UDP) != 0)
     {
         if (bsd_nx_enter(SocketBase) != 0)
-            return bsd_fail(SocketBase, AMI_ENETDOWN);
+            return bsd_fail(SocketBase, bsd_nx_errno(SocketBase));
 
         /* Opt into SO_REUSEPORT (and SO_REUSEADDR, which #38 makes the same
            promise for legacy callers) sharing only for an unspecified
@@ -2298,7 +2298,7 @@ LONG bsd_bind(register LONG sock_fd            __asm("d0"),
     else
     {
         if (bsd_nx_enter(SocketBase) != 0)
-            return bsd_fail(SocketBase, AMI_ENETDOWN);
+            return bsd_fail(SocketBase, bsd_nx_errno(SocketBase));
 
         status = nx_tcp_client_socket_bind(&sock->as_Nx.tcp,
                                            (port != 0) ? port : NX_ANY_PORT,
@@ -2574,7 +2574,7 @@ LONG bsd_listen(register LONG sock_fd __asm("d0"),
     if (bsd_nx_enter(SocketBase) != 0)
     {
         bsd_socket_dispose(incoming);
-        return bsd_fail(SocketBase, AMI_ENETDOWN);
+        return bsd_fail(SocketBase, bsd_nx_errno(SocketBase));
     }
 
     status = nx_tcp_socket_create(ip, &incoming->as_Nx.tcp, bsd_tcp_name,
@@ -3123,7 +3123,8 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
         return bsd_accept_unpin_fail(SocketBase, sock, AMI_EINVAL);
 
     if (bsd_nx_enter(SocketBase) != 0)
-        return bsd_accept_unpin_fail(SocketBase, sock, AMI_ENETDOWN);
+        return bsd_accept_unpin_fail(SocketBase, sock,
+                                     bsd_nx_errno(SocketBase));
 
     wait = bsd_wait_option(sock, sock->as_RcvTimeout, 0);
 
@@ -3664,7 +3665,7 @@ LONG bsd_connect(register LONG sock_fd          __asm("d0"),
         ULONG version = sock->as_PeerAddr.nxd_ip_version;
 
         if (bsd_nx_enter(SocketBase) != 0)
-            return bsd_fail(SocketBase, AMI_ENETDOWN);
+            return bsd_fail(SocketBase, bsd_nx_errno(SocketBase));
 
         bsd_bzero(&sock->as_PeerAddr, sizeof(sock->as_PeerAddr));
         sock->as_PeerAddr.nxd_ip_version = version;
@@ -3697,7 +3698,7 @@ LONG bsd_connect(register LONG sock_fd          __asm("d0"),
 #endif
 
     if (bsd_nx_enter(SocketBase) != 0)
-        return bsd_fail(SocketBase, AMI_ENETDOWN);
+        return bsd_fail(SocketBase, bsd_nx_errno(SocketBase));
 
     result = bsd_connect_locked(SocketBase, sock, &addr, port, scope);
 
@@ -3732,7 +3733,7 @@ LONG bsd_shutdown(register LONG sock_fd __asm("d0"),
             (ASF_TCP | ASF_CONNECTED))
         {
             if (bsd_nx_enter(SocketBase) != 0)
-                return bsd_fail(SocketBase, AMI_ENETDOWN);
+                return bsd_fail(SocketBase, bsd_nx_errno(SocketBase));
 
 #ifdef AMINETXDUO_TCP_CORK
             /* Behind what is corked, if the window will not take it now. */

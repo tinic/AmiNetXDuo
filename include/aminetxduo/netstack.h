@@ -95,6 +95,7 @@ typedef struct AmiNetCaller
     BOOL         nc_Live;       /* cached thread exists, or adoption started */
     struct Task *nc_Task;       /* whose it is; only that task may use it    */
     ULONG        nc_Signal;     /* cached thread's run signal, owner frees   */
+    ULONG        nc_BreakMask;  /* ends a cached enter's wait for a slot     */
 } AmiNetCaller;
 
 LONG ami_netstack_enter(AmiNetCaller *caller);
