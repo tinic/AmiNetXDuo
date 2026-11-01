@@ -166,6 +166,37 @@ static __inline VOID _tx_amiga_signal(APTR task, ULONG sigmask)
     }
 }
 
+/* Hand the baton to the thread's Task.  An adopted Task is the application's,
+   and another program can RemTask() it while it waits here (IBrowse, #383):
+   signal it only while Exec still lists it.  A removed holder is reclaimed
+   like any dead one (netstack_baton.c).  */
+static __inline VOID _tx_amiga_signal_thread(TX_THREAD *thread_ptr)
+{
+struct Task *task;
+ULONG        sigmask;
+
+    task    =  (struct Task *) thread_ptr -> tx_thread_amiga_task;
+    sigmask =  thread_ptr -> tx_thread_amiga_run_signal;
+
+    if ((task == (struct Task *) 0) || (sigmask == 0UL))
+    {
+        return;
+    }
+
+    if ((thread_ptr -> tx_thread_amiga_flags & TX_AMIGA_THREAD_ADOPTED) == 0U)
+    {
+        Signal(task, sigmask);
+        return;
+    }
+
+    Disable();
+    if (tx_amiga_task_alive_locked(task) != TX_FALSE)
+    {
+        Signal(task, sigmask);
+    }
+    Enable();
+}
+
 /* TX_TRUE while the calling task is inside a Forbid().  */
 static __inline UINT _tx_amiga_forbidden(VOID)
 {
@@ -205,8 +236,7 @@ TX_THREAD   *thread_ptr;
 
     ami_budget_hold_start();
 
-    _tx_amiga_signal(thread_ptr -> tx_thread_amiga_task,
-                     thread_ptr -> tx_thread_amiga_run_signal);
+    _tx_amiga_signal_thread(thread_ptr);
 
     TX_AMIGA_COUNT(TX_AMIGA_SC_DIRECT);
 

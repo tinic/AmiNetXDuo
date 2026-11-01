@@ -123,6 +123,7 @@ static BtTask bt_dead_holding;
 static BtTask bt_dead_dormant;
 static BtTask bt_dead_released;
 static BtTask bt_dead_event;
+static BtTask bt_dead_woken;
 
 /* Never adopted, never in the pool: a TX_THREAD that is definitely not the one
    under test.  A discarded handle will not do -- the pool hands that slot to
@@ -132,6 +133,7 @@ static TX_THREAD bt_decoy_thread;
 
 static TX_EVENT_FLAGS_GROUP bt_dead_flags;
 static volatile UINT bt_dead_flags_status = TX_NOT_DONE;
+static TX_EVENT_FLAGS_GROUP bt_woken_flags;
 
 static VOID bt_wait_for(volatile UWORD *flag, const char *what);
 static VOID bt_reap(BtTask *bt);
@@ -692,6 +694,130 @@ static LONG bt_ticks_until(volatile UWORD *flag, ULONG deadline_ticks)
         waited++;
     }
     return (LONG)waited;
+}
+
+/* ---------------------------------------- a removed Task's wait that ends -- */
+
+/* Suspended in ThreadX like a blocked socket call, then removed by another
+   program, as IBrowse removes a network process that does not finish (#383).
+   Exec frees the Task.  When the wait ends the dispatch must not Signal() it:
+   that writes into memory which by then may be another program's.  The struct
+   is claimed back at once and zeroed: a Signal() can only set bits, so any
+   write into it shows. */
+static VOID bt_die_woken_entry(VOID)
+{
+    struct Task *me = FindTask(NULL);
+    BtTask      *bt = (BtTask *)me->tc_UserData;
+    ULONG        actual = 0UL;
+
+    Wait(BT_SIG_GO);
+    if (tx_amiga_adopt_thread(&bt->bt_Thread, &bt->bt_Gen, (CHAR *)"dead woken", 20,
+                              (UINT)TX_FALSE)
+        != TX_SUCCESS)
+    {
+        bt->bt_Failures++;
+        bt_finish(bt);
+    }
+
+    bt->bt_Ready = 1U;
+    Signal(bt->bt_Parent, BT_SIG_GO);
+
+    (VOID)tx_event_flags_get(&bt_woken_flags, 1UL, TX_OR_CLEAR, &actual,
+                             TX_WAIT_FOREVER);
+
+    bt->bt_Failures++;                 /* a dead task must not come back */
+    bt_finish(bt);
+}
+
+static VOID bt_test_removed_waiter_not_signalled(VOID)
+{
+    BtTask      *bt = &bt_dead_woken;
+    struct Task *task;
+    UBYTE       *claim = NULL;
+    ULONG        waited = 0UL;
+    ULONG        written = 0UL;
+    ULONG        i;
+    UINT         status;
+
+    if (tx_event_flags_create(&bt_woken_flags, (CHAR *)"bracket woken")
+        != TX_SUCCESS)
+    {
+        t_check(0, "created the removed-waiter event group", 0);
+        return;
+    }
+
+    bt->bt_Parent = FindTask(NULL);
+    task = bt_spawn(bt, bt_die_woken_entry, "dead-woken", BT_PRI);
+    t_check(task != NULL, "spawned the removed waiter", 0);
+    if (task == NULL)
+    {
+        (VOID)tx_event_flags_delete(&bt_woken_flags);
+        return;
+    }
+
+    Signal(task, BT_SIG_GO);
+    while ((bt->bt_Thread == NULL ||
+            bt->bt_Thread->tx_thread_state != TX_EVENT_FLAG ||
+            bt_woken_flags.tx_event_flags_group_suspended_count != 1UL) &&
+           waited < (ULONG)(30 * 50))
+    {
+        Delay(1);
+        waited++;
+    }
+    t_check(bt->bt_Thread != NULL &&
+            bt->bt_Thread->tx_thread_state == TX_EVENT_FLAG,
+            "removed waiter suspended inside ThreadX", (LONG)waited);
+    if (bt->bt_Thread == NULL ||
+        bt->bt_Thread->tx_thread_state != TX_EVENT_FLAG)
+    {
+        (VOID)tx_event_flags_set(&bt_woken_flags, 1UL, TX_OR);
+        bt_wait_for(&bt->bt_Done, "unsuspended waiter to leave");
+        bt_reap(bt);
+        (VOID)tx_event_flags_delete(&bt_woken_flags);
+        return;
+    }
+
+    Forbid();
+    RemTask(task);
+    claim = (UBYTE *)AllocAbs((ULONG)sizeof(struct Task), (APTR)task);
+    if (claim != NULL)
+    {
+        for (i = 0UL; i < (ULONG)sizeof(struct Task); i++)
+            claim[i] = 0U;
+    }
+    Permit();
+    bt->bt_Task = NULL;
+    t_check(claim != NULL, "claimed the removed Task's freed struct", 0);
+
+    /* The wait ends: ThreadX resumes the thread and the baton goes to it. */
+    (VOID)tx_event_flags_set(&bt_woken_flags, 1UL, TX_OR);
+    Delay(10);
+
+    if (claim != NULL)
+    {
+        Forbid();
+        for (i = 0UL; i < (ULONG)sizeof(struct Task); i++)
+        {
+            if (claim[i] != 0U)
+                written++;
+        }
+        Permit();
+    }
+    t_check(written == 0UL,
+            "a removed Task is not signalled when its wait ends",
+            (LONG)written);
+
+    (VOID)ami_netstack_baton_abandon(bt->bt_Thread);
+    status = tx_amiga_discard_thread(bt->bt_Thread, bt->bt_Gen);
+    t_check(status == TX_SUCCESS, "removed waiter's TX_THREAD was discarded",
+            (LONG)status);
+
+    if (claim != NULL)
+        FreeMem(claim, (ULONG)sizeof(struct Task));
+    bt_reap(bt);
+
+    t_check(tx_event_flags_delete(&bt_woken_flags) == TX_SUCCESS,
+            "deleted the removed-waiter event group", 0);
 }
 
 static VOID bt_test_reclaim_dead_holder(VOID)
@@ -2521,6 +2647,7 @@ int main(int argc, char **argv)
 
     /* ---- a Task removed by Exec while it holds the baton ---------------- */
 
+    bt_test_removed_waiter_not_signalled();
     bt_test_reclaim_dead_holder();
     bt_test_live_waiter_not_dead();
     bt_test_onstack_caller_and_slot_reuse();
