@@ -7,6 +7,10 @@ are history.
 
 ## Unreleased
 
+- A program waiting for a free place in the stack stops on Ctrl-C.
+- A network task that another program removes while it waits in the stack
+  is no longer signalled afterwards, which could corrupt memory after
+  IBrowse ignored its unfinished subtasks.
 - A program waiting in recv() or accept() no longer holds up every other
   program once fifteen are waiting, so IBrowse can stop its connections and
   NetShutdown finishes.
