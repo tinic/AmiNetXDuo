@@ -109,9 +109,11 @@ struct _tx_amiga_adopt_slot
 };
 
 /* Claim: Forbid() held, 0 when the pool is full.  Park: Forbid() NOT held, it
-   waits, and 0 means the waiter table was full or the kernel went away.  */
+   waits, and 0 means the waiter table was full, the kernel went away or one of
+   `break_mask` came (*broke).  */
 struct _tx_amiga_adopt_slot *_tx_amiga_slot_claim_locked(UINT reserved);
-struct _tx_amiga_adopt_slot *_tx_amiga_slot_claim_or_park(struct Task *me, UINT reserved);
+struct _tx_amiga_adopt_slot *_tx_amiga_slot_claim_or_park(struct Task *me, UINT reserved,
+                                                          ULONG break_mask, UINT *broke);
 
 /* The slot behind a handle that still names this adoption, or 0.  Forbid()
    held.  _tx_amiga_slot_release_locked() and the waiter wakes are declared in

@@ -1939,7 +1939,7 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
     }
 
     if (bsd_nx_enter(SocketBase) != 0)
-        return bsd_fail(SocketBase, AMI_ENETDOWN);
+        return bsd_fail(SocketBase, bsd_nx_errno(SocketBase));
 
     /* Adopted from here to bsd_nx_leave(): memory reads and nx_*_info_get().
        Nothing in here may take sb_Lock. */
@@ -2198,7 +2198,7 @@ LONG bsd_NetStackControl(register ULONG magic __asm("d0"),
                 return 0;
 
             if (bsd_nx_enter(SocketBase) != 0)
-                return bsd_fail(SocketBase, AMI_ENETDOWN);
+                return bsd_fail(SocketBase, bsd_nx_errno(SocketBase));
 
             status = (ctl->nsc_Gateway != 0)
                          ? nx_ip_gateway_address_set(cip, ctl->nsc_Gateway)
@@ -2409,7 +2409,7 @@ LONG bsd_NetStackControl(register ULONG magic __asm("d0"),
         return bsd_fail(SocketBase, AMI_ENETDOWN);
 
     if (bsd_nx_enter(SocketBase) != 0)
-        return bsd_fail(SocketBase, AMI_ENETDOWN);
+        return bsd_fail(SocketBase, bsd_nx_errno(SocketBase));
 
     switch (op)
     {

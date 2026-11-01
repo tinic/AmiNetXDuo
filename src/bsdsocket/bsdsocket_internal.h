@@ -282,6 +282,7 @@ struct AmiSocketBase
     BsdFdSets               sb_SelReady;   /* and its result sets    */
     LONG                    sb_NxNest;      /* bracket depth, 0 == outside   */
     struct Task            *sb_NxTask;      /* who holds it; NULL == outside */
+    BOOL                    sb_NxBroken;    /* last enter ended by a break   */
 
 
 #ifdef AMINETXDUO_NXCENSUS
@@ -784,6 +785,16 @@ static __inline ULONG bsd_break_signals(struct AmiSocketBase *base)
 {
     (VOID)base;
     return FindTask(NULL)->tc_SigRecvd;
+}
+
+/*
+ * Why bsd_nx_enter() refused: EINTR when a break ended its wait for an
+ * adoption slot (#383), as a break ends every other wait; ENETDOWN when the
+ * stack is not running.
+ */
+static __inline LONG bsd_nx_errno(struct AmiSocketBase *base)
+{
+    return base->sb_NxBroken ? AMI_EINTR : AMI_ENETDOWN;
 }
 
 static __inline BOOL bsd_nx_orphan(struct AmiSocketBase *base)

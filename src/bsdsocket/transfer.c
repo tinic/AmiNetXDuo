@@ -2215,7 +2215,7 @@ static LONG bsd_send_iov(struct AmiSocketBase *base, AmiSocket *sock,
 #endif
 
     if (bsd_nx_enter(base) != 0)
-        return bsd_fail(base, AMI_ENETDOWN);
+        return bsd_fail(base, bsd_nx_errno(base));
 
     /* The connected peer is taken here, inside the bracket the interface
        epoch moves under (#51): address, port and zone together, as one
@@ -2268,7 +2268,7 @@ static LONG bsd_recv_iov(struct AmiSocketBase *base, AmiSocket *sock,
     if (!bsd_recv_parked(sock, len))
     {
         if (bsd_nx_enter(base) != 0)
-            return bsd_fail(base, AMI_ENETDOWN);
+            return bsd_fail(base, bsd_nx_errno(base));
         held = TRUE;
     }
 
@@ -2375,7 +2375,7 @@ static LONG bsd_send_oob(struct AmiSocketBase *base, AmiSocket *sock,
 #endif
 
     if (bsd_nx_enter(base) != 0)
-        return bsd_fail(base, AMI_ENETDOWN);
+        return bsd_fail(base, bsd_nx_errno(base));
 
 #ifdef AMINETXDUO_TCP_CORK
     /* The urgent byte is sent around the queue, so what is corked goes

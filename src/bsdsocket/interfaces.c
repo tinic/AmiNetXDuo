@@ -326,7 +326,7 @@ LONG bsd_QueryInterfaceTagList(register STRPTR name __asm("a0"),
         return 0;
 
     if (bsd_nx_enter(SocketBase) != 0)
-        return bsd_fail(SocketBase, AMI_ENETDOWN);
+        return bsd_fail(SocketBase, bsd_nx_errno(SocketBase));
 
     bsd_if_gather(ip, (UINT)index, &info);
 
@@ -508,7 +508,7 @@ LONG bsd_if_set_address(struct AmiSocketBase *SocketBase, LONG index,
         return bsd_fail(SocketBase, AMI_ENETDOWN);
 
     if (bsd_nx_enter(SocketBase) != 0)
-        return bsd_fail(SocketBase, AMI_ENETDOWN);
+        return bsd_fail(SocketBase, bsd_nx_errno(SocketBase));
 
     nxif = &ip->nx_ip_interface[index];
 
@@ -689,7 +689,7 @@ LONG bsd_ConfigureInterfaceTagList(register STRPTR name __asm("a0"),
 
         if (bsd_nx_enter(SocketBase) != 0)
         {
-            result = bsd_fail(SocketBase, AMI_ENETDOWN);
+            result = bsd_fail(SocketBase, bsd_nx_errno(SocketBase));
             goto out;
         }
 
@@ -1116,7 +1116,7 @@ LONG bsd_if_ioctl(ULONG req, APTR argp,
         LONG           written  = 0;
 
         if (bsd_nx_enter(SocketBase) != 0)
-            return bsd_fail(SocketBase, AMI_ENETDOWN);
+            return bsd_fail(SocketBase, bsd_nx_errno(SocketBase));
 
         for (i = 0; i < (UINT)NX_MAX_PHYSICAL_INTERFACES; i++)
         {
@@ -1163,7 +1163,7 @@ LONG bsd_if_ioctl(ULONG req, APTR argp,
             return bsd_fail(SocketBase, AMI_ENXIO);
 
         if (bsd_nx_enter(SocketBase) != 0)
-            return bsd_fail(SocketBase, AMI_ENETDOWN);
+            return bsd_fail(SocketBase, bsd_nx_errno(SocketBase));
 
         bsd_if_gather(ip, (UINT)index, &info);
 

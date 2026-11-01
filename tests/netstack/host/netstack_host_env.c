@@ -286,6 +286,16 @@ UINT tx_amiga_adopt_thread(TX_THREAD **thread_ptr, ULONG *generation,
     return TX_SUCCESS;
 }
 
+UINT tx_amiga_adopt_thread_break(TX_THREAD **thread_ptr, ULONG *generation,
+                                 CHAR *name, UINT priority, UINT reserved,
+                                 ULONG break_mask)
+{
+    (VOID)break_mask;
+
+    return tx_amiga_adopt_thread(thread_ptr, generation, name, priority,
+                                 reserved);
+}
+
 ULONG tx_amiga_adopt_slots(VOID)   { return 1UL; }
 ULONG tx_amiga_adopt_reserve(VOID) { return 0UL; }
 ULONG _tx_amiga_adopt_waiting;

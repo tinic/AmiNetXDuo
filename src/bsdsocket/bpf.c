@@ -99,7 +99,7 @@ LONG bsd_bpf_write(register LONG channel __asm("d0"),
     LONG status;
 
     if (bsd_nx_enter(SocketBase) != 0)
-        return bsd_fail(SocketBase, AMI_ENETDOWN);
+        return bsd_fail(SocketBase, bsd_nx_errno(SocketBase));
 
     status = ami_bpf_write((APTR)SocketBase, channel, buffer, len);
 
