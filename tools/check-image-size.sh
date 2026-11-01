@@ -123,7 +123,9 @@ BUDGETS=(
     # (a3292227): the per-unit push/invalidate record, its lookup and the
     # device-side arm/disarm.  A guard that flushed for every unit on a
     # machine with one card paid for cards that were not there, 2026-09-22.
-    "default:src/netdev/anxnet.device:46000"
+    # Longword-aligned members in the shell's per-frame structures (NetdevUnit,
+    # NetdevNic): +212, 45,880 -> 46,092, 2026-11-01.
+    "default:src/netdev/anxnet.device:46092"
     # 21,724 at the split; 23,032 with the original receive offload (IPv4 and
     # IPv6 verification plus the former driver-side CONTINUES mark); 24,440 in
     # the former batched-reply experiment, plus the held pass and reset
@@ -143,7 +145,9 @@ BUDGETS=(
     # 29,120 -> 29,752, approved by turo 2026-10-29.
     # The queue limit and its stops in ami_sana2_get_stats(): +8,
     # 29,752 -> 29,760.
-    "default:src/netdev/anxgenet.device:29760"
+    # Longword-aligned members in the per-frame structures: +64,
+    # 29,752 -> 29,816.
+    "default:src/netdev/anxgenet.device:29816"
     "default:src/wifipi/anxwifipi.device:56000"
     # +832 bytes for Roadshow's native users/groups ReadArgs syntax, strict
     # /N validation and bounded member-vector sizing: existing UID/GID maps
@@ -205,12 +209,15 @@ BUDGETS=(
     # A break ends a wait for a slot (#383): +472, 255,740 -> 256,212.
     # No Signal() into a Task another program removed (#383): +228,
     # 256,212 -> 256,440.
-    "minimal:src/bsdsocket/bsdsocket.library:256524"
-    "minimal:src/netdev/anxnet.device:46000"
+    # Longword-aligned hot structure members: +28, 256,520 -> 256,548.
+    "minimal:src/bsdsocket/bsdsocket.library:256548"
+    # Longword-aligned per-frame members: +212, 45,880 -> 46,092.
+    "minimal:src/netdev/anxnet.device:46092"
     # 29,088 on e806188f after the audited device fixes.
     # Batched transmit adds 632, 29,120 -> 29,752, approved by turo 2026-10-29.
     # The queue limit and its stops in ami_sana2_get_stats(): +8, -> 29,760.
-    "minimal:src/netdev/anxgenet.device:29760"
+    # Longword-aligned per-frame members: +64, -> 29,816.
+    "minimal:src/netdev/anxgenet.device:29816"
     "minimal:src/wifipi/anxwifipi.device:56000"
     # 10,172 on e806188f after the audited parser fixes.
     "minimal:src/usergroup/usergroup.library:10240"

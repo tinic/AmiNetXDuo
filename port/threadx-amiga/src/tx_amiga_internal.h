@@ -22,6 +22,57 @@
 /* The baton-holder side of the receive step budget (a no-op outside
    AMINETXDUO_RXPROBE builds).  */
 #include "aminetxduo/budget.h"
+#include "aminetxduo/align.h"
+
+/* The thread the scheduler and the adoption slots switch on every call. */
+AMI_ALIGN_LONG(TX_THREAD, tx_thread_id);
+AMI_ALIGN_LONG(TX_THREAD, tx_thread_run_count);
+AMI_ALIGN_LONG(TX_THREAD, tx_thread_stack_ptr);
+AMI_ALIGN_LONG(TX_THREAD, tx_thread_stack_start);
+AMI_ALIGN_LONG(TX_THREAD, tx_thread_stack_end);
+AMI_ALIGN_LONG(TX_THREAD, tx_thread_stack_size);
+AMI_ALIGN_LONG(TX_THREAD, tx_thread_time_slice);
+AMI_ALIGN_LONG(TX_THREAD, tx_thread_new_time_slice);
+AMI_ALIGN_LONG(TX_THREAD, tx_thread_ready_next);
+AMI_ALIGN_LONG(TX_THREAD, tx_thread_ready_previous);
+AMI_ALIGN_LONG(TX_THREAD, tx_thread_amiga_exec_wait_nesting);
+AMI_ALIGN_LONG(TX_THREAD, tx_thread_amiga_flags);
+AMI_ALIGN_LONG(TX_THREAD, tx_thread_amiga_run_signal);
+AMI_ALIGN_LONG(TX_THREAD, tx_thread_amiga_signal_owner);
+AMI_ALIGN_LONG(TX_THREAD, tx_thread_amiga_suspension_type);
+AMI_ALIGN_LONG(TX_THREAD, tx_thread_amiga_task);
+AMI_ALIGN_LONG(TX_THREAD, tx_thread_name);
+AMI_ALIGN_LONG(TX_THREAD, tx_thread_priority);
+AMI_ALIGN_LONG(TX_THREAD, tx_thread_state);
+AMI_ALIGN_LONG(TX_THREAD, tx_thread_delayed_suspend);
+AMI_ALIGN_LONG(TX_THREAD, tx_thread_suspending);
+AMI_ALIGN_LONG(TX_THREAD, tx_thread_preempt_threshold);
+AMI_ALIGN_LONG(TX_THREAD, tx_thread_schedule_hook);
+AMI_ALIGN_LONG(TX_THREAD, tx_thread_entry);
+AMI_ALIGN_LONG(TX_THREAD, tx_thread_entry_parameter);
+AMI_ALIGN_LONG(TX_THREAD, tx_thread_timer);
+AMI_ALIGN_LONG(TX_THREAD, tx_thread_suspend_cleanup);
+AMI_ALIGN_LONG(TX_THREAD, tx_thread_suspend_control_block);
+AMI_ALIGN_LONG(TX_THREAD, tx_thread_suspended_next);
+AMI_ALIGN_LONG(TX_THREAD, tx_thread_suspended_previous);
+AMI_ALIGN_LONG(TX_THREAD, tx_thread_suspend_info);
+AMI_ALIGN_LONG(TX_THREAD, tx_thread_additional_suspend_info);
+AMI_ALIGN_LONG(TX_THREAD, tx_thread_suspend_option);
+AMI_ALIGN_LONG(TX_THREAD, tx_thread_suspend_status);
+AMI_ALIGN_LONG(TX_THREAD, tx_thread_amiga_task_stamp);
+AMI_ALIGN_LONG(TX_THREAD, tx_thread_created_next);
+AMI_ALIGN_LONG(TX_THREAD, tx_thread_created_previous);
+AMI_ALIGN_LONG(TX_THREAD, tx_thread_amiga_task_name);
+#ifndef TX_NO_FILEX_POINTER
+AMI_ALIGN_LONG(TX_THREAD, tx_thread_filex_ptr);
+#endif
+AMI_ALIGN_LONG(TX_THREAD, tx_thread_user_priority);
+AMI_ALIGN_LONG(TX_THREAD, tx_thread_user_preempt_threshold);
+AMI_ALIGN_LONG(TX_THREAD, tx_thread_inherit_priority);
+AMI_ALIGN_LONG(TX_THREAD, tx_thread_owned_mutex_count);
+AMI_ALIGN_LONG(TX_THREAD, tx_thread_owned_mutex_list);
+AMI_ALIGN_LONG(TX_THREAD, tx_thread_stack_highest_ptr);
+AMI_ALIGN_LONG(TX_THREAD, tx_thread_suspension_sequence);
 
 
 /* Open-coded NewList(): amiga.lib is not linkable into a shared library.
@@ -51,6 +102,15 @@ struct _tx_amiga_ctrl
     volatile ULONG  *ctrl_reaped;                   /* flag on reaper's stack */
     volatile UINT    ctrl_zombie;                   /* reaper gave up on it   */
 };
+
+AMI_ALIGN_LONG(struct _tx_amiga_ctrl, ctrl_task);
+AMI_ALIGN_LONG(struct _tx_amiga_ctrl, ctrl_magic);
+AMI_ALIGN_LONG(struct _tx_amiga_ctrl, ctrl_die);
+AMI_ALIGN_LONG(struct _tx_amiga_ctrl, ctrl_thread);
+AMI_ALIGN_LONG(struct _tx_amiga_ctrl, ctrl_reaper);
+AMI_ALIGN_LONG(struct _tx_amiga_ctrl, ctrl_reaper_signal);
+AMI_ALIGN_LONG(struct _tx_amiga_ctrl, ctrl_reaped);
+AMI_ALIGN_LONG(struct _tx_amiga_ctrl, ctrl_zombie);
 
 
 /* THE LIVE BATON HOLDER, as an Exec Task address, or 0 when the baton is free.
@@ -107,6 +167,13 @@ struct _tx_amiga_adopt_slot
     ULONG           as_claim_stamp;
     UINT            as_published;
 };
+
+AMI_ALIGN_LONG(struct _tx_amiga_adopt_slot, as_thread);
+AMI_ALIGN_LONG(struct _tx_amiga_adopt_slot, as_generation);
+AMI_ALIGN_LONG(struct _tx_amiga_adopt_slot, as_busy);
+AMI_ALIGN_LONG(struct _tx_amiga_adopt_slot, as_claimer);
+AMI_ALIGN_LONG(struct _tx_amiga_adopt_slot, as_claim_stamp);
+AMI_ALIGN_LONG(struct _tx_amiga_adopt_slot, as_published);
 
 /* Claim: Forbid() held, 0 when the pool is full.  Park: Forbid() NOT held, it
    waits, and 0 means the waiter table was full, the kernel went away or one of
@@ -323,6 +390,21 @@ struct _tx_amiga_tick_run
     UINT    tr_live;            /* parameters valid; service may run        */
     UINT    tr_realm;           /* green: the realm is the wakeup target    */
 };
+
+AMI_ALIGN_LONG(struct _tx_amiga_tick_run, tr_eclock_hz);
+AMI_ALIGN_LONG(struct _tx_amiga_tick_run, tr_eclock_per_ms);
+AMI_ALIGN_LONG(struct _tx_amiga_tick_run, tr_eclock_per_tick);
+AMI_ALIGN_LONG(struct _tx_amiga_tick_run, tr_eclock_rem);
+AMI_ALIGN_LONG(struct _tx_amiga_tick_run, tr_frac);
+AMI_ALIGN_LONG(struct _tx_amiga_tick_run, tr_backlog);
+AMI_ALIGN_LONG(struct _tx_amiga_tick_run, tr_last_lo);
+AMI_ALIGN_LONG(struct _tx_amiga_tick_run, tr_up_lo);
+AMI_ALIGN_LONG(struct _tx_amiga_tick_run, tr_up_rem);
+AMI_ALIGN_LONG(struct _tx_amiga_tick_run, tr_last_service);
+AMI_ALIGN_LONG(struct _tx_amiga_tick_run, tr_worst_delta);
+AMI_ALIGN_LONG(struct _tx_amiga_tick_run, tr_worst_hold);
+AMI_ALIGN_LONG(struct _tx_amiga_tick_run, tr_live);
+AMI_ALIGN_LONG(struct _tx_amiga_tick_run, tr_realm);
 
 extern struct _tx_amiga_tick_run    _tx_amiga_tick_run;
 

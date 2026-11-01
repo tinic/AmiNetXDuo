@@ -234,7 +234,7 @@ typedef struct GenetCore
     volatile UBYTE link_poll_due; /* the link task owes the PHY one look   */
     UBYTE   pre_saved;      /* the two below were read before this driver
                                changed anything                            */
-    ULONG   pre_rgmii_oob;  /* EXT_RGMII_OOB_CTRL as the firmware left it   */
+    ULONG   pre_rgmii_oob __attribute__((aligned(4))); /* EXT_RGMII_OOB_CTRL as the firmware left it */
     ULONG   irq_pending;    /* status the top half took, for the bottom half */
     ULONG   phyid;
 
@@ -245,7 +245,7 @@ typedef struct GenetCore
     UBYTE   rx_line_held;   /* RXDMA_DONE left masked for that reader        */
     UBYTE   gic_silent;     /* blanks with frames pending and no interrupt   */
     UBYTE   gic_pad;
-    ULONG   gic_ints_seen;  /* GE_ST_INTS at the last blank                  */
+    ULONG   gic_ints_seen __attribute__((aligned(4))); /* GE_ST_INTS at the last blank */
     ULONG   gicd;           /* GIC-400 distributor, 68k address, 0 = none    */
 
     /* The link task (GE_LINK_STACK above). */
@@ -253,6 +253,17 @@ typedef struct GenetCore
     APTR            link_mem;       /* its Task and stack, one allocation    */
     ULONG           link_sig;       /* the wake signal, allocated by itself  */
 } GenetCore;
+
+AMI_ALIGN_LONG(GenetCore, rx_buf);
+AMI_ALIGN_LONG(GenetCore, tx_buf);
+AMI_ALIGN_LONG(GenetCore, pre_rgmii_oob);
+AMI_ALIGN_LONG(GenetCore, irq_pending);
+AMI_ALIGN_LONG(GenetCore, phyid);
+AMI_ALIGN_LONG(GenetCore, gic_ints_seen);
+AMI_ALIGN_LONG(GenetCore, gicd);
+AMI_ALIGN_LONG(GenetCore, link_task);
+AMI_ALIGN_LONG(GenetCore, link_mem);
+AMI_ALIGN_LONG(GenetCore, link_sig);
 
 /* Blanks a unicast frame may wait at the head of the ring for its reader to
    post a read before it is dropped: five is 100 ms, ten thousand frames at

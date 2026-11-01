@@ -19,6 +19,7 @@
 #include "netdev_bus.h"
 #include "netdev_cards.h"
 #include "netdev_mcaf.h"
+#include "aminetxduo/align.h"
 
 #define NETDEV_HDR_LEN      14
 #define NETDEV_MTU          1500
@@ -114,6 +115,17 @@ struct NetdevNicOps
      */
     VOID  (*detach)(NetdevNic *nic);
 };
+
+AMI_ALIGN_LONG(struct NetdevNicOps, attach);
+AMI_ALIGN_LONG(struct NetdevNicOps, init);
+AMI_ALIGN_LONG(struct NetdevNicOps, stop);
+AMI_ALIGN_LONG(struct NetdevNicOps, tx);
+AMI_ALIGN_LONG(struct NetdevNicOps, setfilter);
+AMI_ALIGN_LONG(struct NetdevNicOps, intr);
+AMI_ALIGN_LONG(struct NetdevNicOps, reset);
+AMI_ALIGN_LONG(struct NetdevNicOps, tick);
+AMI_ALIGN_LONG(struct NetdevNicOps, coherent);
+AMI_ALIGN_LONG(struct NetdevNicOps, detach);
 
 
 #if NETDEV_HAS_ZZ9000
@@ -281,7 +293,7 @@ struct NetdevNic
      * the shell beside rx/rx_arg; all_multi is the shell's "a range too wide
      * for the table" latch, refreshed with every filter rebuild.
      */
-    const struct NetdevMcast *mc_table;
+    const struct NetdevMcast *mc_table __attribute__((aligned(4)));
     UWORD               mc_max;
     UBYTE               all_multi;
     UBYTE               pad_mc;
@@ -329,12 +341,12 @@ struct NetdevNic
     ULONG               link_speed_limit;
     UWORD               ax_default_anar;
 
-    LONG                mem_start;
+    LONG                mem_start __attribute__((aligned(4)));
     LONG                mem_end;
     LONG                mem_size;
     LONG                mem_ring;
     UWORD               txb_cnt;
-    ULONG               serial;     /* the board's autoconfig serial number */
+    ULONG               serial __attribute__((aligned(4))); /* the board's autoconfig serial number */
     UWORD               txb_inuse;
 
     /* netdev_cache.c: cache_mode is what the attach probe selected;
@@ -345,7 +357,7 @@ struct NetdevNic
     UBYTE               cache_mode;
     UBYTE               cache_why;      /* NETDEV_CACHE_WHY_* */
     UBYTE               cache_pad;
-    ULONG               cache_board;
+    ULONG               cache_board __attribute__((aligned(4)));
     ULONG               cache_board_size;
 
     /*
@@ -406,7 +418,7 @@ struct NetdevNic
      * DMA; a shared-memory DP8390 board fills them with moves through its
      * mapped window, and that is the whole of the difference.
      */
-    VOID  (*read_hdr)(NetdevNic *nic, LONG src, NetdevRing *hdr);
+    VOID  (*read_hdr)(NetdevNic *nic, LONG src, NetdevRing *hdr) __attribute__((aligned(4)));
     LONG  (*ring_copy)(NetdevNic *nic, LONG src, UBYTE *dst, UWORD amount);
 
     /*
@@ -475,7 +487,7 @@ struct NetdevNic
      * separate so a failed first open can fall back to polling and a later
      * open can retry registration without rediscovering the device tree.
      */
-    ULONG               dt_irq;
+    ULONG               dt_irq __attribute__((aligned(4)));
     UBYTE               dt_irq_live;
     UBYTE               dt_mac[NETDEV_ADDR_LEN] __attribute__((aligned(2)));
     UBYTE               dt_mac_ok;      /* the tree carried local-mac-address */
@@ -486,7 +498,7 @@ struct NetdevNic
      * detach at expunge.  This is allocation ownership only: bus_master says
      * independently whether the chip can keep writing RAM through a reboot.
      */
-    APTR                core_mem;
+    APTR                core_mem __attribute__((aligned(4)));
     ULONG               core_size;
     APTR                core;           /* the core's own state inside it     */
     UBYTE               bus_master;
@@ -496,12 +508,67 @@ struct NetdevNic
      * after the shell's own so nothing learned by index moves.  core_stat_names
      * is NULL-terminated; core_stat[i] goes with core_stat_names[i].
      */
-    const char *const  *core_stat_names;
+    const char *const  *core_stat_names __attribute__((aligned(4)));
     ULONG               core_stat[NETDEV_CORE_STATS];
 
     /* One frame at a time comes out of the ring, into here. */
     ULONG               rxbuf[(NETDEV_RXBUF_MAX + 7) / 4];
 };
+
+AMI_ALIGN_LONG(struct NetdevNic, bus);
+AMI_ALIGN_LONG(struct NetdevNic, card);
+AMI_ALIGN_LONG(struct NetdevNic, ops);
+AMI_ALIGN_LONG(struct NetdevNic, board);
+AMI_ALIGN_LONG(struct NetdevNic, rx);
+AMI_ALIGN_LONG(struct NetdevNic, rx_arg);
+AMI_ALIGN_LONG(struct NetdevNic, isr);
+AMI_ALIGN_LONG(struct NetdevNic, rx_claim);
+AMI_ALIGN_LONG(struct NetdevNic, rx_claimed);
+AMI_ALIGN_LONG(struct NetdevNic, rx_verified);
+AMI_ALIGN_LONG(struct NetdevNic, tx_reclaim);
+AMI_ALIGN_LONG(struct NetdevNic, rx_capacity);
+AMI_ALIGN_LONG(struct NetdevNic, rx_pause_capacity);
+AMI_ALIGN_LONG(struct NetdevNic, tx_flush);
+#ifdef AMINETXDUO_TX_BATCH
+AMI_ALIGN_LONG(struct NetdevNic, tx_run);
+#endif
+AMI_ALIGN_LONG(struct NetdevNic, mc_table);
+AMI_ALIGN_LONG(struct NetdevNic, dma_pos);
+AMI_ALIGN_LONG(struct NetdevNic, link_bps);
+AMI_ALIGN_LONG(struct NetdevNic, set_link_speed);
+AMI_ALIGN_LONG(struct NetdevNic, link_speed_limit);
+AMI_ALIGN_LONG(struct NetdevNic, mem_start);
+AMI_ALIGN_LONG(struct NetdevNic, mem_end);
+AMI_ALIGN_LONG(struct NetdevNic, mem_size);
+AMI_ALIGN_LONG(struct NetdevNic, mem_ring);
+AMI_ALIGN_LONG(struct NetdevNic, serial);
+AMI_ALIGN_LONG(struct NetdevNic, cache_board);
+AMI_ALIGN_LONG(struct NetdevNic, cache_board_size);
+AMI_ALIGN_LONG(struct NetdevNic, tx_completed);
+AMI_ALIGN_LONG(struct NetdevNic, read_hdr);
+AMI_ALIGN_LONG(struct NetdevNic, ring_copy);
+AMI_ALIGN_LONG(struct NetdevNic, ring_copy_sum);
+AMI_ALIGN_LONG(struct NetdevNic, frame_at);
+AMI_ALIGN_LONG(struct NetdevNic, tx_at);
+AMI_ALIGN_LONG(struct NetdevNic, write_buf);
+AMI_ALIGN_LONG(struct NetdevNic, rx_packets);
+AMI_ALIGN_LONG(struct NetdevNic, tx_packets);
+AMI_ALIGN_LONG(struct NetdevNic, rx_errors);
+AMI_ALIGN_LONG(struct NetdevNic, tx_errors);
+AMI_ALIGN_LONG(struct NetdevNic, overruns);
+AMI_ALIGN_LONG(struct NetdevNic, tx_underruns);
+AMI_ALIGN_LONG(struct NetdevNic, collisions);
+AMI_ALIGN_LONG(struct NetdevNic, resets);
+AMI_ALIGN_LONG(struct NetdevNic, mac_group_fix);
+AMI_ALIGN_LONG(struct NetdevNic, mac_from_cis);
+AMI_ALIGN_LONG(struct NetdevNic, mac_derived);
+AMI_ALIGN_LONG(struct NetdevNic, dt_irq);
+AMI_ALIGN_LONG(struct NetdevNic, core_mem);
+AMI_ALIGN_LONG(struct NetdevNic, core_size);
+AMI_ALIGN_LONG(struct NetdevNic, core);
+AMI_ALIGN_LONG(struct NetdevNic, core_stat_names);
+AMI_ALIGN_LONG(struct NetdevNic, core_stat);
+AMI_ALIGN_LONG(struct NetdevNic, rxbuf);
 
 /*
  * Copy exactly `amount` bytes out of a ring into a caller-sized destination.

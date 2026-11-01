@@ -14,6 +14,7 @@
 #define AMINETXDUO_NETDEV_BUS_H
 
 #include <exec/types.h>
+#include "aminetxduo/align.h"
 
 struct NetdevBus;
 
@@ -39,6 +40,9 @@ struct NetdevBusOps
     VOID  (*wdata)(const NetdevBus *bus, const UBYTE *src, UWORD len);
 };
 
+AMI_ALIGN_LONG(struct NetdevBusOps, rdata);
+AMI_ALIGN_LONG(struct NetdevBusOps, wdata);
+
 struct NetdevBus
 {
     volatile UBYTE *nic;        /* register file, index 0 */
@@ -58,7 +62,7 @@ struct NetdevBus
      * EVEN offsets.  An odd register reached at an odd address in the even
      * window is not a register access on the real card.
      */
-    volatile UBYTE *odd;
+    volatile UBYTE *odd __attribute__((aligned(4)));
 
     /*
      * A 32-entry offset table when the register file is not evenly spaced, NULL
@@ -82,7 +86,7 @@ struct NetdevBus
      */
     UBYTE           getodd;
 
-    const struct NetdevBusOps *ops;
+    const struct NetdevBusOps *ops __attribute__((aligned(4)));
 
     /*
      * Where each of the 32 register indices is, settled once by
@@ -95,6 +99,15 @@ struct NetdevBus
      */
     volatile UBYTE *at[32];
 };
+
+AMI_ALIGN_LONG(struct NetdevBus, nic);
+AMI_ALIGN_LONG(struct NetdevBus, asic);
+AMI_ALIGN_LONG(struct NetdevBus, wide);
+AMI_ALIGN_LONG(struct NetdevBus, wide_write);
+AMI_ALIGN_LONG(struct NetdevBus, odd);
+AMI_ALIGN_LONG(struct NetdevBus, regmap);
+AMI_ALIGN_LONG(struct NetdevBus, ops);
+AMI_ALIGN_LONG(struct NetdevBus, at);
 
 /* The stride-driven implementation every card in the family uses today. */
 extern const struct NetdevBusOps netdev_bus_generic;

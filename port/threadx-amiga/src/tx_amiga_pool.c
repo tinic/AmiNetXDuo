@@ -79,6 +79,10 @@ struct _tx_amiga_adopt_waiter
     ULONG           aw_stamp;           /* what the Task looked like when it       */
 };                                      /* registered; see the wake below          */
 
+AMI_ALIGN_LONG(struct _tx_amiga_adopt_waiter, aw_task);
+AMI_ALIGN_LONG(struct _tx_amiga_adopt_waiter, aw_signal);
+AMI_ALIGN_LONG(struct _tx_amiga_adopt_waiter, aw_stamp);
+
 
 /* BSS, not an allocation made at kernel start.  Two reasons: a stale handle is
    range-checked against this array, and that check must be answerable when the

@@ -60,6 +60,7 @@
 #include "aminetxduo/netstatus.h"
 
 #include "aminetxduo/in6.h"
+#include "aminetxduo/align.h"
 
 /*
  * ABI constants: errno values here are 4.4BSD's, which the newlib <errno.h>
@@ -174,6 +175,10 @@ typedef struct
     ULONG   except[BSD_FD_WORDS];
 } BsdFdSets;
 
+AMI_ALIGN_LONG(BsdFdSets, read);
+AMI_ALIGN_LONG(BsdFdSets, write);
+AMI_ALIGN_LONG(BsdFdSets, except);
+
 /* NetX Duo's listen queue depth for a bound port. */
 #define BSD_MAX_BACKLOG          8
 
@@ -254,7 +259,7 @@ struct AmiSocketBase
     struct MinNode          sb_Node;        /* child link, master's list     */
 
     struct SignalSemaphore  sb_Lock;        /* guards the child list + stack */
-    struct MinList          sb_Children;
+    struct MinList          sb_Children __attribute__((aligned(4)));
     ULONG                   sb_StackRefs;   /* openers and explicit holds    */
     ULONG                   sb_TransientStackRefs; /* async workers, no base */
     ULONG                   sb_StackClosing; /* closers past the drain gate  */
@@ -265,7 +270,7 @@ struct AmiSocketBase
 
     /* Cross-base descriptor hand-off (handoff.c). Two tasks' sockets meet
      * only here, so it lives in the master base. */
-    struct MinList          sb_Handoffs;
+    struct MinList          sb_Handoffs __attribute__((aligned(4)));
     LONG                    sb_NextHandoffId;
 
     struct Task            *sb_Task;        /* the task that opened us       */
@@ -352,15 +357,15 @@ struct AmiSocketBase
 
     UBYTE                   sb_ErrPending;      /* bit 0 errno, bit 1 h_errno */
     BYTE                    sb_EventSignal;
-    ULONG                   sb_EventSigMask;
+    ULONG                   sb_EventSigMask __attribute__((aligned(4)));
 
     struct MsgPort          sb_TimerPort;
-    struct timerequest      sb_TimerReq;
+    struct timerequest      sb_TimerReq __attribute__((aligned(4)));
     BOOL                    sb_TimerOpen;
     BOOL                    sb_TimerArmed;      /* sb_TimerReq is out at timer.device */
     ULONG                   sb_TimerDue;        /* the tick it fires at, tx_time_get() */
     BYTE                    sb_TimerSignal;
-    ULONG                   sb_TimerSigMask;
+    ULONG                   sb_TimerSigMask __attribute__((aligned(4)));
 
     /* Scratch returned to callers by the non-reentrant entry points. Per
      * opener, never file statics: two tasks have two bases, and a shared
@@ -383,6 +388,67 @@ struct AmiSocketBase
        the profiler scans for it rather than being told an offset. */
     struct BsdProfSegTag    sb_ProfSegTag;
 };
+
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_Lib);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_SegList);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_SysBase);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_Master);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_Node);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_Lock);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_Children);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_StackRefs);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_TransientStackRefs);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_StackClosing);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_StackIp);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_StackPool);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_Handoffs);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_NextHandoffId);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_Task);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_TaskName);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_NxCaller);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_SelIn);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_SelReady);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_NxNest);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_NxTask);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_NxBroken);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_NxWaitPacket);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_Table);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_TableSize);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_Errno);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_ErrnoPtr);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_ErrnoSize);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_HErrno);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_HErrnoPtr);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_BreakMask);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_SigIOMask);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_SigUrgMask);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_SigEventMask);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_SigAddressChangeMask);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_CanShareBases);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_LogTag);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_LogStat);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_LogFacility);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_LogMask);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_FDCallback);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_ErrorHook);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_ErrPendingCode);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_HErrPendingCode);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_EventSigMask);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_TimerPort);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_TimerReq);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_TimerDue);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_TimerSigMask);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_ServEnt);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_ProtoEnt);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_NetEnt);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_ServCursor);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_ProtoCursor);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_NetCursor);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_HostEnt);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_HostAddrList);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_HostAliases);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_HostAddr);
+AMI_ALIGN_LONG(struct AmiSocketBase, sb_ProfSegTag);
 
 /* A library base is the lifetime token for the shared NX_IP.  Resolve through
    the master on every use: child copies intentionally carry no ownership
@@ -489,7 +555,7 @@ typedef struct AmiSocket
         NX_UDP_SOCKET   udp;
     } as_Nx;
 
-    struct AmiSocketBase   *as_Owner;       /* base to signal on events      */
+    struct AmiSocketBase   *as_Owner __attribute__((aligned(4))); /* base to signal on events */
     ULONG                   as_RefCount;    /* Dup2Socket / ObtainSocket     */
     ULONG                   as_Flags;
 
@@ -727,7 +793,7 @@ typedef struct AmiSocket
      * Orderly-close list. CloseSocket() sends a FIN and returns, so the
      * connection outlives the descriptor and usually the base as well. socket.c
      */
-    struct AmiSocket       *as_ClosingNext;
+    struct AmiSocket       *as_ClosingNext __attribute__((aligned(4)));
     ULONG                   as_ClosingAt;
 
     /*
@@ -745,6 +811,81 @@ typedef struct AmiSocket
     TX_SEMAPHORE            as_RawSem;
     BOOL                    as_RawSemOk;
 } AmiSocket;
+
+AMI_ALIGN_LONG(AmiSocket, as_Nx);
+AMI_ALIGN_LONG(AmiSocket, as_Owner);
+AMI_ALIGN_LONG(AmiSocket, as_RefCount);
+AMI_ALIGN_LONG(AmiSocket, as_Flags);
+AMI_ALIGN_LONG(AmiSocket, as_Protocol);
+AMI_ALIGN_LONG(AmiSocket, as_Events);
+AMI_ALIGN_LONG(AmiSocket, as_EventMask);
+AMI_ALIGN_LONG(AmiSocket, as_SoError);
+AMI_ALIGN_LONG(AmiSocket, as_ConnectMillis);
+AMI_ALIGN_LONG(AmiSocket, as_ConnectWaiter);
+AMI_ALIGN_LONG(AmiSocket, as_SettleWant);
+AMI_ALIGN_LONG(AmiSocket, as_SettleRtt);
+AMI_ALIGN_LONG(AmiSocket, as_SharePass);
+AMI_ALIGN_LONG(AmiSocket, as_ShareMillis);
+#ifdef NX_ENABLE_TCP_WINDOW_SCALING
+AMI_ALIGN_LONG(AmiSocket, as_RxShare);
+AMI_ALIGN_LONG(AmiSocket, as_RxAutoSeq);
+AMI_ALIGN_LONG(AmiSocket, as_RxAutoMillis);
+AMI_ALIGN_LONG(AmiSocket, as_RxAutoMark);
+#endif
+AMI_ALIGN_LONG(AmiSocket, as_LocalAddr);
+AMI_ALIGN_LONG(AmiSocket, as_LocalPort);
+AMI_ALIGN_LONG(AmiSocket, as_PeerAddr);
+AMI_ALIGN_LONG(AmiSocket, as_PeerPort);
+AMI_ALIGN_LONG(AmiSocket, as_LocalScopeId);
+AMI_ALIGN_LONG(AmiSocket, as_PeerScopeId);
+AMI_ALIGN_LONG(AmiSocket, as_LocalScopeEpoch);
+AMI_ALIGN_LONG(AmiSocket, as_PeerScopeEpoch);
+AMI_ALIGN_LONG(AmiSocket, as_RxPending);
+AMI_ALIGN_LONG(AmiSocket, as_RxOffset);
+AMI_ALIGN_LONG(AmiSocket, as_RcvTimeout);
+AMI_ALIGN_LONG(AmiSocket, as_SndTimeout);
+AMI_ALIGN_LONG(AmiSocket, as_RcvBuf);
+AMI_ALIGN_LONG(AmiSocket, as_SndBuf);
+AMI_ALIGN_LONG(AmiSocket, as_AutoTxDepth);
+AMI_ALIGN_LONG(AmiSocket, as_AutoTxNext);
+AMI_ALIGN_LONG(AmiSocket, as_LingerOn);
+AMI_ALIGN_LONG(AmiSocket, as_LingerTime);
+AMI_ALIGN_LONG(AmiSocket, as_Ttl);
+AMI_ALIGN_LONG(AmiSocket, as_Tos);
+AMI_ALIGN_LONG(AmiSocket, as_UserTimeout);
+AMI_ALIGN_LONG(AmiSocket, as_HdrIncl);
+#ifdef AMINETXDUO_MULTICAST
+AMI_ALIGN_LONG(AmiSocket, as_McastTtl);
+AMI_ALIGN_LONG(AmiSocket, as_McastLoop);
+AMI_ALIGN_LONG(AmiSocket, as_McastIf);
+AMI_ALIGN_LONG(AmiSocket, as_McastIfEpoch);
+#ifdef AMINETXDUO_IPV6
+AMI_ALIGN_LONG(AmiSocket, as_Mcast6Hops);
+AMI_ALIGN_LONG(AmiSocket, as_Mcast6If);
+AMI_ALIGN_LONG(AmiSocket, as_Mcast6IfEpoch);
+#endif
+#endif
+AMI_ALIGN_LONG(AmiSocket, as_CmsgWant);
+AMI_ALIGN_LONG(AmiSocket, as_CmsgSticky);
+#ifdef AMINETXDUO_IPV6
+AMI_ALIGN_LONG(AmiSocket, as_Icmp6Filter);
+#endif
+AMI_ALIGN_LONG(AmiSocket, as_Incoming);
+AMI_ALIGN_LONG(AmiSocket, as_IncomingNext);
+AMI_ALIGN_LONG(AmiSocket, as_Parent);
+AMI_ALIGN_LONG(AmiSocket, as_ListenPort);
+AMI_ALIGN_LONG(AmiSocket, as_Backlog);
+AMI_ALIGN_LONG(AmiSocket, as_IncomingCount);
+AMI_ALIGN_LONG(AmiSocket, as_ClosingNext);
+AMI_ALIGN_LONG(AmiSocket, as_ClosingAt);
+AMI_ALIGN_LONG(AmiSocket, as_DeferNext);
+AMI_ALIGN_LONG(AmiSocket, as_DeferRefs);
+AMI_ALIGN_LONG(AmiSocket, as_RawNext);
+AMI_ALIGN_LONG(AmiSocket, as_RawHead);
+AMI_ALIGN_LONG(AmiSocket, as_RawTail);
+AMI_ALIGN_LONG(AmiSocket, as_RawCount);
+AMI_ALIGN_LONG(AmiSocket, as_RawMax);
+AMI_ALIGN_LONG(AmiSocket, as_RawSem);
 
 /* ------------------------------------------------------------- prototypes,
  *

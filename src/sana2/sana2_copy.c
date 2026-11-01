@@ -481,6 +481,9 @@ typedef struct AmiGsoFields
     UBYTE   flags;
 } AmiGsoFields;
 
+AMI_ALIGN_LONG(AmiGsoFields, seq);
+AMI_ALIGN_LONG(AmiGsoFields, seg_len);
+
 static inline ULONG __attribute__((always_inline)) ami_sana2_gso_fold(ULONG sum)
 {
     while (sum >> 16)

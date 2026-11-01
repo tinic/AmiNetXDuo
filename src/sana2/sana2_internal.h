@@ -19,7 +19,33 @@
 #include "aminetxduo/compat.h"
 #include "aminetxduo/anxs2ext.h"
 #include "aminetxduo/anxnet.h"
+#include "aminetxduo/align.h"
 #include "aminetxduo/asm_abi.h"
+
+/* NetX Duo's packet, read and written on every frame. */
+AMI_ALIGN_LONG(NX_PACKET, nx_packet_pool_owner);
+#ifndef NX_DISABLE_PACKET_CHAIN
+AMI_ALIGN_LONG(NX_PACKET, nx_packet_next);
+#endif
+AMI_ALIGN_LONG(NX_PACKET, nx_packet_prepend_ptr);
+AMI_ALIGN_LONG(NX_PACKET, nx_packet_append_ptr);
+AMI_ALIGN_LONG(NX_PACKET, nx_packet_data_start);
+AMI_ALIGN_LONG(NX_PACKET, nx_packet_data_end);
+#ifndef NX_DISABLE_PACKET_CHAIN
+AMI_ALIGN_LONG(NX_PACKET, nx_packet_last);
+#endif
+AMI_ALIGN_LONG(NX_PACKET, nx_packet_queue_next);
+AMI_ALIGN_LONG(NX_PACKET, nx_packet_union_next);
+AMI_ALIGN_LONG(NX_PACKET, nx_packet_length);
+#ifndef NX_DISABLE_FRAGMENTATION
+AMI_ALIGN_LONG(NX_PACKET, nx_packet_reassembly_time);
+#endif
+AMI_ALIGN_LONG(NX_PACKET, nx_packet_address);
+AMI_ALIGN_LONG(NX_PACKET, nx_packet_ip_header);
+#ifdef NX_ENABLE_INTERFACE_CAPABILITY
+AMI_ALIGN_LONG(NX_PACKET, nx_packet_interface_capability_flag);
+#endif
+
 #ifdef AMINETXDUO_TCP_GSO
 #include "aminetxduo/tcpgso.h"
 #else
@@ -462,6 +488,9 @@ typedef struct AmiTxPending
     UWORD       gso;
 } AmiTxPending;
 
+AMI_ALIGN_LONG(AmiTxPending, packet);
+AMI_ALIGN_LONG(AmiTxPending, dst_lsw);
+
 /*
  * TCP GSO (aminetxduo/tcpgso.h): one block in flight as k child writes.  The
  * context owns the parent until the last child is done with it; each child
@@ -512,6 +541,10 @@ typedef struct AmiTxGso
 #endif
 } AmiTxGso;
 
+AMI_ALIGN_LONG(AmiTxGso, parent);
+AMI_ALIGN_LONG(AmiTxGso, cur_buf);
+AMI_ALIGN_LONG(AmiTxGso, cur_start);
+
 /* A repair record's one child, and whether it ends the payload. */
 #define AMI_SANA2_GSO_REPAIR    0x01
 #define AMI_SANA2_GSO_TAIL      0x02
@@ -551,6 +584,11 @@ typedef struct AmiAckHeld
     ULONG       dst_lsw;
     ULONG       gap;
 } AmiAckHeld;
+
+AMI_ALIGN_LONG(AmiAckHeld, packet);
+AMI_ALIGN_LONG(AmiAckHeld, dst_msw);
+AMI_ALIGN_LONG(AmiAckHeld, dst_lsw);
+AMI_ALIGN_LONG(AmiAckHeld, gap);
 
 /* Ticks to spin on a full TX ring before dropping the frame: the queue above
    replaced the spin in ami_sana2_tx_send(); ami_sana2_tx_drain() still waits
@@ -761,6 +799,17 @@ typedef struct AmiRxSlot
     BOOL        hdr_written;
 } AmiRxSlot;
 
+AMI_ALIGN_LONG(AmiRxSlot, req);
+AMI_ALIGN_LONG(AmiRxSlot, owner);
+AMI_ALIGN_LONG(AmiRxSlot, stats);
+AMI_ALIGN_LONG(AmiRxSlot, packet);
+AMI_ALIGN_LONG(AmiRxSlot, dst);
+AMI_ALIGN_LONG(AmiRxSlot, capacity);
+AMI_ALIGN_LONG(AmiRxSlot, copied);
+#ifdef AMINETXDUO_RX_VERIFY
+AMI_ALIGN_LONG(AmiRxSlot, sum);
+#endif
+
 /*
  * What the copy hook accumulated, lifted out of the slot.
  *
@@ -779,6 +828,9 @@ typedef struct AmiRxSum
     BOOL    summed;     /* whether the copy took the summing path          */
     UBYTE   flags;      /* the device's ANXD_S2_RXF_* byte, 0 = none      */
 } AmiRxSum;
+
+AMI_ALIGN_LONG(AmiRxSum, sum);
+AMI_ALIGN_LONG(AmiRxSum, copied);
 
 /*
  * THE READER: one task per interface, one reply port, three pipelines.
@@ -840,7 +892,7 @@ typedef struct AmiSana2Reader
        every drain so a driver holding frames for the reads just re-posted
        delivers them before the reader sleeps.  Replied on the port when a
        device does not honour IOF_QUICK, and taken back at once. */
-    struct IOSana2Req   poll;
+    struct IOSana2Req   poll __attribute__((aligned(4)));
 
     /* ACKPACE: the timer that wakes this reader when the next held
        acknowledgment is due and nothing else would (sana2_ackpace.c). */
@@ -850,6 +902,21 @@ typedef struct AmiSana2Reader
     BOOL                ack_tr_busy;
     ULONG               ack_mask;
 } AmiSana2Reader;
+
+AMI_ALIGN_LONG(AmiSana2Reader, iface);
+AMI_ALIGN_LONG(AmiSana2Reader, thread);
+AMI_ALIGN_LONG(AmiSana2Reader, ready);
+AMI_ALIGN_LONG(AmiSana2Reader, exited);
+AMI_ALIGN_LONG(AmiSana2Reader, stack);
+AMI_ALIGN_LONG(AmiSana2Reader, task);
+AMI_ALIGN_LONG(AmiSana2Reader, port);
+AMI_ALIGN_LONG(AmiSana2Reader, wake_mask);
+AMI_ALIGN_LONG(AmiSana2Reader, port_mem);
+AMI_ALIGN_LONG(AmiSana2Reader, reap_mask);
+AMI_ALIGN_LONG(AmiSana2Reader, poll);
+AMI_ALIGN_LONG(AmiSana2Reader, ack_port);
+AMI_ALIGN_LONG(AmiSana2Reader, ack_tr);
+AMI_ALIGN_LONG(AmiSana2Reader, ack_mask);
 
 /* One ring of reads for one Ethernet type. */
 /*
@@ -873,8 +940,12 @@ typedef struct AmiRxBatch
     UWORD               first;      /* its first slot in rx->slot[]        */
     UWORD               count;      /* slots it covers                     */
     BOOL                in_flight;  /* handed to the device                */
-    AnxdS2RxBatch      *rec;        /* ami_alloc'd, count cookies          */
+    AnxdS2RxBatch      *rec __attribute__((aligned(4))); /* ami_alloc'd, count cookies */
 } AmiRxBatch;
+
+AMI_ALIGN_LONG(AmiRxBatch, req);
+AMI_ALIGN_LONG(AmiRxBatch, owner);
+AMI_ALIGN_LONG(AmiRxBatch, rec);
 
 _Static_assert(__builtin_offsetof(AmiRxBatch, owner) ==
                __builtin_offsetof(AmiRxSlot, owner),
@@ -895,7 +966,7 @@ typedef struct AmiSana2Rx
                                            are with the reader             */
     UBYTE               pad0;
     UWORD               batch_slots;    /* slots covered by the batches     */
-    AmiRxBatch          batch[AMI_SANA2_RX_BATCHES];
+    AmiRxBatch          batch[AMI_SANA2_RX_BATCHES] __attribute__((aligned(4)));
 #endif
 
     /*
@@ -918,11 +989,11 @@ typedef struct AmiSana2Rx
      * AMI_SANA2_GRO_MAX, or when this drain ends.  Nothing waits past one pass
      * of the reader.
      */
-    NX_PACKET          *gro_head;
+    NX_PACKET          *gro_head __attribute__((aligned(4)));
     NX_PACKET          *gro_tail;
     AmiRxSum            gro_sum;
     UWORD               gro_count;      /* frames in the held run           */
-    ULONG               gro_addr[8];    /* source then destination           */
+    ULONG               gro_addr[8] __attribute__((aligned(4))); /* source then destination */
     ULONG               gro_ports;      /* source port << 16 | destination  */
     ULONG               gro_next;       /* next in-order TCP sequence        */
     ULONG               gro_ack;
@@ -940,6 +1011,23 @@ typedef struct AmiSana2Rx
     AmiRxSlot          *slot;
     UWORD               slot_alloc;     /* how many `slot` holds             */
 } AmiSana2Rx;
+
+AMI_ALIGN_LONG(AmiSana2Rx, iface);
+AMI_ALIGN_LONG(AmiSana2Rx, reader);
+AMI_ALIGN_LONG(AmiSana2Rx, packet_type);
+#ifdef AMINETXDUO_RX_BATCH
+AMI_ALIGN_LONG(AmiSana2Rx, batch);
+#endif
+#ifdef AMINETXDUO_GRO
+AMI_ALIGN_LONG(AmiSana2Rx, gro_head);
+AMI_ALIGN_LONG(AmiSana2Rx, gro_tail);
+AMI_ALIGN_LONG(AmiSana2Rx, gro_sum);
+AMI_ALIGN_LONG(AmiSana2Rx, gro_addr);
+AMI_ALIGN_LONG(AmiSana2Rx, gro_ports);
+AMI_ALIGN_LONG(AmiSana2Rx, gro_next);
+AMI_ALIGN_LONG(AmiSana2Rx, gro_ack);
+#endif
+AMI_ALIGN_LONG(AmiSana2Rx, slot);
 
 /* --------------------------------------------------------------- TX slots */
 
@@ -969,7 +1057,7 @@ typedef struct AmiTxSlot
     UBYTE               seg_index;
     UBYTE               seg_summed;
     UWORD               seg_sum;
-    NX_PACKET          *seg_buf;
+    NX_PACKET          *seg_buf __attribute__((aligned(4)));
     ULONG               seg_buf_off;
 #ifdef AMINETXDUO_TX_BATCH
     /* A batch write (ANXD_S2F_TX_BATCH): the block's children, 0 for any
@@ -989,6 +1077,18 @@ typedef struct AmiTxSlot
 #endif
 } AmiTxSlot;
 
+AMI_ALIGN_LONG(AmiTxSlot, req);
+AMI_ALIGN_LONG(AmiTxSlot, iface);
+AMI_ALIGN_LONG(AmiTxSlot, packet);
+AMI_ALIGN_LONG(AmiTxSlot, cursor);
+AMI_ALIGN_LONG(AmiTxSlot, cursor_off);
+AMI_ALIGN_LONG(AmiTxSlot, consumed);
+AMI_ALIGN_LONG(AmiTxSlot, total);
+#ifdef AMINETXDUO_TCP_GSO
+AMI_ALIGN_LONG(AmiTxSlot, seg_buf);
+AMI_ALIGN_LONG(AmiTxSlot, seg_buf_off);
+#endif
+
 /* ------------------------------------------------------------- interface */
 
 /*
@@ -1007,7 +1107,7 @@ struct AmiSana2If
     struct IOSana2Req   templ;
     BOOL                device_open;
     char                device[AMI_CFG_PATH_LEN];
-    ULONG               unit;
+    ULONG               unit __attribute__((aligned(4)));
     /* ANXD_S2_CARD_TYPE points here, not at the caller's AmiIfConfig: the tag
        list is an input to OpenDevice and outlives the open. */
     char                card[AMI_CFG_NAME_LEN];
@@ -1058,7 +1158,7 @@ struct AmiSana2If
     struct IOSana2Req   tx_flush_req;   /* ANXD_CMD_TX_FLUSH, reply on
                                            tx_port, told apart by command    */
 #endif
-    ULONG               rx_capacity;    /* data_end - dst: a pool constant   */
+    ULONG               rx_capacity __attribute__((aligned(4))); /* data_end - dst: a pool constant */
     /*
      * THE TWO raw_mode BRANCHES OF THE RE-ARM, DECIDED ONCE.
      *
@@ -1084,7 +1184,7 @@ struct AmiSana2If
        rx_capacity_at being the ThreadX tick of its last asking (0 at
        attach, so its first pass asks). */
     BOOL                rx_capacity_live;
-    ULONG               rx_capacity_at;
+    ULONG               rx_capacity_at __attribute__((aligned(4)));
     /* Set when an asking found a different answer, and once a second while
        a capacity is stated so the TCP layer re-shares it among the unit's
        connections; the reader's next drain clears it and calls the
@@ -1094,7 +1194,7 @@ struct AmiSana2If
        added since the TCP layer last asked (ami_sana2_take_overruns), and
        whether this interface fits long paths to the card after an overrun
        under an unfitted one (bsdsocket_window.h); cleared at attach. */
-    ULONG               overruns_seen;
+    ULONG               overruns_seen __attribute__((aligned(4)));
     ULONG               overruns_new;
     BOOL                wan_fitted;
     /* TCPGROWRTT in ms, 0 = BSD_TCP_WINDOW_GROW_RTT_MS (bsdsocket_window.h). */
@@ -1108,12 +1208,12 @@ struct AmiSana2If
        at the configured rate, 0 = off.  ack_next is the E-clock low word
        before which no held acknowledgment leaves; ack_task/ack_wake are the
        reader that releases them and the signal that wakes it. */
-    ULONG               ack_tpkb;
+    ULONG               ack_tpkb __attribute__((aligned(4)));
     AmiAckHeld          ackq[AMI_SANA2_ACKQ];
     UWORD               ackq_head;
     UWORD               ackq_count;
     BOOL                ack_clock;
-    ULONG               ack_next;
+    ULONG               ack_next __attribute__((aligned(4)));
     ULONG               ack_prev_ack;
     ULONG               ack_prev_edge;  /* ack + window, unscaled bytes      */
     ULONG               ack_prev_ports;
@@ -1122,7 +1222,7 @@ struct AmiSana2If
     /* The connection being paced, as an arriving segment names it (source
        port << 16 | destination port): with ACKPACE on, GROFRAMES applies
        to its runs alone, and every other connection keeps the full run. */
-    ULONG               ack_gro_ports;
+    ULONG               ack_gro_ports __attribute__((aligned(4)));
     struct Task        *ack_task;
     ULONG               ack_wake;
 
@@ -1132,7 +1232,7 @@ struct AmiSana2If
     UWORD               rx_want_ip;
     UWORD               rx_want_arp;
     UWORD               tx_slots;
-    ULONG               hw_type;
+    ULONG               hw_type __attribute__((aligned(4)));
     UWORD               addr_bits;
     UWORD               addr_bytes;     /* 6 for Ethernet, 0 if addressless */
 
@@ -1164,7 +1264,7 @@ struct AmiSana2If
        (ami_sana2_command()), each one allocation holding its request, reply
        port and statistics buffer.  Listed until the reply is taken off the
        port; while any is, the interface is kept as for offline_held. */
-    struct AmiSana2Cmd *cmd_held;
+    struct AmiSana2Cmd *cmd_held __attribute__((aligned(4)));
     UWORD               cmd_orphans;        /* times one was abandoned */
     /* Administrative state: the stack's intent, not the wire's condition.
        Only the driver entry's enable/disable cases write it. */
@@ -1185,7 +1285,7 @@ struct AmiSana2If
     BOOL                raw_tx_refused;
 
     /* NetX Duo binding. */
-    NX_IP              *ip;
+    NX_IP              *ip __attribute__((aligned(4)));
     UINT                index;
     NX_INTERFACE       *interface_ptr;
     /* Alias addresses (ConfigureNetInterface ALIASADDR): NetX Duo holds one
@@ -1197,13 +1297,13 @@ struct AmiSana2If
     UWORD               alias_count;
     /* The owning pool: every packet a slot pins came from here, and the
        retained sweep gives them back here, not to a later stack's pool. */
-    NX_PACKET_POOL     *pool;
+    NX_PACKET_POOL     *pool __attribute__((aligned(4)));
 
     /* TX ring. The reply port raises a signal on the reader that carries the
        reaping duty, and falls back to PA_IGNORE when no reader holds it. The
        sending thread never blocks on it either way. */
     struct MsgPort      tx_port;
-    AmiTxSlot           tx[AMI_SANA2_TX_SLOTS];
+    AmiTxSlot           tx[AMI_SANA2_TX_SLOTS] __attribute__((aligned(4)));
 
     /* Writes waiting for a slot, oldest at tx_pend_head, tx_pend_count of
        them; under Forbid() with the slots.  tx_kicking: one task at a time
@@ -1225,13 +1325,13 @@ struct AmiSana2If
     UWORD               tx_lim_limit;
     UWORD               tx_lim_target;      /* ms of drain */
     UWORD               tx_lim_clean;       /* ms of backlog without a dry run */
-    ULONG               tx_lim_posted;
+    ULONG               tx_lim_posted __attribute__((aligned(4)));
     ULONG               tx_lim_base;
     ULONG               tx_lim_tick;
     ULONG               tx_lim_ms;
     UBYTE               tx_lim_held;
     UBYTE               tx_lim_pad;
-    ULONG               tx_lim_stops;
+    ULONG               tx_lim_stops __attribute__((aligned(4)));
 
     /* GSO blocks in flight, under Forbid() with the slots: gso_count of
        them, NULL until GSO is first advertised; gso_next is where the
@@ -1251,7 +1351,7 @@ struct AmiSana2If
      * "PA_IGNORE because of a send", never "because no reader is bound", and
      * every transition of it happens under the same Disable() as the port flags.
      */
-    TX_TIMER            tx_lazy_timer;
+    TX_TIMER            tx_lazy_timer __attribute__((aligned(4)));
     BOOL                tx_lazy_timer_up;
     volatile BOOL       tx_lazy_parked;
     volatile ULONG      tx_lazy_last_send;
@@ -1285,6 +1385,64 @@ struct AmiSana2If
     ULONG               probe_dev_tx;
 #endif
 };
+
+AMI_ALIGN_LONG(struct AmiSana2If, templ);
+AMI_ALIGN_LONG(struct AmiSana2If, unit);
+AMI_ALIGN_LONG(struct AmiSana2If, buffer_tags);
+AMI_ALIGN_LONG(struct AmiSana2If, link_speed_request);
+AMI_ALIGN_LONG(struct AmiSana2If, extension);
+#ifdef AMINETXDUO_TX_RUN
+AMI_ALIGN_LONG(struct AmiSana2If, tx_holder);
+AMI_ALIGN_LONG(struct AmiSana2If, tx_flush_req);
+#endif
+AMI_ALIGN_LONG(struct AmiSana2If, rx_capacity);
+AMI_ALIGN_LONG(struct AmiSana2If, rx_dst_off);
+AMI_ALIGN_LONG(struct AmiSana2If, mtu);
+AMI_ALIGN_LONG(struct AmiSana2If, bps);
+AMI_ALIGN_LONG(struct AmiSana2If, hw_rx_bytes);
+AMI_ALIGN_LONG(struct AmiSana2If, rx_capacity_at);
+AMI_ALIGN_LONG(struct AmiSana2If, overruns_seen);
+AMI_ALIGN_LONG(struct AmiSana2If, overruns_new);
+AMI_ALIGN_LONG(struct AmiSana2If, tcp_wan_window);
+AMI_ALIGN_LONG(struct AmiSana2If, ack_tpkb);
+AMI_ALIGN_LONG(struct AmiSana2If, ackq);
+AMI_ALIGN_LONG(struct AmiSana2If, ack_next);
+AMI_ALIGN_LONG(struct AmiSana2If, ack_prev_ack);
+AMI_ALIGN_LONG(struct AmiSana2If, ack_prev_edge);
+AMI_ALIGN_LONG(struct AmiSana2If, ack_prev_ports);
+AMI_ALIGN_LONG(struct AmiSana2If, ack_ws_ports);
+AMI_ALIGN_LONG(struct AmiSana2If, ack_gro_ports);
+AMI_ALIGN_LONG(struct AmiSana2If, ack_task);
+AMI_ALIGN_LONG(struct AmiSana2If, ack_wake);
+AMI_ALIGN_LONG(struct AmiSana2If, hw_type);
+AMI_ALIGN_LONG(struct AmiSana2If, offline_req);
+AMI_ALIGN_LONG(struct AmiSana2If, offline_port);
+AMI_ALIGN_LONG(struct AmiSana2If, cmd_held);
+AMI_ALIGN_LONG(struct AmiSana2If, stats_epoch);
+AMI_ALIGN_LONG(struct AmiSana2If, ip);
+AMI_ALIGN_LONG(struct AmiSana2If, index);
+AMI_ALIGN_LONG(struct AmiSana2If, interface_ptr);
+AMI_ALIGN_LONG(struct AmiSana2If, alias);
+AMI_ALIGN_LONG(struct AmiSana2If, pool);
+AMI_ALIGN_LONG(struct AmiSana2If, tx_port);
+AMI_ALIGN_LONG(struct AmiSana2If, tx);
+AMI_ALIGN_LONG(struct AmiSana2If, tx_pend);
+AMI_ALIGN_LONG(struct AmiSana2If, tx_lim_posted);
+AMI_ALIGN_LONG(struct AmiSana2If, tx_lim_base);
+AMI_ALIGN_LONG(struct AmiSana2If, tx_lim_tick);
+AMI_ALIGN_LONG(struct AmiSana2If, tx_lim_ms);
+AMI_ALIGN_LONG(struct AmiSana2If, tx_lim_stops);
+#ifdef AMINETXDUO_TCP_GSO
+AMI_ALIGN_LONG(struct AmiSana2If, gso);
+#endif
+#ifdef AMINETXDUO_TX_LAZY_COLLECT
+AMI_ALIGN_LONG(struct AmiSana2If, tx_lazy_timer);
+AMI_ALIGN_LONG(struct AmiSana2If, tx_lazy_last_send);
+#endif
+AMI_ALIGN_LONG(struct AmiSana2If, reader);
+AMI_ALIGN_LONG(struct AmiSana2If, rx);
+AMI_ALIGN_LONG(struct AmiSana2If, retained_next);
+AMI_ALIGN_LONG(struct AmiSana2If, stats);
 
 /* The private extension record's version-3 fields, whichever record the
    interface carries: the batch three appended, or the record alone. */

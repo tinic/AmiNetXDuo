@@ -41,6 +41,7 @@
 /* ------------------------------------------------------------- tunables, */
 
 #include "../thread_priorities.h"
+#include "aminetxduo/align.h"
 
 #define AMI_IP_STACK_SIZE           4096
 #define AMI_ARP_CACHE_SIZE          1024
@@ -179,6 +180,9 @@ typedef struct AmiNsClientPoolBlock
     ULONG memory[1];
 } AmiNsClientPoolBlock;
 
+AMI_ALIGN_LONG(AmiNsClientPoolBlock, pool);
+AMI_ALIGN_LONG(AmiNsClientPoolBlock, memory);
+
 UINT ami_ns_client_pool_create(AmiNsClientPoolBlock **owner,
                                CHAR *name, ULONG payload, ULONG memory_bytes);
 VOID ami_ns_client_pool_delete(AmiNsClientPoolBlock **owner);
@@ -212,24 +216,24 @@ struct AmiNetStack
 
     AmiConfig           ns_Config;
 
-    NX_PACKET_POOL      ns_Pool;
+    NX_PACKET_POOL      ns_Pool __attribute__((aligned(4)));
     BOOL                ns_PoolCreated;
-    APTR                ns_PoolMemory;
+    APTR                ns_PoolMemory __attribute__((aligned(4)));
     ULONG               ns_PoolBytes;
     ULONG               ns_PoolPackets;
 
     NX_IP               ns_Ip;
-    APTR                ns_IpStack;
+    APTR                ns_IpStack __attribute__((aligned(4)));
     APTR                ns_ArpCache;
     BOOL                ns_IpCreated;
 
-    AmiSana2If         *ns_Iface[AMI_CFG_MAX_ATTACHED];
+    AmiSana2If         *ns_Iface[AMI_CFG_MAX_ATTACHED] __attribute__((aligned(4)));
 
     /* Operations that resolved an interface name and still use its numeric
        NetX slot.  A claimed slot cannot be removed and reused underneath the
        operation; ami_ns_lock serialises updates to this table. */
     UWORD               ns_IfaceClaims[AMI_CFG_MAX_ATTACHED];
-    ULONG               ns_IfaceEpoch[AMI_CFG_MAX_ATTACHED];
+    ULONG               ns_IfaceEpoch[AMI_CFG_MAX_ATTACHED] __attribute__((aligned(4)));
 
     /* MDNS= for each interface, by NX interface index rather than by
        configuration index: ns_Iface[] is filled in open order and an interface
@@ -261,7 +265,7 @@ struct AmiNetStack
      * order irrelevant.  The first interface explicitly named by
      * AddNetInterface replaces the boot-time slot-0 preference once.
      */
-    ULONG               ns_DhcpGateway[AMI_CFG_MAX_ATTACHED];
+    ULONG               ns_DhcpGateway[AMI_CFG_MAX_ATTACHED] __attribute__((aligned(4)));
     ULONG               ns_GatewayFixed;
     UWORD               ns_GatewayPrimary;
     BOOL                ns_GatewayPrimaryNamed;
@@ -269,8 +273,8 @@ struct AmiNetStack
     UBYTE               ns_ConfigRouteInstalled[AMI_CFG_MAX_STATIC_ROUTES];
 
 #ifdef AMINETXDUO_DHCP
-    NX_DHCP             ns_Dhcp;
-    AmiNsClientPoolBlock *ns_DhcpPool;
+    NX_DHCP             ns_Dhcp __attribute__((aligned(4)));
+    AmiNsClientPoolBlock *ns_DhcpPool __attribute__((aligned(4)));
     BOOL                ns_DhcpCreated;
 
     /*
@@ -292,13 +296,13 @@ struct AmiNetStack
        callbacks report only the new value, so the previous one is kept here to
        let the notifications report transitions such as a lost lease. */
     UBYTE               ns_DhcpState[AMI_CFG_MAX_ATTACHED];
-    ULONG               ns_LastAddress[AMI_CFG_MAX_ATTACHED];
+    ULONG               ns_LastAddress[AMI_CFG_MAX_ATTACHED] __attribute__((aligned(4)));
     AmiNsDhcpHostnameState ns_DhcpHostname;
 
     /* Another host answered an ARP for an address of this machine.  Counted
        rather than only logged, because the log is off in a shipping build and
        this is the one fault where the machine works and the network does not. */
-    ULONG               ns_AddrConflicts;
+    ULONG               ns_AddrConflicts __attribute__((aligned(4)));
     ULONG               ns_LastConflictAddr;
 
     /* Posted by ami_ns_address_changed() when an interface gains or loses an
@@ -309,10 +313,10 @@ struct AmiNetStack
     /* The one-second heartbeat that carries ami_second_notify().  The flag is
        needed because three of ami_ns_destroy()'s six call sites run before
        ThreadX exists, so the delete cannot be inferred from position. */
-    TX_TIMER            ns_Second;
+    TX_TIMER            ns_Second __attribute__((aligned(4)));
     BOOL                ns_SecondCreated;
 
-    NX_AUTO_IP          ns_AutoIp;
+    NX_AUTO_IP          ns_AutoIp __attribute__((aligned(4)));
     APTR                ns_AutoIpStack;
     BOOL                ns_AutoIpCreated;
     BOOL                ns_AutoIpRunning;
@@ -324,7 +328,7 @@ struct AmiNetStack
     /* A BOUND notification can run on the DHCP client's own ThreadX task.
        It records the interface here; the next caller-thread resolver
        operation imports option 6 under the ordinary caller bracket. */
-    AmiNsDnsPending     ns_DhcpDnsPending;
+    AmiNsDnsPending     ns_DhcpDnsPending __attribute__((aligned(4)));
     AmiNsDhcpDnsLease   ns_DhcpDnsLease;
     AmiNsDhcpSearchLease ns_DhcpSearchLease;
     AmiNsDhcpDomainState ns_DhcpDomain;
@@ -356,7 +360,7 @@ struct AmiNetStack
      * ends of the buffer and m68k gives a UCHAR array no alignment.
      */
     NX_MDNS             ns_Mdns;
-    APTR                ns_MdnsStack;
+    APTR                ns_MdnsStack __attribute__((aligned(4)));
     BOOL                ns_MdnsCreated;
     BOOL                ns_MdnsClaimed;     /* probing finished, name is ours */
     char                ns_MdnsLabel[NX_MDNS_HOST_NAME_MAX];  /* as configured */
@@ -374,8 +378,8 @@ struct AmiNetStack
      * while both stacks are allocated, because they exist only on a machine
      * that asked for DHCPv6 and one that did not must not carry 6 KB.
      */
-    NX_DHCPV6           ns_Dhcpv6;
-    APTR                ns_Dhcpv6Stack;
+    NX_DHCPV6           ns_Dhcpv6 __attribute__((aligned(4)));
+    APTR                ns_Dhcpv6Stack __attribute__((aligned(4)));
     APTR                ns_Dhcpv6WorkStack;
     TX_THREAD           ns_Dhcpv6Work;
     TX_EVENT_FLAGS_GROUP ns_Dhcpv6Events;
@@ -417,6 +421,54 @@ struct AmiNetStack
     UBYTE               ns_Dhcpv6State;     /* NX_DHCPV6_STATE_*             */
 #endif
 };
+
+AMI_ALIGN_LONG(struct AmiNetStack, ns_Refs);
+AMI_ALIGN_LONG(struct AmiNetStack, ns_Config);
+AMI_ALIGN_LONG(struct AmiNetStack, ns_Pool);
+AMI_ALIGN_LONG(struct AmiNetStack, ns_PoolMemory);
+AMI_ALIGN_LONG(struct AmiNetStack, ns_PoolBytes);
+AMI_ALIGN_LONG(struct AmiNetStack, ns_PoolPackets);
+AMI_ALIGN_LONG(struct AmiNetStack, ns_Ip);
+AMI_ALIGN_LONG(struct AmiNetStack, ns_IpStack);
+AMI_ALIGN_LONG(struct AmiNetStack, ns_ArpCache);
+AMI_ALIGN_LONG(struct AmiNetStack, ns_Iface);
+AMI_ALIGN_LONG(struct AmiNetStack, ns_IfaceEpoch);
+AMI_ALIGN_LONG(struct AmiNetStack, ns_DhcpGateway);
+AMI_ALIGN_LONG(struct AmiNetStack, ns_GatewayFixed);
+#ifdef AMINETXDUO_DHCP
+AMI_ALIGN_LONG(struct AmiNetStack, ns_Dhcp);
+AMI_ALIGN_LONG(struct AmiNetStack, ns_DhcpPool);
+#endif
+AMI_ALIGN_LONG(struct AmiNetStack, ns_LastAddress);
+AMI_ALIGN_LONG(struct AmiNetStack, ns_AddrConflicts);
+AMI_ALIGN_LONG(struct AmiNetStack, ns_LastConflictAddr);
+AMI_ALIGN_LONG(struct AmiNetStack, ns_AddrArrived);
+AMI_ALIGN_LONG(struct AmiNetStack, ns_Second);
+AMI_ALIGN_LONG(struct AmiNetStack, ns_AutoIp);
+AMI_ALIGN_LONG(struct AmiNetStack, ns_AutoIpStack);
+AMI_ALIGN_LONG(struct AmiNetStack, ns_Dns);
+AMI_ALIGN_LONG(struct AmiNetStack, ns_DnsPool);
+AMI_ALIGN_LONG(struct AmiNetStack, ns_DhcpDnsPending);
+AMI_ALIGN_LONG(struct AmiNetStack, ns_DhcpDnsLease);
+#ifdef AMINETXDUO_IPV6
+AMI_ALIGN_LONG(struct AmiNetStack, ns_Ra);
+#endif
+#ifdef NX_DNS_CACHE_ENABLE
+AMI_ALIGN_LONG(struct AmiNetStack, ns_DnsCache);
+#endif
+#ifdef AMINETXDUO_MDNS
+AMI_ALIGN_LONG(struct AmiNetStack, ns_Mdns);
+AMI_ALIGN_LONG(struct AmiNetStack, ns_MdnsStack);
+#endif
+#ifdef AMINETXDUO_IPV6
+AMI_ALIGN_LONG(struct AmiNetStack, ns_Dhcpv6);
+AMI_ALIGN_LONG(struct AmiNetStack, ns_Dhcpv6Stack);
+AMI_ALIGN_LONG(struct AmiNetStack, ns_Dhcpv6WorkStack);
+AMI_ALIGN_LONG(struct AmiNetStack, ns_Dhcpv6Work);
+AMI_ALIGN_LONG(struct AmiNetStack, ns_Dhcpv6Events);
+AMI_ALIGN_LONG(struct AmiNetStack, ns_Dhcpv6InformSeen);
+AMI_ALIGN_LONG(struct AmiNetStack, ns_Dhcpv6Dns);
+#endif
 
 /* Persistent DEVS:Internet/routes, separate so netstack.c remains within the
    GCC analyzer's per-translation-unit complexity budget. */

@@ -13,6 +13,7 @@
 
 #include "tx_api.h"
 #include "nx_api.h"
+#include "aminetxduo/align.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -97,6 +98,12 @@ typedef struct AmiNetCaller
     ULONG        nc_Signal;     /* cached thread's run signal, owner frees   */
     ULONG        nc_BreakMask;  /* ends a cached enter's wait for a slot     */
 } AmiNetCaller;
+
+AMI_ALIGN_LONG(AmiNetCaller, nc_Thread);
+AMI_ALIGN_LONG(AmiNetCaller, nc_Gen);
+AMI_ALIGN_LONG(AmiNetCaller, nc_Task);
+AMI_ALIGN_LONG(AmiNetCaller, nc_Signal);
+AMI_ALIGN_LONG(AmiNetCaller, nc_BreakMask);
 
 LONG ami_netstack_enter(AmiNetCaller *caller);
 VOID ami_netstack_leave(AmiNetCaller *caller);

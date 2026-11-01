@@ -61,6 +61,7 @@ static inline VOID nd_remove(struct Node *n)
 #include "netdev_nic.h"
 #include "netdev_mcast.h"
 #include "sana2_device.h"
+#include "aminetxduo/align.h"
 
 /* Independent of the stack's interface slots: full/minimal/fat retain four
    hardware units, while micro's device images reserve just one. */
@@ -75,8 +76,11 @@ typedef struct NetdevTrack
 {
     ULONG                       type;
     UWORD                       used;
-    struct Sana2PacketTypeStats st;
+    struct Sana2PacketTypeStats st __attribute__((aligned(4)));
 } NetdevTrack;
+
+AMI_ALIGN_LONG(NetdevTrack, type);
+AMI_ALIGN_LONG(NetdevTrack, st);
 
 /*
  * One per OpenDevice().  SANA-II reserves ios2_BufferManagement for this
@@ -113,8 +117,8 @@ typedef struct NetdevOpener
     UBYTE               op_Pad;
 
     struct List         op_Reads;
-    struct List         op_Orphans;
-    struct List         op_Events;
+    struct List         op_Orphans __attribute__((aligned(4)));
+    struct List         op_Events __attribute__((aligned(4)));
 
     NetdevTrack         op_Track[NETDEV_TRACK_MAX];
     UWORD               op_TrackHigh;   /* one past the highest used slot */
@@ -126,10 +130,32 @@ typedef struct NetdevOpener
        remembered and is dropped the old way.  op_ReadTypeLast makes the
        once-a-frame note one compare in the steady state. */
 #define NETDEV_READ_TYPES   4
-    ULONG               op_ReadTypes[NETDEV_READ_TYPES];
+    ULONG               op_ReadTypes[NETDEV_READ_TYPES] __attribute__((aligned(4)));
     ULONG               op_ReadTypeLast;
     UWORD               op_ReadTypeCount;
 } NetdevOpener;
+
+AMI_ALIGN_LONG(NetdevOpener, op_Node);
+AMI_ALIGN_LONG(NetdevOpener, op_Hw);
+AMI_ALIGN_LONG(NetdevOpener, op_CopyTo);
+AMI_ALIGN_LONG(NetdevOpener, op_CopyFrom);
+AMI_ALIGN_LONG(NetdevOpener, op_Filter);
+AMI_ALIGN_LONG(NetdevOpener, op_RxDirect);
+AMI_ALIGN_LONG(NetdevOpener, op_RxFilled);
+AMI_ALIGN_LONG(NetdevOpener, op_TxFlags);
+#ifdef AMINETXDUO_TX_BATCH
+AMI_ALIGN_LONG(NetdevOpener, op_TxBatch);
+AMI_ALIGN_LONG(NetdevOpener, op_TxChild);
+AMI_ALIGN_LONG(NetdevOpener, op_TxPosted);
+#endif
+AMI_ALIGN_LONG(NetdevOpener, op_Extensions);
+AMI_ALIGN_LONG(NetdevOpener, op_LinkSpeed);
+AMI_ALIGN_LONG(NetdevOpener, op_Reads);
+AMI_ALIGN_LONG(NetdevOpener, op_Orphans);
+AMI_ALIGN_LONG(NetdevOpener, op_Events);
+AMI_ALIGN_LONG(NetdevOpener, op_Track);
+AMI_ALIGN_LONG(NetdevOpener, op_ReadTypes);
+AMI_ALIGN_LONG(NetdevOpener, op_ReadTypeLast);
 
 static inline VOID netdev_note_read_type(NetdevOpener *op, ULONG type)
 {
@@ -211,7 +237,7 @@ typedef struct NetdevUnit
 {
     /* First by design: Exec and SANA-II callers receive this shared Unit. */
     struct Unit                  nu_ExecUnit;
-    NetdevNic                   nu_Nic;
+    NetdevNic                   nu_Nic __attribute__((aligned(4)));
     struct NetdevDevice        *nu_Dev;
     UWORD                       nu_Openers;
 
@@ -220,12 +246,12 @@ typedef struct NetdevUnit
     UBYTE                       nu_IntrAdded;
     UBYTE                       nu_Pad;
 
-    struct List                 nu_OpenerList;
-    struct List                 nu_Writes;      /* CMD_WRITE awaiting a slot */
+    struct List                 nu_OpenerList __attribute__((aligned(4)));
+    struct List                 nu_Writes __attribute__((aligned(4))); /* CMD_WRITE awaiting a slot */
 
-    struct Interrupt            nu_Intr;      /* INT2, the card               */
-    struct Interrupt            nu_Tick;      /* INT3 vertical blank, watchdog */
-    struct Interrupt            nu_Soft;      /* the bottom half, nic->isr cores */
+    struct Interrupt            nu_Intr __attribute__((aligned(4))); /* INT2, the card */
+    struct Interrupt            nu_Tick __attribute__((aligned(4))); /* INT3 vertical blank, watchdog */
+    struct Interrupt            nu_Soft __attribute__((aligned(4))); /* the bottom half, nic->isr cores */
     UBYTE                       nu_TxBuilding; /* a task owns nu_TxBuf         */
     UBYTE                      *nu_TxAt;      /* where the frame was built    */
     UWORD                       nu_TxStall;   /* blanks with a transmit stuck  */
@@ -235,12 +261,12 @@ typedef struct NetdevUnit
     ULONG                       nu_RxPolls;     /* ANXD_CMD_RX_POLL received    */
     ULONG                       nu_RxPollsHeld; /* of those, with frames held   */
     UWORD                       nu_IntSilent; /* blanks since a claimed one    */
-    ULONG                       nu_RxDirect;  /* completed direct RX fills      */
+    ULONG                       nu_RxDirect __attribute__((aligned(4))); /* completed direct RX fills */
     ULONG                       nu_RxBatches; /* ANXD_CMD_RX_BATCH replies       */
     UWORD                       nu_RxKickWait;/* blanks toward an RX re-roll   */
     UWORD                       nu_RxKicks;   /* deaf-boot resets performed    */
     volatile UBYTE              nu_InIsr;     /* interrupt server on the chip  */
-    ULONG                       nu_TxProgress;/* last completion the tick saw  */
+    ULONG                       nu_TxProgress __attribute__((aligned(4))); /* last completion the tick saw */
 
     NetdevMcast                 nu_Mcast[NETDEV_MCAST_MAX];
     ULONG                       nu_McastFull;   /* joins the table could not hold */
@@ -269,7 +295,7 @@ typedef struct NetdevUnit
      * the opener's record; NULL when no batch is paused.  Every path that
      * takes a write off nu_Writes clears it (netdev_tx_forget).
      */
-    struct IOSana2Req          *nu_TxBatchIo;
+    struct IOSana2Req          *nu_TxBatchIo __attribute__((aligned(4)));
     AnxdS2TxBatchInfo           nu_TxBatchInfo;
     UWORD                       nu_TxBatchNext;
     /* A pump pass stopped at its frame budget with writes waiting and a
@@ -285,12 +311,38 @@ typedef struct NetdevUnit
     ULONG                       nu_PumpNudges;    /* passes owed and Caused */
 
 #endif /* AMINETXDUO_TX_BATCH */
-    struct Sana2DeviceStats     nu_Stats;
+    struct Sana2DeviceStats     nu_Stats __attribute__((aligned(4)));
 
     /* Frames are staged here on the way out, 4-aligned for the long window. */
     ULONG                       nu_TxBuf[(NETDEV_FRAME_MAX + 7) / 4]
                                 __attribute__((aligned(4)));
 } NetdevUnit;
+
+AMI_ALIGN_LONG(NetdevUnit, nu_ExecUnit);
+AMI_ALIGN_LONG(NetdevUnit, nu_Nic);
+AMI_ALIGN_LONG(NetdevUnit, nu_Dev);
+AMI_ALIGN_LONG(NetdevUnit, nu_OpenerList);
+AMI_ALIGN_LONG(NetdevUnit, nu_Writes);
+AMI_ALIGN_LONG(NetdevUnit, nu_Intr);
+AMI_ALIGN_LONG(NetdevUnit, nu_Tick);
+AMI_ALIGN_LONG(NetdevUnit, nu_Soft);
+AMI_ALIGN_LONG(NetdevUnit, nu_TxAt);
+AMI_ALIGN_LONG(NetdevUnit, nu_IntSeen);
+AMI_ALIGN_LONG(NetdevUnit, nu_TickPolls);
+AMI_ALIGN_LONG(NetdevUnit, nu_RxPolls);
+AMI_ALIGN_LONG(NetdevUnit, nu_RxPollsHeld);
+AMI_ALIGN_LONG(NetdevUnit, nu_RxDirect);
+AMI_ALIGN_LONG(NetdevUnit, nu_RxBatches);
+AMI_ALIGN_LONG(NetdevUnit, nu_TxProgress);
+AMI_ALIGN_LONG(NetdevUnit, nu_McastFull);
+#ifdef AMINETXDUO_TX_BATCH
+AMI_ALIGN_LONG(NetdevUnit, nu_TxBatchIo);
+AMI_ALIGN_LONG(NetdevUnit, nu_TxBatches);
+AMI_ALIGN_LONG(NetdevUnit, nu_TxBatchPauses);
+AMI_ALIGN_LONG(NetdevUnit, nu_PumpNudges);
+#endif
+AMI_ALIGN_LONG(NetdevUnit, nu_Stats);
+AMI_ALIGN_LONG(NetdevUnit, nu_TxBuf);
 
 /*
  * Let tools/profiler/Profile recover this device's LoadSeg hunks.  A device
@@ -318,7 +370,7 @@ _Static_assert(sizeof(NetdevProfSegTag) == 5u * sizeof(ULONG),
 typedef struct NetdevDevice
 {
     struct Device       nd_Device;
-    struct Library     *nd_ExpansionBase;
+    struct Library     *nd_ExpansionBase __attribute__((aligned(4)));
     BPTR                nd_SegList;
     NetdevProfSegTag    nd_ProfSegTag;
     UWORD               nd_UnitCount;
@@ -340,7 +392,7 @@ typedef struct NetdevDevice
      * change the one CardHandle and the one PCMCIA unit, so hardware access and
      * publication of the result are one semaphore-protected transaction.
      */
-    struct SignalSemaphore nd_PcmciaLock;
+    struct SignalSemaphore nd_PcmciaLock __attribute__((aligned(4)));
 
     /*
      * OpenDevice() enters Open under Forbid, but a PCMCIA claim or a contended
@@ -349,10 +401,19 @@ typedef struct NetdevDevice
      * cache lease, opener publication, interrupt-server lifetime and stop.
      * Interrupt-facing lists still use Disable() separately.
      */
-    struct SignalSemaphore nd_LifecycleLock;
+    struct SignalSemaphore nd_LifecycleLock __attribute__((aligned(4)));
 
     NetdevUnit          nd_Units[NETDEV_MAX_UNITS];
 } NetdevDevice;
+
+AMI_ALIGN_LONG(NetdevDevice, nd_Device);
+AMI_ALIGN_LONG(NetdevDevice, nd_ExpansionBase);
+AMI_ALIGN_LONG(NetdevDevice, nd_SegList);
+AMI_ALIGN_LONG(NetdevDevice, nd_ProfSegTag);
+AMI_ALIGN_LONG(NetdevDevice, nd_Diag);
+AMI_ALIGN_LONG(NetdevDevice, nd_PcmciaLock);
+AMI_ALIGN_LONG(NetdevDevice, nd_LifecycleLock);
+AMI_ALIGN_LONG(NetdevDevice, nd_Units);
 
 /*
  * Open() replaces the buffer-management tag list with the per-open cookie,

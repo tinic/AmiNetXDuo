@@ -10,6 +10,7 @@
 #include "aminetxduo/budget.h"
 #include "aminetxduo/sana2.h"
 #include "aminetxduo/tcpgso.h"
+#include "aminetxduo/align.h"
 #include "netmonitor.h"
 #include "packet_extract.h"
 #include "udp_queue.h"
@@ -58,6 +59,11 @@ typedef struct BsdIovCursor
     LONG                ic_Index;
     ULONG               ic_Offset;
 } BsdIovCursor;
+
+AMI_ALIGN_LONG(BsdIovCursor, ic_Vec);
+AMI_ALIGN_LONG(BsdIovCursor, ic_Count);
+AMI_ALIGN_LONG(BsdIovCursor, ic_Index);
+AMI_ALIGN_LONG(BsdIovCursor, ic_Offset);
 
 static VOID bsd_iov_init(BsdIovCursor *cur, const struct iovec *iov, LONG count)
 {
@@ -253,6 +259,10 @@ typedef struct
     AmiSana2If     *run;
 } BsdAllocArgs;
 
+AMI_ALIGN_LONG(BsdAllocArgs, pool);
+AMI_ALIGN_LONG(BsdAllocArgs, packet);
+AMI_ALIGN_LONG(BsdAllocArgs, run);
+
 static UINT bsd_alloc_once(VOID *arg, ULONG wait)
 {
     BsdAllocArgs *a = (BsdAllocArgs *)arg;
@@ -277,6 +287,10 @@ typedef struct
     NX_PACKET     *packet;
     AmiSana2If    *run;
 } BsdSendArgs;
+
+AMI_ALIGN_LONG(BsdSendArgs, tcp);
+AMI_ALIGN_LONG(BsdSendArgs, packet);
+AMI_ALIGN_LONG(BsdSendArgs, run);
 
 /*
  * _nx_ and not nx_, as bsd_recv_once() is: bsd_nx_enter() has supplied the
@@ -389,6 +403,9 @@ typedef struct BsdWaitBudget
     ULONG   bwb_Wait;       /* as bsd_wait_option() answered, for errno     */
     ULONG   bwb_Start;      /* tx_time_get() when the call began            */
 } BsdWaitBudget;
+
+AMI_ALIGN_LONG(BsdWaitBudget, bwb_Wait);
+AMI_ALIGN_LONG(BsdWaitBudget, bwb_Start);
 
 static VOID bsd_budget_start(BsdWaitBudget *b, ULONG wait)
 {
@@ -1589,6 +1606,9 @@ typedef struct
     NX_PACKET     **packet;
 } BsdRecvArgs;
 
+AMI_ALIGN_LONG(BsdRecvArgs, tcp);
+AMI_ALIGN_LONG(BsdRecvArgs, packet);
+
 /* Not static, deliberately.  A tail call to a local symbol in another
    -ffunction-sections section of the same object is the relocation this
    toolchain mis-resolves (cmake/check-pcrel-branches.cmake, RESEARCH 25).
@@ -1611,6 +1631,9 @@ typedef struct
     NX_PACKET     **packet;
 } BsdRecvUdpArgs;
 
+AMI_ALIGN_LONG(BsdRecvUdpArgs, udp);
+AMI_ALIGN_LONG(BsdRecvUdpArgs, packet);
+
 static UINT bsd_recv_udp_once(VOID *arg, ULONG wait)
 {
     BsdRecvUdpArgs *a = (BsdRecvUdpArgs *)arg;
@@ -1624,6 +1647,10 @@ typedef struct
     NX_PACKET **packet;
     UINT        why;
 } BsdRecvRawArgs;
+
+AMI_ALIGN_LONG(BsdRecvRawArgs, sock);
+AMI_ALIGN_LONG(BsdRecvRawArgs, packet);
+AMI_ALIGN_LONG(BsdRecvRawArgs, why);
 
 static UINT bsd_recv_raw_once(VOID *arg, ULONG wait)
 {

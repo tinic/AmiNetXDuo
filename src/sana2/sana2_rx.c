@@ -1325,6 +1325,12 @@ typedef struct AmiSana2GroKey
     UBYTE version;
 } AmiSana2GroKey;
 
+AMI_ALIGN_LONG(AmiSana2GroKey, addr);
+AMI_ALIGN_LONG(AmiSana2GroKey, ports);
+AMI_ALIGN_LONG(AmiSana2GroKey, seq);
+AMI_ALIGN_LONG(AmiSana2GroKey, ack);
+AMI_ALIGN_LONG(AmiSana2GroKey, skip);
+
 static UWORD ami_sana2_gro_be16(const UCHAR *p)
 {
     return (UWORD)(((UWORD)p[0] << 8) | p[1]);
@@ -1529,6 +1535,10 @@ typedef struct AmiRxHandUp
     AmiRxSum    sum;
     ULONG       length;
 } AmiRxHandUp;
+
+AMI_ALIGN_LONG(AmiRxHandUp, packet);
+AMI_ALIGN_LONG(AmiRxHandUp, sum);
+AMI_ALIGN_LONG(AmiRxHandUp, length);
 
 /*
  * Settle the frame in the slot: the length the device reported against what
