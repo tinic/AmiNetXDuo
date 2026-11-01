@@ -7,6 +7,9 @@ are history.
 
 ## Unreleased
 
+- A program waiting in recv() or accept() no longer holds up every other
+  program once fifteen are waiting, so IBrowse can stop its connections and
+  NetShutdown finishes.
 - Replies from a host whose address ends in .0 or .255 on another network
   are accepted, so DA-Player gets CD titles from gnudb.gnudb.org.
 - A TCP connection whose IPv6 address expires or is withdrawn by the router
