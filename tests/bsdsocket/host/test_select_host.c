@@ -1756,6 +1756,47 @@ static void t_wait_event_pool_short(void)
     CHECK(status == NX_SUCCESS && h.parks == 0, "not evented: never parked");
 }
 
+/*
+ * #383: a WaitSelect() whose readiness sweep cannot enter the stack
+ * because the adoption pool is full parks in bsd_nx_enter().  A Ctrl-C ends
+ * that park -- the call was broken, not the stack brought down -- so the
+ * result must be EINTR, not ENETDOWN.  bsd_nx_enter() records which in
+ * sb_NxBroken and bsd_nx_errno() reads it; the poll-failure path used to
+ * answer a hard ENETDOWN and lost the distinction.
+ */
+static void t_waitselect_break_full_pool(void)
+{
+    HSets s;
+    LONG  n;
+
+    printf("WaitSelect(): a break while the pool is full is EINTR\n");
+
+    /* A full-pool park ended by Ctrl-C: the enter fails and marks the base
+       broken, as the real bsd_nx_enter() does. */
+    h_reset();
+    (void)h_udp(0, 7777);
+    memset(&s, 0, sizeof(s));
+    h_set(s.read, 0);
+    h.nx_enter_result  = -1;
+    h_base.sb_NxBroken = TRUE;
+
+    n = bsd_WaitSelect(1, s.read, NULL, NULL, &h_poll, NULL, &h_base);
+    CHECK(n == -1 && h_base.sb_Errno == AMI_EINTR,
+          "a full-pool park ended by Ctrl-C is EINTR");
+
+    /* The same failed enter without a break is still ENETDOWN. */
+    h_reset();
+    (void)h_udp(0, 7777);
+    memset(&s, 0, sizeof(s));
+    h_set(s.read, 0);
+    h.nx_enter_result  = -1;
+    h_base.sb_NxBroken = FALSE;
+
+    n = bsd_WaitSelect(1, s.read, NULL, NULL, &h_poll, NULL, &h_base);
+    CHECK(n == -1 && h_base.sb_Errno == AMI_ENETDOWN,
+          "a stack that is down is still ENETDOWN");
+}
+
 int main(void)
 {
     printf("select.c host tests\n");
@@ -1775,6 +1816,7 @@ int main(void)
     t_events();
     t_event_signal_once();
     t_wait_event_pool_short();
+    t_waitselect_break_full_pool();
 
     printf("%lu checks, %lu failures\n", h_checks, h_failures);
     return h_failures == 0 ? 0 : 1;
