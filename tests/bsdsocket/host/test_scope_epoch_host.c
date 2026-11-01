@@ -171,6 +171,9 @@ ULONG ami_random_ulong(VOID) { abort(); }
 UINT bsd_wait_sliced(struct AmiSocketBase *base, ULONG wait,
                      BsdSlicedCall call, VOID *arg, BOOL *aborted)
 { (VOID)base; (VOID)wait; (VOID)call; (VOID)arg; (VOID)aborted; abort(); }
+UINT bsd_wait_event(struct AmiSocketBase *base, ULONG wait,
+                    BsdSlicedCall call, VOID *arg, BOOL *aborted)
+{ (VOID)base; (VOID)wait; (VOID)call; (VOID)arg; (VOID)aborted; abort(); }
 BOOL netstack_ipv4_route(ULONG destination, LONG preferred_index,
                          UWORD *index_out, ULONG *next_hop_out,
                          ULONG *source_address_out)

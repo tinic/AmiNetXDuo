@@ -756,6 +756,15 @@ VOID  bsd_usergroup_open(VOID);
 LONG  bsd_nx_enter(struct AmiSocketBase *base);
 VOID  bsd_nx_leave(struct AmiSocketBase *base);
 
+/* Wait() for `mask` with the ThreadX slot given back and the bracket still
+   this Task's.  BSD_PARK_NONE when the bracket is not the opener's alone (no
+   wait made), BSD_PARK_DONE when the bracket is back, BSD_PARK_LOST when the
+   stack could not be re-entered: the bracket is then closed (#383). */
+#define BSD_PARK_NONE   0
+#define BSD_PARK_DONE   1
+#define BSD_PARK_LOST   2
+LONG  bsd_nx_park(struct AmiSocketBase *base, ULONG mask, ULONG *received);
+
 /* Drop the base's cached ThreadX registration. Teardown only, no bracket open.
    See netx_call.c for what is cached and why. */
 VOID  bsd_nx_release(struct AmiSocketBase *base);
@@ -1238,6 +1247,12 @@ typedef UINT (*BsdSlicedCall)(VOID *arg, ULONG wait);
 
 UINT bsd_wait_sliced(struct AmiSocketBase *base, ULONG wait,
                      BsdSlicedCall call, VOID *arg, BOOL *aborted);
+
+/* bsd_wait_sliced() for a call whose wake posts the base's event signal (a
+   receive, an accept): with every adoption slot taken it waits on that
+   signal outside the stack, holding no slot. */
+UINT bsd_wait_event(struct AmiSocketBase *base, ULONG wait,
+                    BsdSlicedCall call, VOID *arg, BOOL *aborted);
 
 ULONG bsd_wait_option(AmiSocket *sock, ULONG timeout_ticks, LONG flags);
 

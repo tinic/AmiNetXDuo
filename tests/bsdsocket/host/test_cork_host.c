@@ -315,6 +315,17 @@ VOID Signal(struct Task *task, ULONG signalSet)
     h.signals |= signalSet;
 }
 
+/* select.c's pool-pressure wait (#383): never short here, so never parked. */
+BOOL ami_netstack_slots_short(VOID) { return FALSE; }
+LONG bsd_nx_park(struct AmiSocketBase *base, ULONG mask, ULONG *received)
+{
+    (VOID)base; (VOID)mask; (VOID)received;
+    printf("  FAIL bsd_nx_park reached\n");
+    h_failures++;
+    abort();
+    return BSD_PARK_NONE;
+}
+
 ULONG Wait(ULONG signalSet)
 {
     printf("  FAIL Wait(0x%lx) reached\n", (unsigned long)signalSet);

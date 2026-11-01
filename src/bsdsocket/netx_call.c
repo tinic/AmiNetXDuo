@@ -139,6 +139,48 @@ VOID bsd_nx_leave(struct AmiSocketBase *base)
 }
 
 /*
+ * A blocking call's wait, made in Exec with the slot given back.
+ *
+ * A Task suspended in NetX Duo holds an adoption slot for as long as it waits,
+ * and the slots are a fixed pool (tx_amiga_pool.c).  Fifteen Tasks blocked in
+ * recv() took every slot, and the sixteenth caller -- any program, httpd
+ * included -- waited in the pool, deaf to Ctrl-C, until one of the fifteen
+ * got data (#383).  Here the leave makes the adoption dormant, so a full pool
+ * takes it back, and the bracket stays this Task's: sb_NxNest and sb_NxTask
+ * are untouched, so another Task on this base is still refused, as it is
+ * while this one is suspended in NetX.
+ *
+ * Only the opener waits here: the event signal goes to sb_Task.
+ */
+LONG bsd_nx_park(struct AmiSocketBase *base, ULONG mask, ULONG *received)
+{
+    if (base->sb_NxNest != 1 || base->sb_NxTask != base->sb_Task ||
+        FindTask(NULL) != base->sb_Task)
+        return BSD_PARK_NONE;
+
+#if AMINETXDUO_NXCACHE
+    ami_netstack_leave_cached(&base->sb_NxCaller);
+#else
+    ami_netstack_leave(&base->sb_NxCaller);
+#endif
+
+    *received = Wait(mask);
+
+#if AMINETXDUO_NXCACHE
+    if (ami_netstack_enter_cached(&base->sb_NxCaller) == AMI_NET_OK)
+        return BSD_PARK_DONE;
+#else
+    if (ami_netstack_enter(&base->sb_NxCaller) == AMI_NET_OK)
+        return BSD_PARK_DONE;
+#endif
+
+    base->sb_NxNest = 0;
+    base->sb_NxTask = NULL;
+
+    return BSD_PARK_LOST;
+}
+
+/*
  * Give the cached TX_THREAD back. Called from bsd_child_destroy() (library.c)
  * after the last socket is shut, so it runs on the base's own task with no
  */

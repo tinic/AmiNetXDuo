@@ -159,6 +159,16 @@ static VOID h_close_and_sweep(VOID)
 /* ---- the scripted wait --------------------------------------------------- */
 
 UINT bsd_wait_sliced(struct AmiSocketBase *base, ULONG wait,
+                     BsdSlicedCall call, VOID *arg, BOOL *aborted);
+
+/* accept() waits through bsd_wait_event(); the script is the same one. */
+UINT bsd_wait_event(struct AmiSocketBase *base, ULONG wait,
+                    BsdSlicedCall call, VOID *arg, BOOL *aborted)
+{
+    return bsd_wait_sliced(base, wait, call, arg, aborted);
+}
+
+UINT bsd_wait_sliced(struct AmiSocketBase *base, ULONG wait,
                      BsdSlicedCall call, VOID *arg, BOOL *aborted)
 {
     NX_TCP_SOCKET *tcp = &h_incoming.as_Nx.tcp;

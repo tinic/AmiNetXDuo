@@ -3149,8 +3149,8 @@ LONG bsd_accept(register LONG sock_fd          __asm("d0"),
         args.listener = sock;
         args.ready    = NULL;
 
-        status = bsd_wait_sliced(SocketBase, wait, bsd_accept_once, &args,
-                                 &aborted);
+        status = bsd_wait_event(SocketBase, wait, bsd_accept_once, &args,
+                                &aborted);
         if (aborted)
         {
             rc = bsd_fail(SocketBase, AMI_EINTR);

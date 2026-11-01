@@ -44,5 +44,6 @@ UINT    tx_amiga_adopt_claim_orphan(VOID);
 ULONG   tx_amiga_adopt_generation(TX_THREAD *thread_ptr);
 UINT    tx_amiga_adopt_handle_valid(TX_THREAD *thread_ptr, ULONG generation);
 UINT    tx_amiga_caller_is_thread(VOID);
+extern ULONG _tx_amiga_adopt_waiting;
 
 #endif /* AMINETXDUO_NETSTACK_HOST_TX_AMIGA_H */

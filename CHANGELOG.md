@@ -9,6 +9,9 @@ are history.
 
 ## 1.0.0-rc3
 
+- A program waiting in recv() or accept() no longer holds up every other
+  program once fifteen are waiting, so IBrowse can stop its connections and
+  NetShutdown finishes.
 - Replies from a host whose address ends in .0 or .255 on another network
   are accepted, so DA-Player gets CD titles from gnudb.gnudb.org.
 - After a switch from the drawer installation to the system one, the tools no
