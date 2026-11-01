@@ -12,6 +12,18 @@ are history.
 - A program waiting in recv() or accept() no longer holds up every other
   program once fifteen are waiting, so IBrowse can stop its connections and
   NetShutdown finishes.
+- A program waiting for a free place in the stack stops on Ctrl-C.
+- A network task that another program removes while it waits in the stack
+  is no longer signalled afterwards, which could corrupt memory after
+  IBrowse ignored its unfinished subtasks.
+- A program removed while it waits in recv() no longer has a later packet
+  written into its freed memory.
+- WaitSelect() interrupted by Ctrl-C while the stack is busy returns EINTR
+  instead of ENETDOWN.
+- A program waiting in connect(), send(), a receive with a timeout or a DNS
+  lookup no longer holds up other programs, and stops on Ctrl-C.
+- A program removed while it waits in WaitSelect() with a timeout is no
+  longer signalled by its timer afterwards.
 - Replies from a host whose address ends in .0 or .255 on another network
   are accepted, so DA-Player gets CD titles from gnudb.gnudb.org.
 - After a switch from the drawer installation to the system one, the tools no
