@@ -17,6 +17,7 @@
 
 #include <exec/types.h>
 #include <exec/execbase.h>
+#include <exec/interrupts.h>
 #include <exec/libraries.h>
 #include <exec/lists.h>
 #include <exec/memory.h>
@@ -353,12 +354,18 @@ struct AmiSocketBase
     BYTE                    sb_EventSignal;
     ULONG                   sb_EventSigMask;
 
-    struct MsgPort          sb_TimerPort;
+    /* LONGWORD ALIGNMENT: the 34-byte port then the 22-byte interrupt put
+       the request and every ULONG below on a longword, and the pad keeps
+       what follows sb_TimerSigMask where it was. */
+    struct Task            *sb_TimerTask;       /* the task the port serves */
+    struct MsgPort          sb_TimerPort;       /* PA_SOFTINT, sb_TimerInt  */
+    struct Interrupt        sb_TimerInt;        /* signals sb_TimerTask, live */
     struct timerequest      sb_TimerReq;
     BOOL                    sb_TimerOpen;
     BOOL                    sb_TimerArmed;      /* sb_TimerReq is out at timer.device */
     ULONG                   sb_TimerDue;        /* the tick it fires at, tx_time_get() */
     BYTE                    sb_TimerSignal;
+    UWORD                   sb_TimerPad;
     ULONG                   sb_TimerSigMask;
 
     /* Scratch returned to callers by the non-reentrant entry points. Per
@@ -1261,12 +1268,14 @@ VOID  bsd_tcp_send_fin(AmiSocket *sock);
    can drive it in slices without knowing which call it is. */
 typedef UINT (*BsdSlicedCall)(VOID *arg, ULONG wait);
 
+/* A blocking call's wait.  With every adoption slot taken it gives its slot
+   back and waits outside the stack, on what ends the wait (select.c, #383):
+   bsd_wait_event() for a call whose wake posts the base's event signal (a
+   receive, an accept, a connect, a send on a full window or queue),
+   bsd_wait_sliced() for one nothing signals (a packet allocation), which
+   asks again each slice.  A deadline is the base's timer either way. */
 UINT bsd_wait_sliced(struct AmiSocketBase *base, ULONG wait,
                      BsdSlicedCall call, VOID *arg, BOOL *aborted);
-
-/* bsd_wait_sliced() for a call whose wake posts the base's event signal (a
-   receive, an accept): with every adoption slot taken it waits on that
-   signal outside the stack, holding no slot. */
 UINT bsd_wait_event(struct AmiSocketBase *base, ULONG wait,
                     BsdSlicedCall call, VOID *arg, BOOL *aborted);
 
@@ -1277,7 +1286,12 @@ ULONG bsd_wait_option(AmiSocket *sock, ULONG timeout_ticks, LONG flags);
  * queries (resolver.c). `arg` is the struct AmiSocketBase whose sb_BreakMask
  * applies. The signature is netstack's AmiNetGiveUpFn.
  */
-BOOL  bsd_resolve_break(VOID *arg);
+BOOL  bsd_resolve_break(VOID *arg, ULONG pause);
+
+/* Wait() up to `ticks` outside the stack for the break, on the base's timer.
+   TRUE when the break came; it stays set for the caller.  A Task that is not
+   the opener, or a base without its timer, returns at once (select.c). */
+BOOL  bsd_pause(struct AmiSocketBase *base, ULONG ticks);
 
 /*
  * Returns the next real tag, advancing *cursor past it, or NULL at the end.

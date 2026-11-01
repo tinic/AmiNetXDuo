@@ -259,13 +259,21 @@ static UINT bsd_alloc_once(VOID *arg, ULONG wait)
 #ifdef AMINETXDUO_TX_RUN
     UINT          status;
 
-    if (wait == NX_NO_WAIT || a->run == NULL)
+    if (a->run == NULL)
         return nx_packet_allocate(a->pool, a->packet, NX_TCP_PACKET, wait);
 
     status = nx_packet_allocate(a->pool, a->packet, NX_TCP_PACKET, NX_NO_WAIT);
     if (status != NX_NO_PACKET)
         return status;
 
+    /* Refused: a wait follows, in NetX or parked (bsd_wait_slices()); a
+       parked Task can come back as another TX_THREAD, so that one ends the
+       run rather than flushing it. */
+    if (wait == NX_NO_WAIT)
+    {
+        ami_sana2_tx_run_end(a->run);
+        return status;
+    }
     ami_sana2_tx_run_flush(a->run);
 #endif
     return nx_packet_allocate(a->pool, a->packet, NX_TCP_PACKET, wait);
@@ -291,10 +299,27 @@ typedef struct
 static UINT bsd_send_once(VOID *arg, ULONG wait)
 {
     BsdSendArgs *a = (BsdSendArgs *)arg;
-#ifdef AMINETXDUO_TX_RUN
     UINT         status;
 
-    if (wait == NX_NO_WAIT || a->run == NULL)
+    /* The look a parked send makes (bsd_wait_slices()): a refusal leaves
+       as_TxWait, so the acknowledgment that opens the window or the queue
+       posts the event its Wait() is for (select.c, the window notify).  Set
+       inside the bracket, so no acknowledgment falls between.  The run ends
+       first: its frames are what the acknowledgment answers, and a parked
+       Task can come back as another TX_THREAD, which could never end it. */
+    if (wait == NX_NO_WAIT)
+    {
+        status = _nx_tcp_socket_send(a->tcp, a->packet, NX_NO_WAIT);
+        if (status == NX_WINDOW_OVERFLOW || status == NX_TX_QUEUE_DEPTH)
+        {
+            ((AmiSocket *)a->tcp->nx_tcp_socket_reserved_ptr)->as_TxWait = 1;
+            ami_sana2_tx_run_end(a->run);
+        }
+        return status;
+    }
+
+#ifdef AMINETXDUO_TX_RUN
+    if (a->run == NULL)
         return _nx_tcp_socket_send(a->tcp, a->packet, wait);
 
     /* The two verdicts a wait can change; the send is not all-or-nothing,
@@ -684,8 +709,8 @@ static LONG bsd_send_tcp_run(struct AmiSocketBase *base, AmiSocket *sock,
                 BsdSendArgs sargs = { &sock->as_Nx.tcp, packet, run };
                 BOOL aborted;
 
-                status = bsd_wait_sliced(base, bsd_budget_left(tb),
-                                         bsd_send_once, &sargs, &aborted);
+                status = bsd_wait_event(base, bsd_budget_left(tb),
+                                        bsd_send_once, &sargs, &aborted);
                 if (aborted)
                 {
                     sent += bsd_send_consumed(packet, filled);
@@ -792,7 +817,7 @@ static ULONG bsd_cork_flush_wait(struct AmiSocketBase *base, AmiSocket *sock,
     sargs.packet = *pkt;
     sargs.run    = run;
 
-    *status = bsd_wait_sliced(base, wait, bsd_send_once, &sargs, aborted);
+    *status = bsd_wait_event(base, wait, bsd_send_once, &sargs, aborted);
     if (*aborted)
         return BSD_CORKF_STALLED;
 
@@ -2140,7 +2165,7 @@ static LONG bsd_recv_raw(struct AmiSocketBase *base, AmiSocket *sock,
         args.packet = &packet;
         args.why    = NX_NO_PACKET;
 
-        (VOID)bsd_wait_sliced(base, wait, bsd_recv_raw_once, &args, &aborted);
+        (VOID)bsd_wait_event(base, wait, bsd_recv_raw_once, &args, &aborted);
         if (aborted)
             return bsd_fail(base, AMI_EINTR);
         if (packet == NX_NULL && len == 0 && args.why == NX_NO_PACKET)

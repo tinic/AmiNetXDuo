@@ -32,7 +32,8 @@ typedef enum
 {
     AMI_NET_ASK_ANSWERED = 0,   /* got what the caller wanted, stop         */
     AMI_NET_ASK_SILENT,         /* nobody answered, ask again               */
-    AMI_NET_ASK_REFUSED         /* answered without an address, stop        */
+    AMI_NET_ASK_REFUSED,        /* answered without an address, stop        */
+    AMI_NET_ASK_QUEUED          /* waited for the client, asked nothing     */
 } AmiNetAskResult;
 
 /* One attempt, narrowed to (wait) -> outcome. */
@@ -58,6 +59,10 @@ typedef enum
  */
 #define AMI_NET_ASK_FIRST       (1UL * (ULONG)NX_IP_PERIODIC_RATE)
 #define AMI_NET_ASK_CEILING     (2UL * (ULONG)NX_IP_PERIODIC_RATE)
+
+/* How often a lookup queued behind another's looks at the DNS client again
+   (netstack_dns.c, #383).  A LAN answer takes a tick or two. */
+#define AMI_NET_ASK_POLL        2UL
 
 /*
  * Ask until something answers, the budget is gone, or give_up() says stop.

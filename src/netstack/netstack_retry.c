@@ -27,7 +27,7 @@ AmiNetLadderResult ami_net_ask_until(AmiNetAskFn ask, VOID *arg, ULONG budget,
 
         /* Before the first query as well as between them: a task that already
            has its break signal set is not made to wait for one round first. */
-        if (give_up != NULL && give_up(give_up_arg))
+        if (give_up != NULL && give_up(give_up_arg, 0UL))
             return AMI_NET_LADDER_ABORTED;
 
         if (budget == 0UL)
@@ -44,6 +44,13 @@ AmiNetLadderResult ami_net_ask_until(AmiNetAskFn ask, VOID *arg, ULONG budget,
             return AMI_NET_LADDER_ANSWERED;
         if (result == AMI_NET_ASK_REFUSED)
             return AMI_NET_LADDER_REFUSED;
+
+        /* Nothing was asked: what it waited is spent, the rung is not. */
+        if (result == AMI_NET_ASK_QUEUED)
+        {
+            budget = (spent < budget) ? (budget - spent) : 0UL;
+            continue;
+        }
 
         /* Came back with time to spare, so somebody answered, see the
            header. */

@@ -1493,22 +1493,68 @@ VOID ami_netstack_dns_stop(AmiNetStack *ns)
 
 typedef struct
 {
-    AmiNetStack *ns;
-    const char  *name;
-    ULONG        address;
-    UINT         status;
-    BOOL         nocaller;      /* the ThreadX bracket was not taken */
+    AmiNetStack   *ns;
+    const char    *name;
+    ULONG          address;
+    UINT           status;
+    BOOL           nocaller;    /* the ThreadX bracket was not taken */
+    AmiNetGiveUpFn give_up;     /* the caller's, for ami_ns_dns_queue() */
+    VOID          *give_up_arg;
 } AmiNsNameAsk;
 
 typedef struct
 {
-    AmiNetStack *ns;
-    ULONG        address;
-    char        *name_out;
-    ULONG        name_len;
-    UINT         status;
-    BOOL         nocaller;
+    AmiNetStack   *ns;
+    ULONG          address;
+    char          *name_out;
+    ULONG          name_len;
+    UINT           status;
+    BOOL           nocaller;
+    AmiNetGiveUpFn give_up;
+    VOID          *give_up_arg;
 } AmiNsAddrAsk;
+
+/*
+ * WAIT FOR THE CLIENT OUTSIDE THE STACK (#383).
+ *
+ * The DNS client asks one question at a time: each lookup takes its mutex for
+ * the whole query.  A lookup that found it taken waited on the mutex inside
+ * NetX Duo, and so held an adoption slot (tx_amiga_pool.c) for as long as the
+ * queries ahead of it took -- fifteen lookups behind one unanswered server
+ * were every slot there is, and httpd, a browser's next connection, any
+ * program waited with them.  So the queue is here, outside the bracket: while
+ * the mutex has an owner, the caller's give_up() waits AMI_NET_ASK_POLL ticks
+ * for the break, for up to this rung's `wait`.  TRUE when the client is free
+ * and the ask goes in; FALSE when the rung was spent queued or the break came,
+ * which the ladder answers (AMI_NET_ASK_QUEUED).  A caller that cannot wait
+ * outside goes in at once and queues in NetX Duo, as before.  The look is a
+ * plain read of the owner count: a mutex taken just after it costs a wait in
+ * NetX, which is bounded by the rung.
+ */
+static BOOL ami_ns_dns_queue(AmiNetStack *ns, ULONG wait,
+                             AmiNetGiveUpFn give_up, VOID *give_up_arg)
+{
+    ULONG start = tx_time_get();
+
+    if (give_up == NULL)
+        return TRUE;
+
+    while (ns->ns_Dns.nx_dns_mutex.tx_mutex_ownership_count != 0)
+    {
+        ULONG before = tx_time_get();
+
+        if (give_up(give_up_arg, AMI_NET_ASK_POLL))
+            return FALSE;
+
+        if (tx_time_get() == before)
+            return TRUE;
+
+        if (tx_time_get() - start >= wait)
+            return FALSE;
+    }
+
+    return TRUE;
+}
 
 /*
  * Test whether `name` is in the .local domain.  Case-insensitive, as DNS is
@@ -1561,6 +1607,9 @@ static AmiNetAskResult ami_ns_ask_name(VOID *arg, ULONG wait)
     if (wait == 0UL)
         return AMI_NET_ASK_SILENT;
 
+    if (!ami_ns_dns_queue(ask->ns, wait, ask->give_up, ask->give_up_arg))
+        return AMI_NET_ASK_QUEUED;
+
     caller = ami_netstack_enter_alloc();
     if (caller == NULL)
     {
@@ -1591,6 +1640,9 @@ static AmiNetAskResult ami_ns_ask_addr(VOID *arg, ULONG wait)
     /* Never NX_NO_WAIT, see ami_ns_ask_name(). */
     if (wait == 0UL)
         return AMI_NET_ASK_SILENT;
+
+    if (!ami_ns_dns_queue(ask->ns, wait, ask->give_up, ask->give_up_arg))
+        return AMI_NET_ASK_QUEUED;
 
     caller = ami_netstack_enter_alloc();
     if (caller == NULL)
@@ -1663,11 +1715,13 @@ static LONG ami_ns_resolve_once(const char *name, ULONG *addr_out,
     if (timeout_ticks == 0UL)
         return AMI_NET_ERR_TIMEOUT;
 
-    ask.ns       = ns;
-    ask.name     = name;
-    ask.address  = 0;
-    ask.status   = NX_DNS_QUERY_FAILED;
-    ask.nocaller = FALSE;
+    ask.ns          = ns;
+    ask.name        = name;
+    ask.address     = 0;
+    ask.status      = NX_DNS_QUERY_FAILED;
+    ask.nocaller    = FALSE;
+    ask.give_up     = give_up;
+    ask.give_up_arg = give_up_arg;
 
 #ifdef AMINETXDUO_MDNS
     /*
@@ -1863,12 +1917,14 @@ LONG netstack_resolve_reverse_until(ULONG addr, char *name_out, ULONG name_len,
     if (timeout_ticks == 0UL)
         return AMI_NET_ERR_TIMEOUT;
 
-    ask.ns       = ns;
-    ask.address  = addr;
-    ask.name_out = name_out;
-    ask.name_len = name_len;
-    ask.status   = NX_DNS_QUERY_FAILED;
-    ask.nocaller = FALSE;
+    ask.ns          = ns;
+    ask.address     = addr;
+    ask.name_out    = name_out;
+    ask.name_len    = name_len;
+    ask.status      = NX_DNS_QUERY_FAILED;
+    ask.nocaller    = FALSE;
+    ask.give_up     = give_up;
+    ask.give_up_arg = give_up_arg;
 
     done = ami_net_ask_until(ami_ns_ask_addr, &ask, timeout_ticks, give_up,
                              give_up_arg);
@@ -1906,6 +1962,8 @@ typedef struct
     UINT                count;
     UINT                status;
     BOOL                nocaller;
+    AmiNetGiveUpFn      give_up;
+    VOID               *give_up_arg;
 } AmiNsName6Ask;
 
 _Static_assert(__alignof__(AmiNsName6Ask) >= 4,
@@ -1921,6 +1979,9 @@ static AmiNetAskResult ami_ns_ask_name6(VOID *arg, ULONG wait)
     /* Never NX_NO_WAIT, see ami_ns_ask_name(). */
     if (wait == 0UL)
         return AMI_NET_ASK_SILENT;
+
+    if (!ami_ns_dns_queue(ask->ns, wait, ask->give_up, ask->give_up_arg))
+        return AMI_NET_ASK_QUEUED;
 
     caller = ami_netstack_enter_alloc();
     if (caller == NULL)
@@ -1973,11 +2034,13 @@ static LONG ami_ns_resolve6_once(const char *name, ULONG addr_out[4],
     if (timeout_ticks == 0UL)
         return AMI_NET_ERR_TIMEOUT;
 
-    ask.ns       = ns;
-    ask.name     = name;
-    ask.count    = 0;
-    ask.status   = NX_DNS_QUERY_FAILED;
-    ask.nocaller = FALSE;
+    ask.ns          = ns;
+    ask.name        = name;
+    ask.count       = 0;
+    ask.status      = NX_DNS_QUERY_FAILED;
+    ask.nocaller    = FALSE;
+    ask.give_up     = give_up;
+    ask.give_up_arg = give_up_arg;
 
     done = ami_net_ask_until(ami_ns_ask_name6, &ask, timeout_ticks, give_up,
                              give_up_arg);

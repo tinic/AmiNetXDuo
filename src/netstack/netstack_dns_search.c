@@ -65,7 +65,7 @@ LONG ami_ns_search(const AmiNsSearchOps *ops, const char *name, VOID *out,
         ULONG left;
         LONG  next;
 
-        if (give_up != NULL && give_up(give_up_arg))
+        if (give_up != NULL && give_up(give_up_arg, 0UL))
             return AMI_NET_ERR_ABORTED;
 
         if (!ops->suffix_at(name, i, qualified, (ULONG)sizeof(qualified), NULL))

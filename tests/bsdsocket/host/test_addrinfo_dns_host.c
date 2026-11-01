@@ -77,7 +77,8 @@ BOOL netstack_ipv6_enabled(VOID) { return h_enabled; }
 BOOL netstack_ipv6_have_global(VOID) { return h_global; }
 BOOL netstack_ipv4_configured(VOID) { return h_v4; }
 BOOL netstack_ipv6_configured(VOID) { return h_v6; }
-BOOL bsd_resolve_break(VOID *arg) { (VOID)arg; return FALSE; }
+BOOL bsd_resolve_break(VOID *arg, ULONG pause)
+{ (VOID)arg; (VOID)pause; return FALSE; }
 LONG bsd_if_index_of(NX_IP *ip, const char *name)
 { (VOID)ip; (VOID)name; return -1; }
 

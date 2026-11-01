@@ -26,6 +26,7 @@ struct MinNode {
 #define NT_LIBRARY   9
 #define NT_MESSAGE   5
 #define NT_MSGPORT   4
+#define NT_INTERRUPT 2
 #define NT_PROCESS   13
 
 #endif
