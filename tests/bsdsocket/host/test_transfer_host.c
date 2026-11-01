@@ -169,6 +169,7 @@ static struct
     BOOL        alloc_pressure, send_pressure;
     ULONG       signals, break_at_send;
     ULONG       sliced_calls, run_flushes;
+    BOOL        append_breaks;  /* a refused append brings the break    */
     ULONG       clock;
     ULONG       cost;
     BOOL        forever;            /* bsd_wait_option() answers FOREVER     */
@@ -758,7 +759,11 @@ UINT _nx_packet_data_append(NX_PACKET *packet_ptr, VOID *data_start,
 
     h.append_calls++;
     if (h.append_status != NX_SUCCESS)
+    {
+        if (h.append_breaks)
+            h.signals |= h_base.sb_BreakMask;
         return h.append_status;
+    }
 
     if (p != NULL)
         h_len(p) += data_size;
@@ -1390,9 +1395,23 @@ static void t_append_buffer_shapes(void)
     h.alloc_planned = 2;
     CHECK(bsd_sendmsg(0, &m, 0, &h_base) == 3,
           "allocation failure after a direct run credits only the accepted bytes");
-    CHECK(h.append_calls == 1 && h.sent_bytes == 3 &&
+    /* An empty pool: a look without waiting, then the sliced wait (#383). */
+    CHECK(h.append_calls == 2 && h.sent_bytes == 3 &&
           h_len(&h_pkt[0]) == 3 && memcmp(h_pkt[0].data, "abc", 3) == 0,
           "the run that cannot fit retains native append and partial-send handling");
+
+    /* #383: Ctrl-C while the append waits for the pool ends the send with
+       EINTR; it waited in NetX Duo, deaf to the break. */
+    h_reset();
+    (VOID)h_tcp(0);
+    h.packet_room = 2;
+    h.append_status = NX_NO_PACKET;
+    h_base.sb_BreakMask = 1UL << 12;
+    h.append_breaks = TRUE;
+    CHECK(bsd_sendmsg(0, &m, 0, &h_base) == -1 &&
+          h.errno_value == AMI_EINTR && h.append_calls == 1 &&
+          h.sent_bytes == 0,
+          "a break in the wait for a packet to append to is EINTR");
 
     h_reset();
     (VOID)h_tcp(0);

@@ -3581,10 +3581,11 @@ static LONG bsd_connect_locked(struct AmiSocketBase *SocketBase,
             return bsd_fail(SocketBase, AMI_EINPROGRESS);
 
         args.sock = sock;
-        ws = bsd_wait_sliced(SocketBase,
-                             (sock->as_SndTimeout != 0) ? sock->as_SndTimeout
-                                                        : NX_WAIT_FOREVER,
-                             bsd_connect_once, &args, &aborted);
+        /* The establish and disconnect notifies post the event. */
+        ws = bsd_wait_event(SocketBase,
+                            (sock->as_SndTimeout != 0) ? sock->as_SndTimeout
+                                                       : NX_WAIT_FOREVER,
+                            bsd_connect_once, &args, &aborted);
 
         if (aborted)
         {

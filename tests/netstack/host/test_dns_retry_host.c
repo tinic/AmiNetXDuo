@@ -66,9 +66,10 @@ static AmiNetAskResult h_ask(VOID *arg, ULONG wait)
 
 static ULONG h_break_at;
 
-static BOOL h_break(VOID *arg)
+static BOOL h_break(VOID *arg, ULONG pause)
 {
     (VOID)arg;
+    (VOID)pause;
 
     return (BOOL)(h_break_at != 0UL && h_now >= h_break_at);
 }
@@ -227,6 +228,76 @@ static void h_case_no_wait(void)
     h_check(done == AMI_NET_LADDER_SILENT, "and ends silent");
 }
 
+/*
+ * #383: a lookup queued behind another's for the DNS client waits outside the
+ * stack and asks nothing (AMI_NET_ASK_QUEUED).  What it waited is charged to
+ * the budget, the rung is not doubled, and the break still ends it.
+ */
+static ULONG h_queued_left;
+
+static AmiNetAskResult h_ask_queued(VOID *arg, ULONG wait)
+{
+    HostServer *s = (HostServer *)arg;
+
+    if (h_queued_left > 0)
+    {
+        h_queued_left--;
+        if (s->attempts < (ULONG)(sizeof(s->waits) / sizeof(s->waits[0])))
+            s->waits[s->attempts] = wait;
+        s->attempts++;
+        h_now += wait;
+        return AMI_NET_ASK_QUEUED;
+    }
+
+    return h_ask(arg, wait);
+}
+
+static void h_case_queued(void)
+{
+    HostServer         s;
+    AmiNetLadderResult done;
+
+    memset(&s, 0, sizeof(s));
+    s.servers     = 1;
+    s.reply_delay = 2;
+    s.answer_at   = 1;
+    h_queued_left = 2;
+
+    h_now      = 0;
+    h_break_at = 0;
+
+    done = ami_net_ask_until(h_ask_queued, &s, 10UL * H_SECOND, h_break, NULL);
+
+    h_check(done == AMI_NET_LADDER_ANSWERED, "queued twice, then answered");
+    h_check(s.attempts == 3, "two queued rungs and the asked one");
+    h_check(s.waits[0] == H_SECOND && s.waits[1] == H_SECOND &&
+            s.waits[2] == H_SECOND,
+            "a queued rung is not doubled: nothing was asked");
+
+    /* A queue longer than the budget ends silent, charged what it waited. */
+    memset(&s, 0, sizeof(s));
+    s.servers     = 1;
+    h_queued_left = 100;
+    h_now         = 0;
+
+    done = ami_net_ask_until(h_ask_queued, &s, 3UL * H_SECOND, h_break, NULL);
+
+    h_check(done == AMI_NET_LADDER_SILENT, "queued past the budget is silence");
+    h_check(h_now == 3UL * H_SECOND, "and took the budget, no more");
+
+    /* Ctrl-C while queued: the next look at the break ends it. */
+    memset(&s, 0, sizeof(s));
+    s.servers     = 1;
+    h_queued_left = 100;
+    h_now         = 0;
+    h_break_at    = H_SECOND;
+
+    done = ami_net_ask_until(h_ask_queued, &s, 30UL * H_SECOND, h_break, NULL);
+
+    h_check(done == AMI_NET_LADDER_ABORTED, "queued, then the break: aborted");
+    h_check(s.attempts == 1, "after the rung it was queued in");
+    h_break_at = 0;
+}
 
 int main(void)
 {
@@ -237,6 +308,7 @@ int main(void)
     h_case_answer();
     h_case_contention();
     h_case_no_wait();
+    h_case_queued();
 
     printf("%lu checks, %lu failures\n", h_checks, h_failures);
 
