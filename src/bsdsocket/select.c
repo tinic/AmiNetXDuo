@@ -1083,8 +1083,11 @@ LONG bsd_WaitSelect(register LONG nfds                __asm("d0"),
             if (terminal_wait && SocketBase->sb_TimerArmed)
                 bsd_timer_cancel(SocketBase);
 
+            /* A full pool parks the enter, and a Ctrl-C ends that park: the
+               call was broken, not the stack brought down, so EINTR and not
+               ENETDOWN.  bsd_nx_errno() reads which (#383). */
             return bsd_waitselect_fail(SocketBase, signals, got_signals,
-                                       AMI_ENETDOWN);
+                                       bsd_nx_errno(SocketBase));
         }
 
         if (count > 0 || got_signals != 0)
@@ -1246,7 +1249,7 @@ LONG bsd_WaitSelect(register LONG nfds                __asm("d0"),
 
             if (count < 0)
                 return bsd_waitselect_fail(SocketBase, signals, got_signals,
-                                           AMI_ENETDOWN);
+                                           bsd_nx_errno(SocketBase));
 
             break;
         }
