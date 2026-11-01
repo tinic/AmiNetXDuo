@@ -7,6 +7,10 @@ are history.
 
 ## Unreleased
 
+- A program removed while it waits in recv() no longer has a later packet
+  written into its freed memory.
+- WaitSelect() interrupted by Ctrl-C while the stack is busy returns EINTR
+  instead of ENETDOWN.
 - A program waiting for a free place in the stack stops on Ctrl-C.
 - A network task that another program removes while it waits in the stack
   is no longer signalled afterwards, which could corrupt memory after
