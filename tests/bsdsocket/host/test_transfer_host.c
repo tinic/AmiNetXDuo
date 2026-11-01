@@ -177,6 +177,7 @@ static struct
     /* A scripted TCP receive: `rx_packets` packets of `rx_len` bytes, which
        the extract then really copies, then NX_NO_PACKET. */
     unsigned    rx_packets, recvs;
+    const void *last_recv_pkt;      /* where a receive was told to deposit */
     ULONG       rx_len;
     BOOL        extract_real;
 
@@ -904,6 +905,7 @@ UINT _nx_tcp_socket_receive(NX_TCP_SOCKET *socket_ptr, NX_PACKET **packet_ptr,
 
     if (h.recvs < H_PLAN)
         h.recv_waits[h.recvs] = wait_option;
+    h.last_recv_pkt = (const void *)packet_ptr;
     h.recvs++;
     h_spend(wait_option);
 
@@ -2609,6 +2611,36 @@ static void t_gso_short_and_break(void)
           "a break while a block waits credits what of it went");
 }
 
+/*
+ * #383: a TCP receive that blocks must not hand NetX Duo a packet-pointer
+ * sink on the caller's stack.  The IP thread fills that pointer when a
+ * segment arrives (nx_tcp_socket_state_data_check.c), and another program
+ * can RemTask() the caller while it waits -- a stack sink is freed memory
+ * by then.  The sink is the base's sb_NxWaitPacket instead, which outlives
+ * the caller.  A revert to a stack local makes the recorded address not the
+ * base field and this fails.
+ */
+static void t_recv_sink_off_stack(void)
+{
+    char buf[8];
+
+    printf("recv(): the awaited packet lands in the base, not on the stack\n");
+
+    h_reset();
+    h_tcp(0);
+    h.cost          = 0;
+    h.rx_packets    = 1;
+    h.rx_len        = 4;
+    h.extract_real  = TRUE;
+    h.last_recv_pkt = NULL;
+
+    CHECK(bsd_recv(0, buf, 4, 0, &h_base) == 4, "the blocking recv completes");
+    CHECK(h.last_recv_pkt == (const void *)&h_base.sb_NxWaitPacket,
+          "NetX Duo was given the base packet sink, not a stack local");
+    CHECK(h_base.sb_NxWaitPacket == NULL,
+          "and the base sink is cleared once the caller has taken it");
+}
+
 int main(void)
 {
     printf("transfer.c host checks\n\n");
@@ -2629,6 +2661,7 @@ int main(void)
     t_mss_peek_guard();
     t_short_write_is_credited();
     t_no_packet();
+    t_recv_sink_off_stack();
     t_dontwait();
     t_shutdown();
     t_datagram_size();

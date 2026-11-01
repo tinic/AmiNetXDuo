@@ -545,9 +545,10 @@ static struct AmiSocketBase *bsd_child_create(struct AmiSocketBase *master)
     child->sb_NextHandoffId      = 0;
 
     bsd_bzero(&child->sb_NxCaller, sizeof(child->sb_NxCaller));
-    child->sb_NxNest   = 0;
-    child->sb_NxTask   = NULL;
-    child->sb_NxBroken = FALSE;
+    child->sb_NxNest       = 0;
+    child->sb_NxTask       = NULL;
+    child->sb_NxBroken     = FALSE;
+    child->sb_NxWaitPacket = NX_NULL;
 
     child->sb_Table     = NULL;
     child->sb_TableSize = 0;

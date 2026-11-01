@@ -1883,11 +1883,14 @@ static LONG bsd_recv_tcp(struct AmiSocketBase *base, AmiSocket *sock,
                 }
                 else
                 {
+                    /* In the base, not here: see sb_NxWaitPacket. */
                     args.tcp    = &sock->as_Nx.tcp;
-                    args.packet = &packet;
+                    args.packet = &base->sb_NxWaitPacket;
 
                     status = bsd_wait_event(base, now, bsd_recv_once, &args,
                                             &aborted);
+                    packet = base->sb_NxWaitPacket;
+                    base->sb_NxWaitPacket = NX_NULL;
                 }
 
                 if (aborted)
@@ -2011,13 +2014,16 @@ static LONG bsd_recv_udp(struct AmiSocketBase *base, AmiSocket *sock,
         BsdRecvUdpArgs args;
         BOOL           aborted;
 
+        /* In the base, not here: see sb_NxWaitPacket. */
         args.udp    = &sock->as_Nx.udp;
-        args.packet = &packet;
+        args.packet = &base->sb_NxWaitPacket;
 
         for (;;)
         {
             status = bsd_wait_event(base, wait, bsd_recv_udp_once, &args,
                                     &aborted);
+            packet = base->sb_NxWaitPacket;
+            base->sb_NxWaitPacket = NX_NULL;
             if (aborted)
                 return bsd_fail(base, AMI_EINTR);
             if (status != NX_SUCCESS)
