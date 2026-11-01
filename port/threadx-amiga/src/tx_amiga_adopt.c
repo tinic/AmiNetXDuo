@@ -93,12 +93,22 @@ ULONG        count;
 UINT tx_amiga_adopt_thread(TX_THREAD **thread_ptr, ULONG *generation,
                            CHAR *name, UINT priority, UINT reserved)
 {
+    return(tx_amiga_adopt_thread_break(thread_ptr, generation, name, priority,
+                                       reserved, 0UL));
+}
+
+
+UINT tx_amiga_adopt_thread_break(TX_THREAD **thread_ptr, ULONG *generation,
+                                 CHAR *name, UINT priority, UINT reserved,
+                                 ULONG break_mask)
+{
 
 struct _tx_amiga_adopt_slot *slot;
 TX_THREAD                   *thread;
 struct Task                 *me;
 BYTE                         sig;
 ULONG                        sigmask;
+UINT                         broke;
 UINT                         status;
 ULONG                        stack_size;
 VOID                        *stack_start;
@@ -135,14 +145,18 @@ VOID                        *stack_start;
 
     /* The TX_THREAD is the port's, never the caller's: tx_amiga_pool.c says
        why.  This waits when every slot is taken, and it waits holding nothing.  */
-    slot =  _tx_amiga_slot_claim_or_park(me, reserved);
+    slot =  _tx_amiga_slot_claim_or_park(me, reserved, break_mask, &broke);
     if (slot == (struct _tx_amiga_adopt_slot *) 0)
     {
         FreeSignal(sig);
 
-        /* The wait ends without a slot for one of two reasons: the kernel went
-           away under us, or more Tasks were already waiting than the port
-           tracks.  */
+        /* The wait ends without a slot for one of three reasons: a break came,
+           the kernel went away under us, or more Tasks were already waiting
+           than the port tracks.  */
+        if (broke != TX_FALSE)
+        {
+            return(TX_WAIT_ABORTED);
+        }
         return((_tx_amiga_kernel_up == TX_FALSE) ? TX_NOT_DONE : TX_NO_MEMORY);
     }
     thread =  &slot -> as_thread;
@@ -380,6 +394,7 @@ struct Task *me;
        the last entry (StackSwap between calls), and the dead-holder check
        compares against this.  */
     thread_ptr -> tx_thread_amiga_task_stamp =  _tx_amiga_task_stamp(me);
+    thread_ptr -> tx_thread_amiga_task_name  =  me -> tc_Node.ln_Name;
 
     thread_ptr -> tx_thread_amiga_flags &=  ~TX_AMIGA_THREAD_DORMANT;
 

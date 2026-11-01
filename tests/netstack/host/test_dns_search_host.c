@@ -139,9 +139,10 @@ static BOOL h_suffix_at(const char *name, UWORD at, char *qualified,
     return TRUE;
 }
 
-static BOOL h_give_up(VOID *arg)
+static BOOL h_give_up(VOID *arg, ULONG pause)
 {
     (VOID)arg;
+    (VOID)pause;
 
     h.give_up_calls++;
 

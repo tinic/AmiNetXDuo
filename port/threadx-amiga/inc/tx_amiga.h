@@ -157,6 +157,12 @@ static __inline ULONG tx_amiga_eclock_us(ULONG ec, ULONG eclock_per_ms)
 UINT    tx_amiga_adopt_thread(TX_THREAD **thread_ptr, ULONG *generation,
                               CHAR *name, UINT priority, UINT reserved);
 
+/* tx_amiga_adopt_thread(), with one of `break_mask` ending a wait for a slot:
+   TX_WAIT_ABORTED, and the bits stay set for the caller (#383).  */
+UINT    tx_amiga_adopt_thread_break(TX_THREAD **thread_ptr, ULONG *generation,
+                                    CHAR *name, UINT priority, UINT reserved,
+                                    ULONG break_mask);
+
 /* Release the baton, deregister the TX_THREAD, free the Exec signal and give
    the pool slot back.  Must be called by the same Task that adopted, and only
    while it holds the baton.  TX_SUCCESS, TX_THREAD_ERROR (stale handle) or

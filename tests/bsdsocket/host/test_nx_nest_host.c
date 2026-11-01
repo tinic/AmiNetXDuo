@@ -69,6 +69,14 @@ VOID ami_netstack_leave(AmiNetCaller *caller)
 
 VOID ami_netstack_release(AmiNetCaller *caller) { (void)caller; }
 
+/* bsd_nx_park() puts a break back for the re-enter; none comes here. */
+ULONG SetSignal(ULONG newSignals, ULONG signalSet)
+{
+    (void)newSignals;
+    (void)signalSet;
+    return 0UL;
+}
+
 /* bsd_nx_park()'s Wait(): what the bracket looked like while it waited. */
 ULONG Wait(ULONG signalSet)
 {

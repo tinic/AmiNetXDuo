@@ -109,9 +109,11 @@ struct _tx_amiga_adopt_slot
 };
 
 /* Claim: Forbid() held, 0 when the pool is full.  Park: Forbid() NOT held, it
-   waits, and 0 means the waiter table was full or the kernel went away.  */
+   waits, and 0 means the waiter table was full, the kernel went away or one of
+   `break_mask` came (*broke).  */
 struct _tx_amiga_adopt_slot *_tx_amiga_slot_claim_locked(UINT reserved);
-struct _tx_amiga_adopt_slot *_tx_amiga_slot_claim_or_park(struct Task *me, UINT reserved);
+struct _tx_amiga_adopt_slot *_tx_amiga_slot_claim_or_park(struct Task *me, UINT reserved,
+                                                          ULONG break_mask, UINT *broke);
 
 /* The slot behind a handle that still names this adoption, or 0.  Forbid()
    held.  _tx_amiga_slot_release_locked() and the waiter wakes are declared in
@@ -166,6 +168,41 @@ static __inline VOID _tx_amiga_signal(APTR task, ULONG sigmask)
     }
 }
 
+/* Hand the baton to the thread's Task.  An adopted Task is the application's,
+   and another program can RemTask() it while it waits here (IBrowse, #383):
+   signal it only while Exec still lists it.  A removed holder is reclaimed
+   like any dead one (netstack_baton.c).  The list walk is the slow path: a
+   Task in a live state under the name it entered with is signalled directly.
+   RemTask() leaves TS_REMOVED, and memory reused since rarely keeps both.  */
+static __inline VOID _tx_amiga_signal_thread(TX_THREAD *thread_ptr)
+{
+struct Task *task;
+ULONG        sigmask;
+
+    task    =  (struct Task *) thread_ptr -> tx_thread_amiga_task;
+    sigmask =  thread_ptr -> tx_thread_amiga_run_signal;
+
+    if ((task == (struct Task *) 0) || (sigmask == 0UL))
+    {
+        return;
+    }
+
+    if (((thread_ptr -> tx_thread_amiga_flags & TX_AMIGA_THREAD_ADOPTED) == 0U) ||
+        ((task -> tc_State >= TS_RUN) && (task -> tc_State <= TS_EXCEPT) &&
+         ((VOID *) task -> tc_Node.ln_Name == thread_ptr -> tx_thread_amiga_task_name)))
+    {
+        Signal(task, sigmask);
+        return;
+    }
+
+    Disable();
+    if (tx_amiga_task_alive_locked(task) != TX_FALSE)
+    {
+        Signal(task, sigmask);
+    }
+    Enable();
+}
+
 /* TX_TRUE while the calling task is inside a Forbid().  */
 static __inline UINT _tx_amiga_forbidden(VOID)
 {
@@ -205,8 +242,7 @@ TX_THREAD   *thread_ptr;
 
     ami_budget_hold_start();
 
-    _tx_amiga_signal(thread_ptr -> tx_thread_amiga_task,
-                     thread_ptr -> tx_thread_amiga_run_signal);
+    _tx_amiga_signal_thread(thread_ptr);
 
     TX_AMIGA_COUNT(TX_AMIGA_SC_DIRECT);
 

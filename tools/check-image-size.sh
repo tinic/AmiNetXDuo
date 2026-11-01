@@ -109,7 +109,13 @@ BUDGETS=(
     # netxduo #41): +16, 377,516 -> 377,532.
     # A blocked recv() or accept() gives its adoption slot back while the
     # pool is full (#383): +316, 377,532 -> 377,848.
-    "default:src/bsdsocket/bsdsocket.library:377848"
+    # A break ends a wait for an adoption slot, with EINTR (#383): +552,
+    # 377,848 -> 378,400.
+    # No Signal() into a Task another program removed (#383): +268,
+    # 378,400 -> 378,668.
+    # Every blocking wait gives its slot back on a full pool, the timer's
+    # reply never signals a removed Task (#383): +1,492, 378,732 -> 380,224.
+    "default:src/bsdsocket/bsdsocket.library:380224"
     # 41,412 after stateless receive-checksum verification was added to the
     # EL3 and word/long NE2000 direct paths, 2026-09-15.  43,620 with
     # ANXD_CMD_RX_BATCH in the shell (claim, completion, staging copy, the
@@ -198,7 +204,12 @@ BUDGETS=(
     # Off-link .0/.255 sources (#419, netxduo #41): +16, 255,304 -> 255,320.
     # A blocked recv() or accept() gives its slot back on a full pool (#383):
     # +420, 255,320 -> 255,740.
-    "minimal:src/bsdsocket/bsdsocket.library:255740"
+    # A break ends a wait for a slot (#383): +472, 255,740 -> 256,212.
+    # No Signal() into a Task another program removed (#383): +228,
+    # 256,212 -> 256,440.
+    # Every blocking wait gives its slot back, the timer's reply never
+    # signals a removed Task (#383): +1,372, 256,524 -> 257,896.
+    "minimal:src/bsdsocket/bsdsocket.library:257896"
     "minimal:src/netdev/anxnet.device:46000"
     # 29,088 on e806188f after the audited device fixes.
     # Batched transmit adds 632, 29,120 -> 29,752, approved by turo 2026-10-29.
@@ -225,7 +236,11 @@ BUDGETS=(
     # 208,132 on e806188f with the same F-series fixes as the full build.
     # 209,076 with a blocked recv() or accept() giving its slot back on a
     # full pool (#383).
-    "micro:src/bsdsocket/bsdsocket.library:209076"
+    # 209,392 with a break ending a wait for a slot (#383).
+    # 209,656 with no Signal() into a Task another program removed (#383).
+    # 210,756 with every blocking wait giving its slot back and the timer's
+    # reply never signalling a removed Task (#383).
+    "micro:src/bsdsocket/bsdsocket.library:210756"
     "micro:src/netdev/anxnet.device:46000"
     "micro:src/netdev/anxgenet.device:29120"
     "micro:src/wifipi/anxwifipi.device:56000"

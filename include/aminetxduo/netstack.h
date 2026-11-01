@@ -95,6 +95,7 @@ typedef struct AmiNetCaller
     BOOL         nc_Live;       /* cached thread exists, or adoption started */
     struct Task *nc_Task;       /* whose it is; only that task may use it    */
     ULONG        nc_Signal;     /* cached thread's run signal, owner frees   */
+    ULONG        nc_BreakMask;  /* ends a cached enter's wait for a slot     */
 } AmiNetCaller;
 
 LONG ami_netstack_enter(AmiNetCaller *caller);
@@ -447,8 +448,11 @@ LONG    netstack_resolve_reverse(ULONG addr, char *name_out, ULONG name_len,
 /* The same three, told how to give up early.  `give_up` is asked BETWEEN
    queries, never during one, and runs outside the ThreadX bracket so it may
    call exec; TRUE ends the lookup with AMI_NET_ERR_ABORTED.  A NULL `give_up`
-   is the plain call above. */
-typedef BOOL (*AmiNetGiveUpFn)(VOID *arg);
+   is the plain call above.  With `pause` > 0 it first waits up to that many
+   ticks for the break, holding no adoption slot: a lookup queued behind
+   another's for the DNS client waits there (#383).  One that cannot wait
+   returns at once, and the lookup waits in NetX Duo as before. */
+typedef BOOL (*AmiNetGiveUpFn)(VOID *arg, ULONG pause);
 
 LONG    netstack_resolve_until(const char *name, ULONG *addr_out,
                                ULONG timeout_ticks,

@@ -73,8 +73,7 @@ TX_THREAD   *thread_ptr;
 
         ami_budget_hold_start();
 
-        _tx_amiga_signal(thread_ptr -> tx_thread_amiga_task,
-                         thread_ptr -> tx_thread_amiga_run_signal);
+        _tx_amiga_signal_thread(thread_ptr);
 
         Permit();
 

@@ -205,6 +205,16 @@ VOID Signal(struct Task *task, ULONG signalSet)
     h.last_signalled = signalSet;
 }
 
+/* Exec's lists hold every fixture Task but one marked TS_REMOVED, which is
+   what RemTask() leaves in the memory it frees. */
+UINT tx_amiga_exec_task_signal(VOID *task, ULONG sigmask)
+{
+    if (((struct Task *)task)->tc_State == TS_REMOVED)
+        return TX_FALSE;
+    Signal((struct Task *)task, sigmask);
+    return TX_TRUE;
+}
+
 ULONG Wait(ULONG signalSet)
 {
     ULONG arrived;
@@ -1733,20 +1743,214 @@ static void t_wait_event_pool_short(void)
           "no break mask: parked all the same");
     CHECK(h.park_mask == H_EVENT_SIG, "no break mask: on the event alone");
 
-    /* A finite wait keeps NetX's timeout, and so does a call whose wake is
-       not the event signal (bsd_wait_sliced). */
+}
+
+/*
+ * #383, every blocking wait: a timed one (SO_RCVTIMEO, SO_SNDTIMEO, a connect
+ * with a timeout) parks too, with the base's timer at its deadline, and a call
+ * nothing signals (bsd_wait_sliced(), a packet allocation) parks on the timer
+ * a slice at a time.  Suspended in NetX they held their slots: fifteen
+ * connects to a silent host, or fifteen sends on a full window, were the
+ * whole pool.
+ */
+static void t_wait_park_timed(void)
+{
+    BOOL aborted;
+    UINT status;
+
+    printf("bsd_wait_event()/bsd_wait_sliced(): timed and polled waits park\n");
+
+    /* THE CASE.  A timed receive, pool short, nothing comes: parked on the
+       event, the break and the timer, which is armed for the deadline; when
+       it fires the deadline is spent and one last look ends it. */
     h_reset();
-    h.slots_short = TRUE;
+    h.slots_short  = TRUE;
+    h.park_result  = BSD_PARK_DONE;
+    h.wait_plan[0] = H_TIMER_SIG;
+    h.wait_planned = 1;
+    h.tick_jump    = 50;
+    h_sliced_reset(99);
+    status = bsd_wait_event(&h_base, 50, h_sliced_call, NX_NULL, &aborted);
+    CHECK(status == NX_NO_PACKET && !aborted, "timed: it times out");
+    CHECK(h.parks == 1, "timed: parked, not suspended in NetX");
+    CHECK(h.park_mask == (H_EVENT_SIG | H_BREAK_SIG | H_TIMER_SIG),
+          "timed: on the event, the break and the timer");
+    CHECK(h.sendios == 1 &&
+          h_base.sb_TimerReq.tr_time.tv_secs * 1000000UL +
+                  h_base.sb_TimerReq.tr_time.tv_micro ==
+              50UL * (1000000UL / TX_TIMER_TICKS_PER_SECOND),
+          "timed: the timer is armed for the 50-tick deadline");
+    CHECK(h_sliced_n == 2 && h_sliced_waits[0] == NX_NO_WAIT &&
+          h_sliced_waits[1] == NX_NO_WAIT,
+          "timed: a look before the park and one at the deadline");
+    CHECK(h.waitios == 1, "timed: the timer's reply is taken");
+
+    /* The data comes first: returned, and the request stays out for the
+       next wait to keep, as WaitSelect() leaves it. */
+    h_reset();
+    h.slots_short  = TRUE;
+    h.park_result  = BSD_PARK_DONE;
+    h.wait_plan[0] = H_EVENT_SIG;
+    h.wait_planned = 1;
     h_sliced_reset(2);
     status = bsd_wait_event(&h_base, 50, h_sliced_call, NX_NULL, &aborted);
-    CHECK(status == NX_SUCCESS && h.parks == 0, "finite: never parked");
+    CHECK(status == NX_SUCCESS && !aborted, "timed, data: returned");
+    CHECK(h.parks == 1 && h.abortios == 0 && h_base.sb_TimerArmed,
+          "timed, data: the request is kept");
 
+    /* Ctrl-C while a timed wait is parked: EINTR, the break back on the
+       caller. */
     h_reset();
-    h.slots_short = TRUE;
-    h_sliced_reset(2);
+    h.slots_short  = TRUE;
+    h.park_result  = BSD_PARK_DONE;
+    h.wait_plan[0] = H_BREAK_SIG;
+    h.wait_planned = 1;
+    h_sliced_reset(99);
+    status = bsd_wait_event(&h_base, 500, h_sliced_call, NX_NULL, &aborted);
+    CHECK(status == NX_SUCCESS && aborted, "timed, break: aborted");
+    CHECK((h.signals & H_BREAK_SIG) != 0, "timed, break: put back");
+
+    /* A wait nothing signals parks a slice at a time on the timer. */
+    h_reset();
+    h.slots_short  = TRUE;
+    h.park_result  = BSD_PARK_DONE;
+    h.wait_plan[0] = H_TIMER_SIG;
+    h.wait_plan[1] = H_TIMER_SIG;
+    h.wait_planned = 2;
+    h.tick_jump    = 10;
+    h_sliced_reset(3);
     status = bsd_wait_sliced(&h_base, NX_WAIT_FOREVER, h_sliced_call, NX_NULL,
                              &aborted);
-    CHECK(status == NX_SUCCESS && h.parks == 0, "not evented: never parked");
+    CHECK(status == NX_SUCCESS && h.parks == 2, "polled: parked twice");
+    CHECK(h.park_mask == (H_EVENT_SIG | H_BREAK_SIG | H_TIMER_SIG),
+          "polled: with the timer");
+    CHECK(h.sendios == 2 && h_base.sb_TimerReq.tr_time.tv_secs == 0 &&
+          h_base.sb_TimerReq.tr_time.tv_micro ==
+              10UL * (1000000UL / TX_TIMER_TICKS_PER_SECOND),
+          "polled: armed for a slice each time");
+
+    /* Another Task on the base: the timer is the opener's, so no park and
+       no timer -- a look, then NetX's slice, as before. */
+    h_reset();
+    h.slots_short = TRUE;
+    h.park_result = BSD_PARK_DONE;
+    h_me = &h_other_task;
+    h_sliced_reset(2);
+    status = bsd_wait_event(&h_base, 50, h_sliced_call, NX_NULL, &aborted);
+    CHECK(status == NX_SUCCESS && h.parks == 0 && h.opens == 0,
+          "not the opener: no timer, no park");
+    CHECK(h_sliced_waits[0] == NX_NO_WAIT && h_sliced_waits[1] == 10,
+          "not the opener: NetX's slice");
+
+    /* The pool has room: nothing changes, the timed wait is NetX's. */
+    h_reset();
+    h_sliced_reset(2);
+    status = bsd_wait_event(&h_base, 50, h_sliced_call, NX_NULL, &aborted);
+    CHECK(status == NX_SUCCESS && h.parks == 0 && h.opens == 0 &&
+          h_sliced_waits[0] == 10, "room: NetX's slice, no timer");
+}
+
+/*
+ * #383: the base's timer request stays out between waits, and its reply came
+ * as a Signal() to the port's mp_SigTask.  RemTask() of an opener blocked in
+ * a timed WaitSelect() left that Task freed, and the reply wrote a byte of
+ * tc_SigRecvd into the freed memory.  The port is a software interrupt now,
+ * which signals the opener only while Exec lists it.
+ */
+static void t_timer_reply_removed(void)
+{
+    VOID (*reply)(struct AmiSocketBase *);
+
+    printf("timer reply: never Signal()s a removed opener\n");
+
+    h_reset();
+    h_task.tc_State          = TS_WAIT;
+    h_task.tc_Node.ln_Name   = (char *)"opener";
+    h_base.sb_TaskName       = h_task.tc_Node.ln_Name;
+    h.wait_plan[0] = H_TIMER_SIG;
+    h.wait_planned = 1;
+    CHECK(!bsd_pause(&h_base, 2), "pause: the timer ends it");
+    CHECK(h_base.sb_TimerOpen, "pause: the timer was opened");
+    CHECK(h_base.sb_TimerPort.mp_Flags == PA_SOFTINT &&
+          h_base.sb_TimerPort.mp_SigTask == (APTR)&h_base.sb_TimerInt,
+          "the reply port is a software interrupt");
+
+    reply = (VOID (*)(struct AmiSocketBase *))h_base.sb_TimerInt.is_Code;
+    CHECK(reply != NULL && h_base.sb_TimerInt.is_Data == (APTR)&h_base,
+          "the interrupt is the base's");
+    if (reply == NULL)
+        return;
+
+    h.signal_calls = 0;
+    reply(&h_base);
+    CHECK(h.signal_calls == 1 && h.last_signal_task == &h_task &&
+          h.last_signalled == H_TIMER_SIG, "live: the opener is signalled");
+
+    /* THE CASE: RemTask() of the opener, the sweep not yet run. */
+    h.signal_calls     = 0;
+    h_task.tc_State    = TS_REMOVED;
+    reply(&h_base);
+    CHECK(h.signal_calls == 0, "removed: nothing is written into the Task");
+
+    /* The sweep has forgotten it. */
+    h_base.sb_Task = NULL;
+    reply(&h_base);
+    CHECK(h.signal_calls == 0, "forgotten: nothing is signalled");
+    h_task.tc_State = 0;
+
+    /* The break ends a pause and stays set for the caller. */
+    h_reset();
+    h.wait_plan[0] = H_BREAK_SIG;
+    h.wait_planned = 1;
+    CHECK(bsd_pause(&h_base, 2), "pause: the break ends it");
+    CHECK((h.signals & H_BREAK_SIG) != 0, "pause: the break stays set");
+
+    /* Not the opener: no wait at all. */
+    h_reset();
+    h_me = &h_other_task;
+    CHECK(!bsd_pause(&h_base, 2) && h.opens == 0 && h.wait_calls == 0,
+          "pause: another Task returns at once");
+}
+
+/*
+ * #383: a WaitSelect() whose readiness sweep cannot enter the stack
+ * because the adoption pool is full parks in bsd_nx_enter().  A Ctrl-C ends
+ * that park -- the call was broken, not the stack brought down -- so the
+ * result must be EINTR, not ENETDOWN.  bsd_nx_enter() records which in
+ * sb_NxBroken and bsd_nx_errno() reads it; the poll-failure path used to
+ * answer a hard ENETDOWN and lost the distinction.
+ */
+static void t_waitselect_break_full_pool(void)
+{
+    HSets s;
+    LONG  n;
+
+    printf("WaitSelect(): a break while the pool is full is EINTR\n");
+
+    /* A full-pool park ended by Ctrl-C: the enter fails and marks the base
+       broken, as the real bsd_nx_enter() does. */
+    h_reset();
+    (void)h_udp(0, 7777);
+    memset(&s, 0, sizeof(s));
+    h_set(s.read, 0);
+    h.nx_enter_result  = -1;
+    h_base.sb_NxBroken = TRUE;
+
+    n = bsd_WaitSelect(1, s.read, NULL, NULL, &h_poll, NULL, &h_base);
+    CHECK(n == -1 && h_base.sb_Errno == AMI_EINTR,
+          "a full-pool park ended by Ctrl-C is EINTR");
+
+    /* The same failed enter without a break is still ENETDOWN. */
+    h_reset();
+    (void)h_udp(0, 7777);
+    memset(&s, 0, sizeof(s));
+    h_set(s.read, 0);
+    h.nx_enter_result  = -1;
+    h_base.sb_NxBroken = FALSE;
+
+    n = bsd_WaitSelect(1, s.read, NULL, NULL, &h_poll, NULL, &h_base);
+    CHECK(n == -1 && h_base.sb_Errno == AMI_ENETDOWN,
+          "a stack that is down is still ENETDOWN");
 }
 
 int main(void)
@@ -1768,6 +1972,9 @@ int main(void)
     t_events();
     t_event_signal_once();
     t_wait_event_pool_short();
+    t_wait_park_timed();
+    t_timer_reply_removed();
+    t_waitselect_break_full_pool();
 
     printf("%lu checks, %lu failures\n", h_checks, h_failures);
     return h_failures == 0 ? 0 : 1;

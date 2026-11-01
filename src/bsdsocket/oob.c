@@ -172,10 +172,12 @@ LONG bsd_oob_send(struct AmiSocketBase *base, AmiSocket *sock, UBYTE byte,
 
     wait = bsd_wait_option(sock, sock->as_SndTimeout, flags);
 
-    status = nx_packet_allocate(pool, &packet, NX_TCP_PACKET, wait);
+    status = bsd_packet_get(base, pool, &packet, NX_TCP_PACKET, wait);
     if (status != NX_SUCCESS)
         return bsd_fail(base, (status == NX_NO_PACKET)
                                   ? AMI_EWOULDBLOCK
+                              : (status == NX_WAIT_ABORTED)
+                                  ? AMI_EINTR
                                   : bsd_errno_from_nx(status));
 
     status = nx_packet_data_append(packet, &byte, 1UL, pool, wait);

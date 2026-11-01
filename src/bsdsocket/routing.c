@@ -183,7 +183,7 @@ LONG bsd_AddRouteTagList(register struct TagItem *tags __asm("a0"),
         return -1;
 
     if (bsd_nx_enter(SocketBase) != 0)
-        return bsd_fail(SocketBase, AMI_ENETDOWN);
+        return bsd_fail(SocketBase, bsd_nx_errno(SocketBase));
 
     if (req.brr_HaveDefault)
     {
@@ -248,7 +248,7 @@ LONG bsd_DeleteRouteTagList(register struct TagItem *tags __asm("a0"),
         return bsd_fail(SocketBase, AMI_EINVAL);
 
     if (bsd_nx_enter(SocketBase) != 0)
-        return bsd_fail(SocketBase, AMI_ENETDOWN);
+        return bsd_fail(SocketBase, bsd_nx_errno(SocketBase));
 
     if (req.brr_HaveDefault)
     {
@@ -361,7 +361,7 @@ LONG bsd_ChangeRouteTagList(register struct TagItem *tags __asm("a0"),
         return -1;
 
     if (bsd_nx_enter(SocketBase) != 0)
-        return bsd_fail(SocketBase, AMI_ENETDOWN);
+        return bsd_fail(SocketBase, bsd_nx_errno(SocketBase));
 
     if (req.brr_HaveDefault)
     {
@@ -770,7 +770,7 @@ struct rt_msghdr *bsd_GetRouteInfo(register LONG address_family __asm("d0"),
     if (bsd_nx_enter(SocketBase) != 0)
     {
         ami_free(table);
-        (VOID)bsd_fail(SocketBase, AMI_ENETDOWN);
+        (VOID)bsd_fail(SocketBase, bsd_nx_errno(SocketBase));
         return NULL;
     }
 

@@ -133,13 +133,20 @@ static LONG bsd_herrno_of(LONG status)
 }
 
 /*
- * What lets Ctrl-C out of a lookup.
+ * What lets Ctrl-C out of a lookup, and where a lookup queued behind another
+ * waits for the DNS client, holding no slot (bsd_pause(), #383).
  */
-BOOL bsd_resolve_break(VOID *arg)
+BOOL bsd_resolve_break(VOID *arg, ULONG pause)
 {
     struct AmiSocketBase *base = (struct AmiSocketBase *)arg;
 
-    if (base == NULL || base->sb_BreakMask == 0)
+    if (base == NULL)
+        return FALSE;
+
+    if (pause != 0UL)
+        return bsd_pause(base, pause);
+
+    if (base->sb_BreakMask == 0)
         return FALSE;
 
     return (BOOL)((SetSignal(0UL, 0UL) & base->sb_BreakMask) != 0);

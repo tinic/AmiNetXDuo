@@ -315,6 +315,13 @@ VOID Signal(struct Task *task, ULONG signalSet)
     h.signals |= signalSet;
 }
 
+/* The fixtures Tasks are never removed: Execs lists would hold them. */
+UINT tx_amiga_exec_task_signal(VOID *task, ULONG sigmask)
+{
+    Signal((struct Task *)task, sigmask);
+    return TX_TRUE;
+}
+
 /* select.c's pool-pressure wait (#383): never short here, so never parked. */
 BOOL ami_netstack_slots_short(VOID) { return FALSE; }
 LONG bsd_nx_park(struct AmiSocketBase *base, ULONG mask, ULONG *received)

@@ -17,6 +17,7 @@
 
 #include <exec/types.h>
 #include <exec/execbase.h>
+#include <exec/interrupts.h>
 #include <exec/libraries.h>
 #include <exec/lists.h>
 #include <exec/memory.h>
@@ -269,6 +270,7 @@ struct AmiSocketBase
     LONG                    sb_NextHandoffId;
 
     struct Task            *sb_Task;        /* the task that opened us       */
+    char                   *sb_TaskName;    /* its ln_Name then (select.c)   */
 
     /*
      * ThreadX context for this opener's task (netx_call.c). NetX Duo's
@@ -282,6 +284,12 @@ struct AmiSocketBase
     BsdFdSets               sb_SelReady;   /* and its result sets    */
     LONG                    sb_NxNest;      /* bracket depth, 0 == outside   */
     struct Task            *sb_NxTask;      /* who holds it; NULL == outside */
+    LONG                    sb_NxBroken;    /* last enter ended by a break;
+                                               a LONG keeps what follows aligned */
+    /* Where NetX Duo leaves the packet for a receive this base waits in.
+       Not the caller's stack: another program can RemTask() the caller
+       while it waits, and the packet then lands in freed memory (#383). */
+    NX_PACKET              *sb_NxWaitPacket;
 
 
 #ifdef AMINETXDUO_NXCENSUS
@@ -347,13 +355,18 @@ struct AmiSocketBase
     BYTE                    sb_EventSignal;
     ULONG                   sb_EventSigMask;
 
-    struct MsgPort          sb_TimerPort;
+    struct MsgPort          sb_TimerPort;       /* PA_SOFTINT, sb_TimerInt  */
     struct timerequest      sb_TimerReq;
     BOOL                    sb_TimerOpen;
     BOOL                    sb_TimerArmed;      /* sb_TimerReq is out at timer.device */
     ULONG                   sb_TimerDue;        /* the tick it fires at, tx_time_get() */
     BYTE                    sb_TimerSignal;
     ULONG                   sb_TimerSigMask;
+    /* 2 + 4 + 22 bytes, added after the fields above: every field of the base
+       keeps its offset modulo 4, and sb_TimerTask is a longword. */
+    UWORD                   sb_TimerPad;
+    struct Task            *sb_TimerTask;       /* the task the port serves */
+    struct Interrupt        sb_TimerInt;        /* signals sb_TimerTask, live */
 
     /* Scratch returned to callers by the non-reentrant entry points. Per
      * opener, never file statics: two tasks have two bases, and a shared
@@ -784,6 +797,16 @@ static __inline ULONG bsd_break_signals(struct AmiSocketBase *base)
 {
     (VOID)base;
     return FindTask(NULL)->tc_SigRecvd;
+}
+
+/*
+ * Why bsd_nx_enter() refused: EINTR when a break ended its wait for an
+ * adoption slot (#383), as a break ends every other wait; ENETDOWN when the
+ * stack is not running.
+ */
+static __inline LONG bsd_nx_errno(struct AmiSocketBase *base)
+{
+    return base->sb_NxBroken ? AMI_EINTR : AMI_ENETDOWN;
 }
 
 static __inline BOOL bsd_nx_orphan(struct AmiSocketBase *base)
@@ -1245,23 +1268,35 @@ VOID  bsd_tcp_send_fin(AmiSocket *sock);
    can drive it in slices without knowing which call it is. */
 typedef UINT (*BsdSlicedCall)(VOID *arg, ULONG wait);
 
+/* A blocking call's wait.  With every adoption slot taken it gives its slot
+   back and waits outside the stack, on what ends the wait (select.c, #383):
+   bsd_wait_event() for a call whose wake posts the base's event signal (a
+   receive, an accept, a connect, a send on a full window or queue),
+   bsd_wait_sliced() for one nothing signals (a packet allocation), which
+   asks again each slice.  A deadline is the base's timer either way. */
 UINT bsd_wait_sliced(struct AmiSocketBase *base, ULONG wait,
                      BsdSlicedCall call, VOID *arg, BOOL *aborted);
-
-/* bsd_wait_sliced() for a call whose wake posts the base's event signal (a
-   receive, an accept): with every adoption slot taken it waits on that
-   signal outside the stack, holding no slot. */
 UINT bsd_wait_event(struct AmiSocketBase *base, ULONG wait,
                     BsdSlicedCall call, VOID *arg, BOOL *aborted);
 
 ULONG bsd_wait_option(AmiSocket *sock, ULONG timeout_ticks, LONG flags);
+
+/* nx_packet_allocate() whose wait for an empty pool is bsd_wait_sliced()'s:
+   NX_WAIT_ABORTED when the break ended it (transfer.c, #383). */
+UINT bsd_packet_get(struct AmiSocketBase *base, NX_PACKET_POOL *pool,
+                    NX_PACKET **packet, ULONG type, ULONG wait);
 
 /*
  * The break-signal test the resolver's retransmission ladder asks between
  * queries (resolver.c). `arg` is the struct AmiSocketBase whose sb_BreakMask
  * applies. The signature is netstack's AmiNetGiveUpFn.
  */
-BOOL  bsd_resolve_break(VOID *arg);
+BOOL  bsd_resolve_break(VOID *arg, ULONG pause);
+
+/* Wait() up to `ticks` outside the stack for the break, on the base's timer.
+   TRUE when the break came; it stays set for the caller.  A Task that is not
+   the opener, or a base without its timer, returns at once (select.c). */
+BOOL  bsd_pause(struct AmiSocketBase *base, ULONG ticks);
 
 /*
  * Returns the next real tag, advancing *cursor past it, or NULL at the end.

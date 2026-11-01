@@ -6,6 +6,7 @@
 
 #include "bsdsocket_vectors.h"
 #include "aminetxduo/budget.h"
+#include "aminetxduo/exec_port.h"
 #include "aminetxduo/nxstatus.h"
 #include "connfail.h"
 
@@ -39,6 +40,28 @@ static LONG bsd_waitselect_fail(struct AmiSocketBase *base, ULONG *signals,
         *signals = got_signals;
 
     return bsd_fail(base, error);
+}
+
+/*
+ * Signal() the opener only while Exec still lists it: another program can
+ * RemTask() the opener (IBrowse, #383), and the sweep forgets it up to a
+ * second later.  A live state under the name it opened with is enough to skip
+ * the list walk, as at the port's dispatch.  Signalled or gone, nothing
+ * follows here either way.  Safe from an interrupt: the timer's reply below.
+ */
+static inline __attribute__((always_inline)) VOID bsd_task_signal(
+    struct AmiSocketBase *base, ULONG signals)
+{
+    struct Task *task = base->sb_Task;
+
+    if (task == NULL || signals == 0)
+        return;
+
+    if (task->tc_State >= TS_RUN && task->tc_State <= TS_EXCEPT &&
+        task->tc_Node.ln_Name == base->sb_TaskName)
+        Signal(task, signals);
+    else
+        AMI_NX_EITHER_WAY(tx_amiga_exec_task_signal(task, signals));
 }
 
 VOID bsd_event_post(AmiSocket *sock, ULONG events)
@@ -81,9 +104,9 @@ VOID bsd_event_post(AmiSocket *sock, ULONG events)
     if ((events & FD_OOB) != 0)
         signals |= base->sb_SigUrgMask;
 
-    if (signals != 0)
-        Signal(base->sb_Task, signals);
+    bsd_task_signal(base, signals);
 }
+
 
 static VOID bsd_tcp_receive_notify(NX_TCP_SOCKET *socket_ptr)
 {
@@ -375,6 +398,13 @@ VOID bsd_events_attach(AmiSocket *sock)
 
 #define BSD_BREAK_SLICE_TICKS   10
 
+/* What a parked wait waits for besides the break (bsd_wait_slices()). */
+#define BSD_WAKE_EVENT          0   /* the call's wake posts sb_EventSigMask */
+#define BSD_WAKE_POLL           1   /* nothing posts it: ask each slice      */
+
+static BOOL bsd_timer_until(struct AmiSocketBase *base, ULONG due);
+static VOID bsd_timer_take(struct AmiSocketBase *base);
+
 /* The statuses a sliced call answers while it would still block. */
 static BOOL bsd_wait_again(UINT status)
 {
@@ -387,17 +417,31 @@ static BOOL bsd_wait_again(UINT status)
  * Returns NX_SUCCESS with *aborted set when the break arrived, so the caller
  * fails with EINTR. Otherwise it returns whatever the sliced call last said.
  *
- * `evented`: the call's wake posts the base's event signal.  Such a wait with
- * no deadline gives its adoption slot back while every slot is taken: it
- * clears the event bit, asks once without waiting, and Wait()s in Exec for
- * the event or the break (bsd_nx_park()).  Suspended in NetX it would hold
- * its slot until its data came, and fifteen of those stopped every other
- * caller of the stack (#383).  It is looked at between slices, so a forever
- * wait with no break mask is sliced too.
+ * THE PARK (#383).  A Task suspended in NetX holds an adoption slot for as
+ * long as it waits, and the slots are a fixed pool (tx_amiga_pool.c): fifteen
+ * blocked callers took every slot, and every other program -- httpd, a
+ * browser's next connection, NetShutdown -- waited for one of them to finish.
+ * So while a Task waits for a slot, each blocking call made here gives its
+ * slot back between slices: it clears the event bit, asks once without
+ * waiting, and Wait()s in Exec with the adoption dormant (bsd_nx_park()) for
+ * what ends its wait:
+ *
+ *   - the event signal, which the call's wake posts (BSD_WAKE_EVENT): data or
+ *     a connection arriving, a handshake done or failed, the window or the
+ *     transmit queue opening (bsd_send_once() leaves as_TxWait for that);
+ *   - the base's timer, at the deadline of a timed wait (SO_RCVTIMEO,
+ *     SO_SNDTIMEO), and each slice for a call nothing signals
+ *     (BSD_WAKE_POLL: a packet allocation);
+ *   - the break, which ends it with EINTR, as between slices.
+ *
+ * Only the opener parks: the event and the timer signal it.  Another Task on
+ * the base, and every Task while the pool has room, takes the slice.  The
+ * pool is looked at between slices, so a forever wait with no break mask is
+ * sliced too.
  */
 static UINT bsd_wait_slices(struct AmiSocketBase *base, ULONG wait,
                             BsdSlicedCall call, VOID *arg, BOOL *aborted,
-                            BOOL evented)
+                            UBYTE wake)
 {
     ULONG break_mask = base->sb_BreakMask;
     ULONG remaining  = wait;
@@ -405,8 +449,7 @@ static UINT bsd_wait_slices(struct AmiSocketBase *base, ULONG wait,
 
     *aborted = FALSE;
 
-    if (wait == NX_NO_WAIT ||
-        (wait == NX_WAIT_FOREVER && break_mask == 0 && !evented))
+    if (wait == NX_NO_WAIT)
         return call(arg, wait);
 
     for (;;)
@@ -423,10 +466,18 @@ static UINT bsd_wait_slices(struct AmiSocketBase *base, ULONG wait,
             return NX_SUCCESS;
         }
 
-        if (evented && wait == NX_WAIT_FOREVER && ami_netstack_slots_short())
+        if (wait != NX_WAIT_FOREVER && remaining == 0)
+            return call(arg, NX_NO_WAIT);
+
+        if (ami_netstack_slots_short())
         {
+            ULONG mask     = base->sb_EventSigMask | break_mask;
             ULONG received = 0;
+            BOOL  timed    = (wait != NX_WAIT_FOREVER || wake == BSD_WAKE_POLL);
+            BOOL  parkable = TRUE;
             LONG  parked;
+
+            started = tx_time_get();
 
             /* Clear, then ask: an event after the clear sets the bit again
                and the Wait() returns at once. */
@@ -436,30 +487,60 @@ static UINT bsd_wait_slices(struct AmiSocketBase *base, ULONG wait,
             if (!bsd_wait_again(status))
                 return status;
 
-            parked = bsd_nx_park(base, base->sb_EventSigMask | break_mask,
-                                 &received);
-            if (parked == BSD_PARK_LOST)
-                return NX_NOT_ENABLED;
-
-            if (parked == BSD_PARK_DONE)
+            if (timed)
             {
-                if ((received & break_mask) != 0)
-                {
-                    /* Back to the caller, as WaitSelect() gives it back. */
-                    Signal(FindTask(NULL), received & break_mask);
-                    *aborted = TRUE;
-                    return NX_SUCCESS;
-                }
-                continue;
+                ULONG span = (wake == BSD_WAKE_POLL &&
+                              (wait == NX_WAIT_FOREVER ||
+                               remaining > BSD_BREAK_SLICE_TICKS))
+                                 ? BSD_BREAK_SLICE_TICKS : remaining;
+
+                parkable = bsd_timer_until(base, started + span);
+                mask    |= base->sb_TimerSigMask;
             }
 
-            /* BSD_PARK_NONE: not this Task's bracket alone, so the slice. */
+            if (parkable)
+            {
+                parked = bsd_nx_park(base, mask, &received);
+                if (parked == BSD_PARK_LOST)
+                {
+                    /* A break ends the wait to re-enter too (bsd_nx_park()):
+                       the no-bracket path of a stack that went away, as
+                       EINTR. */
+                    if ((received & break_mask) != 0)
+                        return NX_WAIT_ABORTED;
+                    return NX_NOT_ENABLED;
+                }
+
+                if (parked == BSD_PARK_DONE)
+                {
+                    if ((received & break_mask) != 0)
+                    {
+                        /* Back to the caller, as WaitSelect() gives it
+                           back. */
+                        Signal(FindTask(NULL), received & break_mask);
+                        *aborted = TRUE;
+                        return NX_SUCCESS;
+                    }
+
+                    if (timed && (received & base->sb_TimerSigMask) != 0)
+                        bsd_timer_take(base);
+
+                    if (wait != NX_WAIT_FOREVER)
+                    {
+                        ULONG elapsed = tx_time_get() - started;
+
+                        remaining = (elapsed >= remaining) ? 0
+                                                           : remaining - elapsed;
+                    }
+                    continue;
+                }
+            }
+
+            /* BSD_PARK_NONE, or no timer for the deadline: the slice. */
         }
 
         if (wait == NX_WAIT_FOREVER)
             slice = BSD_BREAK_SLICE_TICKS;
-        else if (remaining == 0)
-            return call(arg, NX_NO_WAIT);
         else
             slice = (remaining < BSD_BREAK_SLICE_TICKS) ? remaining
                                                         : BSD_BREAK_SLICE_TICKS;
@@ -486,13 +567,13 @@ static UINT bsd_wait_slices(struct AmiSocketBase *base, ULONG wait,
 UINT bsd_wait_sliced(struct AmiSocketBase *base, ULONG wait,
                      BsdSlicedCall call, VOID *arg, BOOL *aborted)
 {
-    return bsd_wait_slices(base, wait, call, arg, aborted, FALSE);
+    return bsd_wait_slices(base, wait, call, arg, aborted, BSD_WAKE_POLL);
 }
 
 UINT bsd_wait_event(struct AmiSocketBase *base, ULONG wait,
                     BsdSlicedCall call, VOID *arg, BOOL *aborted)
 {
-    return bsd_wait_slices(base, wait, call, arg, aborted, TRUE);
+    return bsd_wait_slices(base, wait, call, arg, aborted, BSD_WAKE_EVENT);
 }
 
 ULONG bsd_wait_option(AmiSocket *sock, ULONG timeout_ticks, LONG flags)
@@ -656,6 +737,27 @@ BOOL bsd_exception(AmiSocket *sock)
             sock->as_SoError != 0);
 }
 
+/*
+ * timer.device's reply, a software interrupt on the port (PA_SOFTINT).
+ *
+ * The request is the base's and stays out between waits (below), so its reply
+ * can come at any time -- also after another program has RemTask()ed the
+ * opener in the middle of a timed WaitSelect() (#383).  A PA_SIGNAL port
+ * Signal()ed whatever mp_SigTask named, and that was the freed Task: one byte
+ * of tc_SigRecvd in freed memory.  The interrupt signals it only while Exec
+ * still lists it, the test the socket events make, and once the sweep has
+ * forgotten it (sb_Task NULL) not at all.  The message is queued on the port
+ * either way, so CheckIO()/WaitIO() see the reply as before.
+ */
+static VOID bsd_timer_reply(register struct AmiSocketBase *base __asm("a1"))
+{
+    if (base->sb_TimerTask == base->sb_Task)
+        bsd_task_signal(base, base->sb_TimerSigMask);
+    else
+        AMI_NX_EITHER_WAY(tx_amiga_exec_task_signal(base->sb_TimerTask,
+                                                    base->sb_TimerSigMask));
+}
+
 static BOOL bsd_timer_open(struct AmiSocketBase *base)
 {
     BYTE sig;
@@ -670,16 +772,12 @@ static BOOL bsd_timer_open(struct AmiSocketBase *base)
     base->sb_TimerSignal  = sig;
     base->sb_TimerSigMask = 1UL << sig;
 
-    /* NewList() is amiga.lib, so the port is open-coded. */
-    base->sb_TimerPort.mp_Node.ln_Type = NT_MSGPORT;
-    base->sb_TimerPort.mp_Flags        = PA_SIGNAL;
-    base->sb_TimerPort.mp_SigBit       = sig;
     /*
      * THE TASK THAT OWNS THE BIT, WHICH IS NOT ALWAYS THE OPENER.
      *
      * AllocSignal() allocates in the CALLING task and this runs lazily, on the
-     * first WaitSelect() with a timeout.  mp_SigTask was the opener, so on a
-     * base shared between tasks -- which this library permits, because it
+     * first wait with a timeout.  mp_SigTask was the opener, so on a base
+     * shared between tasks -- which this library permits, because it
      * enforces no same-task rule anywhere -- timer.device signalled the OPENER
      * on a bit the WAITER had allocated, and the waiter sat in Wait() until a
      * socket event arrived or forever.  A timeout that never fires is the
@@ -688,7 +786,18 @@ static BOOL bsd_timer_open(struct AmiSocketBase *base)
      * The port serves one task: whoever opens it here.  A second task asking
      * for a timeout is refused below rather than left to hang.
      */
-    base->sb_TimerPort.mp_SigTask      = FindTask(NULL);
+    base->sb_TimerTask = FindTask(NULL);
+    base->sb_TimerInt.is_Node.ln_Type = NT_INTERRUPT;
+    base->sb_TimerInt.is_Node.ln_Pri  = 0;
+    base->sb_TimerInt.is_Node.ln_Name = (char *)"bsdsocket timer";
+    base->sb_TimerInt.is_Data         = (APTR)base;
+    base->sb_TimerInt.is_Code         = (VOID (*)())bsd_timer_reply;
+
+    /* NewList() is amiga.lib, so the port is open-coded. */
+    base->sb_TimerPort.mp_Node.ln_Type = NT_MSGPORT;
+    base->sb_TimerPort.mp_Flags        = PA_SOFTINT;
+    base->sb_TimerPort.mp_SigBit       = sig;
+    base->sb_TimerPort.mp_SigTask      = (struct Task *)&base->sb_TimerInt;
     base->sb_TimerPort.mp_MsgList.lh_Head =
         (struct Node *)&base->sb_TimerPort.mp_MsgList.lh_Tail;
     base->sb_TimerPort.mp_MsgList.lh_Tail = NULL;
@@ -801,6 +910,77 @@ static VOID bsd_timer_arm(struct AmiSocketBase *base, ULONG secs, ULONG micro,
     SendIO((struct IORequest *)&base->sb_TimerReq);
     base->sb_TimerArmed = TRUE;
     base->sb_TimerDue   = due;
+}
+
+/*
+ * The base's timer out to fire no later than about a tick after `due` (a
+ * tx_time_get() tick, under LONG_MAX ticks away), for a wait parked outside
+ * the stack (bsd_wait_slices()).  The rules are WaitSelect()'s: a request
+ * still out is kept unless it would fire too late, and an early one is
+ * re-armed by the waiter for what is left.  The signal is cleared, so a set
+ * bit after this is a reply.  Opener only, for the reason at bsd_timer_open().
+ */
+static BOOL bsd_timer_until(struct AmiSocketBase *base, ULONG due)
+{
+    ULONG now = tx_time_get();
+    LONG  want = (LONG)(due - now);
+
+    if (FindTask(NULL) != base->sb_Task || !bsd_timer_open(base) ||
+        base->sb_TimerTask != base->sb_Task)
+        return FALSE;
+
+    if (want < 1)
+        want = 1;
+
+    if (bsd_timer_reap(base) && (LONG)(base->sb_TimerDue - now) > want + 1L)
+        bsd_timer_cancel(base);
+
+    SetSignal(0, base->sb_TimerSigMask);
+
+    if (!base->sb_TimerArmed)
+        bsd_timer_arm(base, (ULONG)want / (ULONG)TX_TIMER_TICKS_PER_SECOND,
+                      ((ULONG)want % (ULONG)TX_TIMER_TICKS_PER_SECOND) *
+                          BSD_TICK_US,
+                      due);
+
+    return TRUE;
+}
+
+BOOL bsd_pause(struct AmiSocketBase *base, ULONG ticks)
+{
+    ULONG break_mask = base->sb_BreakMask;
+    ULONG received;
+
+    if ((SetSignal(0UL, 0UL) & break_mask) != 0)
+        return TRUE;
+
+    if (!bsd_timer_until(base, tx_time_get() + ticks))
+        return FALSE;
+
+    received = Wait(base->sb_TimerSigMask | break_mask);
+
+    if ((received & base->sb_TimerSigMask) != 0)
+        bsd_timer_take(base);
+
+    if ((received & break_mask) != 0)
+    {
+        SetSignal(received & break_mask, received & break_mask);
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
+/* After a parked wait woke with the timer's bit: take the reply if it is
+   one.  The bit alone is a request that fired after its wait had ended. */
+static VOID bsd_timer_take(struct AmiSocketBase *base)
+{
+    if (base->sb_TimerArmed &&
+        CheckIO((struct IORequest *)&base->sb_TimerReq) != NULL)
+    {
+        WaitIO((struct IORequest *)&base->sb_TimerReq);
+        base->sb_TimerArmed = FALSE;
+    }
 }
 
 
@@ -1064,8 +1244,11 @@ LONG bsd_WaitSelect(register LONG nfds                __asm("d0"),
             if (terminal_wait && SocketBase->sb_TimerArmed)
                 bsd_timer_cancel(SocketBase);
 
+            /* A full pool parks the enter, and a Ctrl-C ends that park: the
+               call was broken, not the stack brought down, so EINTR and not
+               ENETDOWN.  bsd_nx_errno() reads which (#383). */
             return bsd_waitselect_fail(SocketBase, signals, got_signals,
-                                       AMI_ENETDOWN);
+                                       bsd_nx_errno(SocketBase));
         }
 
         if (count > 0 || got_signals != 0)
@@ -1107,7 +1290,7 @@ LONG bsd_WaitSelect(register LONG nfds                __asm("d0"),
                    top (F-065), before this timer was ever reached. */
 
                 if (SocketBase->sb_TimerOpen &&
-                    SocketBase->sb_TimerPort.mp_SigTask != me)
+                    SocketBase->sb_TimerTask != me)
                 {
                     AMI_WARN("bsdsocket: WaitSelect timeout from a second "
                              "task; the timer belongs to another one");
@@ -1227,7 +1410,7 @@ LONG bsd_WaitSelect(register LONG nfds                __asm("d0"),
 
             if (count < 0)
                 return bsd_waitselect_fail(SocketBase, signals, got_signals,
-                                           AMI_ENETDOWN);
+                                           bsd_nx_errno(SocketBase));
 
             break;
         }

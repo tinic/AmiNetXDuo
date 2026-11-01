@@ -34,6 +34,7 @@ static ULONG bsd_nx_eclock(VOID)
 
 LONG bsd_nx_enter(struct AmiSocketBase *base)
 {
+    LONG entered;
 #ifdef AMINETXDUO_NXCENSUS
     ULONG t0;
 #endif
@@ -65,28 +66,32 @@ LONG bsd_nx_enter(struct AmiSocketBase *base)
     t0 = bsd_nx_eclock();
 #endif
 
+    /* A full pool parks the enter until a slot comes back; the break ends
+       that wait, as it ends the call's own (#383). */
+    base->sb_NxCaller.nc_BreakMask = base->sb_BreakMask;
+
 #ifdef AMINETXDUO_RXPROBE
     {
         ULONG bt0 = ami_budget_clock();
 
 #if AMINETXDUO_NXCACHE
-        if (ami_netstack_enter_cached(&base->sb_NxCaller) != AMI_NET_OK)
-            return -1;
+        entered = ami_netstack_enter_cached(&base->sb_NxCaller);
 #else
-        if (ami_netstack_enter(&base->sb_NxCaller) != AMI_NET_OK)
-            return -1;
+        entered = ami_netstack_enter(&base->sb_NxCaller);
 #endif
         ami_budget_baton(ami_budget_clock() - bt0);
     }
 #else
 #if AMINETXDUO_NXCACHE
-    if (ami_netstack_enter_cached(&base->sb_NxCaller) != AMI_NET_OK)
-        return -1;
+    entered = ami_netstack_enter_cached(&base->sb_NxCaller);
 #else
-    if (ami_netstack_enter(&base->sb_NxCaller) != AMI_NET_OK)
+    entered = ami_netstack_enter(&base->sb_NxCaller);
+#endif
+#endif
+
+    base->sb_NxBroken = (entered == AMI_NET_ERR_ABORTED) ? TRUE : FALSE;
+    if (entered != AMI_NET_OK)
         return -1;
-#endif
-#endif
 
 #ifdef AMINETXDUO_NXCENSUS
     t0 = bsd_nx_eclock() - t0;
@@ -165,6 +170,13 @@ LONG bsd_nx_park(struct AmiSocketBase *base, ULONG mask, ULONG *received)
 #endif
 
     *received = Wait(mask);
+
+    /* The break stays set: it ends the re-enter's wait for a slot too, and
+       the caller answers it (#383). */
+    if ((*received & base->sb_BreakMask) != 0)
+        SetSignal(*received & base->sb_BreakMask,
+                  *received & base->sb_BreakMask);
+    base->sb_NxCaller.nc_BreakMask = base->sb_BreakMask;
 
 #if AMINETXDUO_NXCACHE
     if (ami_netstack_enter_cached(&base->sb_NxCaller) == AMI_NET_OK)

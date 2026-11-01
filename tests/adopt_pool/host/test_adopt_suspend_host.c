@@ -46,6 +46,9 @@ VOID  Forbid(VOID)  { }
 VOID  Permit(VOID)  { }
 struct Task *FindTask(const char *name) { (void) name; return &fake_task; }
 VOID  Signal(struct Task *task, ULONG s) { task->tc_SigRecvd |= s; }
+VOID  Disable(VOID) { }
+VOID  Enable(VOID)  { }
+UINT  tx_amiga_task_alive_locked(struct Task *task) { (void) task; return TX_TRUE; }
 ULONG Wait(ULONG s)                     { return s; }
 BYTE  AllocSignal(LONG n)               { (void) n; return -1; }
 VOID  FreeSignal(LONG n)                { (void) n; }
@@ -66,8 +69,9 @@ struct _tx_amiga_adopt_slot *_tx_amiga_slot_held(TX_THREAD *t, ULONG g)
 }
 
 /* Off the suspend path. */
-struct _tx_amiga_adopt_slot *_tx_amiga_slot_claim_or_park(struct Task *me, UINT r)
-{ (void) me; (void) r; return 0; }
+struct _tx_amiga_adopt_slot *_tx_amiga_slot_claim_or_park(struct Task *me, UINT r,
+                                                          ULONG b, UINT *broke)
+{ (void) me; (void) r; (void) b; *broke = 0; return 0; }
 VOID  _tx_amiga_slot_publish_locked(struct _tx_amiga_adopt_slot *s) { (void) s; }
 VOID  _tx_amiga_slot_release_locked(struct _tx_amiga_adopt_slot *s) { (void) s; }
 VOID  _tx_amiga_adopt_wake_waiters_locked(VOID) { }
