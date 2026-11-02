@@ -471,7 +471,24 @@ ULONG ami_config_rx_batch(ULONG fallback) { return fallback; }
 ULONG ami_config_tx_run(ULONG fallback)   { return fallback; }
 ULONG ami_config_tx_batch(ULONG fallback) { return fallback; }
 
-UINT tx_thread_sleep(ULONG ticks) { (VOID)ticks; return 0; }
+/* The open runs on an Exec task outside the ThreadX bracket, where the real
+   tx_thread_sleep() finds no current thread and sleeps not at all. */
+static int h_tx_sleeps;
+
+UINT tx_thread_sleep(ULONG ticks)
+{
+    (VOID)ticks;
+    h_tx_sleeps++;
+    return TX_CALLER_ERROR;
+}
+
+static int h_delays;
+
+VOID Delay(LONG ticks)
+{
+    h_delays++;
+    h_now_ms += (ULONG)ticks * 20UL;
+}
 
 /* --------------------------------------------------------- the device I/O -- */
 
@@ -2548,6 +2565,42 @@ static void case_cmd_online_deaf(void)
             "online deaf: reclaimed once the device answers");
 }
 
+/* REQUIRESINITDELAY: a second between the configure and the return, from
+   the open's own task, which is not a ThreadX thread. */
+static void case_init_delay(void)
+{
+    AmiSana2If *iface;
+    LONG        err = 0;
+    ULONG       settled;
+
+    h_device_reset();
+    h_config();
+    h_cfg.requires_init_delay = TRUE;
+    h_tx_sleeps = 0;
+    h_delays    = 0;
+
+    iface = ami_sana2_open(&h_cfg, &err);
+    settled = h_now_ms;
+
+    printf("init_delay settled_ms=%lu delays=%d tx_sleeps=%d\n",
+           (unsigned long)settled, h_delays, h_tx_sleeps);
+    h_check(iface != NULL, "init delay: the open succeeds");
+    h_check(settled >= 1000UL, "init delay: a second passed in the open");
+    h_check(h_tx_sleeps == 0, "init delay: no ThreadX sleep off a thread");
+
+    if (iface != NULL)
+        (VOID)h_tear_down(iface);
+
+    /* Not asked: no wait at all. */
+    h_device_reset();
+    h_config();
+    iface = ami_sana2_open(&h_cfg, &err);
+    h_check(iface != NULL && h_now_ms == 0,
+            "no init delay: the open does not wait");
+    if (iface != NULL)
+        (VOID)h_tear_down(iface);
+}
+
 int main(void)
 {
     printf("sana2 device: open, online, offline, close\n");
@@ -2597,6 +2650,7 @@ int main(void)
     case_cmd_deaf();
     case_cmd_held_refuses_rest();
     case_cmd_online_deaf();
+    case_init_delay();
 
     h_check(ami_sana2_retained_count() == 0, "nothing is left retained");
     h_check(h_ports_made > 0, "reply ports were created");
