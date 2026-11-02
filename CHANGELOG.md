@@ -7,6 +7,8 @@ are history.
 
 ## Unreleased
 
+## 1.0.0-rc3
+
 - A WaitSelect() with a timeout times out again when its timer fires just
   as the call starts; it waited for the next packet or Ctrl-C before, and a
   queued name lookup could wait until Ctrl-C.
@@ -21,23 +23,25 @@ are history.
   DHCP client read past the received message.
 - tls.library checks the length of every field in a server's ServerHello
   before reading it.
-- A program waiting in connect(), send(), a receive with a timeout or a DNS
-  lookup no longer holds up other programs, and stops on Ctrl-C.
-- A program removed while it waits in WaitSelect() with a timeout is no
-  longer signalled by its timer afterwards.
-- A program removed while it waits in recv() no longer has a later packet
-  written into its freed memory.
-- WaitSelect() interrupted by Ctrl-C while the stack is busy returns EINTR
-  instead of ENETDOWN.
+- A program waiting in recv() or accept() no longer holds up every other
+  program once fifteen are waiting, so IBrowse can stop its connections and
+  NetShutdown finishes.
 - A program waiting for a free place in the stack stops on Ctrl-C.
 - A network task that another program removes while it waits in the stack
   is no longer signalled afterwards, which could corrupt memory after
   IBrowse ignored its unfinished subtasks.
-- A program waiting in recv() or accept() no longer holds up every other
-  program once fifteen are waiting, so IBrowse can stop its connections and
-  NetShutdown finishes.
+- A program removed while it waits in recv() no longer has a later packet
+  written into its freed memory.
+- WaitSelect() interrupted by Ctrl-C while the stack is busy returns EINTR
+  instead of ENETDOWN.
+- A program waiting in connect(), send(), a receive with a timeout or a DNS
+  lookup no longer holds up other programs, and stops on Ctrl-C.
+- A program removed while it waits in WaitSelect() with a timeout is no
+  longer signalled by its timer afterwards.
 - Replies from a host whose address ends in .0 or .255 on another network
   are accepted, so DA-Player gets CD titles from gnudb.gnudb.org.
+- After a switch from the drawer installation to the system one, the tools no
+  longer read interface files from the old drawer.
 - A TCP connection whose IPv6 address expires or is withdrawn by the router
   no longer stops the network when a tail loss probe fires.
 - A resent block that spans the 32-bit sequence number wrap is sent in full
