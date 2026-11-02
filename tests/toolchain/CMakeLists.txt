@@ -16,6 +16,11 @@ add_test(
     COMMAND "${Python3_EXECUTABLE}"
             "${CMAKE_CURRENT_SOURCE_DIR}/test_crt0_gate.py")
 
+add_test(
+    NAME toolchain_lock_order_gate
+    COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/test_lock_order_gate.py")
+
 # cmake/check-a5-frame.cmake against listings of the frames it must reject
 # (the beta5 clobber, an unmatched exg) and the ones it must pass (a stack
 # restore, the NDK's exg pair around Supervisor()).
