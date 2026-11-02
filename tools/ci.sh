@@ -536,7 +536,9 @@ host_test_targets() { # builddir
 #      changed-value publication/withdrawal (all hosts).
 #      594 with config_devs_redirect: the NetInterfaces drawer each install
 #      layout reads, a stale drawer outside DEVS: included (all hosts).
-HOST_TESTS_EXPECTED=594
+#      595 with bsd_job_lock (#383): an interface job blocked in its driver
+#      leaves OpenLibrary and the status calls free (x86_64 only).
+HOST_TESTS_EXPECTED=595
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,
@@ -549,14 +551,14 @@ case "$(uname -m)" in
     # test_unbracketed_close (F-059), test_raw_hdrincl6 (F-061),
     # test_deferred_release (F-059), test_hostsource (F-088),
     # test_raw_v6_lock (N-036), test_netstatus_order (N-077), and
-    # test_addrinfo_dns and test_tcp_autotune, all
+    # test_addrinfo_dns, test_tcp_autotune and test_joblock (#383), all
     # x86_64-only for
     # the reason in
     # tests/bsdsocket/CMakeLists.txt:
     # elsewhere the host's LONG is eight bytes and no structure in them has
     # the target's shape.
     # Subtract the x86_64-only bsdsocket fixtures here.
-    *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 32)) ;;
+    *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 33)) ;;
 esac
 # The conflict-drain fixture uses Linux's MAP_32BIT, not merely x86_64.
 # Darwin arm64 registers 543; Darwin x86_64 registers 574 on this tree.
