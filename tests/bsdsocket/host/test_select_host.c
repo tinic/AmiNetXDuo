@@ -83,6 +83,8 @@ static struct
     ULONG        waitios;
     ULONG        checkios;
     BOOL         io_done;       /* CheckIO() says the request has replied  */
+    BOOL         checkio_post_reply; /* replies right after CheckIO() == NULL */
+    BOOL         wait_stale_timer;   /* next H_TIMER_SIG wake has no reply   */
     ULONG        tick_jump;     /* ticks a planned timer wake advances     */
     ULONG        signal_calls;
     ULONG        last_signalled;
@@ -221,6 +223,14 @@ ULONG Wait(ULONG signalSet)
 
     h.last_wait_mask = signalSet;
 
+    if ((h.signals & signalSet) != 0)
+    {
+        arrived    = h.signals & signalSet;
+        h.signals &= ~arrived;
+        h.wait_calls++;
+        return arrived;
+    }
+
     if (h.wait_calls >= h.wait_planned)
         h_unreachable("Wait");
 
@@ -229,11 +239,12 @@ ULONG Wait(ULONG signalSet)
 
     /* A timer wake is the request replying: CheckIO() sees it and the
        clock has moved on by the timeout. */
-    if ((arrived & H_TIMER_SIG) != 0)
+    if ((arrived & H_TIMER_SIG) != 0 && !h.wait_stale_timer)
     {
         h.io_done = TRUE;
         h.ticks  += h.tick_jump;
     }
+    h.wait_stale_timer = FALSE;
 
     if (h.wait_establishes != NULL)
     {
@@ -272,8 +283,21 @@ LONG AbortIO(struct IORequest *io) { (VOID)io; h.abortios++; h.io_done = TRUE; r
 LONG WaitIO(struct IORequest *io)  { (VOID)io; h.waitios++; h.io_done = FALSE; return 0; }
 struct IORequest *CheckIO(struct IORequest *io)
 {
+    struct IORequest *res = h.io_done ? io : NULL;
+
     h.checkios++;
-    return h.io_done ? io : NULL;
+    if (res == NULL && h.checkio_post_reply)
+    {
+        VOID (*reply)(struct AmiSocketBase *) =
+            (VOID (*)(struct AmiSocketBase *))h_base.sb_TimerInt.is_Code;
+
+        h.checkio_post_reply = FALSE;
+        h.io_done            = TRUE;
+        h.ticks             += h.tick_jump;
+        if (reply != NULL)
+            reply(&h_base);
+    }
+    return res;
 }
 
 BOOL ami_netstack_slots_short(VOID) { return h.slots_short; }
@@ -1953,6 +1977,123 @@ static void t_waitselect_break_full_pool(void)
           "a stack that is down is still ENETDOWN");
 }
 
+/*
+ * #383: when a kept timer request replies right after bsd_timer_reap()'s
+ * CheckIO() saw it still in flight, the PA_SOFTINT handler sets
+ * sb_TimerSigMask before the caller enters Wait().  Clearing sb_TimerSigMask
+ * unconditionally after bsd_timer_reap() wiped that reply bit while leaving
+ * sb_TimerArmed TRUE, so Wait() blocked forever on a request that had already
+ * completed.  And in bsd_pause(), a kept earlier request that fires before
+ * `due` must re-arm for the remainder instead of returning after 0 ticks.
+ */
+static void t_timer_kept_race(void)
+{
+    struct timeval one_second = { 1, 0 };
+    HSets          s;
+    LONG           n;
+    BOOL           aborted;
+    UINT           status;
+
+    printf("kept timer: reply after CheckIO() and early fire in bsd_pause()\n");
+
+    /* 1. WaitSelect() keeps an armed request that replies right after
+       bsd_timer_reap()'s CheckIO(): Wait() consumes the pending bit without
+       blocking on a completed request. */
+    h_reset();
+    h_task.tc_State        = TS_RUN;
+    h_task.tc_Node.ln_Name = (char *)"opener";
+    h_base.sb_TaskName     = h_task.tc_Node.ln_Name;
+    (void)h_tcp(0, NX_TCP_SYN_SENT);
+    h_sock[0].as_Flags = ASF_TCP | ASF_CONNECTING;
+    h.wait_plan[0]     = H_EVENT_SIG;
+    h.wait_planned     = 1;
+    h.wait_establishes = &h_sock[0];
+    memset(&s, 0, sizeof(s));
+    h_set(s.write, 0);
+
+    n = bsd_WaitSelect(1, NULL, s.write, NULL, &one_second, NULL, &h_base);
+    CHECK(n == 1 && h_base.sb_TimerArmed,
+          "WaitSelect: data wake leaves the timer armed");
+
+    h_sock[0].as_Nx.tcp.nx_tcp_socket_state = NX_TCP_SYN_SENT;
+    h.wait_calls         = 0;
+    h.wait_planned       = 0;   /* no blocking Wait(): bit is set before Wait */
+    h.sendios = h.waitios = h.abortios = 0;
+    h.tick_jump          = TX_TIMER_TICKS_PER_SECOND;
+    h.checkio_post_reply = TRUE;
+    memset(&s, 0, sizeof(s));
+    h_set(s.write, 0);
+
+    n = bsd_WaitSelect(1, NULL, s.write, NULL, &one_second, NULL, &h_base);
+    CHECK(n == 0 && h.sendios == 0 && h.waitios == 1 && !h_base.sb_TimerArmed,
+          "WaitSelect: a kept timer replying after CheckIO() is not wiped");
+
+    /* 2. bsd_pause() keeps an armed request that replies right after
+       bsd_timer_reap()'s CheckIO(): its signal bit is preserved and Wait()
+       returns immediately instead of wedging on sb_TimerSigMask. */
+    h_reset();
+    h_task.tc_State        = TS_RUN;
+    h_task.tc_Node.ln_Name = (char *)"opener";
+    h_base.sb_TaskName     = h_task.tc_Node.ln_Name;
+    h.slots_short  = TRUE;
+    h.park_result  = BSD_PARK_DONE;
+    h.wait_plan[0] = H_EVENT_SIG;
+    h.wait_planned = 1;
+    h_sliced_reset(2);
+    status = bsd_wait_event(&h_base, 2, h_sliced_call, NX_NULL, &aborted);
+    CHECK(status == NX_SUCCESS && h_base.sb_TimerArmed,
+          "bsd_wait_event: data wake leaves the 2-tick timer armed");
+
+    h.wait_calls         = 0;
+    h.wait_planned       = 0;   /* no blocking Wait(): bit is set before Wait */
+    h.sendios = h.waitios = h.abortios = 0;
+    h.tick_jump          = 2;
+    h.checkio_post_reply = TRUE;
+    CHECK(!bsd_pause(&h_base, 2) && h.sendios == 0 && h.waitios == 1 &&
+          !h_base.sb_TimerArmed,
+          "bsd_pause: a kept timer replying after CheckIO() is not wiped");
+
+    /* 3. bsd_pause() with a kept earlier timer that fires before `due`
+       re-arms for the remainder so the caller pauses the full duration. */
+    h_reset();
+    h_task.tc_State        = TS_RUN;
+    h_task.tc_Node.ln_Name = (char *)"opener";
+    h_base.sb_TaskName     = h_task.tc_Node.ln_Name;
+    h.slots_short  = TRUE;
+    h.park_result  = BSD_PARK_DONE;
+    h.wait_plan[0] = H_EVENT_SIG;
+    h.wait_planned = 1;
+    h_sliced_reset(2);
+    status = bsd_wait_event(&h_base, 1, h_sliced_call, NX_NULL, &aborted);
+    CHECK(status == NX_SUCCESS && h_base.sb_TimerArmed &&
+          h_base.sb_TimerDue == 1,
+          "bsd_wait_event: leaves a 1-tick timer armed");
+
+    h.wait_calls   = 0;
+    h.wait_plan[0] = H_TIMER_SIG;
+    h.wait_plan[1] = H_TIMER_SIG;
+    h.wait_planned = 2;
+    h.tick_jump    = 1;
+    h.sendios = h.waitios = h.abortios = 0;
+    CHECK(!bsd_pause(&h_base, 2),
+          "bsd_pause: finishes after the kept timer and the remainder");
+    CHECK(h.wait_calls == 2 && h.sendios == 1 && h.waitios == 2 &&
+          h.ticks == 2 && !h_base.sb_TimerArmed,
+          "bsd_pause: re-armed once for the remaining tick and waited to due");
+
+    /* 4. bsd_pause() waking on a stale timer bit while the request is still
+       in flight loops back into Wait() without re-arming. */
+    h_reset();
+    h.wait_plan[0]     = H_TIMER_SIG;
+    h.wait_plan[1]     = H_TIMER_SIG;
+    h.wait_planned     = 2;
+    h.wait_stale_timer = TRUE;
+    h.tick_jump        = 2;
+    CHECK(!bsd_pause(&h_base, 2) && h.wait_calls == 2 && h.sendios == 1 &&
+          h.waitios == 1 && !h_base.sb_TimerArmed,
+          "bsd_pause: a stale bit with the request still out waits again");
+}
+
 int main(void)
 {
     printf("select.c host tests\n");
@@ -1974,6 +2115,7 @@ int main(void)
     t_wait_event_pool_short();
     t_wait_park_timed();
     t_timer_reply_removed();
+    t_timer_kept_race();
     t_waitselect_break_full_pool();
 
     printf("%lu checks, %lu failures\n", h_checks, h_failures);

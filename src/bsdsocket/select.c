@@ -907,6 +907,7 @@ static VOID bsd_timer_arm(struct AmiSocketBase *base, ULONG secs, ULONG micro,
     base->sb_TimerReq.tr_time.tv_secs    = secs;
     base->sb_TimerReq.tr_time.tv_micro   = micro;
 
+    SetSignal(0, base->sb_TimerSigMask);
     SendIO((struct IORequest *)&base->sb_TimerReq);
     base->sb_TimerArmed = TRUE;
     base->sb_TimerDue   = due;
@@ -917,8 +918,9 @@ static VOID bsd_timer_arm(struct AmiSocketBase *base, ULONG secs, ULONG micro,
  * tx_time_get() tick, under LONG_MAX ticks away), for a wait parked outside
  * the stack (bsd_wait_slices()).  The rules are WaitSelect()'s: a request
  * still out is kept unless it would fire too late, and an early one is
- * re-armed by the waiter for what is left.  The signal is cleared, so a set
- * bit after this is a reply.  Opener only, for the reason at bsd_timer_open().
+ * re-armed by the waiter for what is left.  bsd_timer_arm() clears the signal
+ * before SendIO(), and a kept request keeps any bit its reply has already set.
+ * Opener only, for the reason at bsd_timer_open().
  */
 static BOOL bsd_timer_until(struct AmiSocketBase *base, ULONG due)
 {
@@ -935,8 +937,6 @@ static BOOL bsd_timer_until(struct AmiSocketBase *base, ULONG due)
     if (bsd_timer_reap(base) && (LONG)(base->sb_TimerDue - now) > want + 1L)
         bsd_timer_cancel(base);
 
-    SetSignal(0, base->sb_TimerSigMask);
-
     if (!base->sb_TimerArmed)
         bsd_timer_arm(base, (ULONG)want / (ULONG)TX_TIMER_TICKS_PER_SECOND,
                       ((ULONG)want % (ULONG)TX_TIMER_TICKS_PER_SECOND) *
@@ -949,26 +949,36 @@ static BOOL bsd_timer_until(struct AmiSocketBase *base, ULONG due)
 BOOL bsd_pause(struct AmiSocketBase *base, ULONG ticks)
 {
     ULONG break_mask = base->sb_BreakMask;
+    ULONG due        = tx_time_get() + ticks;
     ULONG received;
 
     if ((SetSignal(0UL, 0UL) & break_mask) != 0)
         return TRUE;
 
-    if (!bsd_timer_until(base, tx_time_get() + ticks))
-        return FALSE;
-
-    received = Wait(base->sb_TimerSigMask | break_mask);
-
-    if ((received & base->sb_TimerSigMask) != 0)
-        bsd_timer_take(base);
-
-    if ((received & break_mask) != 0)
+    for (;;)
     {
-        SetSignal(received & break_mask, received & break_mask);
-        return TRUE;
-    }
+        BOOL kept;
 
-    return FALSE;
+        if (!bsd_timer_until(base, due))
+            return FALSE;
+
+        kept = (base->sb_TimerDue != due);
+
+        received = Wait(base->sb_TimerSigMask | break_mask);
+
+        if ((received & base->sb_TimerSigMask) != 0)
+            bsd_timer_take(base);
+
+        if ((received & break_mask) != 0)
+        {
+            SetSignal(received & break_mask, received & break_mask);
+            return TRUE;
+        }
+
+        if (!base->sb_TimerArmed &&
+            (!kept || (LONG)(due - tx_time_get()) <= 0))
+            return FALSE;
+    }
 }
 
 /* After a parked wait woke with the timer's bit: take the reply if it is
@@ -1330,10 +1340,9 @@ LONG bsd_WaitSelect(register LONG nfds                __asm("d0"),
                         bsd_timer_cancel(SocketBase);
                 }
 
-                /* Reaped or cancelled, so a set bit is stale; a kept request
-                   sets it again when it fires. */
-                SetSignal(0, SocketBase->sb_TimerSigMask);
-
+                /* Reaped or cancelled, bsd_timer_arm() clears any stale bit
+                   before SendIO(); a kept request may have fired since
+                   bsd_timer_reap()'s CheckIO(), so its bit must stay (#383). */
                 if (!SocketBase->sb_TimerArmed)
                     bsd_timer_arm(SocketBase, (ULONG)timeout->tv_secs,
                                   (ULONG)timeout->tv_micro, wanted_due);
