@@ -538,7 +538,9 @@ host_test_targets() { # builddir
 #      layout reads, a stale drawer outside DEVS: included (all hosts).
 #      595 with bsd_job_lock (#383): an interface job blocked in its driver
 #      leaves OpenLibrary and the status calls free (x86_64 only).
-HOST_TESTS_EXPECTED=595
+#      596 with toolchain_lock_order_gate: static lock-order and
+#      lock-across-blocking-call checker regression tests (all hosts).
+HOST_TESTS_EXPECTED=596
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,
