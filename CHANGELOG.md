@@ -7,6 +7,9 @@ are history.
 
 ## Unreleased
 
+- A network driver that waits while an interface goes online or offline no
+  longer stops NetMeter, ShowNetStatus, NetShutdown or programs opening
+  bsdsocket.library until it returns.
 - A DHCP offer or acknowledgement with unknown options no longer makes the
   DHCP client read past the received message.
 - tls.library checks the length of every field in a server's ServerHello
