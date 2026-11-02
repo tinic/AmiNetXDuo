@@ -2879,11 +2879,11 @@ static LONG ami_ns_interface_remove_locked(UWORD index, BOOL force)
  * device is stopped with no lock held, then the lock is taken to finish.
  *
  * What keeps the stack, and so ami_ns, the slot and the interface, up across
- * the window: the only callers are the bsdsocket jobs, and their launchers
+ * the window: the only callers are the bsdsocket jobs, whose launchers
  * (bsd_stack_interface_link() and bsd_stack_interface_remove_named(),
- * library.c) hold the master base's sb_Lock until the job returns.  The
- * stack's teardown, bsd_netstack_shutdown_owned(), runs only under that lock,
- * and the calling base's own sb_StackRefs reference is still counted.
+ * library.c) wait for the job with their base's sb_StackRefs reference
+ * counted.  The stack's teardown, bsd_netstack_shutdown_owned(), runs only
+ * at zero references.
  */
 static LONG ami_ns_interface_remove_rest(UWORD index)
 {

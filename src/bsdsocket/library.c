@@ -58,6 +58,18 @@ static char bsd_lib_id[] =
     BSD_LIB_ABI_TEXT ", build " AMINETXDUO_VERSION_HASH
     ", profile " AMINETXDUO_VERSION_PROFILE ")\r\n";
 
+/*
+ * One job at a time, and bsd_net_boot with it.  Not sb_Lock: a job ends in a
+ * SANA-II driver, and OpenDevice(), CloseDevice() or a BeginIO() that blocks
+ * has no deadline.  Every OpenLibrary(), CloseLibrary() and NETSTATUS_SYSTEM
+ * takes sb_Lock, so a job under it stopped every status tool and NetShutdown
+ * for as long as one driver call waited (#383: cnet.device's OpenDevice() in
+ * a requester).  An interface job's caller keeps the stack up by its own
+ * sb_StackRefs reference; the startup job runs under sb_Lock too, with
+ * sb_Lock taken first.  A job never takes sb_Lock.
+ */
+static struct SignalSemaphore bsd_job_lock;
+
 static struct AmiSocketBase *bsd_lib_init(
     register struct AmiSocketBase *base    __asm("d0"),
     register APTR                  seglist __asm("a0"),
@@ -329,6 +341,7 @@ static struct AmiSocketBase *bsd_lib_init(
     base->sb_Lib.lib_IdString     = bsd_lib_id;
 
     InitSemaphore(&base->sb_Lock);
+    InitSemaphore(&bsd_job_lock);
     /* Published so a diagnostic reader can see who owns it: a Task removed
        while owning this wedges the library in a way the baton reclaim neither
        can nor should address, and tests/concurrent has to keep out of that
@@ -822,8 +835,7 @@ static struct Process *bsd_netstack_spawn(BsdNetBoot *boot, BYTE sig)
  * AllocSignal() fails only with all 32 signals spoken for and CreateNewProc()
  * only out of memory; an open that says so is a diagnosable machine.
  */
-/* Run one job to completion on the launched process.  The caller holds the
-   master base's sb_Lock, which keeps bsd_net_boot to one job at a time.
+/* Run one job to completion on the launched process.
    The Wait() has no deadline of its own: boot is on this stack and the job
    writes its result there, so it must not return first.  The job is bounded
    instead, by the deadline on every SANA-II command it sends
@@ -833,11 +845,14 @@ static LONG bsd_netstack_run(BsdNetBoot *boot, const char *what)
 {
     BYTE sig;
 
+    ObtainSemaphore(&bsd_job_lock);
+
     /* A private signal, never SIGF_SINGLE: the ThreadX port uses SIGF_SINGLE as
        its thread run-signal, so sharing it wakes this Wait() early. */
     sig = (BYTE)AllocSignal(-1);
     if (sig < 0)
     {
+        ReleaseSemaphore(&bsd_job_lock);
         AMI_ERROR("bsdsocket: no signal for the %s task", what);
         return AMI_NET_ERR_KERNEL;
     }
@@ -846,6 +861,7 @@ static LONG bsd_netstack_run(BsdNetBoot *boot, const char *what)
     {
         bsd_net_boot = NULL;
         FreeSignal(sig);
+        ReleaseSemaphore(&bsd_job_lock);
         AMI_ERROR("bsdsocket: no task for the %s", what);
         return AMI_NET_ERR_KERNEL;
     }
@@ -853,6 +869,7 @@ static LONG bsd_netstack_run(BsdNetBoot *boot, const char *what)
     Wait(boot->nb_SigMask);
     bsd_net_boot = NULL;
     FreeSignal(sig);
+    ReleaseSemaphore(&bsd_job_lock);
 
     return boot->nb_Result;
 }
@@ -946,73 +963,49 @@ static LONG bsd_netstack_attach(const AmiIfConfig *cfg, UWORD *index_out)
     return bsd_netstack_run(&boot, "interface attach");
 }
 
+/* The three interface jobs take no library lock of their own: one at a time
+   is bsd_netstack_run()'s, and the stack stays up for the caller's
+   reference (bsd_job_lock). */
 LONG bsd_stack_interface_start(struct AmiSocketBase *base,
                                const AmiIfConfig *cfg, UWORD *index_out)
 {
-    struct AmiSocketBase *master = base;
-    LONG                  rc;
-
-    if (master == NULL || cfg == NULL)
+    if (base == NULL || cfg == NULL)
         return AMI_NET_ERR_CONFIG;
-    if (master->sb_Master != NULL)
-        master = master->sb_Master;
 
-    /* Serialise interface transactions with opens and closes.  The lock also
-       keeps bsd_net_boot to one job at a time. */
-    ObtainSemaphore(&master->sb_Lock);
-    rc = bsd_netstack_attach(cfg, index_out);
-    ReleaseSemaphore(&master->sb_Lock);
-
-    return rc;
+    return bsd_netstack_attach(cfg, index_out);
 }
 
 LONG bsd_stack_interface_link(struct AmiSocketBase *base, UWORD job,
                               UWORD index, BOOL force)
 {
-    struct AmiSocketBase *master = base;
-    BsdNetBoot            boot = { 0 };
-    LONG                  rc;
+    BsdNetBoot boot = { 0 };
 
-    if (master == NULL)
+    if (base == NULL)
         return AMI_NET_ERR_CONFIG;
-    if (master->sb_Master != NULL)
-        master = master->sb_Master;
 
     boot.nb_Job   = job;
     boot.nb_Index = index;
     boot.nb_Force = force;
 
-    ObtainSemaphore(&master->sb_Lock);
-    rc = bsd_netstack_run(&boot, "link change");
-    ReleaseSemaphore(&master->sb_Lock);
-
-    return rc;
+    return bsd_netstack_run(&boot, "link change");
 }
 
+/* Name lookup and removal are one transaction, under ami_ns_lock in the
+   job (netstack_interface_remove_named()): physical slots are reusable. */
 LONG bsd_stack_interface_remove_named(struct AmiSocketBase *base,
                                       const char *name, BOOL force)
 {
-    struct AmiSocketBase *master = base;
-    BsdNetBoot            boot = { 0 };
-    LONG                  rc;
+    BsdNetBoot boot = { 0 };
 
-    if (master == NULL || name == NULL ||
+    if (base == NULL || name == NULL ||
         bsd_strlen(name) >= (ULONG)BSD_IFNAME_SIZE)
         return AMI_NET_ERR_CONFIG;
-    if (master->sb_Master != NULL)
-        master = master->sb_Master;
 
     boot.nb_Job   = BSD_JOB_REMOVE_NAMED;
     boot.nb_Force = force;
     bsd_strncpy(boot.nb_Name, name, (ULONG)sizeof boot.nb_Name);
 
-    /* Name lookup and removal are one transaction: physical slots are
-       reusable, and the lock also owns the single worker handoff. */
-    ObtainSemaphore(&master->sb_Lock);
-    rc = bsd_netstack_run(&boot, "named interface removal");
-    ReleaseSemaphore(&master->sb_Lock);
-
-    return rc;
+    return bsd_netstack_run(&boot, "named interface removal");
 }
 
 struct AmiSocketBase *bsd_lib_open(

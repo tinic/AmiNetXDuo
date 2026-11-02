@@ -1931,7 +1931,7 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
 
     /* Before the bracket too: bsd_openers_list() takes sb_Lock.  Inside, it
        made baton -> sb_Lock here against sb_Lock -> job task Wait() -> baton
-       in bsd_stack_interface_link() and bsd_stack_interface_start(). */
+       in the startup job (bsd_lib_open()). */
     if (what == NETSTATUS_SYSTEM)
     {
         (VOID)bsd_openers_list(SocketBase, NULL, 0, &openers);
