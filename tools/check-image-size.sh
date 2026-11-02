@@ -117,7 +117,8 @@ BUDGETS=(
     # reply never signals a removed Task (#383): +1,492, 378,732 -> 380,224.
     # An ARexx KILL does not wait for the sb_Lock of a last close that waits
     # for the ARexx host: +88, 380,144 -> 380,232.
-    "default:src/bsdsocket/bsdsocket.library:380232"
+    # REQUIRESINITDELAY waits its second: +12, 380,232 -> 380,244.
+    "default:src/bsdsocket/bsdsocket.library:380244"
     # 41,412 after stateless receive-checksum verification was added to the
     # EL3 and word/long NE2000 direct paths, 2026-09-15.  43,620 with
     # ANXD_CMD_RX_BATCH in the shell (claim, completion, staging copy, the
@@ -212,7 +213,8 @@ BUDGETS=(
     # Every blocking wait gives its slot back, the timer's reply never
     # signals a removed Task (#383): +1,372, 256,524 -> 257,896.
     # KILL against a last close: +228, 257,820 -> 258,048.
-    "minimal:src/bsdsocket/bsdsocket.library:258048"
+    # REQUIRESINITDELAY waits its second: +12, 258,048 -> 258,060.
+    "minimal:src/bsdsocket/bsdsocket.library:258060"
     "minimal:src/netdev/anxnet.device:46000"
     # 29,088 on e806188f after the audited device fixes.
     # Batched transmit adds 632, 29,120 -> 29,752, approved by turo 2026-10-29.
@@ -244,7 +246,8 @@ BUDGETS=(
     # 210,756 with every blocking wait giving its slot back and the timer's
     # reply never signalling a removed Task (#383).
     # 210,824 with KILL not waiting for a last close's sb_Lock.
-    "micro:src/bsdsocket/bsdsocket.library:210824"
+    # 210,832 with REQUIRESINITDELAY waiting its second.
+    "micro:src/bsdsocket/bsdsocket.library:210832"
     "micro:src/netdev/anxnet.device:46000"
     "micro:src/netdev/anxgenet.device:29120"
     "micro:src/wifipi/anxwifipi.device:56000"
