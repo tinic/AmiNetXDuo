@@ -240,7 +240,8 @@ BUDGETS=(
     # 209,656 with no Signal() into a Task another program removed (#383).
     # 210,756 with every blocking wait giving its slot back and the timer's
     # reply never signalling a removed Task (#383).
-    "micro:src/bsdsocket/bsdsocket.library:210756"
+    # 210,760 with REQUIRESINITDELAY waiting its second.
+    "micro:src/bsdsocket/bsdsocket.library:210760"
     "micro:src/netdev/anxnet.device:46000"
     "micro:src/netdev/anxgenet.device:29120"
     "micro:src/wifipi/anxwifipi.device:56000"
