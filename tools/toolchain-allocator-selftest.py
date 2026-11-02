@@ -37,7 +37,7 @@ def main():
         (fixture / "bin").mkdir()
         for tool in ("m68k-amigaos-gcc", "m68k-amigaos-ar"):
             (fixture / "bin" / tool).symlink_to(root / "bin" / tool)
-        for name in ("libc.a", "libg.a", "crt0.o", "libm.a"):
+        for name in ("libc.a", "libg.a", "crt0.o", "newlib-crt0.o", "libm.a"):
             for source in libraries.rglob(name):
                 target = fixture / source.relative_to(root)
                 target.parent.mkdir(parents=True, exist_ok=True)

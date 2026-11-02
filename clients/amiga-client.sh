@@ -123,7 +123,9 @@ amiga_client_prepare()
     # below delegates to that one relocation-aware gate and refuses an unknown
     # shape; ported clients do not keep a second byte-pattern workaround.
     AMIGA_CLIENT_STARTFILE="$AMIGA_CLIENT_LIBDIR/crt0.o"
-    local stock="$AMIGA_TOOLCHAIN_ROOT/m68k-amigaos/lib/crt0.o"
+    # AmigaPorts installs it as newlib-crt0.o from 16.2-rc22, crt0.o before.
+    local stock="$AMIGA_TOOLCHAIN_ROOT/m68k-amigaos/lib/newlib-crt0.o"
+    [ -f "$stock" ] || stock="$AMIGA_TOOLCHAIN_ROOT/m68k-amigaos/lib/crt0.o"
     echo "  FIX crt0.o"
     python3 "$AMIGA_CLIENT_ROOT/clients/compat/fix-crt0.py" \
             "$stock" "$AMIGA_CLIENT_STARTFILE" || return 1
@@ -135,7 +137,7 @@ amiga_client_prepare()
     # --wrap=exit,_exit: so that shim can put the task's stack bounds back when a
     # client ends by exit()ing off the swapped stack instead of returning.
     # Preserve Amiga path normalization while newlib supplies unlink/_unlink.
-    AMIGA_CLIENT_LDFLAGS="$AMIGA_CLIENT_LINK_ARCH -nostartfiles $AMIGA_CLIENT_STARTFILE -L$AMIGA_CLIENT_LIBDIR -Wl,--wrap=main,--wrap=exit,--wrap=_exit,--wrap=unlink"
+    AMIGA_CLIENT_LDFLAGS="$AMIGA_CLIENT_LINK_ARCH -nostartfiles $AMIGA_CLIENT_STARTFILE -L$AMIGA_CLIENT_LIBDIR -Wl,--wrap=main,--wrap=exit,--wrap=_exit,--wrap=unlink,--wrap=stat,--wrap=lstat,--wrap=isatty"
 
     export AMIGA_CLIENT_LIBDIR AMIGA_CLIENT_COMPAT_A AMIGA_CLIENT_LDFLAGS
     export AMIGA_CLIENT_STARTFILE

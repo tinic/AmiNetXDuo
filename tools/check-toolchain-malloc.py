@@ -37,17 +37,21 @@ EXPECTED_MALLOC_SHA256 = {
 }
 
 
-# AmigaPorts GCC 16.2.1b / newlib e07bea74: eight multilibs. The custom
-# allocator moved to mallocr.cpp; libc_a-malloc.o is only a public wrapper
-# around _malloc_r and must never stand in for the allocator in this gate.
-AMIGAPORTS_MALLOC_SHA256 = {'libb': '8c7f05d2f0797840a85e0558631f4252f43232696be98803b2ce84c3c1d22dfc',
- 'libb/libm020': '844d6107c440008eae78c139da5ab2fa747fadd0f414181c394e3fe14c6b2dbb',
- 'libb/libm020/libm881': '844d6107c440008eae78c139da5ab2fa747fadd0f414181c394e3fe14c6b2dbb',
- 'libb32/libm020': '99a4b73ee31ed218e3b1a9b324ad2f9c97f8c951ea05c2ec6ea58c2a9315ff93',
- 'libb32/libm020/libm881': '99a4b73ee31ed218e3b1a9b324ad2f9c97f8c951ea05c2ec6ea58c2a9315ff93',
- '': 'ab3e4f26097acfeca5f630eaf297397d87e0e2bed93338186d998abfb56793a7',
- 'libm020': '33fb458d92179450e1da66a2f438531f71530dac93e0a88f3c7cc9bc2d5761cb',
- 'libm020/libm881': '33fb458d92179450e1da66a2f438531f71530dac93e0a88f3c7cc9bc2d5761cb'}
+# AmigaPorts 16.2-rc22 (GCC bcd5f64e, newlib 7d0701e3): eight multilibs,
+# identical on Linux and macOS. The custom allocator is mallocr.cpp, unchanged
+# since newlib e07bea74; the bytes moved with the compiler. libc_a-malloc.o is
+# only a public wrapper around _malloc_r and must never stand in for the
+# allocator in this gate.
+AMIGAPORTS_MALLOC_SHA256 = {
+    "": "7db2a98c7522ea702ebf3d8487205cd95f2df89414c72039b0fbeef524799157",
+    "libb": "3c355e69fae379a1049025b4ce56abb71d448e490b0100e1fc8fc481a045b427",
+    "libb/libm020": "762830f381989ecd66b0f002e85f8e6f2e263cf6b33b6003903b1586b69d5f90",
+    "libb/libm020/libm881": "762830f381989ecd66b0f002e85f8e6f2e263cf6b33b6003903b1586b69d5f90",
+    "libb32/libm020": "4da57b82b6291627050b04ab73c35c019babba0357e9ef959f8b6cffc7c3bd33",
+    "libb32/libm020/libm881": "4da57b82b6291627050b04ab73c35c019babba0357e9ef959f8b6cffc7c3bd33",
+    "libm020": "c9559af1cbaf0ea6d82c0d83dec9f2b7c9e11b70319fbf8b721278297cd4acc1",
+    "libm020/libm881": "c9559af1cbaf0ea6d82c0d83dec9f2b7c9e11b70319fbf8b721278297cd4acc1",
+}
 
 
 def main() -> int:
@@ -97,9 +101,10 @@ def main() -> int:
         for extra in sorted(actual - expected):
             failures.append(f"m68k-amigaos/lib/{extra}: unexpected unverified multilib")
     for variant, want in expected_malloc.items():
-        for companion in ("crt0.o", "libm.a"):
-            path = libdir / variant / companion
-            if not path.is_file():
+        # newlib's startup is newlib-crt0.o from AmigaPorts 16.2-rc22 on.
+        for companion in (("crt0.o", "newlib-crt0.o"), ("libm.a",)):
+            path = libdir / variant / companion[-1]
+            if not any((libdir / variant / name).is_file() for name in companion):
                 failures.append(f"{path.relative_to(prefix)}: missing multilib companion")
         for archive_name in ("libc.a", "libg.a"):
             archive = libdir / variant / archive_name

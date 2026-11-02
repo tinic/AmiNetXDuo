@@ -929,6 +929,12 @@ con_sigfn __wrap_signal(int sig, con_sigfn handler)
     return (con_sigfn)0;
 }
 
+extern __typeof__(fstat) __wrap_fstat;
+int __wrap_fstat(int fd, struct stat *st)
+{
+    return amiga_fstat(fd, st);
+}
+
 extern int __real_ioctl(int fd, unsigned long request, ...);
 
 /* TIOCGWINSZ answered from the console (newlib has no answer and fell back to
@@ -1750,14 +1756,8 @@ int pipe(int fds[2])
 /* AmigaOS has Exec signals, which a task Wait()s on, and not POSIX signals;
    there is nothing to install.  Return SIG_DFL rather than SIG_ERR, which
    dbutil.c treats as fatal. */
-void (*signal(int sig, void (*handler)(int)))(int)
-{
-    (void)sig;
-    (void)handler;
-    return SIG_DFL;
-}
-
-int kill(pid_t pid, int sig)
+extern __typeof__(kill) __wrap_kill;
+int __wrap_kill(pid_t pid, int sig)
 {
     (void)pid;
     (void)sig;

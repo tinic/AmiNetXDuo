@@ -152,7 +152,8 @@ TABLE = {
     # RFC 3465 slow-start limit from the interface (#354, netxduo #37): +11.
     # The RTO walk's lost-copy check at the duplicate-ACK threshold, one call
     # and compare with the decision out of line (netxduo #39): +6.
-    "nx_tcp_socket_state_ack_check.c":   [("__nx_tcp_socket_state_ack_check",   690)],  # 556
+    # AmigaPorts 16.2-rc22 codegen, same source: +1.
+    "nx_tcp_socket_state_ack_check.c":   [("__nx_tcp_socket_state_ack_check",   691)],  # 556
 }
 
 try:

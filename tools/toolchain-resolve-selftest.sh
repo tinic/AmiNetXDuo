@@ -69,7 +69,7 @@ make_root() {
     # Borrow the complete verified multilib companions so this selection test
     # still exercises its already-installed path, without weakening that gate.
     ( cd "$AMIGA_TOOLCHAIN_ROOT" && find m68k-amigaos/lib -type f \
-        \( -name 'crt0.o' -o -name 'libc.a' -o -name 'libg.a' -o -name 'libm.a' \) ) |
+        \( -name 'crt0.o' -o -name 'newlib-crt0.o' -o -name 'libc.a' -o -name 'libg.a' -o -name 'libm.a' \) ) |
     while IFS= read -r file; do
         mkdir -p "$dir/$(dirname "$file")"
         ln -sf "$AMIGA_TOOLCHAIN_ROOT/$file" "$dir/$file"

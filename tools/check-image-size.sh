@@ -214,7 +214,8 @@ BUDGETS=(
     # signals a removed Task (#383): +1,372, 256,524 -> 257,896.
     # KILL against a last close: +228, 257,820 -> 258,048.
     # REQUIRESINITDELAY waits its second: +12, 258,048 -> 258,060.
-    "minimal:src/bsdsocket/bsdsocket.library:258060"
+    # AmigaPorts 16.2-rc22 codegen: +96 on the same source, 258,020 -> 258,116.
+    "minimal:src/bsdsocket/bsdsocket.library:258116"
     "minimal:src/netdev/anxnet.device:46000"
     # 29,088 on e806188f after the audited device fixes.
     # Batched transmit adds 632, 29,120 -> 29,752, approved by turo 2026-10-29.

@@ -125,7 +125,11 @@ static void stat_fill(struct stat *st, const struct FileInfoBlock *fib)
     st->st_blocks  = (blkcnt_t)((fib->fib_Size + 511L) / 512L);
 }
 
-int stat(const char *path, struct stat *st)
+/* newlib defines stat and lstat beside __fibstat, fstat beside _fstat and
+   isatty beside _open, so these are interposed through the linker, as
+   unlink is below. */
+extern __typeof__(stat) __wrap_stat;
+int __wrap_stat(const char *path, struct stat *st)
 {
     BPTR lock;
 
@@ -154,9 +158,10 @@ int stat(const char *path, struct stat *st)
     return 0;
 }
 
-int lstat(const char *path, struct stat *st)
+extern __typeof__(lstat) __wrap_lstat;
+int __wrap_lstat(const char *path, struct stat *st)
 {
-    return stat(path, st);
+    return __wrap_stat(path, st);
 }
 
 /*
@@ -165,7 +170,7 @@ int lstat(const char *path, struct stat *st)
  * answers the two questions a client asks, "is this a terminal" and "how big
  * is it", and says nothing it does not know.
  */
-int fstat(int fd, struct stat *st)
+int amiga_fstat(int fd, struct stat *st)
 {
     long here, end;
 
@@ -205,7 +210,8 @@ int fstat(int fd, struct stat *st)
 
 /* ------------------------------------------------------ the easy ones --- */
 
-int isatty(int fd)
+extern __typeof__(isatty) __wrap_isatty;
+int __wrap_isatty(int fd)
 {
     return _isatty(fd);
 }
