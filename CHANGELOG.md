@@ -7,6 +7,10 @@ are history.
 
 ## Unreleased
 
+- A DHCP offer or acknowledgement with unknown options no longer makes the
+  DHCP client read past the received message.
+- tls.library checks the length of every field in a server's ServerHello
+  before reading it.
 - A program waiting in connect(), send(), a receive with a timeout or a DNS
   lookup no longer holds up other programs, and stops on Ctrl-C.
 - A program removed while it waits in WaitSelect() with a timeout is no
