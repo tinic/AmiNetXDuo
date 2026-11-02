@@ -410,6 +410,19 @@ if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
         AMINETXDUO_EVENT_RING=${AMINETXDUO_EVENT_RING} AMINETXDUO_TCP_CORK)
     add_test(NAME expunge_refusal_cork COMMAND test_expunge_cork)
 
+    # library.c again, on threads: an interface job blocked in its SANA-II
+    # driver call must leave OpenLibrary(), NETSTATUS_SYSTEM's opener walk,
+    # NETCTRL_STACK_NOTIFY and CloseLibrary() to other tasks (#383).
+    find_package(Threads REQUIRED)
+    add_executable(test_joblock host/test_joblock_host.c
+                                "${CMAKE_SOURCE_DIR}/src/bsdsocket/library.c")
+    target_include_directories(test_joblock PRIVATE ${_expunge_inc})
+    target_compile_options(test_joblock PRIVATE
+        -include "${CMAKE_CURRENT_SOURCE_DIR}/host/shim/host_prelude.h"
+        -Wno-int-to-pointer-cast -Wno-pointer-to-int-cast)
+    target_link_libraries(test_joblock PRIVATE Threads::Threads)
+    add_test(NAME bsd_job_lock COMMAND test_joblock)
+
     # handoff.c, including listeners.  AmiTCP and Roadshow allow a listening
     # descriptor through ReleaseSocket()/ReleaseCopyOfSocket(); refusing it
     # was an observable compatibility gap and was not required by NetX Duo's
