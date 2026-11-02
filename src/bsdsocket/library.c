@@ -280,13 +280,27 @@ static VOID bsd_shutdown_requested(VOID)
     if (master == NULL)
         return;
 
+    /*
+     * Attempt, not Obtain: this runs on the ARexx host, and a last close
+     * holds sb_Lock across netstack_shutdown(), which waits for that host to
+     * exit.  The stack is unpublished before that wait, so a busy lock and no
+     * stack is that close, and the KILL has nothing left to do.
+     */
+    while (!AttemptSemaphore(&master->sb_Lock))
+    {
+        if (netstack_get() == NULL)
+            return;
+        Delay(1UL);
+    }
+
     (VOID)bsd_stack_notify(master, &signalled);
+    (VOID)bsd_stack_unhold(master);
+
+    ReleaseSemaphore(&master->sb_Lock);
 
     if (signalled != 0)
         AMI_INFO("bsdsocket: shutdown, %lu program(s) told to stop",
                  (unsigned long)signalled);
-
-    (VOID)bsd_stack_unhold(master);
 }
 
 static VOID bsd_address_changed(VOID)

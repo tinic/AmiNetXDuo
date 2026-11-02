@@ -412,7 +412,9 @@ if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
 
     # library.c again, on threads: an interface job blocked in its SANA-II
     # driver call must leave OpenLibrary(), NETSTATUS_SYSTEM's opener walk,
-    # NETCTRL_STACK_NOTIFY and CloseLibrary() to other tasks (#383).
+    # NETCTRL_STACK_NOTIFY and CloseLibrary() to other tasks (#383); and an
+    # ARexx KILL must not wait for the sb_Lock a last close holds while it
+    # waits for the ARexx host.
     find_package(Threads REQUIRED)
     add_executable(test_joblock host/test_joblock_host.c
                                 "${CMAKE_SOURCE_DIR}/src/bsdsocket/library.c")
