@@ -1,5 +1,5 @@
-# Rc2 -> rc3 submodule review: netxduo +139, wifipi +6; no additions or removals.
-# ThreadX, bsdsocktest, dropbear, libcodesets, shelltools and zz9000-sdk did not move.
+# Rc2 -> rc3 submodule review: netxduo +158, threadx +16, wifipi +6; no additions or removals.
+# bsdsocktest, dropbear, libcodesets, shelltools and zz9000-sdk did not move.
 # The named reviews cover the stated scopes. Product exact-SHA CI and emulator are separate release gates, not claims made by this manifest.
 # Agent attribution comes from AgentNet evidence and PR records, never git author.
 # reviewer=independent-review: fresh agents with no part in these PRs read the full diffs and the touched
@@ -18,7 +18,28 @@
 # subtraction (7c6f09c3). Open: the first scoreboard page (sack_recovery.c:485) skips the pool/8 reserve sack_grow applies,
 # and NX_SACK_ALLOC_FAILED holds until the sent queue drains; sack_lost_retransmit (sack_recovery.c:319) has no reorder window;
 # DHCP ADDRESS_PROBING case re-added by 6be86f18 is dead in the fork; upstream lowered the MQTT interop floor.
-third_party/netxduo 2c53ee850261b65f20b4d2cbfe245eab98f9d879..7f112389cfbfdbba2b38a8e2008c5e52af6c2f76
+# #42 (AmiNetXDuo #430): upstream v6.5.2.202603b_rel hotfix, 19 commits, reviewed by claudecode 2026-11-01 (full diffs of every
+# built file: nxd_dhcp_client.c, nx_secure_tls_process_serverhello.c, nx_api.h, nx_secure_port.h; common/src unchanged). Fork PR #42 CI green 42/42.
+third_party/netxduo 2c53ee850261b65f20b4d2cbfe245eab98f9d879..dde25cf4c359da8d03bbd6369b4972b247109bed
++dde25cf4c359da8d03bbd6369b4972b247109bed reviewer=claudecode merge of netxduo #42 (AmiNetXDuo #430); no source change beyond de27e0e5 and e7cc9f38
++e7cc9f38b10f5e5f9b6fba7f5c00de22b2a5ea47 reviewer=claudecode netxduo #42 tests only: netx_bsd_raw_ipv6_dest_table_full_test expects the fork LRU destination eviction (dae9b32a) instead of refusal on a full table; addons/BSD not built
++de27e0e53cd60cbdefb2123442eacd1ab337e418 reviewer=claudecode netxduo #42 merge of upstream v6.5.2.202603b_rel; 5 conflicts: nx_icmpv6_process_packet_too_big.c ours (fork 2fffd6f4 already checks status and NULL dest_entry_ptr), _nx_dhcp_search_buffer theirs, nxd_ftp_server.c theirs, regression workflow ours, regression CMakeLists union; common/src unchanged from 7f112389
++c690f59f9a5195c465153e90ef56b865337a8a62 reviewer=claudecode upstream merge of the 202603b release preparation (#513); no source change beyond its commits
++768b0b30415272165ae75857608bed4af1e5a086 reviewer=claudecode upstream test infrastructure only (#507): regression template pin and test timeout; nothing built
++8ff993853f32b72c41e3febd9180e4dbad47f48c reviewer=claudecode upstream port version strings to 6.5.2.202603b; in the build only the nx_secure_port.h _nx_secure_version_id text
++82fdcadfe9a6bf7c4d9cdeb804eb24dd63c000a5 reviewer=claudecode upstream NETXDUO_HOTFIX_VERSION 'a' to 'b' in nx_api.h; cmake/AmiNetXDuoVersion.cmake reads MAJOR.MINOR.PATCH only, version pins unchanged
++efdf5a00bf0fb93a993e43a0322a7e9c50c86db4 reviewer=claudecode upstream advisory fix, MSRP MRPDU parse bounds (tsn/src/nx_msrp.c); tsn/ not built
++55de75362d99c3ad16672722e511959e837e29f2 reviewer=claudecode upstream CVE-2026-115403, BSD raw IPv6 destination table full (addons/BSD/nxd_bsd.c); addons/BSD not built, bsdsocket.library is our own
++d04d5bd82eaacbc0241b76c7de4190a560870da7 reviewer=claudecode upstream CVE-2026-114408, ICMPv6 packet-too-big with a full destination table; de27e0e5 keeps fork 2fffd6f4, built file identical to 7f112389
++01e9c5bed40f81ac028263fed1e961e4494cda0a reviewer=claudecode upstream CVE-2026-102724, MRP attribute eviction (tsn/src/nx_mrp.c); tsn/ not built
++c51152a1cf6849d821283b1359f506c4b24ae515 reviewer=claudecode upstream advisory fix, MSRP attribute table (tsn/src/nx_msrp.c); tsn/ not built
++52cab4cce0f9bafc81b5908fa548d5c0565c7521 reviewer=claudecode upstream CVE-2026-102720, _nx_dhcp_search_buffer walks a remaining-byte count and ends the search at an option whose data passes the buffer end (remaining > 1 guards remaining - 2); built, AMINETXDUO_DHCP=ON; supersedes fork N-060 1aa8afef; adds netx_dhcp_option_walk_bounds_test
++6d92f5b3e975ad8a941ebc6735484942896719b3 reviewer=claudecode upstream CVE-2026-102726, PPP IPCP option bounds (addons/ppp); not built
++e58654e0b55f7391814f9f8989407d15d6fd8001 reviewer=claudecode upstream CVE-2026-102727, FTP server PASV/EPSV peer check (addons/ftp); not built
++0c81f51db8d42fa9ac328a5d9a4e47263b185849 reviewer=claudecode upstream CVE-2026-102722, FTP client PASV peer address (addons/ftp); not built
++3f5b2319a519a529c22a65170c6c75dab1c7ead0 reviewer=claudecode upstream CVE-2026-102721, TFTP client and server error message bounds (addons/tftp); not built, C:tftp is src/tools/tftp.c over bsdsocket
++3d1080a1a23fdb9f4e64a6a13c61cebab2b7efb3 reviewer=claudecode upstream CVE-2026-102728, TLS ServerHello session ID length must leave 3 bytes for ciphersuite and compression method; built in tls.library; the DTLS HelloVerifyRequest half is not built; adds nx_secure_client_handshake_message_bounds_test
++77536de01ded627491c54b505574e3cda720483e reviewer=claudecode upstream CVE-2026-102719 and CVE-2026-115215, DTLS server cookie and ClientHello; AMINETXDUO_DTLS=OFF, src/tls/CMakeLists.txt filters nx_secure_dtls*, not built
 +7f112389cfbfdbba2b38a8e2008c5e52af6c2f76 reviewer=claudecode merge of netxduo #41 (AmiNetXDuo #419); no source change beyond its commit
 +1d9b78420c37b447af8e6b1f2e75240461aa1568 reviewer=claudecode netxduo #41 IPv4 source check applies the zero/all-ones host-part tests only to sources on the attached network and refuses 255.255.255.255 explicitly, so an off-link x.x.x.0 host (gnudb.gnudb.org) is accepted; adds netx_ip_source_address_off_link_test; parent #419
 +dfbe02caf1c5825299032a20cb2f6e634b1d5626 reviewer=independent-review merge of netxduo #40 (AmiNetXDuo #411); tree identical to 7c6f09c3; no source change beyond its three commits
@@ -158,6 +179,26 @@ third_party/netxduo 2c53ee850261b65f20b4d2cbfe245eab98f9d879..7f112389cfbfdbba2b
 +92daba6b214af8dd235400ac7df2fe900d20fcdb reviewer=independent-review upstream advisory (#479) RTSP BAD_REQUEST for an unparsable Session header, stranded response released
 +1d345c67733bf29d70ea5df7889037a671298e2c reviewer=independent-review upstream advisory (#479) DTLS ClientHello bounds every field and verifies the cookie
 +3666b68f1a4ea73527856437f2a7a4a1290d0742 reviewer=independent-review upstream advisory (#479) X.509 and ECDSA reject an empty signature bit string; the fork's stricter DER check kept in 6be86f18
+
+# Fast-forward by 16 commits (tinic/threadx #2, #3, master): upstream v6.5.2.202603b_rel hotfix, reviewed by claudecode 2026-11-01.
+# Built change: THREADX_HOTFIX_VERSION in tx_api.h only; common/src and the m68k port unchanged. Fork PR #3 CI green.
+third_party/threadx e24aa9c92d247dcea3502b9a77b6dd1af21d0a2f..f4845a7317923e54b2f5cf1f42befe2789ca62ec
++f4845a7317923e54b2f5cf1f42befe2789ca62ec reviewer=claudecode merge of threadx #3 (AmiNetXDuo #430); no source change beyond 955078fc
++955078fc20dd1225ffb542fa8e0230c23f3a2fea reviewer=claudecode threadx #3 merge of upstream v6.5.2.202603b_rel, no conflicts; fork-vs-upstream diff 8 files 98+/43- before and after, hosted creation and stack-overlap fixes and the pre-relinquish hook kept
++b2868c3d2849aab95d04cedcf8885d3f81798c86 reviewer=claudecode upstream merge of the 202603b release preparation (#827); no source change beyond its commits
++c2950ee5efbaafc2947f5d7bd806d6b3980562c4 reviewer=claudecode upstream port version strings; no file in the build, port/threadx-amiga is ours
++122da41374ff41a67294e4cfffbcfc8c20e0efe5 reviewer=claudecode upstream THREADX_HOTFIX_VERSION ' ' to 'b' in common/inc/tx_api.h; the only built change from e24aa9c9 to f4845a73
++460f7ec594bd45cdd0395b9ffaa68677a329ba3d reviewer=claudecode upstream ARMv7-M module port PendSV stack bounds check; not built
++c8148f28278e7cbc34e1a758a502c5de74dcfa2e reviewer=claudecode upstream advisory fix, module manager load bounds (common_modules/module_manager); not built, CMakeLists.txt globs common/src only
++03e7ac91b48aec246c45739442a07c8f6cf710c1 reviewer=claudecode upstream advisory fix, module manager thread control ownership (txm_module_manager_dispatch.h); not built
++3ce571c2c80754d2fb740b3a2a12763681cb6cc0 reviewer=claudecode upstream advisory fix, Cortex-M module port tx_thread_schedule.S; not built
++7fbe9f596bdefaf18ce1d0376f4b85ae4c0104b8 reviewer=claudecode upstream advisory fix, TrustZone-M tx_thread_secure_stack.c (ARMv8-M ports); not built
++d8be8f7a5b9e769e8a461a7245671bc26307d41a reviewer=claudecode upstream advisory fix, module manager callback request queue; not built
++670384af83fd66ed8862d76576b8b6e474199394 reviewer=claudecode upstream advisory fix, module manager trace-buffer-full notify (txm_module_manager_dispatch.h); not built
++6775b3a50fff52c86fcd7795bba27a01677217d0 reviewer=claudecode upstream QEMU module harness for the Cortex-M3 and M4 ports (#821); tests only, not built
++56c8695b1288fd4fac5406443c28878fade23872 reviewer=claudecode upstream CI action updates (#802); workflows only
++14823c649c6cded2df76df91973ef3c0feca3457 reviewer=claudecode merge of threadx fork #2; no source change beyond 7f2c69f5
++7f2c69f5df536c6a3208eb2b48627da255e9001c reviewer=claudecode threadx fork #2 CI deploys the coverage report only from the upstream repository; workflow only
 
 # Fast-forward by six commits (WiFiPi.device #26-#28, maint/beta4, first-parent merges).
 # Fork PRs #26-#28 and parent PRs #370, #371 and #397 record host ASan/UBSan tests of the production handlers and the m68k cross-build.
