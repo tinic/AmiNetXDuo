@@ -13,6 +13,7 @@
 #include "aminetxduo/events.h"
 
 #include <exec/memory.h>
+#include <proto/dos.h>
 #include <proto/exec.h>
 
 #include "tx_amiga.h"
@@ -1642,10 +1643,11 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
         AMI_INFO("sana2: %s unit %lu: REQUIRESINITDELAY, settling for a second",
                  iface->device, (unsigned long)iface->unit);
 
-        /* tx_thread_sleep() and not dos.library's Delay(): this runs inside
-           the ThreadX bracket, the same way the readers in sana2_rx.c wait,
-           and it needs no library base of its own. */
-        tx_thread_sleep((ULONG)NX_IP_PERIODIC_RATE);
+        /* Delay() and not tx_thread_sleep(): both callers run on a Process
+           outside the ThreadX bracket (the bring-up before the kernel
+           starts, the attach before it enters), where tx_thread_sleep()
+           finds no thread of its own and returns at once. */
+        Delay(TICKS_PER_SECOND);
     }
 
 #if AMI_SANA2_PROBE_RAW

@@ -8,6 +8,10 @@
  * NETCTRL_STACK_NOTIFY and CloseLibrary().  B must finish on its own.  Task C
  * starts a second job, which must wait for A's: one job at a time stays.
  *
+ * And the ARexx KILL against the last close: the close holds sb_Lock across
+ * netstack_shutdown(), which waits for the ARexx host to exit.  A KILL the
+ * host is still running must not then wait for sb_Lock.
+ *
  * Exec is modelled with one mutex: Signal()/Wait() on tc_SigRecvd,
  * SignalSemaphores with owner and nest count, CreateNewProc() as a thread.
  *
@@ -298,10 +302,49 @@ static NX_PACKET_POOL h_stack_pool;
 
 NX_IP *netstack_ip(VOID)               { return &h_stack_ip; }
 NX_PACKET_POOL *netstack_pool(VOID)    { return &h_stack_pool; }
-AmiNetStack *netstack_get(VOID)        { return (AmiNetStack *)&h_stack_ip; }
+/* The KILL case: netstack_shutdown() as the real one runs it -- ami_ns
+   unpublished, then the wait for the ARexx host to exit. */
+static BOOL h_kill_case;
+static BOOL h_stack_gone;
+static BOOL h_in_shutdown;
+static BOOL h_host_back;
+static BOOL h_shutdown_saw_host;
+static VOID (*h_shutdown_hook)(VOID);
+
+static BOOL h_host_returned(const void *unused)
+{
+    (VOID)unused;
+    return h_host_back;
+}
+
+AmiNetStack *netstack_get(VOID)
+{
+    return h_stack_gone ? NULL : (AmiNetStack *)&h_stack_ip;
+}
 LONG netstack_startup(VOID)            { return AMI_NET_OK; }
 LONG netstack_startup_loopback(VOID)   { return AMI_NET_OK; }
-LONG netstack_shutdown(VOID)           { return AMI_NET_OK; }
+LONG netstack_shutdown(VOID)
+{
+    if (!h_kill_case)
+        return AMI_NET_OK;
+
+    pthread_mutex_lock(&h_mx);
+    h_stack_gone  = TRUE;
+    h_in_shutdown = TRUE;
+    pthread_cond_broadcast(&h_cv);
+    /* ami_netstack_rexx_stop() waits for ever; bounded here to report. */
+    h_shutdown_saw_host = h_wait_until(h_host_returned, NULL, H_DEADLINE_MS);
+    pthread_mutex_unlock(&h_mx);
+    return AMI_NET_OK;
+}
+LONG Delay(ULONG ticks)
+{
+    struct timespec ts = { 0, 20000000L };
+
+    while (ticks-- != 0)
+        nanosleep(&ts, NULL);
+    return 0;
+}
 BOOL netstack_can_unload(VOID)         { return FALSE; }
 UWORD netstack_retained_count(VOID)    { return 0; }
 BOOL bsd_tcp_handler_alive(VOID)       { return FALSE; }
@@ -319,7 +362,7 @@ VOID bsd_timer_teardown(struct AmiSocketBase *b) { (VOID)b; }
 VOID bsd_usergroup_open(VOID)          { }
 VOID ami_set_address_change_hook(VOID (*hook)(VOID)) { (VOID)hook; }
 VOID ami_set_second_hook(VOID (*hook)(VOID))         { (VOID)hook; }
-VOID ami_set_shutdown_hook(VOID (*hook)(VOID))       { (VOID)hook; }
+VOID ami_set_shutdown_hook(VOID (*hook)(VOID))       { h_shutdown_hook = hook; }
 VOID ami_log(int level, const char *fmt, ...) { (VOID)level; (VOID)fmt; }
 VOID ami_free(APTR p)                  { free(p); }
 VOID ami_mem_open_delta(LONG d)        { (VOID)d; }
@@ -558,6 +601,122 @@ static VOID h_case(const char *name, UWORD job)
     }
 }
 
+/* ------------------------------------------------ KILL against last close */
+
+typedef struct AmiSocketBase *(*HLibInit)(struct AmiSocketBase *, APTR,
+                                          struct ExecBase *);
+
+extern const struct Resident bsd_romtag;   /* library.c */
+static struct ExecBase       h_sysbase;
+
+/* The ARexx host running KILL: ami_rx_kill() -> ami_shutdown_notify(). */
+static VOID *h_host_main(VOID *arg)
+{
+    HTask *t = (HTask *)arg;
+
+    h_self = h_task_new(t->name);
+    h_shutdown_hook();
+    pthread_mutex_lock(&h_mx);
+    h_host_back = TRUE;
+    pthread_mutex_unlock(&h_mx);
+    h_finish(t);
+    free(h_self);
+    return NULL;
+}
+
+/* The last opener's CloseLibrary(): sb_Lock, the reference to zero, and
+   netstack_shutdown() under it. */
+static VOID *h_last_close_main(VOID *arg)
+{
+    HTask *t = (HTask *)arg;
+
+    h_self = h_task_new(t->name);
+    t->rc  = bsd_stack_close_release(h_master) ? 1 : 0;
+    h_finish(t);
+    free(h_self);
+    return NULL;
+}
+
+static BOOL h_shutting_down(const void *unused)
+{
+    (VOID)unused;
+    return h_in_shutdown;
+}
+
+static VOID h_kill_cases(VOID)
+{
+    const APTR *table = (const APTR *)bsd_romtag.rt_Init;
+    HTask       close_task = { "IBrowse", 0, FALSE, 0, 0, 0, 0 };
+    HTask       host = { "AmiNetXDuo arexx", 0, FALSE, 0, 0, 0, 0 };
+    BOOL        close_back;
+    BOOL        host_back;
+
+    /* bsd_lib_init() registers the hook and publishes the master base. */
+    if (((HLibInit)table[3])(h_master, NULL, &h_sysbase) != h_master ||
+        h_shutdown_hook == NULL)
+    {
+        printf("joblock_host=FAIL bsd_lib_init did not register KILL\n");
+        exit(1);
+    }
+    h_master->sb_StackIp   = &h_stack_ip;
+    h_master->sb_StackPool = &h_stack_pool;
+
+    /* Uncontended: KILL signals and gives the stack hold back. */
+    h_master->sb_Lib.lib_OpenCnt = 2;
+    h_master->sb_StackRefs       = 2;
+    h_master->sb_StackHeld       = TRUE;
+    h_start(&host, h_host_main);
+    pthread_mutex_lock(&h_mx);
+    host_back = h_wait_until(h_task_done, &host, H_DEADLINE_MS);
+    pthread_mutex_unlock(&h_mx);
+    if (!host_back)
+    {
+        printf("joblock_host=FAIL KILL never returned\n");
+        exit(1);
+    }
+    pthread_join(host.th, NULL);
+    printf("joblock case=kill_uncontended held=%d refs=%lu\n",
+           h_master->sb_StackHeld ? 1 : 0,
+           (unsigned long)h_master->sb_StackRefs);
+    CHECK(!h_master->sb_StackHeld && h_master->sb_StackRefs == 1,
+          "KILL gave the stack hold back");
+
+    /* The last close holds sb_Lock and waits for the host; the host is
+       inside KILL. */
+    h_kill_case   = TRUE;
+    h_host_back   = FALSE;
+    host.done     = FALSE;
+    h_start(&close_task, h_last_close_main);
+    pthread_mutex_lock(&h_mx);
+    (VOID)h_wait_until(h_shutting_down, NULL, 0);
+    pthread_mutex_unlock(&h_mx);
+
+    h_start(&host, h_host_main);
+
+    pthread_mutex_lock(&h_mx);
+    close_back = h_wait_until(h_task_done, &close_task, 2 * H_DEADLINE_MS);
+    host_back  = h_wait_until(h_task_done, &host, 2 * H_DEADLINE_MS);
+    pthread_mutex_unlock(&h_mx);
+
+    printf("joblock case=kill_vs_last_close host_returned_while_close_waited=%d "
+           "close_returned=%d host_returned=%d refs=%lu\n",
+           h_shutdown_saw_host ? 1 : 0, close_back ? 1 : 0, host_back ? 1 : 0,
+           (unsigned long)h_master->sb_StackRefs);
+    CHECK(h_shutdown_saw_host, "the ARexx host's KILL returned while the last "
+                               "close held sb_Lock and waited for it");
+    CHECK(close_back && host_back, "both tasks returned");
+
+    if (close_back)
+        pthread_join(close_task.th, NULL);
+    if (host_back)
+        pthread_join(host.th, NULL);
+    if (!close_back || !host_back)
+    {
+        printf("joblock_host=FAIL a task never returned\n");
+        exit(1);
+    }
+}
+
 int main(void)
 {
     setvbuf(stdout, NULL, _IONBF, 0);
@@ -568,6 +727,7 @@ int main(void)
        is a memset of a static that is already zero. */
     h_case("attach_opendevice", BSD_JOB_ATTACH);
     h_case("online_doio", BSD_JOB_UP);
+    h_kill_cases();
 
     printf("joblock_host=%s checks=%lu failures=%lu\n",
            (h_failures == 0) ? "PASS" : "FAIL", h_checks, h_failures);

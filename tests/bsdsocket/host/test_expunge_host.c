@@ -337,6 +337,14 @@ VOID ObtainSemaphore(struct SignalSemaphore *s)
 }
 VOID ReleaseSemaphore(struct SignalSemaphore *s) { (VOID)s; h_lock_depth--; }
 ULONG AttemptSemaphore(struct SignalSemaphore *s) { (VOID)s; return 1UL; }
+/* KILL's retry on a busy sb_Lock; AttemptSemaphore() never fails here. */
+LONG Delay(ULONG ticks)
+{
+    (VOID)ticks;
+    if (h.forbid_depth > 0)
+        h.blocking_under_forbid++;
+    return 0;
+}
 VOID InitSemaphore(struct SignalSemaphore *s)    { (VOID)s; }
 /* A page that is readable only while Forbid() is held, for the openers
    count (t_openers_count_under_forbid).  NULL: Forbid() only counts. */

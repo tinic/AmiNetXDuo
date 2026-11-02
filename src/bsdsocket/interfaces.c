@@ -1021,8 +1021,8 @@ LONG bsd_RemoveInterface(register STRPTR name __asm("a0"),
         return 0;
     }
 
-    /* The worker resolves and removes under the master lock: slots are
-       reusable, and a SANA-II driver needs more than a Shell's stack. */
+    /* The worker resolves and removes as one job, under ami_ns_lock: slots
+       are reusable, and a SANA-II driver needs more than a Shell's stack. */
     rc = bsd_stack_interface_remove_named(SocketBase, (const char *)name,
                                           (force != 0) ? TRUE : FALSE);
     /* RETAINED is removed too: the device stays open, the interface is
