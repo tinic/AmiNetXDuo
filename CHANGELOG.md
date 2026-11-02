@@ -9,6 +9,9 @@ are history.
 
 ## 1.0.0-rc3
 
+- A WaitSelect() with a timeout times out again when its timer fires just
+  as the call starts; it waited for the next packet or Ctrl-C before, and a
+  queued name lookup could wait until Ctrl-C.
 - NetShutdown no longer hangs when the last program closes
   bsdsocket.library while an ARexx KILL is being handled.
 - A network driver that asks for a pause after it opens gets it; the stack
