@@ -9,6 +9,10 @@ are history.
 
 ## 1.0.0-rc3
 
+- NetShutdown no longer hangs when the last program closes
+  bsdsocket.library while an ARexx KILL is being handled.
+- A network driver that asks for a pause after it opens gets it; the stack
+  skipped the pause before.
 - A network driver that waits while an interface goes online or offline no
   longer stops NetMeter, ShowNetStatus, NetShutdown or programs opening
   bsdsocket.library until it returns.
