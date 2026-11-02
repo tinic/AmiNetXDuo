@@ -957,12 +957,8 @@ BOOL bsd_pause(struct AmiSocketBase *base, ULONG ticks)
 
     for (;;)
     {
-        BOOL kept;
-
         if (!bsd_timer_until(base, due))
             return FALSE;
-
-        kept = (base->sb_TimerDue != due);
 
         received = Wait(base->sb_TimerSigMask | break_mask);
 
@@ -975,8 +971,7 @@ BOOL bsd_pause(struct AmiSocketBase *base, ULONG ticks)
             return TRUE;
         }
 
-        if (!base->sb_TimerArmed &&
-            (!kept || (LONG)(due - tx_time_get()) <= 0))
+        if (!base->sb_TimerArmed && (LONG)(due - tx_time_get()) <= 0)
             return FALSE;
     }
 }

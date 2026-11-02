@@ -1893,6 +1893,7 @@ static void t_timer_reply_removed(void)
     h_base.sb_TaskName       = h_task.tc_Node.ln_Name;
     h.wait_plan[0] = H_TIMER_SIG;
     h.wait_planned = 1;
+    h.tick_jump    = 2;
     CHECK(!bsd_pause(&h_base, 2), "pause: the timer ends it");
     CHECK(h_base.sb_TimerOpen, "pause: the timer was opened");
     CHECK(h_base.sb_TimerPort.mp_Flags == PA_SOFTINT &&
@@ -2081,7 +2082,34 @@ static void t_timer_kept_race(void)
           h.ticks == 2 && !h_base.sb_TimerArmed,
           "bsd_pause: re-armed once for the remaining tick and waited to due");
 
-    /* 4. bsd_pause() waking on a stale timer bit while the request is still
+    /* 4. A kept timer whose rounded sb_TimerDue already equals `due` (e.g. an
+       earlier sub-tick WaitSelect timeout or a 2-tick timer armed a tick
+       earlier) that fires before `due` still re-arms for the remainder. */
+    h_reset();
+    h_task.tc_State        = TS_RUN;
+    h_task.tc_Node.ln_Name = (char *)"opener";
+    h_base.sb_TaskName     = h_task.tc_Node.ln_Name;
+    h.slots_short  = TRUE;
+    h.park_result  = BSD_PARK_DONE;
+    h.wait_plan[0] = H_EVENT_SIG;
+    h.wait_planned = 1;
+    h_sliced_reset(2);
+    status = bsd_wait_event(&h_base, 2, h_sliced_call, NX_NULL, &aborted);
+    CHECK(status == NX_SUCCESS && h_base.sb_TimerArmed &&
+          h_base.sb_TimerDue == 2,
+          "bsd_wait_event: leaves a timer armed with sb_TimerDue == 2");
+
+    h.wait_calls   = 0;
+    h.wait_plan[0] = H_TIMER_SIG;
+    h.wait_plan[1] = H_TIMER_SIG;
+    h.wait_planned = 2;
+    h.tick_jump    = 1;     /* kept request fires at T=1, before due=2 */
+    h.sendios = h.waitios = h.abortios = 0;
+    CHECK(!bsd_pause(&h_base, 2) && h.wait_calls == 2 && h.sendios == 1 &&
+          h.waitios == 2 && h.ticks == 2 && !h_base.sb_TimerArmed,
+          "bsd_pause: equal sb_TimerDue firing early re-arms to due");
+
+    /* 5. bsd_pause() waking on a stale timer bit while the request is still
        in flight loops back into Wait() without re-arming. */
     h_reset();
     h.wait_plan[0]     = H_TIMER_SIG;
