@@ -1,0 +1,215 @@
+# Rc2 -> rc3 submodule review: netxduo +158, threadx +16, wifipi +6; no additions or removals.
+# bsdsocktest, dropbear, libcodesets, shelltools and zz9000-sdk did not move.
+# The named reviews cover the stated scopes. Product exact-SHA CI and emulator are separate release gates, not claims made by this manifest.
+# Agent attribution comes from AgentNet evidence and PR records, never git author.
+# reviewer=independent-review: fresh agents with no part in these PRs read the full diffs and the touched
+# functions in context (source only, nothing run), 2026-10-31; verdict and scope per range below.
+
+# Fast-forward by 139 commits (tinic/netxduo #25-#41, master, first-parent merges).
+# #25/#26: upstream dev 1420d86d and master history (parents #349, #350). #27: SYN cache depth (#360).
+# #28-#33: RTO, FIN and SACK recovery (#375, #377, #378). #34/#35/#37: SACK scoreboard, PRR, GSO, lost-retransmit
+# repair, IW/ABC (#354, #385, #396). #36: SNTP year boundary. #38: TX queue stop (#398). #39: RTO-walk lost copy (#399).
+# #40: fixes for review notes 1, 2 and 4 below (AmiNetXDuo #411). #41: off-link IPv4 source check (#419), reviewed by claudecode.
+# Fork PR CI green on every merge; all merges clean (remerge-diff empty) except 6be86f18 (11 conflicts, every fork fix kept).
+# Independent review GO-with-notes, no blocker: scope full common/, addons/ and test diffs, nx_tcp_socket_state_ack_check.c,
+# nx_tcp_socket_retransmit.c, nx_tcp_sack_recovery.c, nx_tcp_socket_send_internal.c, nx_ip_header_add.c, nx_ip_driver_packet_send.c.
+# Notes: fixed by #40: _nx_tcp_socket_retransmit_tail had no IPv6 source-state guard since 8b791062 (1c487512);
+# retransmit.c:1264 unsigned compare of send_end and queued_end (f5bbf4df); send_internal.c:1377 unsaturated prr_credit
+# subtraction (7c6f09c3). Open: the first scoreboard page (sack_recovery.c:485) skips the pool/8 reserve sack_grow applies,
+# and NX_SACK_ALLOC_FAILED holds until the sent queue drains; sack_lost_retransmit (sack_recovery.c:319) has no reorder window;
+# DHCP ADDRESS_PROBING case re-added by 6be86f18 is dead in the fork; upstream lowered the MQTT interop floor.
+# #42 (AmiNetXDuo #430): upstream v6.5.2.202603b_rel hotfix, 19 commits, reviewed by claudecode 2026-11-01 (full diffs of every
+# built file: nxd_dhcp_client.c, nx_secure_tls_process_serverhello.c, nx_api.h, nx_secure_port.h; common/src unchanged). Fork PR #42 CI green 42/42.
+third_party/netxduo 2c53ee850261b65f20b4d2cbfe245eab98f9d879..dde25cf4c359da8d03bbd6369b4972b247109bed
++dde25cf4c359da8d03bbd6369b4972b247109bed reviewer=claudecode merge of netxduo #42 (AmiNetXDuo #430); no source change beyond de27e0e5 and e7cc9f38
++e7cc9f38b10f5e5f9b6fba7f5c00de22b2a5ea47 reviewer=claudecode netxduo #42 tests only: netx_bsd_raw_ipv6_dest_table_full_test expects the fork LRU destination eviction (dae9b32a) instead of refusal on a full table; addons/BSD not built
++de27e0e53cd60cbdefb2123442eacd1ab337e418 reviewer=claudecode netxduo #42 merge of upstream v6.5.2.202603b_rel; 5 conflicts: nx_icmpv6_process_packet_too_big.c ours (fork 2fffd6f4 already checks status and NULL dest_entry_ptr), _nx_dhcp_search_buffer theirs, nxd_ftp_server.c theirs, regression workflow ours, regression CMakeLists union; common/src unchanged from 7f112389
++c690f59f9a5195c465153e90ef56b865337a8a62 reviewer=claudecode upstream merge of the 202603b release preparation (#513); no source change beyond its commits
++768b0b30415272165ae75857608bed4af1e5a086 reviewer=claudecode upstream test infrastructure only (#507): regression template pin and test timeout; nothing built
++8ff993853f32b72c41e3febd9180e4dbad47f48c reviewer=claudecode upstream port version strings to 6.5.2.202603b; in the build only the nx_secure_port.h _nx_secure_version_id text
++82fdcadfe9a6bf7c4d9cdeb804eb24dd63c000a5 reviewer=claudecode upstream NETXDUO_HOTFIX_VERSION 'a' to 'b' in nx_api.h; cmake/AmiNetXDuoVersion.cmake reads MAJOR.MINOR.PATCH only, version pins unchanged
++efdf5a00bf0fb93a993e43a0322a7e9c50c86db4 reviewer=claudecode upstream advisory fix, MSRP MRPDU parse bounds (tsn/src/nx_msrp.c); tsn/ not built
++55de75362d99c3ad16672722e511959e837e29f2 reviewer=claudecode upstream CVE-2026-115403, BSD raw IPv6 destination table full (addons/BSD/nxd_bsd.c); addons/BSD not built, bsdsocket.library is our own
++d04d5bd82eaacbc0241b76c7de4190a560870da7 reviewer=claudecode upstream CVE-2026-114408, ICMPv6 packet-too-big with a full destination table; de27e0e5 keeps fork 2fffd6f4, built file identical to 7f112389
++01e9c5bed40f81ac028263fed1e961e4494cda0a reviewer=claudecode upstream CVE-2026-102724, MRP attribute eviction (tsn/src/nx_mrp.c); tsn/ not built
++c51152a1cf6849d821283b1359f506c4b24ae515 reviewer=claudecode upstream advisory fix, MSRP attribute table (tsn/src/nx_msrp.c); tsn/ not built
++52cab4cce0f9bafc81b5908fa548d5c0565c7521 reviewer=claudecode upstream CVE-2026-102720, _nx_dhcp_search_buffer walks a remaining-byte count and ends the search at an option whose data passes the buffer end (remaining > 1 guards remaining - 2); built, AMINETXDUO_DHCP=ON; supersedes fork N-060 1aa8afef; adds netx_dhcp_option_walk_bounds_test
++6d92f5b3e975ad8a941ebc6735484942896719b3 reviewer=claudecode upstream CVE-2026-102726, PPP IPCP option bounds (addons/ppp); not built
++e58654e0b55f7391814f9f8989407d15d6fd8001 reviewer=claudecode upstream CVE-2026-102727, FTP server PASV/EPSV peer check (addons/ftp); not built
++0c81f51db8d42fa9ac328a5d9a4e47263b185849 reviewer=claudecode upstream CVE-2026-102722, FTP client PASV peer address (addons/ftp); not built
++3f5b2319a519a529c22a65170c6c75dab1c7ead0 reviewer=claudecode upstream CVE-2026-102721, TFTP client and server error message bounds (addons/tftp); not built, C:tftp is src/tools/tftp.c over bsdsocket
++3d1080a1a23fdb9f4e64a6a13c61cebab2b7efb3 reviewer=claudecode upstream CVE-2026-102728, TLS ServerHello session ID length must leave 3 bytes for ciphersuite and compression method; built in tls.library; the DTLS HelloVerifyRequest half is not built; adds nx_secure_client_handshake_message_bounds_test
++77536de01ded627491c54b505574e3cda720483e reviewer=claudecode upstream CVE-2026-102719 and CVE-2026-115215, DTLS server cookie and ClientHello; AMINETXDUO_DTLS=OFF, src/tls/CMakeLists.txt filters nx_secure_dtls*, not built
++7f112389cfbfdbba2b38a8e2008c5e52af6c2f76 reviewer=claudecode merge of netxduo #41 (AmiNetXDuo #419); no source change beyond its commit
++1d9b78420c37b447af8e6b1f2e75240461aa1568 reviewer=claudecode netxduo #41 IPv4 source check applies the zero/all-ones host-part tests only to sources on the attached network and refuses 255.255.255.255 explicitly, so an off-link x.x.x.0 host (gnudb.gnudb.org) is accepted; adds netx_ip_source_address_off_link_test; parent #419
++dfbe02caf1c5825299032a20cb2f6e634b1d5626 reviewer=independent-review merge of netxduo #40 (AmiNetXDuo #411); tree identical to 7c6f09c3; no source change beyond its three commits
++7c6f09c38defd2f6c997cc3fda92893bbc6be613 reviewer=independent-review netxduo #40 new-data PRR charge in send_internal saturates at zero, as _nx_tcp_sack_recovery_sent does, so a repair sent while the checksum ran unprotected cannot wrap prr_credit; adds netx_tcp_sack_prr_credit_race_test; review note 4
++f5bbf4df4312eeca91fcd2335b4b109fd46cded0 reviewer=independent-review netxduo #40 timeout walk compares slice end and block end by signed difference, so a GSO block spanning 2^32 keeps tx_rto_next inside it; tcp_options_build gains LINK_CAP and NO_INTERFACE_CAPABILITY; adds netx_tcp_gso_rto_wrap_test; review note 2
++1c4875125620709b9d258a8148e81015c59ce7f3 reviewer=independent-review netxduo #40 _nx_tcp_socket_retransmit_tail returns while the IPv6 source is not VALID, the check its sibling resend paths use, so a TLP cannot reach the _nx_ipv6_packet_send assert; adds netx_tcp_ipv6_address_delete_loss_probe_test; review note 1
++9b6889d9d7283aa43191a806b5a485bfb02a480c reviewer=independent-review merge of netxduo #39 (AmiNetXDuo #354, parent #399); no source change beyond its three commits
++fe0320595d4af9e0bb2c35cff034c290a7e1ea4b reviewer=independent-review netxduo #39 the lost-copy decision moves out of _nx_tcp_socket_state_ack_check into _nx_tcp_socket_retransmit_lost_copy; per-segment receive path 752 to 684 instructions on the A1200 (PR-recorded); no behaviour change
++92cbc47635f735b179435d1d104e95d937929a54 reviewer=independent-review netxduo #39 duplicate ACKs showing a lost RTO-walk copy resend only the segment at SND.UNA and keep the walk cursor, so later copies are not counted twice; walk steps over SACKed islands; a FIN-only SACK block is not loss evidence; parent #354
++66b0c72f3d7d749748913366165cccfffe57d1f9 reviewer=independent-review netxduo #39 duplicate ACKs below the RTO recovery point no longer start a fast recovery that cleared the walk; adds netx_tcp_burst_loss_recovery_test; rto_ack_recovery expectation changed to the new behaviour, not weakened; parent #354, #399
++6c009aa38080831b062ad687a671042613013fed reviewer=independent-review merge of netxduo #38 (parent #398); no source change beyond its two commits
++70c648fc59d675840fe2ca256bd1012c3edc3aff reviewer=independent-review netxduo #38 SACK NextSeg keeps repairing while the interface TX queue is stopped; extends netx_tcp_tx_queue_stopped_test; parent #398
++4b71a20c5508ade59864576795076a4bbab5d9d5 reviewer=independent-review netxduo #38 nx_interface_tx_queue_stopped (reserved byte, NX_INTERFACE layout unchanged): a stopped queue holds new data like a closed window only while data is outstanding, so the next ACK restarts it; retransmissions not held; adds netx_tcp_tx_queue_stopped_test; parent #398
++54d02c2bd8459f0a084522b026c0ac3a1e18e4ff reviewer=independent-review merge of netxduo #37 (AmiNetXDuo #354, parent #396); no source change beyond its two commits
++d01eada8e968cc49feee22b7c39fe0bd3c91ca45 reviewer=independent-review netxduo #37 per-interface initial window (RFC 6928) and RFC 3465 ABC limit; zero keeps RFC 3390/5681 behaviour; parent #354
++879a3ec89213b385c381d3f18b7d95936f6b1a29 reviewer=independent-review netxduo #37 sequence-based lost SACK retransmission detection (RFC 8985 style, one-MSS margin, no reorder window): hole cursors and HighRxt rewind so the repair goes out on this ACK, not at the RTO; adds netx_tcp_sack_lost_retransmit_test; parent #354
++1d535c2dd176e6709ce52997b999e3ce1ff91257 reviewer=independent-review merge of netxduo #35 (AmiNetXDuo #354, parent #385); no source change beyond its branch
++a99250c0e19f57c4173181538bb915a796f3d01f reviewer=independent-review netxduo #35 NX_DISABLE_TCP_GSO omits software TCP segmentation without changing packet or socket layout
++596e614934b41a4373d18c1cfa872f05d994b089 reviewer=independent-review netxduo #35 branch merge of codex/354-sack-pipe; no source change beyond its parents
++1526c5859100a92b502a9c72173740162ddb07b5 reviewer=independent-review netxduo #35 IPv4 GSO fields read only without NX_DISABLE_IPV4, so IPv6-only builds compile
++4a17528868a246a3dff9779270188d2d3b2989e3 reviewer=independent-review netxduo #35 a new retransmission slice gets a fresh IP header and ID; same change as 273008e9 on codex/354-sack-pipe
++e4eba70ee32e960645fffa22a0c1790dc27d540e reviewer=independent-review netxduo #35 tests only: netx_15_20_test keeps injected flight boundaries coherent; same change as 0617d13f on codex/354-sack-pipe
++c46a5a533857bc4aab2cf88cf30795d246509d12 reviewer=independent-review netxduo #35 GSO and IPv4-checksum capability bits cleared with ~(ULONG) in nx_ip_header_add and send_internal
++7e86f2396cde47dd2b98482d78ed3907320d0054 reviewer=independent-review netxduo #35 branch merge of codex/354-sack-pipe; no source change beyond its parents
++36456c334ea4632d08832b42ab1f09bf06a216af reviewer=independent-review netxduo #35 branch freezes uncertain SACK evidence and keeps known repair progress; counterpart of 20658849 on codex/354-sack-pipe
++0bc577ebec0a79636752e6ff5d2bcf100e15b692 reviewer=independent-review netxduo #35 branch merge of codex/354-sack-pipe; no source change beyond its parents
++5a61bb43eca21e7f52e5884421f0993575677b2d reviewer=independent-review netxduo #35 branch reserves SACK scoreboard pages atomically, adds a cross-page traversal test; counterpart of ad9e56b7 on codex/354-sack-pipe
++9eacdfdaf3ce1a43ae3fadd4174ca6f33a138461 reviewer=independent-review netxduo #35 branch merge of codex/354-sack-pipe; no source change beyond its parents
++e1d5764e6a5099486a77c8fa93defa19df18678c reviewer=independent-review netxduo #35 branch grows SACK history within the pool reserve, conservative pipe on overflow; counterpart of cbdb9344 on codex/354-sack-pipe
++c6c04482fedf309c205f5bb4031fa406bab20cc9 reviewer=independent-review netxduo #35 branch merge of codex/354-sack-pipe; no source change beyond its parents
++9c2a6ce9638dddd6670128b46eadfe39b94c5556 reviewer=independent-review netxduo #35 zero-window probe byte lookup also works under NX_DISABLE_PACKET_CHAIN
++e7277c75401b1db38aae6c10f55eaf4555d4f85b reviewer=independent-review netxduo #35 repair copies and stream verification guarded under NX_DISABLE_PACKET_CHAIN; counterpart of 2bbc52d3 on codex/354-sack-pipe
++d4d683ce4ba5184d7464bf0b57eeb3a24b6dbe92 reviewer=independent-review netxduo #35 tests only: netx_tcp_overlapping_packet_test_2 keeps SND.UNA consistent under byte-credit accounting
++1ca98e7b75c42318e46d21e3a2733107972e1949 reviewer=independent-review netxduo #35 branch merge of codex/354-sack-pipe; nx_tcp_socket_retransmit.c resolution equals the automatic merge (remerge-diff empty)
++3b8016973f605e03b99bf5383f409292257f4f6b reviewer=independent-review netxduo #35 branch exact PRR byte credit without wide arithmetic; counterpart of 69b8ee1e on codex/354-sack-pipe
++603934832dc6e612ee32a227c1783cd770ec431b reviewer=independent-review netxduo #35 in-place GSO repair only while the route interface still advertises TCP_GSO, else an ordinary copied repair
++dca7346a4da440c75f49e7fc777b36a216714df9 reviewer=independent-review netxduo #35 async RTO repair cursor tx_rto_next stays inside the current aggregate
++b665b935c804c20db3b04439df05337b66577211 reviewer=independent-review netxduo #35 bounded IPv4 software TCP GSO with allocation-free in-place repair ranges; repairs, RTO walk, TLP and zero-window probe stay wire-MSS from SND.UNA; parent #354, #385
++f8c805736ece9744aba4c1e7c7e80a98a28f8cfc reviewer=independent-review netxduo #35 branch merge of codex/354-sack-pipe; no source change beyond its parents
++ab5d11cab9e3a7b5f9dcd6b80f22e5d71a8dfb54 reviewer=independent-review netxduo #35 ack_check takes acked bytes from the cumulative ACK, independent of buffer retirement; a partial ACK restarts the timeout clock; wrapped_flag ladder replaced by signed sequence differences; parent #354
++89eda6894d6a5528c966e195231577a2f0b332d7 reviewer=independent-review netxduo #35 NX_TCP_GSO_INFO headroom record, NX_INTERFACE_CAPABILITY_TCP_GSO 0x4000 and NX_TCP_GSO_PACKET; NX_PACKET layout unchanged
++81c342b6aa3536c387b283a184f0cb43bda5b876 reviewer=independent-review merge of netxduo #34 (codex/354-sack-pipe, AmiNetXDuo #354); no source change beyond its branch
++26e97094eff3e044ff5a6f0c30f7c9096a434152 reviewer=independent-review netxduo #34 branch merge of origin/master (brings #36); no source change beyond its parents
++273008e9f6169774f9cafd18baac79ad44836252 reviewer=independent-review netxduo #34 a transient SACK repair slice is never treated as an identical copy, so it gets a fresh IP header; parent #354
++cb648a3926fb0872b90e703c2f2439fb3b1564a6 reviewer=independent-review merge of netxduo #36; no source change beyond ea832792
++0617d13f6ef681898970d32a15c3a2c8bac667d6 reviewer=independent-review netxduo #34 tests only: netx_15_20 keeps SND.UNA coherent with its injected 20 outstanding bytes; same patch-id as e4eba70e
++206588494a36768c36203254060e319932fe4b66 reviewer=independent-review netxduo #34 NX_SACK_UNCERTAIN freeze: evidence above the last represented frontier is ignored and kept in Pipe until cumulatively ACKed; scoreboard test extended; same patch-id as 36456c33; parent #354
++ad9e56b70a3bbc290a3fb80fa6c0f61402fa45d9 reviewer=independent-review netxduo #34 sack_grow checks the pool reserve and allocates under TX_DISABLE; cross-page traversal test; same patch-id as 5a61bb43; parent #354
++cbdb93440b61f227319bf49f9887858c15580bf7 reviewer=independent-review netxduo #34 scoreboard grows by chained control pages (pool/32, at most 16, pool/8 reserve kept); a failed rebuild keeps old evidence and a conservative Pipe; adds netx_tcp_sack_scoreboard_test; same patch-id as e1d5764e; parent #354
++ea832792ced0ff0dcb97504866deefa43676ace9 reviewer=independent-review netxduo #36 SNTP 00:00:00 on 1 January converts to the new year, not 32 December ('>' to '>='); seconds_to_date test gains 14 boundary times; no parent issue
++2bbc52d3667212d2a5c937690f2ac6c599ac22f0 reviewer=independent-review netxduo #34 SACK slice copy stops at the first buffer under NX_DISABLE_PACKET_CHAIN; same patch-id as e7277c75
++76bf37c9884a585e956269202b7b2fb5ff1f00de reviewer=independent-review netxduo #34 tests only: dropped_packet_test2 checks the byte stream; new_reno_algorithm_test2 exact repair-ACK values become strictly increasing progress plus a final-sequence check (PRR clocking)
++cb05c2213c479407dc0c5ba1ea4a38bbcce547b9 reviewer=independent-review netxduo #34 on a full pool the whole one-MSS original is resent when it fits PRR and rwnd credit, so the first repair is not lost; parent #354
++69b8ee1ed70cd9be791dee7f9e9910f9fa005227 reviewer=independent-review netxduo #34 _nx_tcp_prr_proportional_credit: exact ceil(D*ssthresh/RecoverFS) in 32 bits with overflow-safe fallback; same patch-id as 3b801697; parent #354
++a2e205fbbe4748d9d7e8842e0e912b5c631a7728 reviewer=independent-review netxduo #34 SACK slice copies keep the original's nx_packet_address, ip_version and IPsec SA; parent #354
++eed79540bea1c656f246fd52a39071f1573bbd9c reviewer=independent-review netxduo #34 NextSeg(4) rescue limited to a never-retransmitted tail of at most one MSS after an ACK jump above one MSS; RescueRxt set only after transmission; parent #354
++fe12a920bba61cee3a858c9f002a160ffcdbfa82 reviewer=independent-review netxduo #34 after the copy path releases the IP mutex, cwnd/rwnd/PRR credit and state are checked again before sending; parent #354
++a90c71ae1564a508974d4507fd325f3dce0e6722 reviewer=independent-review netxduo #34 new nx_tcp_sack_recovery.c: RFC 6675 hole scoreboard in a pool control page plus a shared RFC 6937 PRR-SSRB budget; SACK peers bypass the old walk, NewReno for others; no test until cbdb9344; parent #354
++68c3f987b99918031230d156bb66e0d26b465818 reviewer=independent-review netxduo #34 old SACK walk counts retransmitted bytes in Pipe (SetPipe b); unreachable for SACK peers after a90c71ae; parent #354
++eeda05d8401c8118aead62e0457b13808d2dc602 reviewer=independent-review merge of netxduo #33; no source change beyond 38ad7c61
++78f07f0bd63886f8cdee4170e05bc896c69ca0f3 reviewer=independent-review merge of netxduo #32; no source change beyond its branch (tests only)
++38ad7c61586eb70f05fb1cb939ed4479dfdf189e reviewer=independent-review netxduo #33 new-flight SACK re-entry: a DATA+FIN tail block counts as loss evidence, a FIN-only block does not; recovery test to 225 scenarios; parent #354
++ff9d53f7f8021875f470a2c8dadbd6b101acbacb reviewer=independent-review merge of netxduo #31; no source change beyond its branch
++26ac69be975ed31ec94f7c122b1afaa6210329c8 reviewer=independent-review netxduo #32 tests only: 67 TCP/FTP/auto-IP fixtures use _nx_ram_network_driver_tcp, parse real header lengths, early-retransmit-aware dup-ACK thresholds; payload assertions kept
++6f9ad9f4a13e1216217837b6e73b0966b28a025b reviewer=independent-review netxduo #32 tests only: netx_12_23/24/25 check the parsed MSS value (== 1460), tightened from the option-area length
++607dfa0fc5ff238781727c39ab241d5c6af1a6f9 reviewer=independent-review netxduo #32 tests only: netx_12_18/12_21 bound receive capture, exclude negotiated options, require exact length
++51923e54450bc1bb0d3c4f42c92ca06b47ee12a3 reviewer=independent-review merge of netxduo #30 (parent #378); no source change beyond its branch
++b925e7de59cf17f8c24ac96e07dbe437d4fab2d7 reviewer=independent-review netxduo #32 branch merge of 95ab4649 (#31 head); no source change beyond its parents
++95ab4649ed582f93714e257502357621f2b7cb27 reviewer=independent-review netxduo #31 at a fully acknowledged recovery point a valid SACK block above the ACK permits a new fast recovery; NewReno guard kept without SACK; parent #354
++bdeb6153c49f984a79d51b7ea3cc2121ab405d17 reviewer=independent-review netxduo #31 tests only: netx_102_20/102_21/2_20 detect fast retransmit by fast_recovery and require zero timeout retries
++f5e708acae91d7a3b39bfdbde3ae417fd950fe9b reviewer=independent-review netxduo #31 fast retransmit restarts the RTO without incrementing timeout_retries (RFC 6298 5.5); RFC 6582 4.1 heuristic includes the four-MSS boundary; parent #354
++fc32e1d18064b00b27990780b6cad17a68a72c49 reviewer=independent-review netxduo #32 tests only: _nx_ram_network_driver_tcp adapter (MTU NX_TCP_MSS_MINIMUM+40 under MSS_CHECK) for small-MTU fixtures
++dd59cda74d732ecd04be433abdd5bab576c37747 reviewer=independent-review netxduo #32 tests/CI only: new tcp_options_build profile (SACK, timestamps, TLP, early retransmit, window scaling, keepalive, MSS check) and fixture updates
++bb5373872730898cf6431485b83a02900158648f reviewer=independent-review merge of netxduo #29 (parent #377); no source change beyond its branch
++42c0b0c3a889d1e56982677f0421b077142ed276 reviewer=independent-review netxduo #30 SACK option parsing and the old SACK walk use DATA SND.UNA (minus one for a pending FIN); parent #378
++816781b8cfd738fb2215dd5ad561f3d2077bdfe2 reviewer=independent-review netxduo #30 a pending FIN stays out of starting_tx_sequence and acked_bytes is capped at outstanding DATA; parent #378
++cf0ea1217128457114ddd9311bc70df5113833c6 reviewer=independent-review netxduo #29 tests only: later plain ACKs below a SACK block keep the cached block; parent #377
++4469ee1bf730c0895591e0b2b99eba68b36db26f reviewer=independent-review netxduo #29 during the post-RTO walk a cached SACK block reached by the cumulative ACK is cleared; parent #377
++2ab2f28548df2ff8101ac883f8e0d041773a5e6e reviewer=independent-review netxduo #29 post-RTO walk stops when one SACK block covers the remaining old-flight tail; parent #377
++58df09186e5b560e202201153857ea0d12d847f5 reviewer=independent-review merge of netxduo #28 (parent #375); no source change beyond its branch
++42e6d28b4fccc234d042258dcce21284fb8bfb7c reviewer=independent-review netxduo #28 tests only: rto_ack_recovery_test binds the native sender socket; parent #375
++2181674a9938c7439a063c06fa30476f11079f71 reviewer=independent-review netxduo #28 post-RTO [rto_next, rto_end) cursor survives rwnd shrink and recovery changes; socket fields appended before the module extension; parent #375
++ce435c625be634050a79082aa561452ca863d8d0 reviewer=independent-review netxduo #28 tests only: FIN cursor check changes from sent == 2 to a cwnd-derived count, first DATA segment still required; parent #375
++30a9c4f2c0c87783a945a6c12512885c781923b0 reviewer=independent-review netxduo #28 post-RTO bounds from queued head/tail headers (FIN excluded), not SND.NXT minus outstanding; parent #375
++28527ccaa7df5c4320f591b371422df7c5aca9c7 reviewer=independent-review netxduo #28 RTO leaves fast recovery and keeps the one-MSS loss window; _nx_tcp_socket_retransmit_after_timeout resends the old flight in slow start on advancing ACKs (Karn); adds rto_ack_recovery_test; parent #375
++cd2667cdeaeec65c1db487d07e49df8b84cc162c reviewer=independent-review merge of netxduo #27 (parent #360); no source change beyond 19d62c74
++19d62c7419e4bd0e574245cd2ef4ffb458fba910 reviewer=independent-review netxduo #27 opt-in NX_TCP_SYNCACHE_DEFERRED_MAXIMUM bounds held SYNs apart from the backlog; undefined keeps behaviour; parent #360
++6ca0ea9dd2c1e813f72573ae767d98680bd3c08a reviewer=independent-review merge of netxduo #26 (parent #350); tree identical to e87fcf4c; no source change
++e87fcf4ccf1e23156c1fab1176614bae7563a569 reviewer=independent-review netxduo #26 CI tooling only: test_ci_routing.py builds its own commits instead of assuming a non-empty HEAD~1..HEAD diff
++ebf0e2273dcf2e73531752e3f8402ad7e084a9c2 reviewer=independent-review netxduo #26 records upstream master ff27569d (upstream #479) as second parent; tree identical to cb006c47; no change in any path
++cb006c472de40f08302dcf9d44a9b3b4cbd8fa44 reviewer=independent-review merge of netxduo #25 (parent #349); tree identical to 73760e17; no source change beyond its branch
++73760e1796a3e8376d454e0f346d83a2ebc3189e reviewer=independent-review netxduo #25 CI only: prepare_apt.sh follows the hosted runner mirror-list indirection
++578ee4d7c10aebbd8e98124cec5359e2ff50f79a reviewer=independent-review netxduo #25 CI only: runners off the stalled Azure Ubuntu mirror, APT timeouts and retries; no assertion or gate changed
++0148f91952200fc14b22b54012646d88b336134c reviewer=independent-review netxduo #25 tests only: legacy ECDSA CertificateVerify regression (upstream #466) sends a complete 8-byte DER signature the fork's exact DER check accepts; hook checks exact bytes; strengthened
++e01025af655b4d9c828181ab32f413f2441f5f97 reviewer=independent-review netxduo #25 tests only: ipv6_address_delete_reset_test becomes _state_test, expects ESTABLISHED, no packet, NX_NO_INTERFACE_ADDRESS, matching 8b791062
++43f45b815a46c9224f6a07d6ab86729cab2f615b reviewer=independent-review netxduo #25 offload receive adapters set the RX-checksum flag (NX_ENABLE_TCPIP_OFFLOAD only, not in the Amiga build); packet-debug test (upstream #497) expects a SYN-cache entry
++8b791062933e9745a3c246f58d40563b90da9e4f reviewer=independent-review netxduo #25 removes the fork's reset-on-delete walk from nxd_ipv6_address_delete.c for upstream #490 send guards; SYN-cache flush kept; intended; leaves the TLP path unguarded (see notes)
++29e00f8903568327cebda651d9718bcfaacccdb9 reviewer=independent-review netxduo #25 drops upstream #496's early return in nxd_udp_socket_send.c that would keep nx_ip_protection held under fork locking; the fork's check returns the same status and releases the mutex
++6be86f1891ea579ece228b736f1068fc8b788197 reviewer=independent-review netxduo #25 merge of upstream dev 1420d86d; 11 conflicts resolved keeping every fork fix (exact ECDSA DER checks, fork RTO timeout set, sharded CI); re-adds upstream's DHCP ADDRESS_PROBING case the fork never enters
++1420d86dbd644ef0ae585fd87afd8ede297bd0f0 reviewer=independent-review upstream #497 tests only: netx_packet_debug_info_test runs (unsatisfiable version guard removed)
++3b3c8b30b619f0189e40385f42e7d62ac7ad212a reviewer=independent-review upstream #496 UDP send refuses an IPv6 source no longer VALID; source hunk superseded in the fork by 29e00f89
++9609e856ffb7976074df9d9c054bab6fdc3af733 reviewer=independent-review upstream #494 DAD failure callback runs after the address is unlinked; ordering only
++86aa85460244f5560d0a13fa5cdc4e193e063871 reviewer=independent-review upstream #490 TCP control sends drop and retransmits hold IPv6 segments while the source address is not VALID (avoids the _nx_ipv6_packet_send assert)
++dc7b216554db06987ccc67baa42c8a5a0e2977a4 reviewer=independent-review upstream #489 HTTP client builds with NX_DISABLE_PACKET_CHAIN
++2cd5aa4ea4e78089fb9ba7107bd86113d3559d7d reviewer=independent-review upstream #482 static-route compaction on interface detach; the fork had the same fix, conflict took the comment only
++8f259585fdae90feb5fdd5ed33eef69dc9ea6d42 reviewer=independent-review upstream #456 Brainpool P256r1/P384r1/P512r1 for TLS 1.3, ECDSA verify and X.509; additive
++8ad45725421e905a1c1d9214c7a7c799c09ab5c1 reviewer=independent-review upstream #450 web server persistent server-sent event streams; new API, additive
++d4ffe44e5db8ce61e87652485fa61a4f34a1643e reviewer=independent-review upstream #454 HTTP client handles response headers split across packets
++fe30ce39e061aea48407f8f7f001e4156a3f7f2b reviewer=independent-review upstream #465 tests only: TLS 1.3 packet ownership regression
++f156359ae1db82dab005d1d59c275c117245d40d reviewer=independent-review upstream #463 MQTT disconnect-callback registration race
++65b7bcff371c5b83af33bf90ff91a16b0aec0989 reviewer=independent-review upstream #462 MQTT releases queued receive packets on disconnect and delete
++167e413c54e96fea220bc04e690f22f3e9947b58 reviewer=independent-review upstream #455 PPP drains all buffered frames per event; PPP not used by AmiNetXDuo
++a6db9e30363bec85868bd1867e3c785879845ba8 reviewer=independent-review upstream #452 IP thread handles TX_WAIT_ABORTED and wait failures, NULL IGMP handler guard; unchanged on TX_SUCCESS
++48a3569e3ce70832327c2837f5d0c5cd76a1e49d reviewer=independent-review upstream #453 DHCP binds after ARP_ANNOUNCE_WAIT and handles conflict before timer events; only the event reorder is live in the fork
++c276c578d664342e96ccfebe15956b22713988bd reviewer=independent-review upstream #466 TLS 1.0/1.1 ECDSA CertificateVerify uses the 20-byte SHA-1 digest
++fc710d89052927d1bada457648064b4c3c840718 reviewer=independent-review upstream #481 IPv6 over TCP/IP offload, nx_link NULL/index guards; offload not in the Amiga build
++58d7ec37fa4a299fb99381ee96000d905977ffca reviewer=independent-review upstream #480 tests only: malformed-packet and IPv4 option tests reach the advisory guards
++ff27569d194f24d296452e1a884d3424f5bb39c9 reviewer=independent-review upstream #479 dev-to-master merge for 6.5.2.202603a; no change beyond parents
++b1e8bd3802beed15b576108fd58d7e99c1c6f538 reviewer=independent-review upstream #477 merge into dev; no change beyond parents
++6bb992669e5d22e2efda4c0e2d1fad088e56a700 reviewer=independent-review upstream #477 tests only: TFTP oversized-data test is N/A without packet chaining (defect needs a chained datagram); runs in every chained build
++4cb38463c2a55f0db0542c615e5bebd8c4c7e4f2 reviewer=independent-review upstream #477 CI only: MQTT interop coverage floor 50% to 40%; build timeout change dropped by the fork resolution
++a83360ef4c5c07dde1e3a601c2d8c4dad28d76b0 reviewer=independent-review upstream #477 CI only: coverage summary reads the report path the suites write
++58a2136e57aa5065bb46b60b1d5843990f2c0287 reviewer=independent-review upstream #477 tests only: SNMP utility prototype for the abnormal-packet test
++3a986fc4faab4dfb7bfedbef5841def5739e5d27 reviewer=independent-review upstream #477 port version strings; no code
++e97d662f54d20479ba0c3825a41cf43fe7e5c7dc reviewer=independent-review upstream #477 nx_api.h version constants; no code
++a4fa098f8d7652d5406f18dac8bc67760dd1e6a9 reviewer=independent-review upstream advisory merge of b66c56b9; no change beyond parents
++a02cf8c50140d6a5b7891ddc333f11be9a2014bf reviewer=independent-review upstream advisory merge of 1d345c67; no change beyond parents
++a1fac8ad4608e82ceca1d9dfa67efa8a5345317d reviewer=independent-review upstream advisory merge of d5a28cfe; no change beyond parents
++615e16e22bcb9adc3bee5a27413108bcc8e720d6 reviewer=independent-review upstream advisory merge of 3666b68f; no change beyond parents
++6af292bab124a154f83a25751a73e580a5792522 reviewer=independent-review upstream advisory merge of 8d6409ad; no change beyond parents
++128f10f80801057fa3b155a5a0ebb523e3b3c864 reviewer=independent-review upstream advisory merge of 92daba6b; no change beyond parents
++868eed28c8f8447f792d7beaefe1d6b7998281a3 reviewer=independent-review upstream advisory merge of 693d9bea; no change beyond parents
++693d9bea9ae001c9036b53d6759d500bda2470b5 reviewer=independent-review upstream advisory (#479) mDNS cached name must match the incoming name length
++d5a28cfee2d98db6903c5555a235e1b1bc0b8497 reviewer=independent-review upstream advisory (#479) TFTP server bounds a received DATA length; adds netx_tftp_oversized_data_test
++8d6409ad80ecba5226f294333d3ffb2345f6d8ee reviewer=independent-review upstream advisory (#479) SNMP bounds the declared OID length
++b66c56b99a5b4affb29f793a06bb3cf4bae41ec7 reviewer=independent-review upstream advisory (#479) ICMPv6 option walks reject short tails and zero-length options; the fork's tail check kept in the merge
++92daba6b214af8dd235400ac7df2fe900d20fcdb reviewer=independent-review upstream advisory (#479) RTSP BAD_REQUEST for an unparsable Session header, stranded response released
++1d345c67733bf29d70ea5df7889037a671298e2c reviewer=independent-review upstream advisory (#479) DTLS ClientHello bounds every field and verifies the cookie
++3666b68f1a4ea73527856437f2a7a4a1290d0742 reviewer=independent-review upstream advisory (#479) X.509 and ECDSA reject an empty signature bit string; the fork's stricter DER check kept in 6be86f18
+
+# Fast-forward by 16 commits (tinic/threadx #2, #3, master): upstream v6.5.2.202603b_rel hotfix, reviewed by claudecode 2026-11-01.
+# Built change: THREADX_HOTFIX_VERSION in tx_api.h only; common/src and the m68k port unchanged. Fork PR #3 CI green.
+third_party/threadx e24aa9c92d247dcea3502b9a77b6dd1af21d0a2f..f4845a7317923e54b2f5cf1f42befe2789ca62ec
++f4845a7317923e54b2f5cf1f42befe2789ca62ec reviewer=claudecode merge of threadx #3 (AmiNetXDuo #430); no source change beyond 955078fc
++955078fc20dd1225ffb542fa8e0230c23f3a2fea reviewer=claudecode threadx #3 merge of upstream v6.5.2.202603b_rel, no conflicts; fork-vs-upstream diff 8 files 98+/43- before and after, hosted creation and stack-overlap fixes and the pre-relinquish hook kept
++b2868c3d2849aab95d04cedcf8885d3f81798c86 reviewer=claudecode upstream merge of the 202603b release preparation (#827); no source change beyond its commits
++c2950ee5efbaafc2947f5d7bd806d6b3980562c4 reviewer=claudecode upstream port version strings; no file in the build, port/threadx-amiga is ours
++122da41374ff41a67294e4cfffbcfc8c20e0efe5 reviewer=claudecode upstream THREADX_HOTFIX_VERSION ' ' to 'b' in common/inc/tx_api.h; the only built change from e24aa9c9 to f4845a73
++460f7ec594bd45cdd0395b9ffaa68677a329ba3d reviewer=claudecode upstream ARMv7-M module port PendSV stack bounds check; not built
++c8148f28278e7cbc34e1a758a502c5de74dcfa2e reviewer=claudecode upstream advisory fix, module manager load bounds (common_modules/module_manager); not built, CMakeLists.txt globs common/src only
++03e7ac91b48aec246c45739442a07c8f6cf710c1 reviewer=claudecode upstream advisory fix, module manager thread control ownership (txm_module_manager_dispatch.h); not built
++3ce571c2c80754d2fb740b3a2a12763681cb6cc0 reviewer=claudecode upstream advisory fix, Cortex-M module port tx_thread_schedule.S; not built
++7fbe9f596bdefaf18ce1d0376f4b85ae4c0104b8 reviewer=claudecode upstream advisory fix, TrustZone-M tx_thread_secure_stack.c (ARMv8-M ports); not built
++d8be8f7a5b9e769e8a461a7245671bc26307d41a reviewer=claudecode upstream advisory fix, module manager callback request queue; not built
++670384af83fd66ed8862d76576b8b6e474199394 reviewer=claudecode upstream advisory fix, module manager trace-buffer-full notify (txm_module_manager_dispatch.h); not built
++6775b3a50fff52c86fcd7795bba27a01677217d0 reviewer=claudecode upstream QEMU module harness for the Cortex-M3 and M4 ports (#821); tests only, not built
++56c8695b1288fd4fac5406443c28878fade23872 reviewer=claudecode upstream CI action updates (#802); workflows only
++14823c649c6cded2df76df91973ef3c0feca3457 reviewer=claudecode merge of threadx fork #2; no source change beyond 7f2c69f5
++7f2c69f5df536c6a3208eb2b48627da255e9001c reviewer=claudecode threadx fork #2 CI deploys the coverage report only from the upstream repository; workflow only
+
+# Fast-forward by six commits (WiFiPi.device #26-#28, maint/beta4, first-parent merges).
+# Fork PRs #26-#28 and parent PRs #370, #371 and #397 record host ASan/UBSan tests of the production handlers and the m68k cross-build.
+# Independent review GO-with-notes, no blocker: scope full src/ diff, UpdateMCastList, Do_S2_ADD/DELMULTICASTADDRESSES,
+# brcm_chip_cores_check, chip_setup, chip_init, the three SetActive paths.
+# Notes: a range above 252 addresses sets allmulti and leaves the firmware mcast_list as it was (unit.c:1349); D11 is required
+# for CM3/CA7 only, CR4 unchanged (wifipi.c:433); cores_check runs before chip_setup (wifipi.c:1149, 1165), so no reader sees the cleared s_SDIOC.
+third_party/wifipi 74334c01c187b7031e9e2587b6f25cb68916879b..cc3d92b80aacc3a1c517c3eec2f039818d5ad82f
++b214651863e911e4fe5ca5cc01f845e613e1cbd3 reviewer=independent-review WiFiPi #26 multicast ADD/DEL return S2ERR_NO_RESOURCES on a failed pool allocation; a failed ADD removes the new range, a failed DEL restores it, so the range list matches the firmware filter; host tests only (tests/test_multicast_host.c); parent #370
++159b34ec3fd7a90ba5878629a83a242e831858d1 reviewer=independent-review merge of WiFiPi #26; no source change beyond b2146518
++d5ba15e9dfcbe4cfa0e0ae60d8923a1220638571 reviewer=independent-review WiFiPi #27 multicast range spans compared in 64 bits before narrowing; lists above 252 entries use allmulti; reversed ADD/DEL bounds return S2WERR_BAD_MULTICAST; per-address debug loop removed; parent #371
++7f3727bf53524abc546bc114eb4ee209ce4c67be reviewer=independent-review merge of WiFiPi #27; no source change beyond d5ba15e9
++0a45647eaa2673100415854d6ecdc5e35c7823df reviewer=independent-review WiFiPi #28 brcm_chip_cores_check records the SDIO core in s_SDIOC and refuses a chip without it, and refuses CM3/CA7 without a D11 core; SetActive and chip_init use s_SDIOC; no change for a chip with both cores; parent #397
++cc3d92b80aacc3a1c517c3eec2f039818d5ad82f reviewer=independent-review merge of WiFiPi #28; no source change beyond 0a45647e
