@@ -9,6 +9,13 @@ are history.
 
 ## 1.0.0-rc3
 
+- A network driver that waits while an interface goes online or offline no
+  longer stops NetMeter, ShowNetStatus, NetShutdown or programs opening
+  bsdsocket.library until it returns.
+- A DHCP offer or acknowledgement with unknown options no longer makes the
+  DHCP client read past the received message.
+- tls.library checks the length of every field in a server's ServerHello
+  before reading it.
 - A program waiting in recv() or accept() no longer holds up every other
   program once fifteen are waiting, so IBrowse can stop its connections and
   NetShutdown finishes.
