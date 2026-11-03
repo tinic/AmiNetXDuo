@@ -545,7 +545,9 @@ host_test_targets() { # builddir
 #      lock-across-blocking-call checker regression tests (all hosts).
 #      597 with ptp (#437): point-to-point next hop, host route and default
 #      route against the real route lookup (all hosts).
-HOST_TESTS_EXPECTED=597
+#      598 with ptp6: a point-to-point link-local without a MAC, no DAD, no
+#      router solicitation, no address resolution (all hosts).
+HOST_TESTS_EXPECTED=598
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,

@@ -421,6 +421,49 @@ if(NOT CMAKE_CROSSCOMPILING)
         add_test(NAME ptp COMMAND test_ptp)
     endif()
 
+    # IPv6 on a point-to-point interface: netstack_ptp.c's link-local against
+    # the real address set, DAD pass and send path, beside an Ethernet card.
+    if(AMINETXDUO_PTP AND AMINETXDUO_IPV6)
+        set(_n "${AMINETXDUO_NETXDUO}/common/src")
+        add_executable(test_ptp6
+            host/test_ptp6_host.c
+            "${CMAKE_SOURCE_DIR}/src/netstack/netstack_ptp.c"
+            "${_n}/nx_ip_static_route_add.c"
+            "${_n}/nx_ip_static_route_delete.c"
+            "${_n}/nxe_ip_static_route_add.c"
+            "${_n}/nxe_ip_static_route_delete.c"
+            "${_n}/nxd_ipv6_address_set.c"
+            "${_n}/nxde_ipv6_address_set.c"
+            "${_n}/nxd_ipv6_stateless_address_autoconfig_disable.c"
+            "${_n}/nxde_ipv6_stateless_address_autoconfig_disable.c"
+            "${_n}/nx_ipv6_multicast_join.c"
+            "${_n}/nx_icmpv6_perform_DAD.c"
+            "${_n}/nx_ipv6_packet_send.c"
+            "${_n}/nx_ipv6_header_add.c"
+            "${_n}/nx_icmpv6_dest_table_find.c"
+            "${_n}/nx_icmpv6_dest_table_add.c"
+            "${_n}/nxd_ipv6_search_onlink.c"
+            "${_n}/nxd_ipv6_router_lookup.c"
+            "${_n}/nx_nd_cache_add_entry.c"
+            "${_n}/nx_nd_cache_find_entry.c"
+            "${_n}/nx_nd_cache_delete_internal.c"
+            "${_n}/nx_ipv6_util.c")
+
+        target_include_directories(test_ptp6 PRIVATE
+            "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first
+            "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"     # nx_port.h
+            "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h, ours
+            "${AMINETXDUO_NETXDUO}/common/inc"
+            "${AMINETXDUO_THREADX}/common/inc"
+            "${CMAKE_SOURCE_DIR}/include")
+
+        target_compile_definitions(test_ptp6 PRIVATE
+            NX_INCLUDE_USER_DEFINE_FILE
+            AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
+
+        add_test(NAME ptp6 COMMAND test_ptp6)
+    endif()
+
     # RFC 6298's round-trip time estimator: the arithmetic on its own, and the
     # path that feeds it.  Same shim and the same -UAMINETXDUO_IPV6 as above.
     # nx_tcp_socket_state_ack_check.c is here as well as the output path,
