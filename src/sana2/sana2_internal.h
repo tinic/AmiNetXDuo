@@ -1139,8 +1139,8 @@ struct AmiSana2If
     UWORD               addr_bits;
     UWORD               addr_bytes;     /* 6 for Ethernet, 0 if addressless */
 #ifdef AMINETXDUO_PTP
-    /* A point-to-point link (ami_sana2_ptp_wire): IPv4 alone, no link
-       header, no address mapping.  ptp_peer is the other end, host byte
+    /* A point-to-point link (ami_sana2_ptp_wire): bare IP datagrams, no
+       link header, no address mapping.  ptp_peer is the other end, host byte
        order, 0 unknown; ptp_routed the peer the host route was made for. */
     BOOL                ptp;
     ULONG               ptp_peer;
@@ -1391,7 +1391,18 @@ ULONG ami_sana2_rx_frame_length(const AmiSana2If *iface, ULONG payload);
 BOOL ami_sana2_rx_resolve_length(AmiRxSlot *slot, ULONG *length);
 BOOL ami_sana2_rx_refused(AmiSana2Rx *rx, UBYTE error);
 #ifdef AMINETXDUO_PTP
-UWORD ami_sana2_rx_ptp_depth(ULONG packet_type, UWORD depth);
+/*
+ * The ARP ring's depth: none on a point-to-point link, which has no hardware
+ * address to resolve.  The IPv4 and IPv6 rings keep the plan's depth there,
+ * bare datagrams both; a driver that does not carry 0x86DD refuses the read
+ * and that ring retires (ami_sana2_rx_refused).  Inline:
+ * ami_sana2_rx_start() is its one caller.
+ */
+static inline UWORD ami_sana2_rx_arp_depth(const AmiSana2If *iface,
+                                           UWORD depth)
+{
+    return iface->ptp ? (UWORD)0 : depth;
+}
 #endif
 
 /* Must the reader block?  The port decides; the batch count may not.  See the

@@ -2941,19 +2941,6 @@ UWORD ami_sana2_rx_ask_ip(const AmiSana2If *iface)
     return ami_sana2_default_ip_reads(iface->device);
 }
 
-#ifdef AMINETXDUO_PTP
-/*
- * A ring's depth on a point-to-point link.  No ARP: there is no hardware
- * address to resolve.  IPv6 is read beside IPv4, bare datagrams both; a
- * driver that does not carry 0x86DD refuses the read and the ring retires
- * (ami_sana2_rx_refused).
- */
-UWORD ami_sana2_rx_ptp_depth(ULONG packet_type, UWORD depth)
-{
-    return (packet_type == AMI_ETHERTYPE_ARP) ? (UWORD)0 : depth;
-}
-#endif
-
 LONG ami_sana2_rx_start(AmiSana2If *iface)
 {
     UWORD       i;
@@ -2999,7 +2986,11 @@ LONG ami_sana2_rx_start(AmiSana2If *iface)
         if (ami_sana2_rx_types[i] == AMI_ETHERTYPE_IPV4)
             rx->depth = depths.ipv4;
         else if (ami_sana2_rx_types[i] == AMI_ETHERTYPE_ARP)
+#ifdef AMINETXDUO_PTP
+            rx->depth = ami_sana2_rx_arp_depth(iface, depths.arp);
+#else
             rx->depth = depths.arp;
+#endif
         else
             rx->depth = depths.ipv6;
 #ifdef AMINETXDUO_GRO
@@ -3010,12 +3001,6 @@ LONG ami_sana2_rx_start(AmiSana2If *iface)
 
         if (rx->depth > AMI_SANA2_RX_MAX_DEPTH)
             rx->depth = AMI_SANA2_RX_MAX_DEPTH;
-
-#ifdef AMINETXDUO_PTP
-        if (iface->ptp)
-            rx->depth = ami_sana2_rx_ptp_depth(ami_sana2_rx_types[i],
-                                               rx->depth);
-#endif
 
         /* The slots, to the planned depth.  Kept across a stop and start
            when the plan has not changed; the previous run's reads were all

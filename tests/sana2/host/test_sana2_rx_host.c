@@ -2145,15 +2145,13 @@ static void test_ptp_rings(void)
 
     printf("sana2: a point-to-point link reads IPv6 beside IPv4\n");
 
-    h_check(ami_sana2_rx_ptp_depth(AMI_ETHERTYPE_IPV4, 12) == 12,
-            "ptp: the IPv4 ring keeps the planned depth");
-    h_check(ami_sana2_rx_ptp_depth(AMI_ETHERTYPE_IPV6, 8) == 8,
-            "ptp: so does the IPv6 ring");
-    h_check(ami_sana2_rx_ptp_depth(AMI_ETHERTYPE_ARP, 4) == 0,
-            "ptp: the ARP ring holds no slots");
-
     rf_ring(&rd, rx);
+    h_check(ami_sana2_rx_arp_depth(&iface, 4) == 4,
+            "ptp: an Ethernet interface keeps its ARP ring");
     ptp_iface();
+    h_check(ami_sana2_rx_arp_depth(&iface, 4) == 0,
+            "ptp: a point-to-point link's ARP ring holds no slots");
+
     rx->packet_type = AMI_ETHERTYPE_IPV6;
     h_last_begun = NULL;
     h_check(ami_sana2_rx_post(rx) == RF_SLOTS && h_last_begun != NULL,
@@ -2162,6 +2160,51 @@ static void test_ptp_rings(void)
     h_check(req->ios2_PacketType == AMI_ETHERTYPE_IPV6 &&
             (req->ios2_Req.io_Flags & SANA2IOF_RAW) == 0,
             "ptp: as a cooked read of 0x86DD");
+}
+
+/*
+ * vpn.device holds IPv6 frames that match no queued read in the 0x86DD
+ * read's FIFO, and IPv4 waits behind them.  So the IPv6 ring stays posted
+ * as IPv4's does: every read that comes back, with a frame or with an error
+ * that is not a refusal, is posted again, typed 0x86DD again (the device
+ * writes ios2_PacketType back).
+ */
+static void test_ptp_ipv6_reads_reposted(void)
+{
+    static const BYTE kept[] = {
+        0, S2ERR_NO_RESOURCES, S2ERR_MTU_EXCEEDED, IOERR_ABORTED
+    };
+    AmiSana2Reader rd;
+    AmiSana2Rx    *rx = &iface.rx[AMI_SANA2_RX_READERS - 1];
+    unsigned       round;
+    UWORD          i;
+
+    printf("sana2: a point-to-point IPv6 ring is posted again like IPv4\n");
+
+    rf_ring(&rd, rx);
+    ptp_iface();
+    rx->packet_type = AMI_ETHERTYPE_IPV6;
+    h_check(ami_sana2_rx_post(rx) == RF_SLOTS, "ptp6 repost: the ring is posted");
+
+    for (round = 0; round < sizeof kept; round++)
+    {
+        int typed = 1;
+
+        for (i = 0; i < RF_SLOTS; i++)
+            rf_slot[i].req.ios2_PacketType = 0xDEAD;
+        rf_complete(rx);
+        h_check(!ami_sana2_rx_refused(rx, (UBYTE)kept[round]) && !rx->refused,
+                "ptp6 repost: a frame or a kept error leaves the ring in service");
+        h_last_begun = NULL;
+        h_check(ami_sana2_rx_post(rx) == RF_SLOTS && h_last_begun != NULL &&
+                rx->unposted == 0,
+                "ptp6 repost: every read is posted again, none left out");
+        for (i = 0; i < RF_SLOTS; i++)
+            if (!rf_slot[i].posted ||
+                rf_slot[i].req.ios2_PacketType != AMI_ETHERTYPE_IPV6)
+                typed = 0;
+        h_check(typed, "ptp6 repost: each one a read of 0x86DD again");
+    }
 }
 
 static void test_ptp_ipv6_delivered(void)
@@ -2727,6 +2770,7 @@ int main(void)
     test_refused_read_retires_the_ring();
 #ifdef AMINETXDUO_PTP
     test_ptp_rings();
+    test_ptp_ipv6_reads_reposted();
     test_ptp_ipv6_delivered();
     test_ptp_ipv6_refused_ipv4_goes_on();
 #endif
