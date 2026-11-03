@@ -65,6 +65,27 @@ static struct IOSana2Req *netdev_peek_take(struct List *list, ULONG type)
 }
 
 /*
+ * The 14-byte link header in front of the payload.  Both ends at 2 mod 4 is
+ * the usual case (dst - 14 = data_start + 2 against a card buffer two bytes
+ * in): one word, then three longwords, every access aligned.  Anything else
+ * takes the plain copy.
+ */
+static VOID __attribute__((noinline)) direct_link_hdr(
+    UBYTE *lh, const UBYTE *hdr)
+{
+    if ((((unsigned long)(APTR)lh) & 3u) == 2u &&
+        (((unsigned long)(CONST_APTR)hdr) & 3u) == 2u)
+    {
+        *(UWORD *)(APTR)lh = *(const UWORD *)(CONST_APTR)hdr;
+        *(ULONG *)(APTR)(lh + 2)  = *(const ULONG *)(CONST_APTR)(hdr + 2);
+        *(ULONG *)(APTR)(lh + 6)  = *(const ULONG *)(CONST_APTR)(hdr + 6);
+        *(ULONG *)(APTR)(lh + 10) = *(const ULONG *)(CONST_APTR)(hdr + 10);
+        return;
+    }
+    __builtin_memcpy(lh, hdr, NETDEV_HDR_LEN);
+}
+
+/*
  * The direct-receive claim, from the core's interrupt context, with only the
  * frame header in hand.  Success means the payload's destination is returned
  * and the CMD_READ is off its queue with its address fields already filled;
@@ -162,13 +183,7 @@ UBYTE *netdev_rx_claim(APTR arg, const UBYTE *hdr, UWORD frame_len,
         dst = ((AnxdS2RxDirect)cand->op_RxDirect)(b->Cookie[b->Filled], plen);
         if (dst == NULL)
             return NULL;
-        {
-            UBYTE *lh = dst - NETDEV_HDR_LEN;
-
-            /* A fixed-size copy lets the 68020 build emit three long moves
-               and one word move, without the byte loop's per-byte DBF. */
-            __builtin_memcpy(lh, hdr, NETDEV_HDR_LEN);
-        }
+        direct_link_hdr(dst - NETDEV_HDR_LEN, hdr);
         /* The one per-frame field a batch request does carry, from the
            claim to its completion: the payload length RxFilled() reports. */
         io->ios2_DataLength = plen;
@@ -214,11 +229,7 @@ UBYTE *netdev_rx_claim(APTR arg, const UBYTE *hdr, UWORD frame_len,
      * opener that asked for the header may still read ios2_SrcAddr.
      */
     if (cand->op_RxLinkHdr)
-    {
-        UBYTE *lh = dst - NETDEV_HDR_LEN;
-
-        __builtin_memcpy(lh, hdr, NETDEV_HDR_LEN);
-    }
+        direct_link_hdr(dst - NETDEV_HDR_LEN, hdr);
 
     direct_addr6(io->ios2_DstAddr, hdr);
     direct_addr6(io->ios2_SrcAddr, hdr + NETDEV_ADDR_LEN);
@@ -295,7 +306,6 @@ NetdevRxResult netdev_batch_stage(NetdevUnit *unit, NetdevOpener *op,
     APTR           cookie = b->Cookie[b->Filled];
     UWORD          plen = (UWORD)(len - NETDEV_HDR_LEN);
     UBYTE         *dst;
-    UWORD          i;
 
     dst = ((AnxdS2RxDirect)op->op_RxDirect)(cookie, plen);
     if (dst == NULL)
@@ -303,8 +313,7 @@ NetdevRxResult netdev_batch_stage(NetdevUnit *unit, NetdevOpener *op,
     if (!netdev_copy_call(op->op_CopyTo, cookie, (APTR)(frame + NETDEV_HDR_LEN),
                           plen))
         return NETDEV_RX_FAILED;
-    for (i = 0; i < NETDEV_HDR_LEN; i++)
-        dst[(LONG)i - NETDEV_HDR_LEN] = frame[i];
+    direct_link_hdr(dst - NETDEV_HDR_LEN, frame);
     netdev_batch_filled(unit, op, io, plen, 0, 0, TRUE);
     return NETDEV_RX_TAKEN;
 }

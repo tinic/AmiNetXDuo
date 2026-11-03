@@ -733,6 +733,30 @@ static inline VOID __attribute__((always_inline)) ami_sana2_gso_poke(
         out[at - from] = (UCHAR)value;
 }
 
+/* A big-endian header word or longword at an address the caller checked:
+   one store on the 68k, bytes on the little-endian host. */
+static inline VOID __attribute__((always_inline)) ami_sana2_gso_put16(
+    UCHAR *p, ULONG value)
+{
+#if defined(__mc68000__) || defined(__m68k__)
+    *(UWORD *)(APTR)p = (UWORD)value;
+#else
+    p[0] = (UCHAR)(value >> 8);
+    p[1] = (UCHAR)value;
+#endif
+}
+
+static inline VOID __attribute__((always_inline)) ami_sana2_gso_put32(
+    UCHAR *p, ULONG value)
+{
+#if defined(__mc68000__) || defined(__m68k__)
+    *(ULONG *)(APTR)p = value;
+#else
+    ami_sana2_gso_put16(p, value >> 16);
+    ami_sana2_gso_put16(p + 2, value);
+#endif
+}
+
 /* Bytes [from, to) of the child's headers: the template, patched. */
 static VOID ami_sana2_gso_emit(const AmiTxGso *g, const UCHAR *ip,
                                const AmiGsoFields *f, ULONG tcp_sum,
@@ -741,6 +765,26 @@ static VOID ami_sana2_gso_emit(const AmiTxGso *g, const UCHAR *ip,
     ULONG t = g->ihl;
 
     ami_sana2_copy_bytes(out, ip + from, to - from);
+
+    /* The whole header at an even address, the usual case: the fields are
+       stored directly.  ihl is a multiple of 4, so every word below is even
+       too; the sequence is one longword only where it is on a longword. */
+    if (from == 0 && to >= t + 18UL && ((ALIGN_TYPE)out & 1) == 0)
+    {
+        ami_sana2_gso_put16(out + 2,  f->ip_len);
+        ami_sana2_gso_put16(out + 4,  f->ip_id);
+        ami_sana2_gso_put16(out + 10, f->ip_sum);
+        if (((ALIGN_TYPE)(out + t + 4) & 3) == 0)
+            ami_sana2_gso_put32(out + t + 4, f->seq);
+        else
+        {
+            ami_sana2_gso_put16(out + t + 4, f->seq >> 16);
+            ami_sana2_gso_put16(out + t + 6, f->seq);
+        }
+        out[t + 13] = f->flags;
+        ami_sana2_gso_put16(out + t + 16, tcp_sum);
+        return;
+    }
 
     ami_sana2_gso_poke(out, from, to, 2,      f->ip_len >> 8);
     ami_sana2_gso_poke(out, from, to, 3,      f->ip_len);

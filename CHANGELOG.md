@@ -7,6 +7,12 @@ are history.
 
 ## Unreleased
 
+- Uploads through an NE2000-compatible card, a 3Com 3C589 or an A2065 copy
+  each frame in longwords on the card's word boundary, which speeds up
+  uploads on a 68020 to 68060; an A3000 with an X-Surf 100 sends 3% faster.
+- TCP uploads build each segment's headers with word and longword stores.
+- Receiving TCP reads the header fields it merges and the IPv6 checksum
+  fields in words and longwords instead of one byte at a time.
 ## 1.0.0-rc3
 
 - A WaitSelect() with a timeout times out again when its timer fires just
