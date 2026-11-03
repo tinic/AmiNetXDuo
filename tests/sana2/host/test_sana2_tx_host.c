@@ -286,14 +286,19 @@ AMIGA_ASM_ARGS VOID n68k_copy_bytes(UCHAR *to, const UCHAR *from, ULONG len)
 AMIGA_ASM_ARGS ULONG n68k_copy_sum_longwords(ULONG *to, const ULONG *from, ULONG count)
 {
     ULONG acc = 0;
+    /* Bytes, not ULONG pointers: since #439 the destination is 2 mod 4, and
+       UBSan checks a memcpy() argument against its pointer type. */
+    UCHAR *t = (UCHAR *)to;
+    const UCHAR *b = (const UCHAR *)from;
 
     while (count != 0UL)
     {
-        const UCHAR *b = (const UCHAR *)from;
         ULONG w = ((ULONG)b[0] << 24) | ((ULONG)b[1] << 16) |
                   ((ULONG)b[2] << 8) | (ULONG)b[3];
 
-        memcpy(to++, from++, sizeof(ULONG));   /* any phase: the 68k's move.l */
+        memcpy(t, b, sizeof(ULONG));   /* any phase: the 68k's move.l */
+        t += sizeof(ULONG);
+        b += sizeof(ULONG);
 
         acc += w;
         if (acc < w)
