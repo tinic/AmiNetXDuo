@@ -793,6 +793,44 @@ static VOID ns_fill_routes6(NX_IP *ip, NsWriter *w)
                 ? NETSTATUS_RT6_FOREVER
                 : (ULONG)e->nx_ipv6_default_router_entry_life_time;
     }
+
+#ifdef AMINETXDUO_PTP
+    /* The prefixes through a point-to-point peer, after the default routers
+       so a reader looking for ::/0 meets those first. */
+    {
+        ULONG prefix[4];
+        ULONG peer[4];
+        UINT  length;
+        UINT  index;
+        UINT  k;
+
+        for (i = 0; anx6_ptp_route_get(i, prefix, &length, &index); i++)
+        {
+            NetStatusRoute6 *out;
+
+            if (!anx6_ptp_peer_get(index, peer))
+                continue;
+
+            out = (NetStatusRoute6 *)ns_writer_next(w);
+            if (out == NULL)
+                continue;
+
+            for (k = 0; k < 4U; k++)
+            {
+                out->nsr6_Destination[k] = prefix[k];
+                out->nsr6_NextHop[k]     = peer[k];
+            }
+            out->nsr6_PrefixLength = length;
+            out->nsr6_Lifetime     = NETSTATUS_RT6_FOREVER;
+            out->nsr6_Flags        = NETSTATUS_RT6_UP | NETSTATUS_RT6_GATEWAY |
+                                     NETSTATUS_RT6_STATIC;
+            out->nsr6_Interface    = (UWORD)index;
+
+            if (length == 128U)
+                out->nsr6_Flags |= NETSTATUS_RT6_HOST;
+        }
+    }
+#endif
 #else
     (VOID)ip;
     (VOID)w;
@@ -2612,6 +2650,9 @@ LONG bsd_NetStackControl(register ULONG magic __asm("d0"),
                ENOENT, as a prefix that is not there is. */
             if ((ctl->nsc_Gateway6[0] | ctl->nsc_Gateway6[1] |
                  ctl->nsc_Gateway6[2] | ctl->nsc_Gateway6[3]) != 0UL &&
+#ifdef AMINETXDUO_PTP
+                ctl->nsc_PrefixLength == 0UL &&     /* not a peer's prefix */
+#endif
                 ip->nx_ipv6_default_router_table_size == 0)
                 status = NX_ENTRY_NOT_FOUND;
             else

@@ -629,6 +629,100 @@ ULONG dest[4];
 }
 #endif /* NX_ENABLE_IPV6_MULTICAST */
 
+#ifdef AMINETXDUO_PTP
+/*
+ * A prefix routed through a point-to-point peer (eth1 as the tunnel): it
+ * chooses the interface, so Rule 5 takes the tunnel's address over a LAN
+ * with a default router.  The longest match wins, an on-link prefix first
+ * among equals; a link that is down is skipped.
+ */
+static void test_ptp_prefix_route(void)
+{
+static const ULONG peer[4]  = { 0x20010DB8UL, 0x00010000UL, 0, 1 };
+static const ULONG p2000[4] = { 0x20000000UL, 0, 0, 0 };
+static const ULONG lan48[4] = { 0x20010DB8UL, 0x00020000UL, 0, 0 };
+ULONG far[4];
+ULONG lan[4];
+ULONG prefix[4];
+ULONG p[4];
+UINT  length;
+UINT  index;
+UINT  i;
+
+    h_reset();
+    h_addr(H_SLOT0, H_ETH0, 0x20010DB8UL, 0x00020000UL, 0, 0x100, 64,
+           NX_IPV6_ADDR_STATE_VALID);
+    h_addr(H_SLOT1, H_ETH1, 0x20010DB8UL, 0x00030000UL, 0, 0x1000, 128,
+           NX_IPV6_ADDR_STATE_VALID);
+    h_router(H_ETH0);
+    anx6_ptp_peer_set(H_ETH1, peer);
+
+    h_set(far, 0x26064700UL, 0, 0, 0x1111);
+    h_set(lan, 0x20010DB8UL, 0x00020000UL, 0, 0x200);
+
+    h_check(h_select(far, NX_NULL) == H_SLOT0,
+            "ptp route: none yet, the LAN's default router");
+
+    /* 2000::/3, written as 2001:db8:5::1/3: kept as the prefix. */
+    h_set(p, 0x20010DB8UL, 0x00050000UL, 0, 1);
+    h_check(anx6_ptp_route_add(p, 3, H_ETH1) == NX_SUCCESS,
+            "ptp route: 2000::/3 through the tunnel is added");
+    h_check(anx6_ptp_route_get(0, prefix, &length, &index) &&
+            (memcmp(prefix, p2000, 16) == 0) && (length == 3) &&
+            (index == H_ETH1) && !anx6_ptp_route_get(1, prefix, &length, &index),
+            "ptp route: listed once, as 2000::/3 on the tunnel");
+    h_check(h_select(far, NX_NULL) == H_SLOT1,
+            "ptp route: it beats the LAN's default, from the tunnel's address");
+    h_check(h_select(lan, NX_NULL) == H_SLOT0,
+            "ptp route: a longer on-link prefix beats it");
+
+    h_check(anx6_ptp_route_add(lan, 64, H_ETH1) == NX_SUCCESS &&
+            h_select(lan, NX_NULL) == H_SLOT0,
+            "ptp route: an on-link prefix of the same length wins the tie");
+    h_check(anx6_ptp_route_add(lan, 96, H_ETH1) == NX_SUCCESS &&
+            h_select(lan, NX_NULL) == H_SLOT1,
+            "ptp route: a longer route beats the on-link prefix");
+    h_check(anx6_ptp_route_delete(lan, 96, H_ETH0) == NX_ENTRY_NOT_FOUND &&
+            anx6_ptp_route_delete(lan, 96, H_ETH1) == NX_SUCCESS &&
+            anx6_ptp_route_delete(lan, 64, H_ETH1) == NX_SUCCESS &&
+            anx6_ptp_route_delete(lan, 64, H_ETH1) == NX_ENTRY_NOT_FOUND,
+            "ptp route: deleted on its own interface, once");
+
+    h_if(H_ETH1) -> nx_interface_link_up = NX_FALSE;
+    h_check(h_select(far, NX_NULL) == H_SLOT0,
+            "ptp route: on a link that is down, skipped");
+    h_if(H_ETH1) -> nx_interface_link_up = NX_TRUE;
+
+    /* The same prefix and length replaces: now through eth0. */
+    h_check(anx6_ptp_route_add(p2000, 3, H_ETH0) == NX_SUCCESS &&
+            anx6_ptp_route_get(0, prefix, &length, &index) &&
+            (index == H_ETH0) && !anx6_ptp_route_get(1, prefix, &length, &index),
+            "ptp route: the same prefix replaces, it does not duplicate");
+    h_check(anx6_ptp_route_add(p2000, 3, H_ETH1) == NX_SUCCESS,
+            "ptp route: and back");
+
+    for (i = 1; i < ANX6_PTP_ROUTES; i++)
+    {
+        h_set(p, 0x20010DB8UL, 0x00100000UL + (i << 16), 0, 0);
+        h_check(anx6_ptp_route_add(p, 48, H_ETH1) == NX_SUCCESS,
+                "ptp route: the table takes eight");
+    }
+    h_set(p, 0x20010DB8UL, 0x00200000UL, 0, 0);
+    h_check(anx6_ptp_route_add(p, 48, H_ETH1) == NX_NO_MORE_ENTRIES,
+            "ptp route: a ninth is refused, the table is full");
+    h_check(anx6_ptp_route_add(lan48, 48, H_ETH1) == NX_NO_MORE_ENTRIES &&
+            anx6_ptp_route_add(p2000, 3, H_ETH1) == NX_SUCCESS,
+            "ptp route: full, a replace still goes in");
+
+    /* Clearing the peer drops every route through the link. */
+    anx6_ptp_peer_set(H_ETH1, NX_NULL);
+    h_check(!anx6_ptp_route_get(0, prefix, &length, &index),
+            "ptp route: the peer cleared, its routes go");
+    h_check(h_select(far, NX_NULL) == H_SLOT0,
+            "ptp route: and the LAN's default carries it again");
+}
+#endif /* AMINETXDUO_PTP */
+
 /* An unspecified address is valid as a local bind address, not a packet
    destination.  A default router must not turn it into a routable target. */
 static void test_unspecified_destination(void)
@@ -661,6 +755,9 @@ int main(void)
     test_rule8_longest_prefix();
     test_candidate_set();
     test_unspecified_destination();
+#ifdef AMINETXDUO_PTP
+    test_ptp_prefix_route();
+#endif
 #ifdef NX_ENABLE_IPV6_MULTICAST
     test_multicast_join();
 #endif

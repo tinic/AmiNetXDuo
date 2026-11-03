@@ -361,6 +361,9 @@ static const char *default_router6(BOOL have_routes)
     for (i = 0; i < arp_routes6.count; i++)
     {
         if ((arp_routes6.route[i].flags & NETSTATUS_RT6_GATEWAY) &&
+#ifdef AMINETXDUO_PTP
+            arp_routes6.route[i].prefix == 0UL &&   /* not a peer's prefix */
+#endif
             arp_routes6.route[i].next_hop[0] != '\0')
         {
             return arp_routes6.route[i].next_hop;

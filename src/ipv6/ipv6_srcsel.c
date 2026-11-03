@@ -283,6 +283,110 @@ static UINT anx6_prefer(const NX_INTERFACE *candidate, const NX_INTERFACE *best)
 static ULONG anx6_ptp_peer[NX_MAX_PHYSICAL_INTERFACES][4];
 static UINT  anx6_ptp_peers;
 
+/*
+ * Prefixes routed through a point-to-point link.  The next hop is the link's
+ * peer, which the send path does not resolve on such a link, so only the
+ * interface is kept.  The first anx6_ptp_routes entries are the ones in use.
+ */
+static struct
+{
+    ULONG prefix[4];
+    UCHAR length;
+    UCHAR interface_index;
+} anx6_ptp_route[ANX6_PTP_ROUTES];
+static UINT anx6_ptp_routes;
+
+/* The entry for exactly this prefix and length, anx6_ptp_routes for none. */
+static UINT anx6_ptp_route_find(const ULONG *prefix, UINT length)
+{
+UINT n;
+
+    for (n = 0; n < anx6_ptp_routes; n++)
+    {
+        if ((anx6_ptp_route[n].length == length) &&
+            anx6_prefix_covers(anx6_ptp_route[n].prefix, length, prefix))
+        {
+            break;
+        }
+    }
+
+    return n;
+}
+
+UINT anx6_ptp_route_add(const ULONG *prefix, UINT length, UINT interface_index)
+{
+UINT n;
+UINT i;
+UINT bits;
+
+    if ((length == 0) || (length > 128) ||
+        (interface_index >= NX_MAX_PHYSICAL_INTERFACES))
+    {
+        return NX_IP_ADDRESS_ERROR;
+    }
+
+    /* The same prefix and length is replaced, as an IPv4 route is. */
+    n = anx6_ptp_route_find(prefix, length);
+    if (n == ANX6_PTP_ROUTES)
+    {
+        return NX_NO_MORE_ENTRIES;
+    }
+
+    for (i = 0; i < 4; i++)
+    {
+        bits = (length >= (i + 1) * 32) ? 32 :
+               (length > i * 32) ? length - (i * 32) : 0;
+        anx6_ptp_route[n].prefix[i] = (bits == 32) ? prefix[i] :
+                                      (bits == 0)  ? 0UL :
+                                      (prefix[i] & ~(0xFFFFFFFFUL >> bits));
+    }
+    anx6_ptp_route[n].length          = (UCHAR)length;
+    anx6_ptp_route[n].interface_index = (UCHAR)interface_index;
+
+    if (n == anx6_ptp_routes)
+    {
+        anx6_ptp_routes++;
+    }
+
+    return NX_SUCCESS;
+}
+
+UINT anx6_ptp_route_delete(const ULONG *prefix, UINT length, UINT interface_index)
+{
+UINT n = anx6_ptp_route_find(prefix, length);
+
+    if ((n == anx6_ptp_routes) ||
+        (anx6_ptp_route[n].interface_index != interface_index))
+    {
+        return NX_ENTRY_NOT_FOUND;
+    }
+
+    anx6_ptp_routes--;
+    anx6_ptp_route[n] = anx6_ptp_route[anx6_ptp_routes];
+
+    return NX_SUCCESS;
+}
+
+UINT anx6_ptp_route_get(UINT n, ULONG *prefix, UINT *length,
+                        UINT *interface_index)
+{
+UINT i;
+
+    if (n >= anx6_ptp_routes)
+    {
+        return NX_FALSE;
+    }
+
+    for (i = 0; i < 4; i++)
+    {
+        prefix[i] = anx6_ptp_route[n].prefix[i];
+    }
+    *length          = anx6_ptp_route[n].length;
+    *interface_index = anx6_ptp_route[n].interface_index;
+
+    return NX_TRUE;
+}
+
 VOID anx6_ptp_peer_set(UINT interface_index, const ULONG *peer)
 {
 UINT i;
@@ -295,6 +399,21 @@ UINT i;
     for (i = 0; i < 4; i++)
     {
         anx6_ptp_peer[interface_index][i] = (peer != NX_NULL) ? peer[i] : 0UL;
+    }
+
+    /* No peer, no next hop: the routes through the link go, so an index that
+       is used again starts with none. */
+    if ((anx6_ptp_peer[interface_index][0] | anx6_ptp_peer[interface_index][1] |
+         anx6_ptp_peer[interface_index][2] | anx6_ptp_peer[interface_index][3]) == 0UL)
+    {
+        for (i = anx6_ptp_routes; i-- > 0; )
+        {
+            if (anx6_ptp_route[i].interface_index == interface_index)
+            {
+                anx6_ptp_routes--;
+                anx6_ptp_route[i] = anx6_ptp_route[anx6_ptp_routes];
+            }
+        }
     }
 
     anx6_ptp_peers = 0;
@@ -524,6 +643,25 @@ UINT              best_length = 0;
             best_length = addr -> nxd_ipv6_address_prefix_length;
         }
     }
+
+#ifdef AMINETXDUO_PTP
+    /* 5b. a prefix routed through a point-to-point peer: the longest match,
+       an on-link prefix first among equals, on a link that is up.  None is
+       one compare of the count. */
+    for (i = 0; i < anx6_ptp_routes; i++)
+    {
+    NX_INTERFACE *via = &ip_ptr -> nx_ip_interface[anx6_ptp_route[i].interface_index];
+
+        if ((anx6_ptp_route[i].length > best_length) &&
+            (via -> nx_interface_link_up != NX_FALSE) &&
+            anx6_prefix_covers(anx6_ptp_route[i].prefix,
+                               anx6_ptp_route[i].length, dest))
+        {
+            best        = via;
+            best_length = anx6_ptp_route[i].length;
+        }
+    }
+#endif /* AMINETXDUO_PTP */
 
     if (best != NX_NULL)
     {
