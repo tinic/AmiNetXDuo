@@ -1073,6 +1073,17 @@ static int addnetroute_main(int argc, char **argv)
             FreeArgs(rda);
             return RETURN_ERROR;
         }
+
+        /*
+         * DESTINATION=0.0.0.0 is the default route, whichever gateway it
+         * has: AmiTCP's DeleteNetRoute reads it so, and the OpenVPN port's
+         * AmiTCP-NG scripts delete the default route that way.
+         */
+        if (dest == 0UL && (!have_mask || mask == 0UL))
+        {
+            have_default = TRUE;
+            gateway      = 0UL;
+        }
 #else
         if (args[ARG_HOSTDST] != 0)
         {
@@ -1174,6 +1185,13 @@ static int addnetroute_main(int argc, char **argv)
             tool_netstatus_close(base);
             FreeArgs(rda);
             return RETURN_ERROR;
+        }
+
+        /* DESTINATION=0.0.0.0: the one there is. */
+        if (gateway == 0UL)
+        {
+            gateway = live_gw;
+            ami_config_format_ip(gateway, text, sizeof(text));
         }
 
         if (live_gw != gateway)
