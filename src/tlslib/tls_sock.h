@@ -50,6 +50,7 @@ extern "C" {
 
 #define TLS_SOCK_AF_INET            2
 #define TLS_SOCK_AF_INET6           28
+#define TLS_SOCK_AF_INET6_23        23
 
 /* WaitSelect()'s struct timeval.  Two LONGs, and nothing else has ever been
    passed through this vector. */
@@ -99,6 +100,9 @@ BOOL tls_sock_have_lvo(APTR base, ULONG lvo);
  * the private context's descriptor lookup.
  */
 BOOL tls_sock_is_connected_tcp(APTR base, LONG fd, UWORD *port, UWORD *family);
+
+/* The family of a getpeername() answer: TLS_SOCK_AF_INET or _INET6. */
+UWORD tls_sock_family(const UBYTE *sa);
 
 #ifdef __cplusplus
 }

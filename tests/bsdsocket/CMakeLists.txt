@@ -119,6 +119,36 @@ if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
     target_link_options(test_scope_epoch PRIVATE -Wl,--gc-sections)
     add_test(NAME scope_slot_epoch COMMAND test_scope_epoch)
 
+    # AF_INET6 == 23 (bebbo ndk-include) beside 28 at every point a family
+    # enters or leaves: socket.c's sockaddr reader and writer, getaddrinfo(),
+    # getnameinfo(), inet_pton()/inet_ntop() and ObtainSocket().
+    add_executable(test_af_inet6_23 host/test_af_inet6_23_host.c
+        host/test_af_inet6_23_never.c
+        "${CMAKE_SOURCE_DIR}/src/config/config_text.c"
+        "${CMAKE_SOURCE_DIR}/src/config/config_text6.c"
+        "${CMAKE_SOURCE_DIR}/src/ipv6/ipv6_srcsel.c")
+    target_include_directories(test_af_inet6_23 PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/host/shim"
+        "${CMAKE_SOURCE_DIR}/src/bsdsocket"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${AMINETXDUO_THREADX}/common/inc"
+        "${AMINETXDUO_THREADX}/ports/linux/gnu/inc"
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc")
+    target_compile_options(test_af_inet6_23 PRIVATE
+        -include "${CMAKE_CURRENT_SOURCE_DIR}/host/shim/host_prelude.h"
+        -ffunction-sections -fdata-sections -Wno-pointer-to-int-cast)
+    target_compile_definitions(test_af_inet6_23 PRIVATE
+        AMINETXDUO_MULTICAST AMINETXDUO_IPV6 AMINETXDUO_CMSG
+        AMINETXDUO_ADDRINFO NX_INCLUDE_USER_DEFINE_FILE UNIQUE_ID=-1)
+    if(APPLE)
+        target_link_options(test_af_inet6_23 PRIVATE -Wl,-dead_strip)
+    else()
+        target_link_options(test_af_inet6_23 PRIVATE -Wl,--gc-sections)
+    endif()
+    add_test(NAME af_inet6_23 COMMAND test_af_inet6_23)
+
     # socket.c: CloseSocket() and bsd_close_all() without a ThreadX bracket
     # leave no leaked socket naming the closing base (F-059).
     add_executable(test_unbracketed_close host/test_unbracketed_close_host.c)
