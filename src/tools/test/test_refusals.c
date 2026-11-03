@@ -232,6 +232,12 @@ static void t_addnetroute(void)
        for it, and "the route was not added" does not say so. */
     CHECK(strstr(text, "no IPv6 next-hop routes") != NULL,
           "addnetroute.c: the ENOSYS arm does not say IPv6 has no such table");
+    /* With AMINETXDUO_PTP, a next hop is taken through a point-to-point
+       peer, and the refusal says that is the only way. */
+    CHECK(strstr(text, "IPv6 next-hop routes only through a point-to-point peer") != NULL,
+          "addnetroute.c: the ENOSYS arm does not name the peer");
+    CHECK(strstr(text, "explain_bad_address6(\"GATEWAY\"") != NULL,
+          "addnetroute.c: a bad IPv6 GATEWAY is not named");
 
     no_ipv6_refusal("addnetroute.c", text);
 

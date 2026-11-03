@@ -1187,8 +1187,13 @@ VOID tool_print_routes6(const ToolRoutes6 *routes, const AmiConfig *cfg)
         ULONG             pos;
 
         /* A default router is ::/0 and is written that way, so the table says
-           where the packets with nowhere better to go are sent. */
+           where the packets with nowhere better to go are sent.  A prefix
+           through a point-to-point peer is written as itself. */
+#ifdef AMINETXDUO_PTP
+        if ((r->flags & NETSTATUS_RT6_GATEWAY) && r->prefix == 0UL)
+#else
         if (r->flags & NETSTATUS_RT6_GATEWAY)
+#endif
         {
             tool_copy_string(dest, sizeof(dest), "::/0");
         }

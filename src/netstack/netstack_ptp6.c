@@ -95,6 +95,63 @@ VOID ami_ptp_ipv6_peer_set(UINT index, const ULONG *peer)
     anx6_ptp_peer_set(index, peer);
 }
 
+/*
+ * The point-to-point interface whose peer gw is, NX_MAX_PHYSICAL_INTERFACES
+ * for none.  For an add the link must be up, and a link-local peer must be
+ * on interface `zone`.
+ */
+static UINT ami_ptp6_peer_index(NX_IP *ip, const ULONG gw[4], UINT zone,
+                                UINT adding)
+{
+    ULONG peer[4];
+    UINT  i;
+
+    for (i = 0; i < (UINT)NX_MAX_PHYSICAL_INTERFACES; i++)
+    {
+        if (!anx6_ptp_peer_get(i, peer) ||
+            peer[0] != gw[0] || peer[1] != gw[1] ||
+            peer[2] != gw[2] || peer[3] != gw[3])
+            continue;
+
+        if (adding &&
+            (ip->nx_ip_interface[i].nx_interface_link_up == NX_FALSE ||
+             ((gw[0] & 0xFFC00000UL) == 0xFE800000UL && i != zone)))
+            continue;
+
+        break;
+    }
+
+    return i;
+}
+
+/*
+ * A prefix through the peer of a point-to-point link: the link carries it,
+ * and the peer is the next hop without being asked.  Through any other
+ * gateway it is NX_NOT_SUPPORTED, as before: NetX Duo has no IPv6 route
+ * table to resolve one on a LAN.  The caller holds nx_ip_protection.
+ */
+UINT ami_ptp_ipv6_route_add(NX_IP *ip, const ULONG dest[4], ULONG prefix_len,
+                            const ULONG gw[4], UINT zone)
+{
+    UINT i = ami_ptp6_peer_index(ip, gw, zone, NX_TRUE);
+
+    if (i >= (UINT)NX_MAX_PHYSICAL_INTERFACES)
+        return NX_NOT_SUPPORTED;
+
+    return anx6_ptp_route_add(dest, (UINT)prefix_len, i);
+}
+
+UINT ami_ptp_ipv6_route_delete(NX_IP *ip, const ULONG dest[4],
+                               ULONG prefix_len, const ULONG gw[4])
+{
+    UINT i = ami_ptp6_peer_index(ip, gw, 0, NX_FALSE);
+
+    if (i >= (UINT)NX_MAX_PHYSICAL_INTERFACES)
+        return NX_ENTRY_NOT_FOUND;
+
+    return anx6_ptp_route_delete(dest, (UINT)prefix_len, i);
+}
+
 static const ULONG *ami_ptp6_link_local(const NX_INTERFACE *ifp)
 {
     const NXD_IPV6_ADDRESS *a;

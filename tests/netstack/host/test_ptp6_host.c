@@ -662,6 +662,71 @@ static void test_default_via_peer(void)
             "the peer cleared: 2001:db8:1::1 goes by the LAN's default");
 }
 
+/* -------------------------- NETCTRL_ROUTE6_ADD/DELETE through the peer */
+
+static void test_prefix_via_peer(void)
+{
+    static const ULONG p2000[4] = { 0x20000000UL, 0UL, 0UL, 0UL };
+    static const ULONG ll_peer[4] = { 0xFE800000UL, 0UL, 0UL, 0x99UL };
+    ULONG              prefix[4];
+    ULONG              carried[4];
+    UINT               length;
+    UINT               index = 99;
+
+    printf("ptp6: 2000::/3 GATEWAY=<peer6>, beside the LAN's default\n");
+
+    ami_ptp_ipv6_peer_set(1, h_peer);
+    h_check(h_route(h_far) != NX_NULL &&
+            memcmp(h_route(h_far) -> nxd_ipv6_address, h_lan64, 16) == 0,
+            "global traffic: by the LAN's default, before");
+
+    h_check(ami_ptp_ipv6_route_add(&h_ip, h_far, 3, h_lanrt, 0) ==
+                NX_NOT_SUPPORTED,
+            "GATEWAY=<the LAN's router>: NX_NOT_SUPPORTED, ENOSYS");
+    h_check(ami_ptp_ipv6_route_add(&h_ip, h_far, 3, h_peer, 0) == NX_SUCCESS,
+            "GATEWAY=<peer6>: taken");
+    h_check(anx6_ptp_route_get(0, prefix, &length, &index) &&
+            memcmp(prefix, p2000, 16) == 0 && length == 3 && index == 1,
+            "listed as 2000::/3 on the tunnel, the peer its next hop");
+
+    h_ns = 0;
+    h_released = 0;
+    h_check(h_send_routed(h_far, &index, carried) && index == 1,
+            "global traffic: out of the tunnel");
+    h_check(memcmp(carried, h_ptp64, 16) == 0 ||
+            memcmp(carried, h_ptp128, 16) == 0,
+            "global traffic: from a tunnel global");
+    h_check(h_ns == 0 && h_released == 0, "global traffic: nothing resolved");
+
+    h_check(ami_ptp_ipv6_route_delete(&h_ip, h_far, 3, h_lanrt) ==
+                NX_ENTRY_NOT_FOUND,
+            "delete through the LAN's router: not found");
+    h_check(ami_ptp_ipv6_route_delete(&h_ip, h_far, 3, h_peer) == NX_SUCCESS &&
+            !anx6_ptp_route_get(0, prefix, &length, &index),
+            "delete through the peer: gone");
+    h_check(h_route(h_far) != NX_NULL &&
+            memcmp(h_route(h_far) -> nxd_ipv6_address, h_lan64, 16) == 0,
+            "global traffic: by the LAN's default again");
+
+    h_ip.nx_ip_interface[1].nx_interface_link_up = NX_FALSE;
+    h_check(ami_ptp_ipv6_route_add(&h_ip, h_far, 3, h_peer, 0) ==
+                NX_NOT_SUPPORTED,
+            "the tunnel down: refused");
+    h_ip.nx_ip_interface[1].nx_interface_link_up = NX_TRUE;
+
+    /* A link-local peer needs its zone. */
+    ami_ptp_ipv6_peer_set(1, ll_peer);
+    h_check(ami_ptp_ipv6_route_add(&h_ip, h_far, 3, ll_peer, 0) ==
+                NX_NOT_SUPPORTED,
+            "fe80::99%0: not the tunnel's peer, refused");
+    h_check(ami_ptp_ipv6_route_add(&h_ip, h_far, 3, ll_peer, 1) == NX_SUCCESS,
+            "fe80::99%1: taken");
+
+    ami_ptp_ipv6_peer_set(1, NX_NULL);
+    h_check(!anx6_ptp_route_get(0, prefix, &length, &index),
+            "the peer cleared: its route goes");
+}
+
 static void test_ethernet_routing(void)
 {
     static const ULONG on_lan[4] = { 0x20010DB8UL, 0x00020000UL, 0UL, 0x200UL };
@@ -778,6 +843,7 @@ int main(void)
     test_static_address6();
     test_peer_route();
     test_default_via_peer();
+    test_prefix_via_peer();
     test_ethernet_routing();
     test_router_table();
 

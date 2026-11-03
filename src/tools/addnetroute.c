@@ -667,6 +667,10 @@ static LONG find_router6(struct Library *base, const ULONG addr[4])
 
         if (!(r->nsr6_Flags & NETSTATUS_RT6_GATEWAY))
             continue;
+#ifdef AMINETXDUO_PTP
+        if (r->nsr6_PrefixLength != 0UL)
+            continue;                   /* a prefix through a peer */
+#endif
 
         if (same_address6(r->nsr6_NextHop, addr))
             return i;
@@ -689,10 +693,15 @@ static LONG find_prefix6(struct Library *base, const ULONG addr[4],
     {
         const NetStatusRoute6 *r = &nr_answer.route6.e[i];
 
-        if (r->nsr6_Flags & NETSTATUS_RT6_GATEWAY)
-            continue;
 #ifdef AMINETXDUO_PTP
+        /* A prefix through a peer is one; ::/0 and the peer itself are not. */
+        if ((r->nsr6_Flags & NETSTATUS_RT6_GATEWAY) &&
+            r->nsr6_PrefixLength == 0UL)
+            continue;
         if (r->nsr6_Flags & NETSTATUS_RT6_PEER)
+            continue;
+#else
+        if (r->nsr6_Flags & NETSTATUS_RT6_GATEWAY)
             continue;
 #endif
 
@@ -717,7 +726,11 @@ static VOID explain6(LONG err, const char *gateway_text)
     switch (err)
     {
         case ROUTE_ENOSYS:
+#ifdef AMINETXDUO_PTP
+            tool_printf("  IPv6 next-hop routes only through a point-to-point peer\n");
+#else
             tool_printf("  no IPv6 next-hop routes\n");
+#endif
             break;
 
         case ROUTE_ENOBUFS:
@@ -768,7 +781,9 @@ static LONG run_ipv6(const LONG *args, BOOL have_default)
     const char      *given;
     ULONG            bits     = 128;
     LONG             err      = 0;
-#ifndef TOOL_DELETE
+#ifdef TOOL_DELETE
+    LONG             found;
+#else
     UWORD            index    = 0;
     UWORD            attached = 0;
 #endif
@@ -946,13 +961,25 @@ static LONG run_ipv6(const LONG *args, BOOL have_default)
      */
     bits = via.prefix;
 
-    if (find_prefix6(base, via.addr, bits, via.have_prefix, &bits) < 0)
+    found = find_prefix6(base, via.addr, bits, via.have_prefix, &bits);
+    if (found < 0)
     {
         format_route6(via.addr, via.prefix, text, sizeof(text));
         tool_error("no static IPv6 route to %s", (LONG)text);
         tool_netstatus_close(base);
         return RETURN_ERROR;
     }
+
+#ifdef AMINETXDUO_PTP
+    /* Through a peer: the gateway says so to the stack. */
+    if (nr_answer.route6.e[found].nsr6_Flags & NETSTATUS_RT6_GATEWAY)
+    {
+        ctl.nsc_Gateway6[0] = nr_answer.route6.e[found].nsr6_NextHop[0];
+        ctl.nsc_Gateway6[1] = nr_answer.route6.e[found].nsr6_NextHop[1];
+        ctl.nsc_Gateway6[2] = nr_answer.route6.e[found].nsr6_NextHop[2];
+        ctl.nsc_Gateway6[3] = nr_answer.route6.e[found].nsr6_NextHop[3];
+    }
+#endif
 
     ctl.nsc_Destination6[0] = via.addr[0];
     ctl.nsc_Destination6[1] = via.addr[1];
@@ -995,6 +1022,44 @@ static LONG run_ipv6(const LONG *args, BOOL have_default)
         return RETURN_ERROR;
     }
 
+#ifdef AMINETXDUO_PTP
+    if (bits == 0)
+    {
+        tool_error("::/0 is the default route; use DEFAULTGATEWAY");
+        tool_netstatus_close(base);
+        return RETURN_ERROR;
+    }
+
+    /* Through the peer of a point-to-point link; the stack refuses any
+       other next hop ENOSYS. */
+    if (args[ARG_VIA] != 0)
+    {
+        NrAddr6 gw;
+
+        given = (const char *)args[ARG_VIA];
+        if (!parse_address6(given, &gw) || gw.have_prefix)
+        {
+            explain_bad_address6("GATEWAY", given);
+            tool_netstatus_close(base);
+            return RETURN_ERROR;
+        }
+
+        if (!interface_for_next_hop(base, &gw, &index, &attached) &&
+            gw.have_zone)
+        {
+            tool_error("No interface \"%s\"", (LONG)gw.zone);
+            tool_netstatus_close(base);
+            return RETURN_ERROR;
+        }
+
+        ctl.nsc_Index       = index;
+        ctl.nsc_Gateway6[0] = gw.addr[0];
+        ctl.nsc_Gateway6[1] = gw.addr[1];
+        ctl.nsc_Gateway6[2] = gw.addr[2];
+        ctl.nsc_Gateway6[3] = gw.addr[3];
+        tool_format_ip6(gw.addr, gw_text, sizeof(gw_text));
+    }
+#else
     if (args[ARG_VIA] != 0)
     {
         format_route6(via.addr, bits, text, sizeof(text));
@@ -1010,6 +1075,7 @@ static LONG run_ipv6(const LONG *args, BOOL have_default)
         tool_netstatus_close(base);
         return RETURN_ERROR;
     }
+#endif
 
     ctl.nsc_Destination6[0] = via.addr[0];
     ctl.nsc_Destination6[1] = via.addr[1];
@@ -1027,6 +1093,11 @@ static LONG run_ipv6(const LONG *args, BOOL have_default)
         return RETURN_FAIL;
     }
 
+#ifdef AMINETXDUO_PTP
+    if (args[ARG_VIA] != 0)
+        say("route %s via %s\n", (LONG)text, (LONG)gw_text);
+    else
+#endif
     say("route %s on link\n", (LONG)text);
 #endif
 

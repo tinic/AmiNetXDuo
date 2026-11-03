@@ -54,6 +54,19 @@ UINT anx6_policy_lookup(const ULONG *addr, UINT *precedence, UINT *label);
 VOID anx6_ptp_peer_set(UINT interface_index, const ULONG *peer);
 UINT anx6_ptp_peer_get(UINT interface_index, ULONG *peer);
 
+/*
+ * A prefix routed through point-to-point interface `interface_index`, the
+ * next hop its peer; clearing the peer drops them.  The add replaces the same
+ * prefix and length and answers NX_NO_MORE_ENTRIES when the table is full;
+ * the delete answers NX_ENTRY_NOT_FOUND.  The get answers NX_TRUE for entry n
+ * and NX_FALSE past the last.  The caller holds nx_ip_protection.
+ */
+#define ANX6_PTP_ROUTES 8
+UINT anx6_ptp_route_add(const ULONG *prefix, UINT length, UINT interface_index);
+UINT anx6_ptp_route_delete(const ULONG *prefix, UINT length, UINT interface_index);
+UINT anx6_ptp_route_get(UINT n, ULONG *prefix, UINT *length,
+                        UINT *interface_index);
+
 /* The default router global traffic goes to, NX_NULL for none.  The caller
    holds nx_ip_protection. */
 NX_IPV6_DEFAULT_ROUTER_ENTRY *anx6_default_router(NX_IP *ip_ptr);
