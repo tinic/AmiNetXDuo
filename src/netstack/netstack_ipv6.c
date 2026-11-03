@@ -211,6 +211,12 @@ VOID ami_netstack_ipv6_interface_up(AmiNetStack *ns, UWORD interface_index)
         ns->ns_Config.interfaces[interface_index].ip6type != AMI_IP6TYPE_AUTO)
         return;
 
+#ifdef AMINETXDUO_PTP
+    /* No router is solicited on a point-to-point link. */
+    if (ami_sana2_ptp(ns->ns_Iface[interface_index]))
+        return;
+#endif
+
     ami_ns6_arm_solicitation(ns, interface_index);
 }
 
@@ -226,16 +232,6 @@ static VOID ami_ns6_configure_interface(AmiNetStack *ns, UWORD i)
         return;
     }
 
-#ifdef AMINETXDUO_PTP
-    /* No addresses yet: the link carries IPv6 (sana2_rx.c), but there is no
-       hardware address for a link-local interface identifier. */
-    if (ami_sana2_ptp(ns->ns_Iface[i]))
-    {
-        AMI_INFO("netstack: %s: point-to-point, IPv4 only", cfg->name);
-        return;
-    }
-#endif
-
     /*
      * RFC 8200 section 5 puts a 1280-octet floor under every link IPv6 runs
      * over, with no fragmentation below it.  IPv4 has no such floor and stays
@@ -248,6 +244,18 @@ static VOID ami_ns6_configure_interface(AmiNetStack *ns, UWORD i)
                  (unsigned long)ns->ns_Ip.nx_ip_interface[i].nx_interface_ip_mtu_size);
         return;
     }
+
+#ifdef AMINETXDUO_PTP
+    /* A link-local and nothing else yet: netstack_ptp6.c has the why. */
+    if (ami_sana2_ptp(ns->ns_Iface[i]))
+    {
+        status = ami_ptp_ipv6_start(&ns->ns_Ip, (UINT)i);
+        if (status != NX_SUCCESS && status != NX_DUPLICATED_ENTRY)
+            AMI_ERROR("netstack: %s: link-local address failed (%ld)",
+                      cfg->name, (long)status);
+        return;
+    }
+#endif
 
     /*
      * Link-local first, always.  A NULL address with prefix length 10 tells

@@ -54,6 +54,10 @@ endif()
 # the peer (netstack_ptp.c).
 if(AMINETXDUO_PTP)
     list(APPEND NETSTACK_SOURCES netstack_ptp.c)
+    # And its IPv6 link-local (netstack_ptp6.c).
+    if(AMINETXDUO_IPV6)
+        list(APPEND NETSTACK_SOURCES netstack_ptp6.c)
+    endif()
 endif()
 
 # The ARexx host.  Without it netstack_port.c opens a bare AMITCP port, so the

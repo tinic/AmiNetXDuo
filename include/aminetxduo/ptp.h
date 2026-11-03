@@ -23,7 +23,7 @@ typedef struct AmiSana2If AmiSana2If;
  * Point-to-point links.  Roadshow decides from the driver's wire type: PPP,
  * SLIP, CSLIP and PLIP are point-to-point, and POINTTOPOINT=YES makes a
  * driver with no Ethernet address one too (asked is AMI_CFG_PTP_*).  Such a
- * link carries IPv4 alone, with no link header and no ARP; the peer is the
+ * link carries bare IP datagrams, with no link header and no ARP; the peer is the
  * other end, host byte order, 0 when nobody has said.
  */
 UINT  ami_sana2_ptp_wire(ULONG hardware_type, UINT addr_bytes, UINT asked);
@@ -47,6 +47,12 @@ ULONG ami_ptp_shown_hop(NX_IP *ip, ULONG next_hop);
 /* The host route to interface `index`'s peer, after its address or its peer
    changed.  The caller holds the stack as for any NetX Duo call. */
 VOID  ami_ptp_peer_route(NX_IP *ip, UINT index);
+
+#ifdef AMINETXDUO_IPV6
+/* IPv6 on interface `index`: a random link-local, no DAD, no router
+   solicitation.  NX_DUPLICATED_ENTRY when it has a link-local already. */
+UINT  ami_ptp_ipv6_start(NX_IP *ip, UINT index);
+#endif
 
 #define AMI_PTP_NEXT_HOP(ip, gateway)   ami_ptp_next_hop((ip), (gateway))
 #define AMI_PTP_SHOWN_HOP(ip, next_hop) ami_ptp_shown_hop((ip), (next_hop))
