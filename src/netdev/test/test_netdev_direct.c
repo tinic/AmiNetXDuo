@@ -306,8 +306,9 @@ static void test_link_header(void)
 }
 
 
-/* The header copy at every phase of both ends: 2 mod 4 on both is the
-   aligned word-and-longwords form, the rest the plain copy. */
+/* The header copy at every destination phase and both even header phases
+   (the claim reads the type as a word): 2 mod 4 on both is the aligned
+   word-and-longwords form, the rest the plain copy. */
 static void test_link_header_every_phase(void)
 {
     static ULONG hstore[(NETDEV_HDR_LEN + 8) / 4];
@@ -317,7 +318,7 @@ static void test_link_header_every_phase(void)
     int          bad = 0;
 
     for (dshift = 0; dshift < 4; dshift++)
-        for (hshift = 0; hshift < 4; hshift++)
+        for (hshift = 0; hshift < 4; hshift += 2)
         {
             reset_fixture();
             direct_shift = dshift;
