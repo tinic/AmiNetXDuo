@@ -7,6 +7,15 @@ are history.
 
 ## Unreleased
 
+- Point-to-point interfaces carry IPv6: ADDRESS6 and DESTINATION6 in the
+  interface file, ConfigureNetInterface DESTINATION6=, and AddNetRoute
+  DEFAULTGATEWAY <peer> for an IPv6 default route through the link.
+- IPv6 programs built with the AmigaPorts GCC headers, where AF_INET6 is 23
+  and struct sockaddr_in6 has no length byte, work.
+- Up to four IPv6 default routes are kept, one per interface, so a VPN
+  default fits beside routes learned on Ethernet and Wi-Fi.
+- DeleteNetRoute DST=:: removes only a default route that was added by
+  hand, never one learned from a router.
 - Point-to-point interfaces: POINTTOPOINT and DESTINATION in an interface
   file, for drivers such as the OpenVPN client's vpn.device (IPv4).
 - An address with a 255.255.255.254 or 255.255.255.255 netmask is no
