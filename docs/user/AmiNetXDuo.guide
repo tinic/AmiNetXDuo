@@ -576,6 +576,16 @@
   end, AddNetRoute DEFAULT=<peer> sends all traffic through the link, and
   DeleteNetRoute DST=0.0.0.0 removes the default route.
 
+  With ADDRESS6 and DESTINATION6, a point-to-point link carries IPv6 as
+  well. The link gets a random link-local address and sends no neighbour
+  or router solicitations and no duplicate address detection. ADDRESS6
+  takes a /64 or /128 address; DESTINATION6 names the IPv6 address of the
+  other end and can be changed with ConfigureNetInterface DESTINATION6=.
+  AddNetRoute DEFAULTGATEWAY <peer> sends all IPv6 traffic through the
+  link; at equal PRIORITY such a route wins over one learned from a
+  router on the LAN. DeleteNetRoute DST=:: removes only a default route
+  that was added this way, never one learned from a router.
+
   @{b}More than one card@{ub}
 
   Put one file in DEVS:NetInterfaces per card. A file is a definition,
