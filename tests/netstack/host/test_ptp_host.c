@@ -108,6 +108,7 @@ VOID ami_sana2_set_ptp_routed(AmiSana2If *iface, ULONG peer)
 #define H_LAN_ADDR      0xC0A801DBUL     /* 192.168.1.219 */
 #define H_LAN_GATEWAY   0xC0A80101UL     /* 192.168.1.1   */
 #define H_VPN_ADDR      0x0A08000FUL     /* 10.8.0.15     */
+#define H_VPN_ADDR2     0x0A080002UL     /* 10.8.0.2      */
 #define H_VPN_PEER      0x0A080001UL     /* 10.8.0.1      */
 #define H_VPN_PEER2     0x0A080002UL     /* 10.8.0.2      */
 #define H_ELSEWHERE     0x08080808UL     /* 8.8.8.8       */
@@ -230,6 +231,40 @@ int main(void)
             !h_route_to(H_VPN_PEER, 0xFFFFFFFFUL, H_VPN_ADDR) &&
             h_vpn.routed == 0UL,
             "a peer on the interface's network gets no host route");
+
+    /* The route made for a peer goes when the peer comes onto the
+       interface's network (antigravity-agy review, finding 2). */
+    h_interface_set(1, H_VPN_ADDR, 0xFFFFFFFFUL, &h_vpn);
+    ami_ptp_peer_route(&h_ip, 1);
+    h_check(h_route_to(H_VPN_PEER, 0xFFFFFFFFUL, H_VPN_ADDR) &&
+            h_vpn.routed == H_VPN_PEER, "a /32 again has its host route");
+    h_interface_set(1, H_VPN_ADDR, 0xFFFFFF00UL, &h_vpn);
+    ami_ptp_peer_route(&h_ip, 1);
+    h_check(!h_route_to(H_VPN_PEER, 0xFFFFFFFFUL, H_VPN_ADDR) &&
+            h_ip.nx_ip_routing_table_entry_count == 0 && h_vpn.routed == 0UL,
+            "and loses it when the same peer comes onto its network");
+
+    /* A new local address takes the default gateway and the routes through
+       the link with it (finding 3). */
+    h_interface_set(1, H_VPN_ADDR, 0xFFFFFFFFUL, &h_vpn);
+    ami_ptp_peer_route(&h_ip, 1);
+    h_check(_nx_ip_gateway_address_set(&h_ip,
+                ami_ptp_next_hop(&h_ip, H_VPN_PEER)) == NX_SUCCESS,
+            "the default gateway is the tunnel again");
+    h_ip.nx_ip_interface[1].nx_interface_ip_address = H_VPN_ADDR2;
+    h_ip.nx_ip_interface[1].nx_interface_ip_network = H_VPN_ADDR2;
+    ami_ptp_peer_route(&h_ip, 1);
+    h_check(h_ip.nx_ip_gateway_address == H_VPN_ADDR2 &&
+            h_route_to(H_VPN_PEER, 0xFFFFFFFFUL, H_VPN_ADDR2) &&
+            !h_route_to(H_VPN_PEER, 0xFFFFFFFFUL, H_VPN_ADDR),
+            "a new address moves the gateway and the host route to it");
+    h_check(h_route(H_ELSEWHERE, &next_hop) == vpn &&
+            next_hop == H_VPN_ADDR2 &&
+            ami_ptp_shown_hop(&h_ip, next_hop) == H_VPN_PEER,
+            "and the default route still goes through the tunnel, shown as the peer");
+    _nx_ip_gateway_address_clear(&h_ip);
+    (VOID)_nx_ip_static_route_delete(&h_ip, H_VPN_PEER, 0xFFFFFFFFUL);
+    h_vpn.routed = 0UL;
 
     /* An Ethernet interface is left alone. */
     ami_ptp_peer_route(&h_ip, 0);

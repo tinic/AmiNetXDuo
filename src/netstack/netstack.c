@@ -810,6 +810,12 @@ static LONG ami_ns_create_ip(AmiNetStack *ns)
 
         addr = (cfg->iptype == AMI_IPTYPE_STATIC) ? cfg->address : 0UL;
         mask = (cfg->iptype == AMI_IPTYPE_STATIC) ? cfg->netmask : 0UL;
+#ifdef AMINETXDUO_PTP
+        /* Not mask 0, which makes every address on-link and can hand the
+           gateway set below to this interface. */
+        if (addr != 0UL && ami_sana2_ptp(ns->ns_Iface[kept]))
+            mask = ami_ns_static_netmask_ptp(mask, NX_TRUE);
+#endif
 
         status = nx_ip_interface_attach(&ns->ns_Ip, (CHAR *)cfg->name,
                                         addr, mask, ami_sana2_driver_entry);

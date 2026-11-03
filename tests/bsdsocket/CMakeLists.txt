@@ -943,6 +943,7 @@ if(NOT CMAKE_CROSSCOMPILING)
     # whose real half includes the host's <net/if.h>.
     set(BSD_ERRNO_HOOK_SOURCES host/test_errno_hook_host.c
                                "${CMAKE_SOURCE_DIR}/src/bsdsocket/errno.c"
+                               "${CMAKE_SOURCE_DIR}/tests/common/host/ptp_passthrough.c"
                                "${CMAKE_SOURCE_DIR}/src/bsdsocket/netx_call.c")
     set(BSD_ERRNO_HOOK_INCLUDES
         "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"

@@ -79,8 +79,9 @@ ULONG ami_ptp_shown_hop(NX_IP *ip, ULONG next_hop)
 /*
  * The host route to the peer, made again whenever the address or the peer
  * changes.  A peer inside the interface's own network is on it already and
- * needs none.  NetX Duo finds an existing entry by destination and mask and
- * updates its next hop, so a changed address needs no delete first.
+ * needs none, and one made before goes.  NetX Duo finds an existing entry by
+ * destination and mask and updates its next hop, so a changed address needs
+ * no delete first.
  */
 VOID ami_ptp_peer_route(NX_IP *ip, UINT index)
 {
@@ -90,6 +91,7 @@ VOID ami_ptp_peer_route(NX_IP *ip, UINT index)
     ULONG         peer;
     ULONG         routed;
     ULONG         local;
+    UINT          need;
 
     if (ip == NULL || index >= (UINT)NX_MAX_PHYSICAL_INTERFACES)
         return;
@@ -102,14 +104,31 @@ VOID ami_ptp_peer_route(NX_IP *ip, UINT index)
     peer   = ami_sana2_ptp_peer(sana);
     routed = ami_sana2_ptp_routed(sana);
     local  = ifp->nx_interface_ip_address;
+    need   = (peer != 0UL && local != 0UL &&
+              (peer & ifp->nx_interface_ip_network_mask) !=
+                  ifp->nx_interface_ip_network) ? NX_TRUE : NX_FALSE;
 
-    if (routed != 0UL && routed != peer)
+    /* The old host route goes when the peer moved or no longer needs one. */
+    if (routed != 0UL && (routed != peer || !need))
         (VOID)nx_ip_static_route_delete(ip, routed, AMI_PTP_HOST_MASK);
     ami_sana2_set_ptp_routed(sana, 0UL);
 
-    if (peer == 0UL || local == 0UL ||
-        (peer & ifp->nx_interface_ip_network_mask) ==
-            ifp->nx_interface_ip_network)
+    /* Every next hop through the link is the interface's own address
+       (AMI_PTP_NEXT_HOP), so a new address takes them all with it: the
+       default gateway and each static route NetX Duo has on this
+       interface.  The caller holds the stack, as for the route add. */
+    if (local != 0UL)
+    {
+        ULONG r;
+
+        if (ip->nx_ip_gateway_interface == ifp)
+            ip->nx_ip_gateway_address = local;
+        for (r = 0; r < ip->nx_ip_routing_table_entry_count; r++)
+            if (ip->nx_ip_routing_table[r].nx_ip_routing_entry_ip_interface == ifp)
+                ip->nx_ip_routing_table[r].nx_ip_routing_next_hop_address = local;
+    }
+
+    if (!need)
         return;
 
     /* A full table leaves the peer reachable only by a default route

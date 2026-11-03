@@ -537,9 +537,16 @@ static VOID __attribute__((noinline, cold)) ami_sana2_driver_command(
 
         /* ARP needs a hardware address to resolve to. Addressless SANA-II
            wires report AddrFieldSize 0 and get address mapping turned off. */
+#ifdef AMINETXDUO_PTP
+        nx_ip_interface_address_mapping_configure(
+            ip_ptr, iface->index,
+            (iface->addr_bytes == AMI_ETH_ADDR_SIZE && !iface->ptp)
+                ? NX_TRUE : NX_FALSE);
+#else
         nx_ip_interface_address_mapping_configure(
             ip_ptr, iface->index,
             (iface->addr_bytes == AMI_ETH_ADDR_SIZE) ? NX_TRUE : NX_FALSE);
+#endif
 
 #ifdef AMINETXDUO_RX_VERIFY
         /*
@@ -651,6 +658,19 @@ static VOID __attribute__((noinline, cold)) ami_sana2_driver_command(
     case NX_LINK_ARP_SEND:
     case NX_LINK_ARP_RESPONSE_SEND:
     case NX_LINK_RARP_SEND:
+#ifdef AMINETXDUO_PTP
+        /* A gratuitous ARP after an address change reaches every interface;
+           a point-to-point link has no hardware address to announce, and
+           its driver refuses the packet type. */
+        if (iface->ptp &&
+            driver_req->nx_ip_driver_command != NX_LINK_PACKET_BROADCAST)
+        {
+            if (driver_req->nx_ip_driver_packet != NULL)
+                AMI_NX_CLEANUP(nx_packet_transmit_release(
+                                   driver_req->nx_ip_driver_packet));
+            break;
+        }
+#endif
         ami_sana2_driver_send(driver_req, iface);
         break;
 

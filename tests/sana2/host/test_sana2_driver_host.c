@@ -662,6 +662,51 @@ static void test_ether_type(void)
     }
 }
 
+#ifdef AMINETXDUO_PTP
+/* A point-to-point link gets no ARP or RARP: a gratuitous ARP after an
+   address change is sent on every interface, and vpn.device refuses the
+   type.  The packet is released; IPv4 still goes out. */
+static void test_ptp_drops_arp(void)
+{
+    static const UINT dropped[] = {
+        NX_LINK_ARP_SEND, NX_LINK_ARP_RESPONSE_SEND, NX_LINK_RARP_SEND
+    };
+    ULONG i;
+
+    printf("sana2: no ARP onto a point-to-point link\n");
+
+    for (i = 0; i <= sizeof(dropped) / sizeof(dropped[0]); i++)
+    {
+        int releases;
+
+        fixture_init(4);
+        iface.ptp = TRUE;
+        ami_sana2_attach(&iface, &ip, 0);
+        packet.nx_packet_ip_version = 4;
+
+        memset(&req, 0, sizeof(req));
+        req.nx_ip_driver_command   = (i < sizeof(dropped) / sizeof(dropped[0]))
+                                         ? dropped[i] : NX_LINK_PACKET_SEND;
+        req.nx_ip_driver_ptr       = &ip;
+        req.nx_ip_driver_interface = &interface_obj;
+        req.nx_ip_driver_packet    = &packet;
+        releases = h_releases;
+
+        ami_sana2_driver_entry(&req);
+
+        if (i < sizeof(dropped) / sizeof(dropped[0]))
+            h_check(h_sends == 0 && h_releases == releases + 1,
+                    "ptp: an ARP or RARP command is released, not sent");
+        else
+            h_check(h_sends == 1 && h_sent_type == AMI_ETHERTYPE_IPV4,
+                    "ptp: an IPv4 packet is still sent");
+
+        ami_sana2_unbind(&iface);
+        interface_obj.nx_interface_additional_link_info = NULL;
+    }
+}
+#endif
+
 /* A send command with no packet is a caller error, not a null dereference. */
 static void test_send_without_a_packet(void)
 {
@@ -1399,6 +1444,9 @@ int main(void)
     test_unbound_control_ignores_stale_packet();
 
     test_ether_type();
+#ifdef AMINETXDUO_PTP
+    test_ptp_drops_arp();
+#endif
     test_send_without_a_packet();
     test_send_status_is_passed_up();
 

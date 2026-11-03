@@ -398,6 +398,7 @@ if(NOT CMAKE_CROSSCOMPILING)
             "${CMAKE_SOURCE_DIR}/src/netstack/netstack_ptp.c"
             "${AMINETXDUO_NETXDUO}/common/src/nx_ip_route_find.c"
             "${AMINETXDUO_NETXDUO}/common/src/nx_ip_gateway_address_set.c"
+            "${AMINETXDUO_NETXDUO}/common/src/nx_ip_gateway_address_clear.c"
             "${AMINETXDUO_NETXDUO}/common/src/nx_ip_static_route_add.c"
             "${AMINETXDUO_NETXDUO}/common/src/nx_ip_static_route_delete.c"
             "${AMINETXDUO_NETXDUO}/common/src/nxe_ip_static_route_add.c"
