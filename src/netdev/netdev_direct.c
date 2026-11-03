@@ -70,7 +70,7 @@ static struct IOSana2Req *netdev_peek_take(struct List *list, ULONG type)
  * in): one word, then three longwords, every access aligned.  Anything else
  * takes the plain copy.
  */
-static inline VOID __attribute__((always_inline)) direct_link_hdr(
+static VOID __attribute__((noinline)) direct_link_hdr(
     UBYTE *lh, const UBYTE *hdr)
 {
     if ((((unsigned long)(APTR)lh) & 3u) == 2u &&
