@@ -798,13 +798,13 @@ static VOID ns_fill_routes6(NX_IP *ip, NsWriter *w)
     /* The prefixes through a point-to-point peer, after the default routers
        so a reader looking for ::/0 meets those first. */
     {
-        ULONG prefix[4];
+        ULONG net[4];
         ULONG peer[4];
         UINT  length;
         UINT  index;
         UINT  k;
 
-        for (i = 0; anx6_ptp_route_get(i, prefix, &length, &index); i++)
+        for (i = 0; anx6_ptp_route_get(i, net, &length, &index); i++)
         {
             NetStatusRoute6 *out;
 
@@ -817,7 +817,7 @@ static VOID ns_fill_routes6(NX_IP *ip, NsWriter *w)
 
             for (k = 0; k < 4U; k++)
             {
-                out->nsr6_Destination[k] = prefix[k];
+                out->nsr6_Destination[k] = net[k];
                 out->nsr6_NextHop[k]     = peer[k];
             }
             out->nsr6_PrefixLength = length;
