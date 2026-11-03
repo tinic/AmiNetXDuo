@@ -156,17 +156,12 @@ extern VOID netdev_trace_val(const char *tag, ULONG v);
 #define LE_RXB_PHASE    2
 #define LE_RXB_OFF      (0x0100 + LE_RXB_PHASE)
 /*
- * Past the end of the receive region and back on a longword.
- *
- * TRANSMIT HAS THE SAME SKEW AND THIS DOES NOT FIX IT.  The frame is built in
- * this buffer from byte 0, so the CopyFrom hook's DESTINATION is txbuf + 14,
- * two bytes out of phase exactly as the receive source was -- the penalty
- * moves to the store side instead of the load side.  It is left alone here on
- * purpose: it is a separate measurement on a direction that carries about half
- * the bytes, and folding it into the same arm would make one A/B answer two
- * questions.  Do not read this line as "transmit is already aligned".
+ * Past the end of the receive region, back on a longword, then two bytes in
+ * for the same reason as the receive buffers: the CopyFrom hook's destination
+ * is txbuf + 14, which this puts at 0 mod 4 against the stack's packet.
  */
-#define LE_TXB_OFF      (0x0100 + LE_RX_RING * LE_BUFSZ + 4)
+#define LE_TXB_PHASE    2
+#define LE_TXB_OFF      (0x0100 + LE_RX_RING * LE_BUFSZ + 4 + LE_TXB_PHASE)
 #define LE_END          (LE_TXB_OFF + LE_TX_RING * LE_BUFSZ)
 
 /*
@@ -178,6 +173,9 @@ extern VOID netdev_trace_val(const char *tag, ULONG v);
 #error "LE_RXB_OFF must put the Ethernet payload (frame + NETDEV_HDR_LEN) on a \
 longword: that alignment is worth 27-37% of the fused copy, which is 15% of \
 receive"
+#endif
+#if ((LE_TXB_OFF + NETDEV_HDR_LEN) & 3u) != 0 || (LE_TXB_OFF & 1u) != 0
+#error "LE_TXB_OFF must be even and put the transmit payload on a longword"
 #endif
 #if (LE_BUFSZ & 3u) != 0
 #error "LE_BUFSZ must be a multiple of 4 or the buffers in the ring do not \
@@ -676,9 +674,9 @@ LONG lance_tx(NetdevNic *nic, const UBYTE *frame, UWORD len)
 
     /*
      * Frame bytes are not swapped: the board's crossed lanes cancel between the
-     * CPU write and the chip's read.  Only descriptors need it.  Longwords, and
-     * both ends are longword aligned -- nu_TxBuf is ULONG[] and the buffers sit
-     * at 0x100 + n * 1536.
+     * CPU write and the chip's read.  Only descriptors need it.  Longwords;
+     * both ends are at the same even phase (tx_phase is LE_TXB_PHASE), so
+     * none is odd on a 68000.
      */
     if (frame != (const UBYTE *)buf)
     {
@@ -822,6 +820,7 @@ LONG lance_attach(NetdevNic *nic)
     nic->txb_cnt   = LE_TX_RING;
     nic->rx_capacity = (ULONG)LE_RX_RING * LE_BUFSZ;
     nic->tx_at     = lance_tx_at;
+    nic->tx_phase  = LE_TXB_PHASE;  /* staged frames copy in phase */
     nic->ring_copy_sum = NULL;  /* no ring_copy either: see below */
     nic->frame_at  = NULL;      /* the receive path hands up the ring buffer
                                    itself, so there is nothing to translate */
