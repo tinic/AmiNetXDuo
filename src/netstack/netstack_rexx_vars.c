@@ -10,6 +10,7 @@
 
 #include "netstack_internal.h"
 #include "netstack_rexx.h"
+#include "aminetxduo/ptp.h"
 
 #include "aminetxduo/nx_queue.h"
 
@@ -760,7 +761,7 @@ static UWORD ami_rx_collect_routes(NX_IP *ip, AmiRxRoute *out, UWORD room)
         AmiRxRoute                *e   = &out[used++];
 
         e->rr_Dest    = src->nx_ip_routing_dest_ip;
-        e->rr_Gateway = src->nx_ip_routing_next_hop_address;
+        e->rr_Gateway = AMI_PTP_SHOWN_HOP(ip, src->nx_ip_routing_next_hop_address);
         e->rr_Flags   = RX_RT_UP | RX_RT_GATEWAY;
         ami_rx_route_name(e, "none");
 
@@ -777,7 +778,7 @@ static UWORD ami_rx_collect_routes(NX_IP *ip, AmiRxRoute *out, UWORD room)
         AmiRxRoute *e = &out[used++];
 
         e->rr_Dest    = 0;
-        e->rr_Gateway = gateway;
+        e->rr_Gateway = AMI_PTP_SHOWN_HOP(ip, gateway);
         e->rr_Flags   = RX_RT_UP | RX_RT_GATEWAY;
         ami_rx_route_name(e, "none");
     }

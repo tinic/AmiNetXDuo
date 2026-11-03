@@ -95,11 +95,23 @@ static VOID measure(BOOL satisfied[COND_COUNT])
         if (!info->attached || !info->link_up)
             continue;
 
+#ifdef AMINETXDUO_PTP
+        /* Roadshow: "Are any point-to-point interfaces, e.g. SLIP and PPP,
+           configured and operational?"  Configured is an address. */
+        if (info->ptp)
+        {
+            if (info->address != 0UL)
+                satisfied[COND_PTPINTERFACES] = TRUE;
+        }
+        else
+            satisfied[COND_BCASTINTERFACES] = TRUE;
+#else
         /*
          * A SANA-II interface with a hardware address is Ethernet.
          * PTPINTERFACES stays FALSE: see the note at the top.
          */
         satisfied[COND_BCASTINTERFACES] = TRUE;
+#endif
 
         /* Either family. Roadshow's INTERFACES asks whether this machine can
            be reached, and an IPv6-only machine can. */

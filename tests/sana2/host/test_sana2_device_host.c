@@ -2,6 +2,7 @@
    SPDX-License-Identifier: MIT */
 
 #include "sana2_internal.h"
+#include "aminetxduo/ptp.h"
 #include "aminetxduo/anxs2ext.h"
 #include "bsdsocket_window.h"
 
@@ -81,6 +82,10 @@ typedef struct HostDevice
     UWORD   slow_cmd;
     int     slow_mode;          /* H_OFF_* */
     ULONG   slow_after_ms;      /* H_OFF_LATE: the reply's delay */
+
+    /* S2_DEVICEQUERY's wire: 0 is Ethernet with 48 address bits. */
+    ULONG   hw_type;
+    ULONG   addr_bits;
 } HostDevice;
 
 /* S2_OFFLINE by SendIO(): inside BeginIO(), later, only once aborted, or
@@ -571,10 +576,11 @@ LONG DoIO(struct IORequest *ioreq)
         q->SizeSupplied  = (ULONG)sizeof(*q);
         q->DevQueryFormat = 0;
         q->DeviceLevel   = 0;
-        q->AddrFieldSize = 48;
+        q->AddrFieldSize = (h_dev.hw_type != 0) ? h_dev.addr_bits : 48;
         q->MTU           = 1500;
         q->BPS           = 10000000UL;
-        q->HardwareType  = S2WireType_Ethernet;
+        q->HardwareType  = (h_dev.hw_type != 0) ? h_dev.hw_type
+                                                : S2WireType_Ethernet;
         break;
     }
 
@@ -2601,11 +2607,85 @@ static void case_init_delay(void)
         (VOID)h_tear_down(iface);
 }
 
+#ifdef AMINETXDUO_PTP
+/*
+ * Point-to-point, decided at the open the way Roadshow decides it: from the
+ * wire type, PPP being what vpn.device answers (HardwareType 253,
+ * AddrFieldSize 32), with POINTTOPOINT=YES for a driver that has no
+ * Ethernet address and says nothing else.
+ */
+static void case_point_to_point(void)
+{
+    static const struct
+    {
+        ULONG       hw_type;
+        ULONG       addr_bits;
+        UBYTE       asked;
+        UINT        ptp;
+        const char *what;
+    } cases[] =
+    {
+        { S2WireType_PPP,   32, AMI_CFG_PTP_AUTO, NX_TRUE,  "PPP, vpn.device's answer" },
+        { S2WireType_SLIP,   0, AMI_CFG_PTP_AUTO, NX_TRUE,  "SLIP" },
+        { S2WireType_CSLIP,  0, AMI_CFG_PTP_AUTO, NX_TRUE,  "CSLIP" },
+        { S2WireType_PLIP,   0, AMI_CFG_PTP_AUTO, NX_TRUE,  "PLIP" },
+        { S2WireType_PPP,   32, AMI_CFG_PTP_NO,   NX_TRUE,  "PPP whatever the file says" },
+        { 0,                48, AMI_CFG_PTP_AUTO, NX_FALSE, "Ethernet" },
+        { 0,                48, AMI_CFG_PTP_YES,  NX_FALSE, "Ethernet even when asked" },
+        { 99,                0, AMI_CFG_PTP_YES,  NX_TRUE,  "an addressless wire when asked" },
+        { 99,                0, AMI_CFG_PTP_AUTO, NX_FALSE, "an addressless wire unasked" }
+    };
+    AmiSana2If *iface;
+    LONG        err;
+    unsigned    i;
+
+    printf("point-to-point: the wire type decides\n");
+
+    for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
+    {
+        char what[96];
+
+        h_device_reset();
+        h_dev.hw_type   = cases[i].hw_type;
+        h_dev.addr_bits = cases[i].addr_bits;
+        h_config();
+        h_cfg.point_to_point = cases[i].asked;
+        h_cfg.destination    = 0x0A080001UL;            /* 10.8.0.1 */
+        err = 0;
+
+        iface = ami_sana2_open(&h_cfg, &err);
+        snprintf(what, sizeof(what), "%s opens", cases[i].what);
+        h_check(iface != NULL, what);
+        if (iface == NULL)
+            continue;
+
+        snprintf(what, sizeof(what), "%s: point-to-point %s", cases[i].what,
+                 cases[i].ptp ? "yes" : "no");
+        h_check(ami_sana2_ptp(iface) == cases[i].ptp, what);
+        snprintf(what, sizeof(what), "%s: peer %s", cases[i].what,
+                 cases[i].ptp ? "from DESTINATION" : "none");
+        h_check(ami_sana2_ptp_peer(iface) ==
+                    (cases[i].ptp ? 0x0A080001UL : 0UL), what);
+        if (cases[i].ptp)
+            h_check(!ami_sana2_raw_mode(iface),
+                    "a point-to-point link is never raw");
+
+        (VOID)ami_sana2_close(iface);
+    }
+
+    h_check(ami_sana2_ptp(NULL) == NX_FALSE && ami_sana2_ptp_peer(NULL) == 0UL,
+            "no interface is no link");
+}
+#endif
+
 int main(void)
 {
     printf("sana2 device: open, online, offline, close\n");
 
     case_link_speed();
+#ifdef AMINETXDUO_PTP
+    case_point_to_point();
+#endif
     case_tx_batch_negotiation();
     case_healthy();
     case_out_of_service_still_offlines();

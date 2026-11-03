@@ -161,6 +161,9 @@ typedef struct NetStatusSystem
 /* An alias address (ConfigureNetInterface ALIASADDR): nsi_Name is
    "<interface>:<slot>", the counters are the interface's row's. */
 #define NETSTATUS_IF_ALIAS      0x0040
+/* A point-to-point link: the first four bytes of nsi_HwAddress are the
+   peer's address, most significant first, 0.0.0.0 when nobody has said. */
+#define NETSTATUS_IF_PTP        0x0080
 
 typedef struct NetStatusInterface
 {

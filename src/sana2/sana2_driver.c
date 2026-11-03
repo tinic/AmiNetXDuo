@@ -539,7 +539,12 @@ static VOID __attribute__((noinline, cold)) ami_sana2_driver_command(
            wires report AddrFieldSize 0 and get address mapping turned off. */
         nx_ip_interface_address_mapping_configure(
             ip_ptr, iface->index,
-            (iface->addr_bytes == AMI_ETH_ADDR_SIZE) ? NX_TRUE : NX_FALSE);
+#ifdef AMINETXDUO_PTP
+            (iface->addr_bytes == AMI_ETH_ADDR_SIZE && !iface->ptp)
+#else
+            (iface->addr_bytes == AMI_ETH_ADDR_SIZE)
+#endif
+                ? NX_TRUE : NX_FALSE);
 
 #ifdef AMINETXDUO_RX_VERIFY
         /*
@@ -651,10 +656,28 @@ static VOID __attribute__((noinline, cold)) ami_sana2_driver_command(
     case NX_LINK_ARP_SEND:
     case NX_LINK_ARP_RESPONSE_SEND:
     case NX_LINK_RARP_SEND:
+#ifdef AMINETXDUO_PTP
+        /* A gratuitous ARP after an address change reaches every interface;
+           a point-to-point link has no hardware address to announce, and
+           its driver refuses the packet type. */
+        if (iface->ptp &&
+            driver_req->nx_ip_driver_command != NX_LINK_PACKET_BROADCAST)
+        {
+            if (driver_req->nx_ip_driver_packet != NULL)
+                AMI_NX_CLEANUP(nx_packet_transmit_release(
+                                   driver_req->nx_ip_driver_packet));
+            break;
+        }
+#endif
         ami_sana2_driver_send(driver_req, iface);
         break;
 
     case NX_LINK_MULTICAST_JOIN:
+#ifdef AMINETXDUO_PTP
+        /* One peer and no groups: every datagram reaches it anyway. */
+        if (iface->ptp)
+            break;
+#endif
         if (ami_sana2_multicast(iface, S2_ADDMULTICASTADDRESS,
                                 driver_req->nx_ip_driver_physical_address_msw,
                                 driver_req->nx_ip_driver_physical_address_lsw)
@@ -670,6 +693,10 @@ static VOID __attribute__((noinline, cold)) ami_sana2_driver_command(
         break;
 
     case NX_LINK_MULTICAST_LEAVE:
+#ifdef AMINETXDUO_PTP
+        if (iface->ptp)
+            break;
+#endif
         (VOID)ami_sana2_multicast(iface, S2_DELMULTICASTADDRESS,
                                   driver_req->nx_ip_driver_physical_address_msw,
                                   driver_req->nx_ip_driver_physical_address_lsw);

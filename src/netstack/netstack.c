@@ -8,6 +8,7 @@
 #include "netstack_iptype.h"
 #include "netstack_slot.h"
 #include "netstack_mask.h"
+#include "aminetxduo/ptp.h"
 #ifdef AMINETXDUO_DHCP
 #include "netstack_dhcp_wire.h"
 #endif
@@ -387,6 +388,10 @@ static LONG ami_ns_open_devices(AmiNetStack *ns)
 
         ns->ns_IfaceMdns[opened] = cfg->mdns;
         ns->ns_Iface[opened] = ami_sana2_open(cfg, &status);
+#ifdef AMINETXDUO_PTP
+        if (ami_sana2_ptp(ns->ns_Iface[opened]))
+            ns->ns_IfaceMdns[opened] = FALSE;
+#endif
         if (ns->ns_Iface[opened] == NULL)
         {
             /* AMI_NET_ERR_RETAINED: recorded by src/sana2 already. */
@@ -805,6 +810,12 @@ static LONG ami_ns_create_ip(AmiNetStack *ns)
 
         addr = (cfg->iptype == AMI_IPTYPE_STATIC) ? cfg->address : 0UL;
         mask = (cfg->iptype == AMI_IPTYPE_STATIC) ? cfg->netmask : 0UL;
+#ifdef AMINETXDUO_PTP
+        /* Not mask 0, which makes every address on-link and can hand the
+           gateway set below to this interface. */
+        if (addr != 0UL && ami_sana2_ptp(ns->ns_Iface[kept]))
+            mask = ami_ns_static_netmask_ptp(mask, NX_TRUE);
+#endif
 
         status = nx_ip_interface_attach(&ns->ns_Ip, (CHAR *)cfg->name,
                                         addr, mask, ami_sana2_driver_entry);
@@ -890,7 +901,8 @@ static LONG ami_ns_create_ip(AmiNetStack *ns)
     if (ns->ns_IfaceCount != 0 && ns->ns_Config.default_gateway != 0UL)
     {
         status = nx_ip_gateway_address_set(&ns->ns_Ip,
-                                           ns->ns_Config.default_gateway);
+                                           AMI_PTP_NEXT_HOP(&ns->ns_Ip,
+                                               ns->ns_Config.default_gateway));
         if (status != NX_SUCCESS)
             AMI_WARN("netstack: gateway set failed (%ld)", (long)status);
     }
@@ -1499,8 +1511,15 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
          * address stopped waiting.  An interface with no address is now an
          * interface that says so, and does not count as resolved.
          */
+#ifdef AMINETXDUO_PTP
+        status = nx_ip_interface_address_set(&ns->ns_Ip, (UINT)i, cfg->address,
+                                             ami_ns_static_netmask_ptp(
+                                                 cfg->netmask,
+                                                 ami_sana2_ptp(ns->ns_Iface[i])));
+#else
         status = nx_ip_interface_address_set(&ns->ns_Ip, (UINT)i, cfg->address,
                                              ami_ns_static_netmask(cfg->netmask));
+#endif
         if (status != NX_SUCCESS)
         {
             ami_event(NETEVENT_ADDR_REFUSED, (UWORD)i, (ULONG)status);
@@ -1508,6 +1527,9 @@ static LONG ami_ns_configure_addresses(AmiNetStack *ns)
                       cfg->name, (long)status);
             continue;
         }
+#ifdef AMINETXDUO_PTP
+        ami_ptp_peer_route(&ns->ns_Ip, (UINT)i);
+#endif
 
         resolved = TRUE;
     }
@@ -3769,9 +3791,20 @@ static LONG ami_ns_interface_add_locked(const AmiIfConfig *cfg,
                                     (slot_cfg->iptype == AMI_IPTYPE_STATIC)
                                         ? slot_cfg->address : 0UL,
                                     (slot_cfg->iptype == AMI_IPTYPE_STATIC)
+#ifdef AMINETXDUO_PTP
+                                        ? ami_ns_static_netmask_ptp(
+                                              slot_cfg->netmask,
+                                              ami_sana2_ptp(iface))
+#else
                                         ? ami_ns_static_netmask(slot_cfg->netmask)
+#endif
                                         : 0UL,
                                     ami_sana2_driver_entry);
+
+#ifdef AMINETXDUO_PTP
+    if (status == NX_SUCCESS)
+        ami_ptp_peer_route(&ns->ns_Ip, (UINT)slot);
+#endif
 
     /*
      * The slot NetX Duo took must be the predicted one, because the driver binding
@@ -3829,7 +3862,11 @@ static LONG ami_ns_interface_add_locked(const AmiIfConfig *cfg,
      */
     ns->ns_IfaceMdns[slot] = FALSE;
 #ifdef AMINETXDUO_MDNS
+#ifdef AMINETXDUO_PTP
+    if (slot_cfg->mdns && !ami_sana2_ptp(iface))
+#else
     if (slot_cfg->mdns)
+#endif
         (VOID)ami_netstack_mdns_iface_set(ns, (UWORD)slot, TRUE);
 #endif
 

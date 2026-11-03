@@ -1196,11 +1196,21 @@ static void test_interface_keyword_aliases(void)
                    "destination=x\ndestinationaddr=x\ndestinationaddress=x\n");
     CHECK(ami_cfg_parse_interface("eth0", buf, &iface) == AMI_CFG_OK);
     CHECK(seen_count == 3);
+#ifdef AMINETXDUO_PTP
+    /* Read now: "x" is not an address under any of the three names. */
+    CHECK(strstr(seen[0].text, "DESTINATION") != NULL);
+    CHECK(strstr(seen[1].text, "DESTINATION") != NULL);
+    CHECK(strstr(seen[2].text, "DESTINATION") != NULL);
+    for (i = 0; i < 3; i++)
+        CHECK(seen[i].severity == AMI_CFG_PROBLEM_ERROR && seen[i].line == i + 3);
+    CHECK(iface.destination == 0UL);
+#else
     CHECK_STR(seen[0].text, "destination ignored: point-to-point links are not supported");
     CHECK_STR(seen[1].text, "destinationaddr ignored: point-to-point links are not supported");
     CHECK_STR(seen[2].text, "destinationaddress ignored: point-to-point links are not supported");
     for (i = 0; i < 3; i++)
         CHECK(seen[i].severity == AMI_CFG_PROBLEM_NOTE && seen[i].line == i + 3);
+#endif
     free(buf);
 
     for (i = 0; i < sizeof(suggestions) / sizeof(suggestions[0]); i++)
@@ -1383,6 +1393,71 @@ static void test_numeric_iptype_is_reported_inert(void)
     CHECK(strstr(ami_cfg_advice(AMI_CFG_ADVICE_IPTYPE_IS_EITHER_A),
                  "ignored") != NULL);
 }
+
+#ifdef AMINETXDUO_PTP
+/*
+ * POINTTOPOINT and DESTINATION.  The first file is the ptp0 that ships with
+ * the OpenVPN port's vpn.device (BETA2-AMITCP-NG/NetInterfaces/ptp0), byte
+ * for byte, AmiTCP's POINTOPOINT spelling included.
+ */
+static void test_interface_point_to_point(void)
+{
+    AmiIfConfig iface;
+    char       *buf;
+
+    printf("interface: POINTTOPOINT and DESTINATION\n");
+
+    seen_count = 0;
+    ami_config_set_reporter(collect, NULL);
+    ami_cfg_problem_file("DEVS:NetInterfaces/ptp0");
+    buf = dup_text("device=DEVS:Networks/vpn.device\n"
+                   "unit=0\n"
+                   "address=10.8.0.15\n"
+                   "destination=10.8.0.1\n"
+                   "netmask=255.255.255.255\n"
+                   "pointopoint=yes\n");
+    CHECK(ami_cfg_parse_interface("ptp0", buf, &iface) == AMI_CFG_OK);
+    CHECK(seen_count == 0);
+    CHECK_STR(iface.device, "DEVS:Networks/vpn.device");
+    CHECK_IP(iface.address, 10, 8, 0, 15);
+    CHECK_IP(iface.destination, 10, 8, 0, 1);
+    CHECK_IP(iface.netmask, 255, 255, 255, 255);
+    CHECK(iface.point_to_point == AMI_CFG_PTP_YES);
+    free(buf);
+
+    /* Roadshow's names: POINTTOPOINT, and DESTINATIONADDRESS as its alias. */
+    seen_count = 0;
+    buf = dup_text("device=ppp.device\n"
+                   "pointtopoint=no\n"
+                   "address=192.168.7.2\n"
+                   "destinationaddress=192.168.7.1\n");
+    CHECK(ami_cfg_parse_interface("ppp0", buf, &iface) == AMI_CFG_OK);
+    CHECK(seen_count == 0);
+    CHECK(iface.point_to_point == AMI_CFG_PTP_NO);
+    CHECK_IP(iface.destination, 192, 168, 7, 1);
+    free(buf);
+
+    /* Neither said: the wire type decides. */
+    seen_count = 0;
+    buf = dup_text("device=a2065.device\nconfigure=dhcp\n");
+    CHECK(ami_cfg_parse_interface("eth0", buf, &iface) == AMI_CFG_OK);
+    CHECK(iface.point_to_point == AMI_CFG_PTP_AUTO);
+    CHECK(iface.destination == 0UL);
+    free(buf);
+
+    /* A bad POINTTOPOINT is a warning that leaves the default. */
+    seen_count = 0;
+    buf = dup_text("device=ppp.device\npointtopoint=maybe\naddress=192.168.7.2\n");
+    CHECK(ami_cfg_parse_interface("ppp0", buf, &iface) == AMI_CFG_OK);
+    CHECK(seen_count == 1);
+    CHECK(seen[0].severity == AMI_CFG_PROBLEM_WARN && seen[0].line == 2);
+    CHECK(strstr(seen[0].text, "POINTTOPOINT") != NULL);
+    CHECK(iface.point_to_point == AMI_CFG_PTP_AUTO);
+    free(buf);
+
+    ami_config_set_reporter(NULL, NULL);
+}
+#endif
 
 static void test_inert_keywords_are_notes(void)
 {
@@ -5041,6 +5116,9 @@ int main(int argc, char **argv)
     test_interface_mode_aliases();
     test_numeric_iptype_is_reported_inert();
     test_inert_keywords_are_notes();
+#ifdef AMINETXDUO_PTP
+    test_interface_point_to_point();
+#endif
     test_request_counts_have_ceilings();
     test_interface_tcp_ack_max();
     test_interface_gro_frames();

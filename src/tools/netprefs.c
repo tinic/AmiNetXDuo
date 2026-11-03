@@ -186,6 +186,11 @@ static NetPrefs np = { .selected = -1, .live_state = NP_LIVE_UNKNOWN };
 static char np_address[16];
 static char np_netmask[16];
 static char np_gateway[16];
+#ifdef AMINETXDUO_PTP
+/* The file's DESTINATION: a gateway that names the peer is reached through
+   the link, whatever the netmask says. */
+static ULONG np_destination;
+#endif
 /* The name servers the form showed: name_resolution is written only when
    they are edited. */
 static char np_dns[NP_DNS_FIELDS][NP_TEXT_VALUE_LEN];
@@ -1125,6 +1130,9 @@ static VOID load_form(LONG index)
         return;
     }
     np.selected = index;
+#ifdef AMINETXDUO_PTP
+    np_destination = cfg.destination;
+#endif
     ami_config_format_ip(cfg.address, np_address, sizeof(np_address));
     ami_config_format_ip(cfg.netmask, np_netmask, sizeof(np_netmask));
     ami_config_format_ip(cfg.gateway, np_gateway, sizeof(np_gateway));
@@ -1357,6 +1365,9 @@ static BOOL save_form(BOOL apply)
             }
         }
         if (gateway != 0 && (gateway & mask) != (address & mask) &&
+#ifdef AMINETXDUO_PTP
+            gateway != np_destination &&
+#endif
             !confirm("Gateway is outside this interface's network. Save anyway?",
                      "Save"))
             return FALSE;

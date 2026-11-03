@@ -484,8 +484,22 @@ static VOID show_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
             tool_printf("  address     %-15s netmask %s (/%ld)\n",
                         (LONG)addr, (LONG)mask,
                         (LONG)tool_prefix_len(live->netmask));
+#ifdef AMINETXDUO_PTP
+            if (!live->ptp)
+#endif
             tool_printf("  broadcast   %s\n", (LONG)bcast);
         }
+#ifdef AMINETXDUO_PTP
+        /* Roadshow's "Peer address" line; there is no hardware address. */
+        if (live->ptp)
+        {
+            if (live->peer != 0UL)
+                ami_config_format_ip(live->peer, bcast, sizeof(bcast));
+            tool_printf("  peer        %s\n",
+                        (LONG)((live->peer != 0UL) ? bcast : "unknown"));
+        }
+        else
+#endif
         tool_printf("  hardware    %s\n", (LONG)mac);
         /* What is running, not what the file asked for: an interface whose
            responder refused to start reads "no" here. */

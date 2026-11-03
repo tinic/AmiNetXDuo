@@ -122,7 +122,9 @@ BUDGETS=(
     # 380,244 -> 380,304.
     # A ring whose reads the device refuses is retired, not re-posted in a
     # spin (#437): +32, 380,304 -> 380,336.
-    "default:src/bsdsocket/bsdsocket.library:380336"
+    # No directed broadcast on /31 and /32 (netxduo #43) and point-to-point
+    # interfaces, AMINETXDUO_PTP (#437): +1,960, 380,336 -> 382,296.
+    "default:src/bsdsocket/bsdsocket.library:382296"
     # 41,412 after stateless receive-checksum verification was added to the
     # EL3 and word/long NE2000 direct paths, 2026-09-15.  43,620 with
     # ANXD_CMD_RX_BATCH in the shell (claim, completion, staging copy, the
@@ -228,7 +230,9 @@ BUDGETS=(
     # REQUIRESINITDELAY waits its second: +12, 258,048 -> 258,060.
     # GSO header fields stored directly: +60, 258,060 -> 258,120.
     # A refused read retires its ring (#437): +32, 258,120 -> 258,152.
-    "minimal:src/bsdsocket/bsdsocket.library:258152"
+    # /31-/32 broadcast (netxduo #43) and AMINETXDUO_PTP (#437): +1,600,
+    # 258,152 -> 259,752.
+    "minimal:src/bsdsocket/bsdsocket.library:259752"
     # Combined with #438 on main: +16, 46,016 -> 46,032.
     "minimal:src/netdev/anxnet.device:46032"
     # 29,088 on e806188f after the audited device fixes.
@@ -265,7 +269,9 @@ BUDGETS=(
     # reply never signalling a removed Task (#383).
     # 210,824 with KILL not waiting for a last close's sb_Lock.
     # 210,832 with REQUIRESINITDELAY waiting its second.
-    "micro:src/bsdsocket/bsdsocket.library:210832"
+    # 212,048 with the /31-/32 broadcast fix (netxduo #43) and
+    # AMINETXDUO_PTP (#437).
+    "micro:src/bsdsocket/bsdsocket.library:212048"
     "micro:src/netdev/anxnet.device:46000"
     "micro:src/netdev/anxgenet.device:29120"
     "micro:src/wifipi/anxwifipi.device:56000"

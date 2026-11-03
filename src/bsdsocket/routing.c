@@ -7,6 +7,7 @@
 #include "aminetxduo/nxstatus.h"
 
 #include "aminetxduo/config.h"
+#include "aminetxduo/ptp.h"
 
 /* struct sockaddr_dl and IFT_ETHER, for the ARP entries below. */
 #include <net/if_dl.h>
@@ -187,7 +188,8 @@ LONG bsd_AddRouteTagList(register struct TagItem *tags __asm("a0"),
 
     if (req.brr_HaveDefault)
     {
-        status = nx_ip_gateway_address_set(ip, req.brr_Default);
+        status = nx_ip_gateway_address_set(ip, AMI_PTP_NEXT_HOP(ip,
+                                                   req.brr_Default));
         if (status == NX_SUCCESS)
             netstack_gateway_override_set(req.brr_Default);
     }
@@ -199,7 +201,8 @@ LONG bsd_AddRouteTagList(register struct TagItem *tags __asm("a0"),
                                             req.brr_DestKind);
 
             status = nx_ip_static_route_add(ip, req.brr_Dest, mask,
-                                            req.brr_Gateway);
+                                            AMI_PTP_NEXT_HOP(ip,
+                                                req.brr_Gateway));
             if (status == NX_SUCCESS)
                 netstack_config_route_added(req.brr_Dest, mask);
         }
@@ -255,7 +258,8 @@ LONG bsd_DeleteRouteTagList(register struct TagItem *tags __asm("a0"),
         ULONG installed = 0;
 
         if (nx_ip_gateway_address_get(ip, &installed) != NX_SUCCESS ||
-            installed == 0 || installed != req.brr_Default)
+            installed == 0 ||
+            installed != AMI_PTP_NEXT_HOP(ip, req.brr_Default))
         {
             bsd_nx_leave(SocketBase);
             return bsd_fail(SocketBase, AMI_ESRCH);
@@ -377,7 +381,8 @@ LONG bsd_ChangeRouteTagList(register struct TagItem *tags __asm("a0"),
         /* One assignment of address and interface together, under the IP mutex
            with interrupts off (nx_ip_gateway_address_set.c). No window in
            which the machine has no default route. */
-        status = nx_ip_gateway_address_set(ip, req.brr_Default);
+        status = nx_ip_gateway_address_set(ip, AMI_PTP_NEXT_HOP(ip,
+                                                   req.brr_Default));
         if (status == NX_SUCCESS)
             netstack_gateway_override_set(req.brr_Default);
     }
@@ -397,12 +402,14 @@ LONG bsd_ChangeRouteTagList(register struct TagItem *tags __asm("a0"),
         }
 
         was = entry->nx_ip_routing_entry_ip_interface;
-        now = bsd_route_nx_iface_for(ip, req.brr_Gateway);
+        now = bsd_route_nx_iface_for(ip, AMI_PTP_NEXT_HOP(ip,
+                                             req.brr_Gateway));
 
         if (now == was || now == NX_NULL)
         {
             status = nx_ip_static_route_add(ip, req.brr_Dest, mask,
-                                            req.brr_Gateway);
+                                            AMI_PTP_NEXT_HOP(ip,
+                                                req.brr_Gateway));
         }
         else
         {
@@ -418,7 +425,8 @@ LONG bsd_ChangeRouteTagList(register struct TagItem *tags __asm("a0"),
             status = nx_ip_static_route_delete(ip, req.brr_Dest, mask);
             if (status == NX_SUCCESS)
                 status = nx_ip_static_route_add(ip, req.brr_Dest, mask,
-                                                req.brr_Gateway);
+                                                AMI_PTP_NEXT_HOP(ip,
+                                                    req.brr_Gateway));
         }
         if (status == NX_SUCCESS)
             netstack_config_route_added(req.brr_Dest, mask);
@@ -720,7 +728,8 @@ static UWORD bsd_route_fill(NX_IP *ip, BsdRouteTable *table, LONG want_flags)
                                e->nx_ip_routing_next_hop_address), 0,
                            e->nx_ip_routing_dest_ip,
                            e->nx_ip_routing_net_mask,
-                           e->nx_ip_routing_next_hop_address))
+                           AMI_PTP_SHOWN_HOP(ip,
+                               e->nx_ip_routing_next_hop_address)))
             used++;
     }
 #endif
@@ -729,7 +738,8 @@ static UWORD bsd_route_fill(NX_IP *ip, BsdRouteTable *table, LONG want_flags)
     {
         if (bsd_route_emit(&table->brt_Entry[used], want_flags,
                            RTF_UP | RTF_GATEWAY,
-                           bsd_route_iface_for(ip, gateway), 0, 0, 0, gateway))
+                           bsd_route_iface_for(ip, gateway), 0, 0, 0,
+                           AMI_PTP_SHOWN_HOP(ip, gateway)))
             used++;
     }
 

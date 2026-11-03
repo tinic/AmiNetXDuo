@@ -1712,3 +1712,40 @@ UINT _txe_timer_delete(TX_TIMER *timer_ptr)
 
     return TX_SUCCESS;
 }
+
+#ifdef AMINETXDUO_PTP
+/* netstack_ptp.c's host route goes; no env interface ever made one. */
+UINT _nxe_ip_static_route_delete(NX_IP *ip_ptr, ULONG network_address,
+                                 ULONG net_mask)
+{
+    (VOID)ip_ptr;
+    (VOID)network_address;
+    (VOID)net_mask;
+    return NX_NOT_SUCCESSFUL;
+}
+
+/* No interface the env opens is point-to-point. */
+UINT ami_sana2_ptp(const AmiSana2If *iface)
+{
+    (VOID)iface;
+    return NX_FALSE;
+}
+
+ULONG ami_sana2_ptp_peer(const AmiSana2If *iface)
+{
+    (VOID)iface;
+    return 0UL;
+}
+
+ULONG ami_sana2_ptp_routed(const AmiSana2If *iface)
+{
+    (VOID)iface;
+    return 0UL;
+}
+
+VOID ami_sana2_set_ptp_routed(AmiSana2If *iface, ULONG peer)
+{
+    (VOID)iface;
+    (VOID)peer;
+}
+#endif

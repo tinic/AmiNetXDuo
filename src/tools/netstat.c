@@ -160,8 +160,22 @@ static VOID show_interfaces(const AmiConfig *cfg, const ToolSnapshot *snap)
                         (LONG)"-", (LONG)"-", (LONG)"-", (LONG)"-");
         }
 
+#ifdef AMINETXDUO_PTP
+        if (info->ptp)
+        {
+            ami_config_format_ip(info->peer, addr, sizeof(addr));
+            tool_printf("        peer %s\n",
+                        (LONG)((info->peer != 0UL) ? addr : "unknown"));
+        }
+        else
+        {
+            tool_format_mac(info->mac, mac, sizeof(mac));
+            tool_printf("        hardware %s\n", (LONG)mac);
+        }
+#else
         tool_format_mac(info->mac, mac, sizeof(mac));
         tool_printf("        hardware %s\n", (LONG)mac);
+#endif
 
         show_addresses6(snap, info->nx_index);
         tool_print_lease6(lease6, info->nx_index, "        lease6 ");

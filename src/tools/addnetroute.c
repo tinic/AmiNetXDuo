@@ -474,6 +474,15 @@ static BOOL gateway_is_reachable(struct Library *base, ULONG addr)
 
         if ((nsi->nsi_Address & nsi->nsi_NetMask) == (addr & nsi->nsi_NetMask))
             return TRUE;
+#ifdef AMINETXDUO_PTP
+        /* The other end of a point-to-point link is reached through it. */
+        if ((nsi->nsi_Flags & NETSTATUS_IF_PTP) != 0 && addr != 0UL &&
+            (((ULONG)nsi->nsi_HwAddress[0] << 24) |
+             ((ULONG)nsi->nsi_HwAddress[1] << 16) |
+             ((ULONG)nsi->nsi_HwAddress[2] << 8) |
+             (ULONG)nsi->nsi_HwAddress[3]) == addr)
+            return TRUE;
+#endif
     }
 
     return FALSE;
@@ -1064,6 +1073,17 @@ static int addnetroute_main(int argc, char **argv)
             FreeArgs(rda);
             return RETURN_ERROR;
         }
+
+        /*
+         * DESTINATION=0.0.0.0 is the default route, whichever gateway it
+         * has: AmiTCP's DeleteNetRoute reads it so, and the OpenVPN port's
+         * AmiTCP-NG scripts delete the default route that way.
+         */
+        if (dest == 0UL && (!have_mask || mask == 0UL))
+        {
+            have_default = TRUE;
+            gateway      = 0UL;
+        }
 #else
         if (args[ARG_HOSTDST] != 0)
         {
@@ -1165,6 +1185,13 @@ static int addnetroute_main(int argc, char **argv)
             tool_netstatus_close(base);
             FreeArgs(rda);
             return RETURN_ERROR;
+        }
+
+        /* DESTINATION=0.0.0.0: the one there is. */
+        if (gateway == 0UL)
+        {
+            gateway = live_gw;
+            ami_config_format_ip(gateway, text, sizeof(text));
         }
 
         if (live_gw != gateway)

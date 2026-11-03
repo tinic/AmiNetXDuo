@@ -711,6 +711,17 @@ if(AMINETXDUO_ROUTING)
     add_compile_definitions(AMINETXDUO_ROUTING)
 endif()
 
+# Point-to-point SANA-II interfaces (#437): a PPP, SLIP, CSLIP or PLIP wire,
+# or POINTTOPOINT=YES, carries raw IPv4 with no link header, no ARP and no
+# IPv6, and DESTINATION= names the other end.  vpn.device, the OpenVPN
+# port's tunnel, is one.  Off, POINTTOPOINT and DESTINATION are read and
+# dropped with a note, as before, and nothing is defined: the compile lines,
+# and so the images, are the ones the tree built before the option existed.
+option(AMINETXDUO_PTP "Build point-to-point interface support" ON)
+if(AMINETXDUO_PTP)
+    add_compile_definitions(AMINETXDUO_PTP)
+endif()
+
 # getaddrinfo(), getnameinfo(), freeaddrinfo() and gai_strerror(): POSIX's
 # protocol-independent name lookup.  Four vectors and no caller inside the
 # library, which is what makes it separable at all.

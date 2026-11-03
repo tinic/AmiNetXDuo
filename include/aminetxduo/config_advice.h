@@ -72,5 +72,8 @@
 #define AMI_CFG_ADVICE_GROFRAMES_IS_FRAMES               57
 #define AMI_CFG_ADVICE_ACKPACE_IS_KBPS                   58
 #define AMI_CFG_ADVICE_LINKSPEED_IS_AUTO_OR_10           59
+#ifdef AMINETXDUO_PTP
+#define AMI_CFG_ADVICE_POINTTOPOINT_IS_YES               60
+#endif
 
 #endif /* AMINETXDUO_CONFIG_ADVICE_H */

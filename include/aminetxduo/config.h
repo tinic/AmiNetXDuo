@@ -303,7 +303,23 @@ typedef struct AmiIfConfig {
     BOOL        have_gateway6;
     /* LINKSPEED=10 limits advertised modes; 0 (AUTO) keeps driver defaults. */
     ULONG       link_speed;
+#ifdef AMINETXDUO_PTP
+    /*
+     * POINTTOPOINT= and DESTINATION=.  Roadshow decides point-to-point from
+     * the driver's wire type and so do we; YES makes a driver with no
+     * Ethernet address one as well.  DESTINATION is the peer, host byte
+     * order, 0 unset.
+     */
+    UBYTE       point_to_point;              /* AMI_CFG_PTP_*                    */
+    ULONG       destination;
+#endif
 } AmiIfConfig;
+
+#ifdef AMINETXDUO_PTP
+#define AMI_CFG_PTP_AUTO    0               /* the wire type decides            */
+#define AMI_CFG_PTP_YES     1
+#define AMI_CFG_PTP_NO      2
+#endif
 
 /*
  * Does this interface expect an IPv4 address, and does it expect an IPv6 one.

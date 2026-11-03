@@ -1138,6 +1138,14 @@ struct AmiSana2If
     ULONG               hw_type;
     UWORD               addr_bits;
     UWORD               addr_bytes;     /* 6 for Ethernet, 0 if addressless */
+#ifdef AMINETXDUO_PTP
+    /* A point-to-point link (ami_sana2_ptp_wire): IPv4 alone, no link
+       header, no address mapping.  ptp_peer is the other end, host byte
+       order, 0 unknown; ptp_routed the peer the host route was made for. */
+    BOOL                ptp;
+    ULONG               ptp_peer;
+    ULONG               ptp_routed;
+#endif
 
     BOOL                online;
     /*

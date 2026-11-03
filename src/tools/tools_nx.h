@@ -32,6 +32,12 @@ VOID tool_nx_quiet(BOOL quiet);
    interface, with room to see a third arrive. */
 #define TOOL_MAX_ADDR6  (TOOL_MAX_IF * 3)
 
+#ifdef AMINETXDUO_PTP
+/* The peer a NETSTATUS_IF_PTP row carries in its hardware address, 0 for
+   any other row. */
+ULONG tool_nsi_peer(const NetStatusInterface *nsi);
+#endif
+
 typedef struct ToolIfInfo
 {
     UWORD           nx_index;
@@ -54,6 +60,11 @@ typedef struct ToolIfInfo
     ULONG           nx_unit;
     /* From the SANA-II shim, when the interface has one attached. */
     BOOL            have_sana2;
+#ifdef AMINETXDUO_PTP
+    /* A point-to-point link and its peer (NETSTATUS_IF_PTP), 0 unknown. */
+    BOOL            ptp;
+    ULONG           peer;
+#endif
     BOOL            sana2_online;
     ULONG           bps;
     AmiSana2Stats   stats;
