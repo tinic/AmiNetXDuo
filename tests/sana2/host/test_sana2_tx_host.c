@@ -1033,6 +1033,55 @@ static void test_no_pad_off_ethernet(void)
             "and its length is the frame's, unpadded");
 }
 
+#ifdef AMINETXDUO_PTP
+/* vpn.device's shape: PPP, four address bytes, cooked.  IPv6 goes as IPv4
+   does: the bare datagram, type 0x86DD, no destination address. */
+static void test_ptp_ipv6_goes_bare(void)
+{
+    static UCHAR v6[48];
+    ULONG        i;
+    int          zero = 1;
+
+    printf("sana2: IPv6 onto a point-to-point link is the bare datagram\n");
+
+    for (i = 0; i < sizeof(v6); i++)
+        v6[i] = (UCHAR)(i + 3);
+    v6[0] = 0x60;                           /* IPv6                         */
+    v6[4] = 0;  v6[5] = 8;                  /* payload length               */
+    v6[6] = 59;                             /* no next header               */
+
+    fixture_init(FALSE, S2WireType_PPP);
+    iface.addr_bytes = 4;
+    iface.ptp        = TRUE;
+    packet_init(v6, (ULONG)sizeof(v6));
+
+    /* An address NetX Duo would never hand a link without mapping, so a
+       zero below is the shim's doing. */
+    h_check(ami_sana2_tx_send(&iface, &pkt, AMI_ETHERTYPE_IPV6, 0xAABB,
+                              0xCCDDEEFF) == NX_SUCCESS,
+            "ptp: the IPv6 write is posted");
+    h_check(sent_req()->ios2_PacketType == AMI_ETHERTYPE_IPV6,
+            "ptp: with packet type 0x86DD");
+    h_check((sent_req()->ios2_Req.io_Flags & SANA2IOF_RAW) == 0,
+            "ptp: cooked, the high type notwithstanding");
+    for (i = 0; i < SANA2_MAX_ADDR_BYTES; i++)
+        if (sent_req()->ios2_DstAddr[i] != 0)
+            zero = 0;
+    h_check(zero, "ptp: and the destination address zeroed");
+    h_check(sent_req()->ios2_DataLength == sizeof(v6),
+            "ptp: its length is the datagram's, no header, no pad");
+    h_check(device_copy() == TRUE &&
+            memcmp(devbuf, v6, sizeof(v6)) == 0,
+            "ptp: the device copies the datagram from its version byte");
+
+    h_reply();
+    ami_sana2_tx_reap(&iface);
+    h_check(pkt.nx_packet_length == sizeof(v6) &&
+            pkt.nx_packet_prepend_ptr == pool + NX_PHYSICAL_HEADER,
+            "ptp: and the packet goes back as it came");
+}
+#endif
+
 /* A reply arriving during the final permitted sleep is still inside the
    drain deadline.  It must be reaped before the interface is declared unsafe
    to free. */
@@ -3281,6 +3330,9 @@ int main(void)
     test_raw_refused_falls_back_to_cooked();
     test_no_pad_when_long_enough();
     test_no_pad_off_ethernet();
+#ifdef AMINETXDUO_PTP
+    test_ptp_ipv6_goes_bare();
+#endif
     test_drain_reaps_final_sleep();
 
 #ifdef AMINETXDUO_TCP_GSO
