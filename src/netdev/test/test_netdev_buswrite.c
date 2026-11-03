@@ -135,6 +135,7 @@ static void arena_fill(void)
 #define FORM_WORD  1        /* host word loads, even source */
 #define FORM_PACK  2        /* explicit big-endian pack, odd source */
 #define FORM_LONG  3
+#define FORM_LEAD  4        /* one host word, then the long form at src+2 */
 
 static unsigned exp_n;
 static struct { unsigned char width; unsigned long value; } exp_wire[WIRE_MAX];
@@ -160,6 +161,14 @@ static void expect_build(const UBYTE *src, UWORD len, int form)
         for (k = 0; k < len; k++)
             exp_put(1, src[k]);
         return;
+    }
+
+    if (form == FORM_LEAD)
+    {
+        exp_put(2, (unsigned long)*(const UWORD *)(const void *)src);
+        src += 2;
+        len = (UWORD)(len - 2);
+        form = FORM_LONG;
     }
 
     if (form == FORM_LONG)
@@ -220,19 +229,22 @@ static unsigned wire_bytes(void)
 }
 
 /* Which form the contract says this call must take. */
+/* odd: 0 longword source, 1 odd source, 2 a source at 2 mod 4. */
 static int form_for(int dmode, int odd, UWORD len, int have_wide)
 {
     if (dmode == NETDEV_DMODE_BYTE)
         return FORM_BYTE;
-    if (dmode == NETDEV_DMODE_LONG && have_wide && !odd && len >= 4)
+    if (dmode == NETDEV_DMODE_LONG && have_wide && odd == 2 && len >= 6)
+        return FORM_LEAD;
+    if (dmode == NETDEV_DMODE_LONG && have_wide && odd == 0 && len >= 4)
         return FORM_LONG;
-    return odd ? FORM_PACK : FORM_WORD;
+    return (odd == 1) ? FORM_PACK : FORM_WORD;
 }
 
 static void one(const char *label, int dmode, int odd, UWORD len)
 {
     NetdevBus    bus;
-    const UBYTE *src = arena.b + (odd ? 1 : 0);
+    const UBYTE *src = arena.b + odd;
     char         what[160];
     int          have_wide = (dmode == NETDEV_DMODE_LONG);
     int          form;
@@ -354,6 +366,15 @@ static void test_long_window(void)
     for (i = 0; i < (UWORD)(sizeof(lens) / sizeof(lens[0])); i++)
         one("long window, odd source falls back", NETDEV_DMODE_LONG, 1,
             lens[i]);
+
+    /* A frame staged at tx_phase 2 leads in with one word and bursts the
+       rest from a longword; under six bytes it is the word form. */
+    for (i = 0; i < (UWORD)(sizeof(lens) / sizeof(lens[0])); i++)
+        if ((lens[i] & 1u) == 0)
+            one("long window, source at 2 mod 4", NETDEV_DMODE_LONG, 2,
+                lens[i]);
+    for (i = 0; i < (UWORD)(sizeof(lens) / sizeof(lens[0])); i++)
+        one("word port, source at 2 mod 4", NETDEV_DMODE_WORD, 2, lens[i]);
 }
 
 /*

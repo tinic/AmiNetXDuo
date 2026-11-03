@@ -1377,6 +1377,7 @@ static LONG ne2000_attach(NetdevNic *nic)
     nic->ring_copy_sum = ne2000_ring_copy_sum;
     nic->frame_at  = NULL;   /* a port has no address to hand out */
     nic->write_buf = ne2000_write_buf;
+    nic->tx_phase  = 2;      /* bus_wdata() leads in with one word */
 
     ne2000_probe_wide(nic);
     nic->rx_flags_supported = (UBYTE)(

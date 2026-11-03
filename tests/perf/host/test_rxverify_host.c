@@ -825,6 +825,11 @@ ULONG   v6_bits = NX_INTERFACE_CAPABILITY_TCP_RX_CHECKSUM;
     frame = build_v6(v6_payload, NX_PROTOCOL_TCP);
     both("v6 clean", buf6, frame, frame, NX_FALSE, v6_bits);
 
+    /* The same frame off a longword boundary reads its addresses a byte at
+       a time and reaches the same verdict. */
+    memmove(buf6 + 2, buf6, frame);
+    both("v6 clean, unaligned", buf6 + 2, frame, frame, NX_FALSE, v6_bits);
+
     /* No IPv6 header checksum exists, so a corrupted address is caught by the
        pseudo header and nowhere else.  It must still be caught. */
     frame = build_v6(v6_payload, NX_PROTOCOL_TCP);

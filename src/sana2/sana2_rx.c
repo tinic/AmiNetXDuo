@@ -1329,15 +1329,27 @@ typedef struct AmiSana2GroKey
     UBYTE version;
 } AmiSana2GroKey;
 
+/* Direct loads on the 68k: every frame here comes from a slot armed by
+   ami_sana2_rx_arm(), so the IP and TCP headers are longword-aligned (the
+   assertions above it).  The host tier is little-endian and reads bytes, as
+   N68K_RDW16/N68K_RDW32 do in src/net68k/n68k_rx_verify.c. */
 static UWORD ami_sana2_gro_be16(const UCHAR *p)
 {
+#if defined(__mc68000__) || defined(__m68k__)
+    return *(const UWORD *)(CONST_APTR)p;
+#else
     return (UWORD)(((UWORD)p[0] << 8) | p[1]);
+#endif
 }
 
 static ULONG ami_sana2_gro_be32(const UCHAR *p)
 {
+#if defined(__mc68000__) || defined(__m68k__)
+    return *(const ULONG *)(CONST_APTR)p;
+#else
     return ((ULONG)ami_sana2_gro_be16(p) << 16) |
            ami_sana2_gro_be16(p + 2);
+#endif
 }
 
 /*

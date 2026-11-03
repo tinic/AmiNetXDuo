@@ -155,7 +155,9 @@ static struct IOSana2Req read_b;
 /* The link header lands in front of what RX_DIRECT answers, so the fixture
    has to have something in front of it to land in.  direct_area is the whole
    allocation; direct_buffer is the payload the hook returns. */
-static UBYTE direct_area[NETDEV_HDR_LEN + NETDEV_MTU];
+static ULONG direct_store[(NETDEV_HDR_LEN + NETDEV_MTU + 3) / 4 + 1];
+static unsigned direct_shift;     /* the payload's phase, for the header test */
+#define direct_area   ((UBYTE *)direct_store + direct_shift)
 #define direct_buffer (direct_area + NETDEV_HDR_LEN)
 static UBYTE data_cookie;
 
@@ -203,7 +205,7 @@ static void reset_fixture(void)
     memset(&unit, 0, sizeof(unit));
     memset(&read_a, 0, sizeof(read_a));
     memset(&read_b, 0, sizeof(read_b));
-    memset(direct_area, 0, sizeof(direct_area));
+    memset(direct_store, 0, sizeof(direct_store));
     NewList(&unit.nu_OpenerList);
     NewList(&unit.nu_Writes);
 
@@ -303,6 +305,37 @@ static void test_link_header(void)
     }
 }
 
+
+/* The header copy at every destination phase and both even header phases
+   (the claim reads the type as a word): 2 mod 4 on both is the aligned
+   word-and-longwords form, the rest the plain copy. */
+static void test_link_header_every_phase(void)
+{
+    static ULONG hstore[(NETDEV_HDR_LEN + 8) / 4];
+    unsigned     dshift, hshift;
+    APTR         token;
+    UBYTE       *hdr;
+    int          bad = 0;
+
+    for (dshift = 0; dshift < 4; dshift++)
+        for (hshift = 0; hshift < 4; hshift += 2)
+        {
+            reset_fixture();
+            direct_shift = dshift;
+            hdr = (UBYTE *)hstore + hshift;
+            make_header(hdr, 0x0800);
+            queue_read(&opener_a, &read_a, 0x0800);
+            opener_a.op_RxLinkHdr = TRUE;
+            token = NULL;
+            if (netdev_rx_claim(&unit, hdr, 60, &token, NULL) != direct_buffer ||
+                memcmp(direct_buffer - NETDEV_HDR_LEN, hdr, NETDEV_HDR_LEN) != 0)
+                bad++;
+            if (token != NULL)
+                netdev_rx_claimed(&unit, token, 0, 0);
+        }
+    direct_shift = 0;
+    expect_u32("link header: every phase of both ends", (unsigned long)bad, 0);
+}
 
 static void test_claim_complete(void)
 {
@@ -747,6 +780,7 @@ int main(void)
     test_batch_counts_as_one_taker();
     test_claim_complete();
     test_link_header();
+    test_link_header_every_phase();
     test_raw_request_restored();
     test_declines_unsafe_claims();
     test_other_type_does_not_block();
