@@ -246,7 +246,7 @@ static VOID ami_ns6_configure_interface(AmiNetStack *ns, UWORD i)
     }
 
 #ifdef AMINETXDUO_PTP
-    /* A link-local and nothing else yet: netstack_ptp.c has the why. */
+    /* A link-local and nothing else yet: netstack_ptp6.c has the why. */
     if (ami_sana2_ptp(ns->ns_Iface[i]))
     {
         status = ami_ptp_ipv6_start(&ns->ns_Ip, (UINT)i);

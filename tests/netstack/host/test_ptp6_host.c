@@ -3,7 +3,7 @@
  *
  * The LAN card in slot 0 and an OpenVPN tunnel in slot 1, no MAC and no
  * address mapping, as sana2_driver.c attaches vpn.device.
- * ami_ptp_ipv6_start() against the real nxd_ipv6_address_set(), stateless
+ * netstack_ptp6.c against the real nxd_ipv6_address_set(), stateless
  * autoconfiguration switch, _nx_icmpv6_perform_DAD() and
  * _nx_ipv6_packet_send(): the tunnel gets a link-local of its own, detects
  * nothing, solicits no router and resolves no address; the LAN card is
@@ -149,7 +149,7 @@ UINT _nx_packet_transmit_release(NX_PACKET *packet_ptr)
     return NX_SUCCESS;
 }
 
-/* ---------------------------------------- the SANA-II side, as recorded -- */
+/* ----------------------------------------------- the SANA-II side -- */
 
 struct AmiSana2If
 {
@@ -157,27 +157,6 @@ struct AmiSana2If
     ULONG peer;
     ULONG routed;
 };
-
-UINT ami_sana2_ptp(const AmiSana2If *iface)
-{
-    return (iface != NULL) ? iface->ptp : NX_FALSE;
-}
-
-ULONG ami_sana2_ptp_peer(const AmiSana2If *iface)
-{
-    return (iface != NULL && iface->ptp) ? iface->peer : 0UL;
-}
-
-ULONG ami_sana2_ptp_routed(const AmiSana2If *iface)
-{
-    return (iface != NULL) ? iface->routed : 0UL;
-}
-
-VOID ami_sana2_set_ptp_routed(AmiSana2If *iface, ULONG peer)
-{
-    if (iface != NULL)
-        iface->routed = peer;
-}
 
 /* What reached the driver, the last time anything did. */
 static unsigned     h_sent;

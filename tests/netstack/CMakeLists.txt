@@ -421,17 +421,13 @@ if(NOT CMAKE_CROSSCOMPILING)
         add_test(NAME ptp COMMAND test_ptp)
     endif()
 
-    # IPv6 on a point-to-point interface: netstack_ptp.c's link-local against
+    # IPv6 on a point-to-point interface: netstack_ptp6.c's link-local against
     # the real address set, DAD pass and send path, beside an Ethernet card.
     if(AMINETXDUO_PTP AND AMINETXDUO_IPV6)
         set(_n "${AMINETXDUO_NETXDUO}/common/src")
         add_executable(test_ptp6
             host/test_ptp6_host.c
-            "${CMAKE_SOURCE_DIR}/src/netstack/netstack_ptp.c"
-            "${_n}/nx_ip_static_route_add.c"
-            "${_n}/nx_ip_static_route_delete.c"
-            "${_n}/nxe_ip_static_route_add.c"
-            "${_n}/nxe_ip_static_route_delete.c"
+            "${CMAKE_SOURCE_DIR}/src/netstack/netstack_ptp6.c"
             "${_n}/nxd_ipv6_address_set.c"
             "${_n}/nxde_ipv6_address_set.c"
             "${_n}/nxd_ipv6_stateless_address_autoconfig_disable.c"
