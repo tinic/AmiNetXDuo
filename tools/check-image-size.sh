@@ -124,7 +124,9 @@ BUDGETS=(
     # spin (#437): +32, 380,304 -> 380,336.
     # No directed broadcast on /31 and /32 (netxduo #43) and point-to-point
     # interfaces, AMINETXDUO_PTP (#437): +1,960, 380,336 -> 382,296.
-    "default:src/bsdsocket/bsdsocket.library:382296"
+    # IPv6 link-local on a point-to-point link, no DAD and no router
+    # solicitation (#437): +312, 382,296 -> 382,608.
+    "default:src/bsdsocket/bsdsocket.library:382608"
     # 41,412 after stateless receive-checksum verification was added to the
     # EL3 and word/long NE2000 direct paths, 2026-09-15.  43,620 with
     # ANXD_CMD_RX_BATCH in the shell (claim, completion, staging copy, the
