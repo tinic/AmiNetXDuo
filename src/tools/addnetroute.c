@@ -901,8 +901,8 @@ static LONG run_ipv6(const LONG *args, BOOL have_default)
     }
 
 #ifdef AMINETXDUO_PTP
-    /* DESTINATION=::, the default route that is carrying traffic, as
-       DESTINATION=0.0.0.0 is for IPv4. */
+    /* DESTINATION=::, the default route added by hand, as DESTINATION=0.0.0.0
+       is for IPv4.  One learnt from an advertisement is left alone. */
     if ((via.addr[0] | via.addr[1] | via.addr[2] | via.addr[3]) == 0UL &&
         (!via.have_prefix || via.prefix == 0UL))
     {
@@ -912,12 +912,14 @@ static LONG run_ipv6(const LONG *args, BOOL have_default)
         LONG i;
 
         for (i = 0; i < n; i++)
-            if (nr_answer.route6.e[i].nsr6_Flags & NETSTATUS_RT6_GATEWAY)
+            if ((nr_answer.route6.e[i].nsr6_Flags &
+                 (NETSTATUS_RT6_GATEWAY | NETSTATUS_RT6_STATIC)) ==
+                (NETSTATUS_RT6_GATEWAY | NETSTATUS_RT6_STATIC))
                 break;
 
         if (i >= n)
         {
-            tool_error("there is no default route to remove");
+            tool_error("no static default route");
             tool_netstatus_close(base);
             return RETURN_ERROR;
         }

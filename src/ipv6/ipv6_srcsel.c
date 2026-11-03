@@ -368,6 +368,24 @@ NX_IPV6_DEFAULT_ROUTER_ENTRY *best = NX_NULL;
 
     return best;
 }
+
+NX_IPV6_DEFAULT_ROUTER_ENTRY *anx6_static_default_router(NX_IP *ip_ptr)
+{
+UINT i;
+
+    for (i = 0; i < NX_IPV6_DEFAULT_ROUTER_TABLE_SIZE; i++)
+    {
+    NX_IPV6_DEFAULT_ROUTER_ENTRY *rt = &ip_ptr -> nx_ipv6_default_router_table[i];
+
+        if ((rt -> nx_ipv6_default_router_entry_flag & NX_IPV6_ROUTE_TYPE_VALID) &&
+            (rt -> nx_ipv6_default_router_entry_flag & NX_IPV6_ROUTE_TYPE_STATIC))
+        {
+            return rt;
+        }
+    }
+
+    return NX_NULL;
+}
 #endif /* AMINETXDUO_PTP */
 
 static NX_INTERFACE *anx6_outgoing_interface(NX_IP *ip_ptr, const ULONG *dest)
