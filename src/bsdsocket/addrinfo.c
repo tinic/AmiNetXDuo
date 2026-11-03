@@ -330,19 +330,20 @@ static VOID bsd_gai_append(struct addrinfo **head, struct addrinfo **tail,
     *tail = &node->ai;
 }
 
-/*
- * Register assignment comes from the NDK pragma, not from the C prototype.
- *
- *   pragmas/bsdsocket_pragmas.h:139  freeaddrinfo(a0)
- *   pragmas/bsdsocket_pragmas.h:140  getaddrinfo(a0,a1,a2,a3)
- *   pragmas/bsdsocket_pragmas.h:141  gai_strerror(a0)      <-- not d0
- *   pragmas/bsdsocket_pragmas.h:142  getnameinfo(a0,d0,a1,d1,a2,d2,d3)
- */
+#ifdef AMINETXDUO_IPV6
+/* The lookup, in AF_INET6 == 28; bsd_getaddrinfo() below translates. */
+static LONG bsd_gai_lookup(STRPTR nodename, STRPTR servname,
+                           const struct addrinfo *hints,
+                           struct addrinfo **res,
+                           struct AmiSocketBase *SocketBase)
+#else
+/* pragmas/bsdsocket_pragmas.h:140  getaddrinfo(a0,a1,a2,a3) */
 LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
                      register STRPTR servname         __asm("a1"),
                      register struct addrinfo *hints  __asm("a2"),
                      register struct addrinfo **res   __asm("a3"),
                      register struct AmiSocketBase *SocketBase __asm("a6"))
+#endif
 {
     struct addrinfo *head = NULL;
     struct addrinfo *tail = NULL;
@@ -643,6 +644,63 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
     return verdict;
 }
 
+/*
+ * Register assignment comes from the NDK pragma, not from the C prototype.
+ *
+ *   pragmas/bsdsocket_pragmas.h:139  freeaddrinfo(a0)
+ *   pragmas/bsdsocket_pragmas.h:140  getaddrinfo(a0,a1,a2,a3)
+ *   pragmas/bsdsocket_pragmas.h:141  gai_strerror(a0)      <-- not d0
+ *   pragmas/bsdsocket_pragmas.h:142  getnameinfo(a0,d0,a1,d1,a2,d2,d3)
+ *
+ * The getaddrinfo() family is translated here: hints in BSD_AF_INET6_23
+ * are looked up as AF_INET6, and the IPv6 results go back in 23 for those
+ * hints, or for no family once the opener has used 23 (sb_Fam23).
+ */
+#ifdef AMINETXDUO_IPV6
+LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
+                     register STRPTR servname         __asm("a1"),
+                     register struct addrinfo *hints  __asm("a2"),
+                     register struct addrinfo **res   __asm("a3"),
+                     register struct AmiSocketBase *SocketBase __asm("a6"))
+{
+    struct addrinfo  copy;
+    struct addrinfo *ai;
+    BOOL             as23 = (BOOL)(SocketBase->sb_Fam23 != 0);
+    LONG             rc;
+
+    if (hints != NULL && hints->ai_family == BSD_AF_INET6_23)
+    {
+        bsd_bcopy(hints, &copy, sizeof(copy));
+        copy.ai_family = (int)bsd_af_in(SocketBase, BSD_AF_INET6_23);
+        hints = &copy;
+        as23  = TRUE;
+    }
+    else if (hints != NULL && hints->ai_family == AF_INET6)
+    {
+        as23 = FALSE;
+    }
+
+    rc = bsd_gai_lookup(nodename, servname, hints, res, SocketBase);
+
+    if (rc == 0 && as23)
+    {
+        for (ai = *res; ai != NULL; ai = ai->ai_next)
+        {
+            if (ai->ai_family == AF_INET6)
+            {
+                UBYTE *b = (UBYTE *)ai->ai_addr;
+
+                ai->ai_family = BSD_AF_INET6_23;
+                b[0] = BSD_AF_INET6_23;         /* their sin6_family */
+                b[1] = BSD_AF_INET6_23;         /* their sa_family   */
+            }
+        }
+    }
+
+    return rc;
+}
+#endif
+
 VOID bsd_freeaddrinfo(register struct addrinfo *ai __asm("a0"),
                       register struct AmiSocketBase *SocketBase __asm("a6"))
 {
@@ -751,7 +809,7 @@ LONG bsd_getnameinfo(register struct sockaddr *sa __asm("a0"),
                           NI_NAMEREQD | NI_DGRAM | NI_WITHSCOPEID)) != 0)
         return EAI_BADFLAGS;
 
-    family = bsd_sa_family(sa, (socklen_t)salen);
+    family = bsd_af_in(SocketBase, bsd_sa_family(sa, (socklen_t)salen));
     if (family != AF_INET
 #ifdef AMINETXDUO_IPV6
         && family != AF_INET6

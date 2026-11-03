@@ -128,7 +128,9 @@ BUDGETS=(
     # solicitation (#437): +312, 382,296 -> 382,608.
     # ADDRESS6, DESTINATION6 and ::/0 on a point-to-point link (#437):
     # +1,900, 382,608 -> 384,508.
-    "default:src/bsdsocket/bsdsocket.library:384508"
+    # AF_INET6 == 23 accepted and answered in (bebbo ndk-include): +424,
+    # 384,508 -> 384,932.
+    "default:src/bsdsocket/bsdsocket.library:384932"
     # 41,412 after stateless receive-checksum verification was added to the
     # EL3 and word/long NE2000 direct paths, 2026-09-15.  43,620 with
     # ANXD_CMD_RX_BATCH in the shell (claim, completion, staging copy, the

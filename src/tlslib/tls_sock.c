@@ -280,6 +280,23 @@ BOOL tls_sock_have_lvo(APTR base, ULONG lvo)
 
 /* ----------------------------------------------------- the descriptor --- */
 
+/*
+ * Both current address families use the BSD length/family prefix.
+ * Retain the older IPv4-only spelling for other bsdsocket implementations.
+ * A socket created with AF_INET6 == 23 (bebbo ndk-include) answers 23.
+ */
+UWORD tls_sock_family(const UBYTE *sa)
+{
+    UWORD fam = sa[1];
+
+    if (sa[0] == TLS_SOCK_AF_INET)
+        fam = sa[0];
+    if (fam == TLS_SOCK_AF_INET6_23)
+        fam = TLS_SOCK_AF_INET6;
+
+    return fam;
+}
+
 BOOL tls_sock_is_connected_tcp(APTR base, LONG fd, UWORD *port, UWORD *family)
 {
     /* Enough for sockaddr_in6; family and port share IPv4's BSD offsets. */
@@ -309,22 +326,10 @@ BOOL tls_sock_is_connected_tcp(APTR base, LONG fd, UWORD *port, UWORD *family)
     if (length < 4)
         return FALSE;
 
-    /*
-     * Both current address families use the BSD length/family prefix.
-     * Retain the older IPv4-only spelling for other bsdsocket implementations.
-     */
-    if (family != NULL || port != NULL)
-    {
-        UWORD fam = sa[1];
-
-        if (sa[0] == TLS_SOCK_AF_INET)
-            fam = sa[0];
-
-        if (family != NULL)
-            *family = fam;
-        if (port != NULL)
-            *port = (UWORD)(((UWORD)sa[2] << 8) | (UWORD)sa[3]);
-    }
+    if (family != NULL)
+        *family = tls_sock_family(sa);
+    if (port != NULL)
+        *port = (UWORD)(((UWORD)sa[2] << 8) | (UWORD)sa[3]);
 
     return TRUE;
 }

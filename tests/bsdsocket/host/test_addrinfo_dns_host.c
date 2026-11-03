@@ -136,6 +136,7 @@ APTR ami_alloc(ULONG size)
 }
 VOID ami_free(APTR p) { if (p != NULL) h_live--; free(p); }
 VOID bsd_bzero(APTR p, ULONG size) { memset(p, 0, size); }
+VOID bsd_bcopy(CONST_APTR src, APTR dst, ULONG size) { memmove(dst, src, size); }
 ULONG bsd_strlen(const char *s) { return (ULONG)strlen(s); }
 VOID bsd_strncpy(char *dst, const char *src, ULONG size)
 { if (size) { strncpy(dst, src, size); dst[size - 1] = 0; } }
