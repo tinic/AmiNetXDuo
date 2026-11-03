@@ -1279,6 +1279,55 @@ static void test_stack_gro_ipv6(void)
     gro_done();
 }
 
+/* The key as the 68k reads it, with direct loads: frames in longword-aligned
+   pool payloads, as ami_sana2_rx_arm() lays them out. */
+static void test_stack_gro_key_aligned(void)
+{
+    static ULONG store4[64];
+    static ULONG store6[64];
+    UCHAR   *buf4 = (UCHAR *)store4;
+    UCHAR   *buf6 = (UCHAR *)store6;
+    AmiRxSum sum  = h_flagged(ANXD_S2_RXF_VERIFIED);
+    UBYTE    i;
+    BOOL     same = TRUE;
+
+    printf("sana2: GRO reads the key off aligned headers\n");
+
+    gro_init();
+    tcp_frame_init(&pkt, buf4, 6, 40);
+    h_check(((ALIGN_TYPE)(pkt.nx_packet_prepend_ptr + AMI_ETH_HEADER_SIZE) &
+             3UL) == 0UL, "the IPv4 header is longword-aligned");
+    h_check(ami_sana2_gro_take(&rxs, &pkt, &sum) == TRUE, "IPv4 is held");
+    h_check(rxs.gro_words == 2 &&
+            rxs.gro_addr[0] == 0xc0000201UL && rxs.gro_addr[1] == 0xc6336402UL,
+            "with both IPv4 addresses");
+    h_check(rxs.gro_ports == 0x04d210e1UL && rxs.gro_next == 1040UL &&
+            rxs.gro_ack == 500UL && rxs.gro_win == 0x1000U,
+            "and the ports, next sequence, ack and window");
+    ami_sana2_gro_flush(&rxs);
+    gro_done();
+
+    gro_init();
+    tcp6_frame_init(&pkt, buf6, 40);
+    h_check(((ALIGN_TYPE)(pkt.nx_packet_prepend_ptr + AMI_ETH_HEADER_SIZE) &
+             3UL) == 0UL, "the IPv6 header is longword-aligned");
+    h_check(ami_sana2_gro_take(&rxs, &pkt, &sum) == TRUE, "IPv6 is held");
+    for (i = 0; i < 8; i++)
+    {
+        ULONG b = (ULONG)i * 4UL + 1UL;
+
+        if (rxs.gro_addr[i] != ((b << 24) | ((b + 1UL) << 16) |
+                                ((b + 2UL) << 8) | (b + 3UL)))
+            same = FALSE;
+    }
+    h_check(rxs.gro_words == 8 && same, "with all eight IPv6 address words");
+    h_check(rxs.gro_ports == 0x04d210e1UL && rxs.gro_next == 1040UL &&
+            rxs.gro_ack == 500UL && rxs.gro_win == 0x1000U,
+            "and the same TCP fields");
+    ami_sana2_gro_flush(&rxs);
+    gro_done();
+}
+
 static void test_run_ends_on_a_frame_that_does_not_continue(void)
 {
     AmiRxSum head  = h_flagged(ANXD_S2_RXF_SUMMED | ANXD_S2_RXF_VERIFIED);
@@ -2465,6 +2514,7 @@ int main(void)
     test_continuing_frame_is_chained();
     test_stack_gro_uses_headers();
     test_stack_gro_ipv6();
+    test_stack_gro_key_aligned();
     test_run_ends_on_a_frame_that_does_not_continue();
     test_run_is_capped();
     test_run_follows_groframes();
