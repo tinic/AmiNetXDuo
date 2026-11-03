@@ -203,9 +203,13 @@ static UBYTE *t_tx_at(NetdevNic *nic)
     return tx_buf;
 }
 
+static const UBYTE *last_frame;
+
 static LONG t_tx(NetdevNic *nic, const UBYTE *frame, UWORD len)
 {
     Posted *p;
+
+    last_frame = frame;
 
     if (nic->txb_inuse >= ring_size)
         return DP8390_TX_BUSY;
@@ -961,6 +965,33 @@ static void test_ordinary_unchanged(void)
            "no TX_BATCH granted: the flag means nothing");
 }
 
+/* A core with no tx_at frames in the staging buffer, tx_phase bytes in,
+   which puts the payload on a longword at phase 2. */
+static void test_staging_phase(void)
+{
+    struct IOSana2Req *io;
+    int                phase;
+
+    printf("netdev tx: the staging buffer frames at tx_phase\n");
+    for (phase = 0; phase <= 2; phase += 2)
+    {
+        fixture(64);
+        unit.nu_Nic.tx_at    = NULL;
+        unit.nu_Nic.tx_phase = (UBYTE)phase;
+        io = mk(0, 0);
+        netdev_tx_direct(&unit, io);
+        expect(nposted == 1 && posted[0].len == 114 &&
+               posted[0].bytes[14] == 0xC0 && io->ios2_Req.io_Error == 0 &&
+               last_frame == (const UBYTE *)unit.nu_TxBuf + phase,
+               phase ? "tx_phase 2: the frame starts two bytes in"
+                     : "tx_phase 0: the frame starts at the buffer");
+        expect(((unsigned long)(const void *)(last_frame + 14) & 3ul) ==
+                   (phase ? 0ul : 2ul),
+               phase ? "and its payload is on a longword"
+                     : "and its payload is at 2 mod 4, as before");
+    }
+}
+
 /* The ordinary pump pass is under the same budget. */
 static void test_ordinary_budget(void)
 {
@@ -991,6 +1022,7 @@ int main(void)
     test_bad_shape();
     test_ordinary_unchanged();
     test_ordinary_budget();
+    test_staging_phase();
 
     printf("%d checks, %d failures, %s\n", checks, failures,
            failures == 0 ? "PASS" : "FAIL");

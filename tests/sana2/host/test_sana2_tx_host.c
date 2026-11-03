@@ -293,7 +293,7 @@ AMIGA_ASM_ARGS ULONG n68k_copy_sum_longwords(ULONG *to, const ULONG *from, ULONG
         ULONG w = ((ULONG)b[0] << 24) | ((ULONG)b[1] << 16) |
                   ((ULONG)b[2] << 8) | (ULONG)b[3];
 
-        *to++ = *from++;
+        memcpy(to++, from++, sizeof(ULONG));   /* any phase: the 68k's move.l */
 
         acc += w;
         if (acc < w)
@@ -2207,6 +2207,46 @@ static void test_gso_pieces_and_restart(void)
     }
 }
 
+/* The whole child into a destination at each of the four phases: the even
+   ones store the header fields directly, the odd ones patch byte by byte,
+   and every one is the same frame. */
+static void test_gso_header_every_phase(void)
+{
+    static ULONG       store[(H_FRAME + 8) / 4];
+    UCHAR             *base = (UCHAR *)store;
+    NX_PACKET         *p;
+    struct IOSana2Req *req;
+    UCHAR              want[H_FRAME];
+    ULONG              len, seg, phase;
+    int                arm;
+
+    printf("sana2: a GSO child's header at every destination phase\n");
+
+    for (arm = 0; arm < 2; arm++)
+        for (seg = 0; seg < 3; seg++)
+        {
+            fixture_init(FALSE, S2WireType_Ethernet);
+            iface.tx_csum_ok = arm ? ANXD_S2_TXF_TCP : 0;
+            p = gso_parent(32, 350, 100, 0x99, 0xFFFFFF60UL, 9, 37,
+                           g_odd_cuts, 5);
+            (VOID)ami_sana2_tx_send(&iface, p, AMI_ETHERTYPE_IPV4, 0xBC24,
+                                    0x11EF103A);
+            req = (struct IOSana2Req *)h_sent_log[seg];
+            len = gso_expect(want, (UWORD)seg, arm);
+
+            for (phase = 0; phase < 4; phase++)
+            {
+                memset(store, 0x5A, sizeof(store));
+                h_check(ami_sana2_copy_from_buff(base + phase, req->ios2_Data,
+                                                 len) == TRUE,
+                        "the child is handed over");
+                h_check(memcmp(base + phase, want, len) == 0 &&
+                        base[phase + len] == 0x5A,
+                        "the frame exactly, at this phase");
+            }
+        }
+}
+
 /*
  * A GSO child copied in two pieces to a device that does not finish the
  * checksum: the sum is walked alone, through the longword routine, before the
@@ -3243,6 +3283,7 @@ int main(void)
     test_gso_children_offload();
     test_gso_pads_the_last();
     test_gso_pieces_and_restart();
+    test_gso_header_every_phase();
     test_gso_sum_alone_two_pieces();
     test_gso_queues_in_order();
     test_gso_offline_mid_block();
