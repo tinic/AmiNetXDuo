@@ -62,6 +62,11 @@ const NpItem np_items[NP_L_COUNT] =
     [NP_L_ARPREQUESTS]   = { "ARP reads",       NP_PLACE_LEFT,  NP_PAGE_TUNING },
     [NP_L_WRITEREQUESTS] = { "Writes",          NP_PLACE_LEFT,  NP_PAGE_TUNING },
     [NP_L_NOTE]          = { "0 = automatic",   NP_PLACE_IN,    NP_PAGE_TUNING },
+#ifdef AMINETXDUO_PTP
+    [NP_L_PTP]           = { "Point-to-point",  NP_PLACE_RIGHT, NP_PAGE_GENERAL },
+    [NP_L_DESTINATION]   = { "Peer",            NP_PLACE_LEFT,  NP_PAGE_IPV4 },
+    [NP_L_DESTINATION6]  = { "Peer",            NP_PLACE_LEFT,  NP_PAGE_IPV6 },
+#endif
 };
 
 const char *const np_panel_labels[] =
@@ -98,15 +103,24 @@ static const NpCell cells[] =
     { NP_L_STATE,         2, K_CHECK,      0,  AT_NEXT  },
     { NP_L_BOOT,          2, K_CHECK,      0,  AT_NEXT  },
     { NP_L_MDNS,          3, K_CHECK,      0,  AT_FIELD },
+#ifdef AMINETXDUO_PTP
+    { NP_L_PTP,           3, K_CHECK,      0,  AT_NEXT  },
+#endif
 
     { NP_L_IPV4,          0, K_CYCLE_IPV4, 0,  AT_FIELD },
     { NP_L_ADDRESS,       1, K_FIELD,      0,  AT_FIELD },
+#ifdef AMINETXDUO_PTP
+    { NP_L_DESTINATION,   1, K_FILL,       0,  AT_FIELD2 },
+#endif
     { NP_L_NETMASK,       2, K_FIELD,      0,  AT_FIELD },
     { NP_L_DNS_1,         2, K_FILL,       0,  AT_FIELD2 },
     { NP_L_GATEWAY,       3, K_FIELD,      0,  AT_FIELD },
     { NP_L_DNS_2,         3, K_FILL,       0,  AT_FIELD2 },
 
     { NP_L_IPV6,          0, K_CYCLE_IPV6, 0,  AT_FIELD },
+#ifdef AMINETXDUO_PTP
+    { NP_L_DESTINATION6,  0, K_FILL,       0,  AT_NEXT  },
+#endif
     { NP_L_ADDRESS6_1,    1, K_FILL,       0,  AT_FIELD },
     { NP_L_ADDRESS6_2,    2, K_FILL,       0,  AT_FIELD },
     { NP_L_GATEWAY6,      3, K_FILL,       0,  AT_FIELD },
