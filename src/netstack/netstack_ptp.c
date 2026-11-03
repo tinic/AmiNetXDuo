@@ -17,6 +17,7 @@
  */
 
 #include "aminetxduo/ptp.h"
+#include "aminetxduo/nxstatus.h"
 
 #define AMI_PTP_HOST_MASK   0xFFFFFFFFUL
 
@@ -110,7 +111,8 @@ VOID ami_ptp_peer_route(NX_IP *ip, UINT index)
 
     /* The old host route goes when the peer moved or no longer needs one. */
     if (routed != 0UL && (routed != peer || !need))
-        (VOID)nx_ip_static_route_delete(ip, routed, AMI_PTP_HOST_MASK);
+        AMI_NX_CLEANUP(nx_ip_static_route_delete(ip, routed,
+                                                 AMI_PTP_HOST_MASK));
     ami_sana2_set_ptp_routed(sana, 0UL);
 
     /* Every next hop through the link is the interface's own address

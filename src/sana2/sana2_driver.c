@@ -537,16 +537,14 @@ static VOID __attribute__((noinline, cold)) ami_sana2_driver_command(
 
         /* ARP needs a hardware address to resolve to. Addressless SANA-II
            wires report AddrFieldSize 0 and get address mapping turned off. */
+        nx_ip_interface_address_mapping_configure(
+            ip_ptr, iface->index,
 #ifdef AMINETXDUO_PTP
-        nx_ip_interface_address_mapping_configure(
-            ip_ptr, iface->index,
             (iface->addr_bytes == AMI_ETH_ADDR_SIZE && !iface->ptp)
-                ? NX_TRUE : NX_FALSE);
 #else
-        nx_ip_interface_address_mapping_configure(
-            ip_ptr, iface->index,
-            (iface->addr_bytes == AMI_ETH_ADDR_SIZE) ? NX_TRUE : NX_FALSE);
+            (iface->addr_bytes == AMI_ETH_ADDR_SIZE)
 #endif
+                ? NX_TRUE : NX_FALSE);
 
 #ifdef AMINETXDUO_RX_VERIFY
         /*
