@@ -247,6 +247,11 @@ static LONG network_holding(const AmiConfig *cfg, ULONG addr)
 
         if (same_network(addr, ifc->address, ifc->netmask))
             return (LONG)i;
+#ifdef AMINETXDUO_PTP
+        /* The peer of a point-to-point link is reached through it. */
+        if (ifc->destination != 0 && ifc->destination == addr)
+            return (LONG)i;
+#endif
     }
 
     return -1;
@@ -409,6 +414,13 @@ static VOID check_addressing(const char *path, const AmiIfConfig *ifc)
 
     prefix    = tool_prefix_len(ifc->netmask);
     host_bits = ifc->address & ~ifc->netmask;
+
+#ifdef AMINETXDUO_PTP
+    /* A point-to-point link has no network beyond its two ends: /32 is
+       what it is meant to have, and the peer is DESTINATION. */
+    if (ifc->destination != 0 || ifc->point_to_point == AMI_CFG_PTP_YES)
+        return;
+#endif
 
     if (prefix >= 31)
     {
@@ -980,6 +992,19 @@ static VOID check_addressing6(const char *path, const AmiIfConfig *ifc)
                            ami_cfg_address6_line_file(path, ifc->name,
                                                       ifc->address6[m].addr,
                                                       0));
+
+#ifdef AMINETXDUO_PTP
+    /* The file says point-to-point the two ways check_addressing() reads. */
+    if (ifc->have_destination6 && ifc->destination == 0 &&
+        ifc->point_to_point != AMI_CFG_PTP_YES)
+    {
+        finding(path, ami_cfg_keyword_line_file(path, "DESTINATION6"),
+                AMI_CFG_PROBLEM_WARN);
+        note("DESTINATION6 is the peer of a point-to-point interface and is "
+             "ignored on any other; this file has neither POINTTOPOINT=YES "
+             "nor DESTINATION");
+    }
+#endif
 
     /* Two ADDRESS6 lines on ONE interface naming one address, which the
        cross-interface walk above cannot see because it never compares an

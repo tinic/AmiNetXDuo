@@ -985,6 +985,7 @@ LONG el3_attach(NetdevNic *nic)
     nic->rx_flags_supported = ANXD_S2_RXF_VERIFIED;
     nic->frame_at  = NULL;
     nic->tx_at     = NULL;
+    nic->tx_phase  = 2;      /* bus_wdata() leads in with one word */
     nic->write_buf = NULL;
 
     return 0;

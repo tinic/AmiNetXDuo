@@ -7,6 +7,29 @@ are history.
 
 ## Unreleased
 
+- Point-to-point interfaces carry IPv6: ADDRESS6 and DESTINATION6 in the
+  interface file, ConfigureNetInterface DESTINATION6=, and AddNetRoute
+  DEFAULTGATEWAY <peer> for an IPv6 default route through the link.
+- IPv6 programs built with the AmigaPorts GCC headers, where AF_INET6 is 23
+  and struct sockaddr_in6 has no length byte, work.
+- Up to four IPv6 default routes are kept, one per interface, so a VPN
+  default fits beside routes learned on Ethernet and Wi-Fi.
+- DeleteNetRoute DST=:: removes only a default route that was added by
+  hand, never one learned from a router.
+- Point-to-point interfaces: POINTTOPOINT and DESTINATION in an interface
+  file, for drivers such as the OpenVPN client's vpn.device (IPv4).
+- An address with a 255.255.255.254 or 255.255.255.255 netmask is no
+  longer treated as a broadcast address, so TCP and ping to it work.
+- DeleteNetRoute DST=0.0.0.0 removes the default route, as on AmiTCP.
+- A network driver that refuses one kind of read, such as ARP or IPv6 on a
+  point-to-point device, no longer keeps the stack's receive task busy
+  asking for it again.
+- Uploads through an NE2000-compatible card, a 3Com 3C589 or an A2065 copy
+  each frame in longwords on the card's word boundary, which speeds up
+  uploads on a 68020 to 68060; an A3000 with an X-Surf 100 sends 3% faster.
+- TCP uploads build each segment's headers with word and longword stores.
+- Receiving TCP reads the header fields it merges and the IPv6 checksum
+  fields in words and longwords instead of one byte at a time.
 ## 1.0.0-rc3
 
 - A WaitSelect() with a timeout times out again when its timer fires just

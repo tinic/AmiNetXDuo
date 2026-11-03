@@ -1196,11 +1196,21 @@ static void test_interface_keyword_aliases(void)
                    "destination=x\ndestinationaddr=x\ndestinationaddress=x\n");
     CHECK(ami_cfg_parse_interface("eth0", buf, &iface) == AMI_CFG_OK);
     CHECK(seen_count == 3);
+#ifdef AMINETXDUO_PTP
+    /* Read now: "x" is not an address under any of the three names. */
+    CHECK(strstr(seen[0].text, "DESTINATION") != NULL);
+    CHECK(strstr(seen[1].text, "DESTINATION") != NULL);
+    CHECK(strstr(seen[2].text, "DESTINATION") != NULL);
+    for (i = 0; i < 3; i++)
+        CHECK(seen[i].severity == AMI_CFG_PROBLEM_ERROR && seen[i].line == i + 3);
+    CHECK(iface.destination == 0UL);
+#else
     CHECK_STR(seen[0].text, "destination ignored: point-to-point links are not supported");
     CHECK_STR(seen[1].text, "destinationaddr ignored: point-to-point links are not supported");
     CHECK_STR(seen[2].text, "destinationaddress ignored: point-to-point links are not supported");
     for (i = 0; i < 3; i++)
         CHECK(seen[i].severity == AMI_CFG_PROBLEM_NOTE && seen[i].line == i + 3);
+#endif
     free(buf);
 
     for (i = 0; i < sizeof(suggestions) / sizeof(suggestions[0]); i++)
@@ -1383,6 +1393,145 @@ static void test_numeric_iptype_is_reported_inert(void)
     CHECK(strstr(ami_cfg_advice(AMI_CFG_ADVICE_IPTYPE_IS_EITHER_A),
                  "ignored") != NULL);
 }
+
+#ifdef AMINETXDUO_PTP
+/*
+ * POINTTOPOINT and DESTINATION.  The first file is the ptp0 that ships with
+ * the OpenVPN port's vpn.device (BETA2-AMITCP-NG/NetInterfaces/ptp0), byte
+ * for byte, AmiTCP's POINTOPOINT spelling included.
+ */
+static void test_interface_point_to_point(void)
+{
+    AmiIfConfig iface;
+    char       *buf;
+
+    printf("interface: POINTTOPOINT and DESTINATION\n");
+
+    seen_count = 0;
+    ami_config_set_reporter(collect, NULL);
+    ami_cfg_problem_file("DEVS:NetInterfaces/ptp0");
+    buf = dup_text("device=DEVS:Networks/vpn.device\n"
+                   "unit=0\n"
+                   "address=10.8.0.15\n"
+                   "destination=10.8.0.1\n"
+                   "netmask=255.255.255.255\n"
+                   "pointopoint=yes\n");
+    CHECK(ami_cfg_parse_interface("ptp0", buf, &iface) == AMI_CFG_OK);
+    CHECK(seen_count == 0);
+    CHECK_STR(iface.device, "DEVS:Networks/vpn.device");
+    CHECK_IP(iface.address, 10, 8, 0, 15);
+    CHECK_IP(iface.destination, 10, 8, 0, 1);
+    CHECK_IP(iface.netmask, 255, 255, 255, 255);
+    CHECK(iface.point_to_point == AMI_CFG_PTP_YES);
+    free(buf);
+
+    /* Roadshow's names: POINTTOPOINT, and DESTINATIONADDRESS as its alias. */
+    seen_count = 0;
+    buf = dup_text("device=ppp.device\n"
+                   "pointtopoint=no\n"
+                   "address=192.168.7.2\n"
+                   "destinationaddress=192.168.7.1\n");
+    CHECK(ami_cfg_parse_interface("ppp0", buf, &iface) == AMI_CFG_OK);
+    CHECK(seen_count == 0);
+    CHECK(iface.point_to_point == AMI_CFG_PTP_NO);
+    CHECK_IP(iface.destination, 192, 168, 7, 1);
+    free(buf);
+
+    /* Neither said: the wire type decides. */
+    seen_count = 0;
+    buf = dup_text("device=a2065.device\nconfigure=dhcp\n");
+    CHECK(ami_cfg_parse_interface("eth0", buf, &iface) == AMI_CFG_OK);
+    CHECK(iface.point_to_point == AMI_CFG_PTP_AUTO);
+    CHECK(iface.destination == 0UL);
+    free(buf);
+
+    /* A bad POINTTOPOINT is a warning that leaves the default. */
+    seen_count = 0;
+    buf = dup_text("device=ppp.device\npointtopoint=maybe\naddress=192.168.7.2\n");
+    CHECK(ami_cfg_parse_interface("ppp0", buf, &iface) == AMI_CFG_OK);
+    CHECK(seen_count == 1);
+    CHECK(seen[0].severity == AMI_CFG_PROBLEM_WARN && seen[0].line == 2);
+    CHECK(strstr(seen[0].text, "POINTTOPOINT") != NULL);
+    CHECK(iface.point_to_point == AMI_CFG_PTP_AUTO);
+    free(buf);
+
+#ifdef AMINETXDUO_IPV6
+    /* DESTINATION6, the peer's IPv6 address, beside ADDRESS6. */
+    seen_count = 0;
+    buf = dup_text("device=vpn.device\n"
+                   "address6=2001:db8::1000/64\n"
+                   "destination6=2001:db8::1\n");
+    CHECK(ami_cfg_parse_interface("ptp0", buf, &iface) == AMI_CFG_OK);
+    CHECK(seen_count == 0);
+    CHECK(iface.have_destination6);
+    CHECK(iface.destination6[0] == 0x20010DB8UL && iface.destination6[1] == 0 &&
+          iface.destination6[2] == 0 && iface.destination6[3] == 1UL);
+    CHECK(iface.ip6type == AMI_IP6TYPE_STATIC);
+    free(buf);
+
+    /* A link-local peer, with this interface as its zone. */
+    seen_count = 0;
+    buf = dup_text("device=vpn.device\nconfigure6=linklocal\n"
+                   "destination6=fe80::1%ptp0\n");
+    CHECK(ami_cfg_parse_interface("ptp0", buf, &iface) == AMI_CFG_OK);
+    CHECK(seen_count == 0);
+    CHECK(iface.have_destination6 && iface.destination6[0] == 0xFE800000UL &&
+          iface.destination6[3] == 1UL);
+    free(buf);
+
+    /* Not given: no peer. */
+    buf = dup_text("device=vpn.device\naddress6=2001:db8::1000/128\n");
+    CHECK(ami_cfg_parse_interface("ptp0", buf, &iface) == AMI_CFG_OK);
+    CHECK(!iface.have_destination6);
+    CHECK(iface.address6_count == 1 && iface.address6[0].prefix == 128);
+    free(buf);
+
+    /* No peer at all: an error on its line, and nothing taken. */
+    {
+        static const char *const bad[] =
+        {
+            "::",                   /* unspecified */
+            "ff02::1",              /* a group */
+            "10.8.0.1",             /* IPv4 */
+            "2001:db8::1/64",       /* a prefix, not an address */
+            "2001:db8::g",
+            ""
+        };
+        UWORD b;
+
+        for (b = 0; b < (UWORD)(sizeof(bad) / sizeof(bad[0])); b++)
+        {
+            char text[96];
+
+            strcpy(text, "device=vpn.device\nconfigure6=linklocal\n"
+                         "destination6=");
+            strcat(text, bad[b]);
+            strcat(text, "\n");
+
+            seen_count = 0;
+            buf = dup_text(text);
+            CHECK(ami_cfg_parse_interface("ptp0", buf, &iface) == AMI_CFG_OK);
+            CHECK(!iface.have_destination6);
+            CHECK(seen_count == 1);
+            CHECK(seen_count == 1 && seen[0].severity == AMI_CFG_PROBLEM_ERROR &&
+                  seen[0].line == 3 &&
+                  strstr(seen[0].text, "DESTINATION6") != NULL);
+            free(buf);
+        }
+    }
+
+    /* Another interface's zone: warned about, not taken. */
+    seen_count = 0;
+    buf = dup_text("device=vpn.device\nconfigure6=linklocal\n"
+                   "destination6=fe80::1%eth0\n");
+    CHECK(ami_cfg_parse_interface("ptp0", buf, &iface) == AMI_CFG_OK);
+    CHECK(!iface.have_destination6);
+    free(buf);
+#endif
+
+    ami_config_set_reporter(NULL, NULL);
+}
+#endif
 
 static void test_inert_keywords_are_notes(void)
 {
@@ -5041,6 +5190,9 @@ int main(int argc, char **argv)
     test_interface_mode_aliases();
     test_numeric_iptype_is_reported_inert();
     test_inert_keywords_are_notes();
+#ifdef AMINETXDUO_PTP
+    test_interface_point_to_point();
+#endif
     test_request_counts_have_ceilings();
     test_interface_tcp_ack_max();
     test_interface_gro_frames();

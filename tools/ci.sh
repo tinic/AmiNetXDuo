@@ -51,6 +51,9 @@ CROSS_CONFIGS=(
     # still builds and binds without it, bind() classifies a class D address
     # here and not there.
     "nomcast:-DAMINETXDUO_MULTICAST=OFF"
+    # Point-to-point interfaces off: what 1.0.0 may ship.  The image without
+    # the option is the tree before it, POINTTOPOINT and DESTINATION inert.
+    "noptp:-DAMINETXDUO_PTP=OFF"
     "noasm:-DAMINETXDUO_CRYPTO68K_ASM=OFF"
     # The portable fallbacks for the card-I/O and checksum inner loops.  This
     # is distinct from noasm above, which switches off crypto68k only.
@@ -540,7 +543,13 @@ host_test_targets() { # builddir
 #      leaves OpenLibrary and the status calls free (x86_64 only).
 #      596 with toolchain_lock_order_gate: static lock-order and
 #      lock-across-blocking-call checker regression tests (all hosts).
-HOST_TESTS_EXPECTED=596
+#      597 with ptp (#437): point-to-point next hop, host route and default
+#      route against the real route lookup (all hosts).
+#      598 with ptp6: a point-to-point link-local without a MAC, no DAD, no
+#      router solicitation, no address resolution (all hosts).
+#      599 with af_inet6_23: AF_INET6 == 23 beside 28 at every family
+#      entry and exit (x86_64 only).
+HOST_TESTS_EXPECTED=599
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,
@@ -553,17 +562,18 @@ case "$(uname -m)" in
     # test_unbracketed_close (F-059), test_raw_hdrincl6 (F-061),
     # test_deferred_release (F-059), test_hostsource (F-088),
     # test_raw_v6_lock (N-036), test_netstatus_order (N-077), and
-    # test_addrinfo_dns, test_tcp_autotune and test_joblock (#383), all
+    # test_addrinfo_dns, test_tcp_autotune and test_joblock (#383),
+    # test_af_inet6_23, all
     # x86_64-only for
     # the reason in
     # tests/bsdsocket/CMakeLists.txt:
     # elsewhere the host's LONG is eight bytes and no structure in them has
     # the target's shape.
     # Subtract the x86_64-only bsdsocket fixtures here.
-    *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 33)) ;;
+    *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 34)) ;;
 esac
 # The conflict-drain fixture uses Linux's MAP_32BIT, not merely x86_64.
-# Darwin arm64 registers 543; Darwin x86_64 registers 574 on this tree.
+# Darwin arm64 registers 543; Darwin x86_64 registers 575 on this tree.
 case "$(uname -s):$(uname -m)" in
     Linux:x86_64|Linux:amd64) ;;
     *) HOST_TESTS_EXPECTED=$((HOST_TESTS_EXPECTED - 1)) ;;

@@ -909,6 +909,9 @@ typedef struct AmiSana2Rx
      */
     UWORD               unposted;
 
+    /* The device refused this ring's reads outright: ami_sana2_rx_refused(). */
+    UBYTE               refused;
+
 #ifdef AMINETXDUO_GRO
     /*
      * THE HELD HEAD.  The receive layer parses verified TCP frames itself;
@@ -1135,6 +1138,14 @@ struct AmiSana2If
     ULONG               hw_type;
     UWORD               addr_bits;
     UWORD               addr_bytes;     /* 6 for Ethernet, 0 if addressless */
+#ifdef AMINETXDUO_PTP
+    /* A point-to-point link (ami_sana2_ptp_wire): bare IP datagrams, no
+       link header, no address mapping.  ptp_peer is the other end, host byte
+       order, 0 unknown; ptp_routed the peer the host route was made for. */
+    BOOL                ptp;
+    ULONG               ptp_peer;
+    ULONG               ptp_routed;
+#endif
 
     BOOL                online;
     /*
@@ -1378,6 +1389,21 @@ VOID ami_sana2_rx_stop(AmiSana2If *iface);
 BOOL ami_sana2_rx_reclaim(AmiSana2If *iface, BOOL release_packets);
 ULONG ami_sana2_rx_frame_length(const AmiSana2If *iface, ULONG payload);
 BOOL ami_sana2_rx_resolve_length(AmiRxSlot *slot, ULONG *length);
+BOOL ami_sana2_rx_refused(AmiSana2Rx *rx, UBYTE error);
+#ifdef AMINETXDUO_PTP
+/*
+ * The ARP ring's depth: none on a point-to-point link, which has no hardware
+ * address to resolve.  The IPv4 and IPv6 rings keep the plan's depth there,
+ * bare datagrams both; a driver that does not carry 0x86DD refuses the read
+ * and that ring retires (ami_sana2_rx_refused).  Inline:
+ * ami_sana2_rx_start() is its one caller.
+ */
+static inline UWORD ami_sana2_rx_arp_depth(const AmiSana2If *iface,
+                                           UWORD depth)
+{
+    return iface->ptp ? (UWORD)0 : depth;
+}
+#endif
 
 /* Must the reader block?  The port decides; the batch count may not.  See the
    definition in sana2_rx.c, and tests/sana2/host for what holds it there. */
@@ -1406,6 +1432,7 @@ UWORD ami_sana2_rx_drain_batch(AmiSana2Reader *rd, AmiRxBatch *bt);
 #endif
 VOID  ami_sana2_rx_abort_outstanding(AmiSana2Reader *rd);
 VOID  ami_sana2_rx_flush(AmiSana2Reader *rd);
+UWORD ami_sana2_rx_post(AmiSana2Rx *rx);
 #endif
 
 /* sana2_tx.c */

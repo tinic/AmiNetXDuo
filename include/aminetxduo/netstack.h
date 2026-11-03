@@ -377,6 +377,12 @@ UINT netstack_ipv6_route_add(const ULONG dest[4], ULONG prefix_len,
 UINT netstack_ipv6_route_delete(const ULONG dest[4], ULONG prefix_len,
                                 const ULONG next_hop[4]);
 
+#ifdef AMINETXDUO_PTP
+/* DESTINATION6 at run time: the peer of point-to-point interface `index`,
+   :: for none.  NX_NOT_SUPPORTED on any other interface. */
+UINT netstack_ipv6_peer_set(UWORD index, const ULONG peer[4]);
+#endif
+
 /* ------------------------------------------------------------- DHCPv6 --- */
 
 typedef struct AmiDhcp6Status {

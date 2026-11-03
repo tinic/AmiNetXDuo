@@ -11,6 +11,7 @@
 #include "bsdsocket_vectors.h"
 
 #include "aminetxduo/version.h"
+#include "aminetxduo/ptp.h"
 
 #ifdef AMINETXDUO_BPF
 #include "aminetxduo/bpf.h"
@@ -762,7 +763,19 @@ static BOOL bsd_tag_get(struct AmiSocketBase *base, struct TagItem *item,
 
                         if (netstack_interface_is_up(iface))
                         {
+#ifdef AMINETXDUO_PTP
+                            NX_IP *pip = bsd_stack_ip(base);
+
+                            if (pip != NULL &&
+                                iface < (UWORD)NX_MAX_PHYSICAL_INTERFACES &&
+                                ami_sana2_ptp((AmiSana2If *)pip->nx_ip_interface[iface]
+                                                  .nx_interface_additional_link_info))
+                                status |= SBSYSSTAT_PTP_Interfaces;
+                            else
+                                status |= SBSYSSTAT_BCast_Interfaces;
+#else
                             status |= SBSYSSTAT_BCast_Interfaces;
+#endif
 
                             status |= SBSYSSTAT_Routes;
                         }

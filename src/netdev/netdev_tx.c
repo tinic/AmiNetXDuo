@@ -41,7 +41,7 @@ UWORD netdev_tx_build(NetdevUnit *unit, struct IOSana2Req *io,
     buf = (unit->nu_Nic.tx_at != NULL) ? unit->nu_Nic.tx_at(&unit->nu_Nic)
                                        : NULL;
     if (buf == NULL)
-        buf = (UBYTE *)unit->nu_TxBuf;
+        buf = (UBYTE *)unit->nu_TxBuf + unit->nu_Nic.tx_phase;
     unit->nu_TxAt = buf;
 
     if (netdev_io_is_raw(op, io))
@@ -76,8 +76,8 @@ UWORD netdev_tx_build(NetdevUnit *unit, struct IOSana2Req *io,
             return 0;
         }
 
-        /* Aligned moves, as on the receive side: nu_TxBuf is ULONG[] and both
-           addresses sit at even offsets. */
+        /* Word-aligned moves, as on the receive side: buf is even, so both
+           addresses are too. */
         nd_addr6(buf, io->ios2_DstAddr);
         nd_addr6(buf + NETDEV_ADDR_LEN, unit->nu_Nic.mac);
         *(UWORD *)(APTR)(buf + 12) = (UWORD)io->ios2_PacketType;

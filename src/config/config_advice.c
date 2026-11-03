@@ -80,6 +80,9 @@ static const char *const ami_cfg_advice_text[] =
     "GROFRAMES is 1 to 16, default 16",
     "ACKPACE is kbit/s, 1 to 1000000; default unpaced",
     "LINKSPEED is AUTO or 10 (Mbit/s); requires a supporting driver",
+#ifdef AMINETXDUO_PTP
+    "POINTTOPOINT is YES or NO; the driver's wire type decides by default",
+#endif
 };
 
 const char *ami_cfg_advice(UWORD code)

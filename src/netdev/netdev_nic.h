@@ -438,6 +438,14 @@ struct NetdevNic
      * separately selectable, so a byte write would corrupt both halves.
      */
     UBYTE *(*tx_at)(NetdevNic *nic);
+    /*
+     * Where the frame starts in the unit's staging buffer.  2 puts the
+     * payload (frame + 14) on a longword, in phase with the stack's packet,
+     * for a core that copies the staged frame out through a port or into a
+     * buffer at the same phase.  0 for a core that copies it to a slot at
+     * 0 mod 4 (zz9000 without the TX offset firmware).
+     */
+    UBYTE               tx_phase;
     UWORD (*write_buf)(NetdevNic *nic, const UBYTE *frame, UWORD len,
                        LONG buf);
 

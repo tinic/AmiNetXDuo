@@ -19,6 +19,7 @@
 #include "aminetxduo/sana2.h"
 #include "aminetxduo/config.h"
 #include "aminetxduo/netstack.h"
+#include "aminetxduo/ptp.h"
 #include "aminetxduo/events.h"
 
 #include "tx_amiga.h"
@@ -32,6 +33,9 @@
 #ifdef AMINETXDUO_IPV6
 /* ND_CACHE_STATE_*, which nx_api.h does not carry. */
 #include "nx_nd_cache.h"
+#ifdef AMINETXDUO_PTP
+#include "../ipv6/ipv6_srcsel.h"        /* anx6_ptp_peer_get() */
+#endif
 #endif
 
 /*
@@ -299,7 +303,7 @@ static VOID ns_fill_system(NX_IP *ip, NetStatusSystem *out)
 
     if (nx_ip_gateway_address_get(ip, &gateway) == NX_SUCCESS && gateway != 0)
     {
-        out->nss_Gateway = gateway;
+        out->nss_Gateway = AMI_PTP_SHOWN_HOP(ip, gateway);
         out->nss_Flags  |= NETSTATUS_SYS_GATEWAY;
     }
 
@@ -727,6 +731,33 @@ static VOID ns_fill_routes6(NX_IP *ip, NsWriter *w)
         }
     }
 
+#ifdef AMINETXDUO_PTP
+    /* The peer of each point-to-point link, the host route through it. */
+    for (i = 0; i < (UINT)NX_MAX_PHYSICAL_INTERFACES; i++)
+    {
+        NetStatusRoute6 *out;
+        ULONG            peer[4];
+
+        if (ip->nx_ip_interface[i].nx_interface_valid == 0 ||
+            !anx6_ptp_peer_get(i, peer))
+            continue;
+
+        out = (NetStatusRoute6 *)ns_writer_next(w);
+        if (out == NULL)
+            continue;
+
+        out->nsr6_Destination[0] = peer[0];
+        out->nsr6_Destination[1] = peer[1];
+        out->nsr6_Destination[2] = peer[2];
+        out->nsr6_Destination[3] = peer[3];
+        out->nsr6_PrefixLength   = 128UL;
+        out->nsr6_Lifetime       = NETSTATUS_RT6_FOREVER;
+        out->nsr6_Flags          = NETSTATUS_RT6_UP | NETSTATUS_RT6_HOST |
+                                   NETSTATUS_RT6_PEER;
+        out->nsr6_Interface      = (UWORD)i;
+    }
+#endif
+
     for (i = 0; i < (UINT)NX_IPV6_DEFAULT_ROUTER_TABLE_SIZE; i++)
     {
         const NX_IPV6_DEFAULT_ROUTER_ENTRY *e = &ip->nx_ipv6_default_router_table[i];
@@ -739,10 +770,17 @@ static VOID ns_fill_routes6(NX_IP *ip, NsWriter *w)
         if (out == NULL)
             continue;
 
+#ifdef AMINETXDUO_PTP
+        /* The peer, where NetX Duo holds the link's own link-local. */
+        ami_ptp_ipv6_shown_hop(ip, e->nx_ipv6_default_router_entry_interface_ptr,
+                               e->nx_ipv6_default_router_entry_router_address,
+                               out->nsr6_NextHop);
+#else
         out->nsr6_NextHop[0] = e->nx_ipv6_default_router_entry_router_address[0];
         out->nsr6_NextHop[1] = e->nx_ipv6_default_router_entry_router_address[1];
         out->nsr6_NextHop[2] = e->nx_ipv6_default_router_entry_router_address[2];
         out->nsr6_NextHop[3] = e->nx_ipv6_default_router_entry_router_address[3];
+#endif
         out->nsr6_Flags      = NETSTATUS_RT6_UP | NETSTATUS_RT6_GATEWAY;
         out->nsr6_Interface  =
             ns_interface_index(ip, e->nx_ipv6_default_router_entry_interface_ptr);
@@ -1067,6 +1105,24 @@ static VOID ns_fill_interfaces(NX_IP *ip, NsWriter *w)
             out->nsi_Flags |= NETSTATUS_IF_SANA2;
             if (ami_sana2_is_online(sana))
                 out->nsi_Flags |= NETSTATUS_IF_ONLINE;
+
+#ifdef AMINETXDUO_PTP
+            /* SANA-II's own convention: a PPP driver's "hardware address" is
+               a protocol address (SANA-II 1.0, S2_CONFIGINTERFACE).  The
+               record keeps its version 16 shape. */
+            if (ami_sana2_ptp(sana))
+            {
+                ULONG peer = ami_sana2_ptp_peer(sana);
+
+                out->nsi_Flags |= NETSTATUS_IF_PTP;
+                out->nsi_HwAddress[0] = (UBYTE)(peer >> 24);
+                out->nsi_HwAddress[1] = (UBYTE)(peer >> 16);
+                out->nsi_HwAddress[2] = (UBYTE)(peer >> 8);
+                out->nsi_HwAddress[3] = (UBYTE)peer;
+                out->nsi_HwAddress[4] = 0;
+                out->nsi_HwAddress[5] = 0;
+            }
+#endif
 
             out->nsi_Speed = ami_sana2_get_bps(sana);
 
@@ -1403,7 +1459,8 @@ static VOID ns_fill_routes(NX_IP *ip, NsWriter *w)
 
         out->nsr_Destination = e->nx_ip_routing_dest_ip;
         out->nsr_NetMask     = e->nx_ip_routing_net_mask;
-        out->nsr_Gateway     = e->nx_ip_routing_next_hop_address;
+        out->nsr_Gateway     = AMI_PTP_SHOWN_HOP(ip,
+                                   e->nx_ip_routing_next_hop_address);
         out->nsr_Flags       = NETSTATUS_RT_UP | NETSTATUS_RT_STATIC |
                                NETSTATUS_RT_GATEWAY;
         out->nsr_Interface   = ns_interface_index(ip,
@@ -1422,7 +1479,7 @@ static VOID ns_fill_routes(NX_IP *ip, NsWriter *w)
         {
             out->nsr_Destination = 0;
             out->nsr_NetMask     = 0;
-            out->nsr_Gateway     = gateway;
+            out->nsr_Gateway     = AMI_PTP_SHOWN_HOP(ip, gateway);
             out->nsr_Flags       = NETSTATUS_RT_UP | NETSTATUS_RT_GATEWAY;
             out->nsr_Interface   = ns_interface_index(ip,
                                                       ip->nx_ip_gateway_interface);
@@ -2201,7 +2258,9 @@ LONG bsd_NetStackControl(register ULONG magic __asm("d0"),
                 return bsd_fail(SocketBase, bsd_nx_errno(SocketBase));
 
             status = (ctl->nsc_Gateway != 0)
-                         ? nx_ip_gateway_address_set(cip, ctl->nsc_Gateway)
+                         ? nx_ip_gateway_address_set(cip, AMI_PTP_NEXT_HOP(
+                                                           cip,
+                                                           ctl->nsc_Gateway))
                          : nx_ip_gateway_address_clear(cip);
             if (status == NX_SUCCESS)
             {
@@ -2333,6 +2392,22 @@ LONG bsd_NetStackControl(register ULONG magic __asm("d0"),
                                                          AMI_EBUSY);
         }
 
+#ifdef AMINETXDUO_PTP
+        case NETCTRL_INTERFACE_PEER6:
+        {
+#ifdef AMINETXDUO_IPV6
+            UINT st = netstack_ipv6_peer_set(ctl->nsc_Index,
+                                             ctl->nsc_Destination6);
+
+            if (st == NX_NOT_SUPPORTED)
+                return bsd_fail(SocketBase, AMI_EOPNOTSUPP);
+            return ns_map_status(SocketBase, st);
+#else
+            return bsd_fail(SocketBase, AMI_ENOSYS);
+#endif
+        }
+#endif
+
         case NETCTRL_INTERFACE_PRIORITY:
         {
             LONG st;
@@ -2414,7 +2489,8 @@ LONG bsd_NetStackControl(register ULONG magic __asm("d0"),
     switch (op)
     {
         case NETCTRL_GATEWAY_SET:
-            status = nx_ip_gateway_address_set(ip, ctl->nsc_Gateway);
+            status = nx_ip_gateway_address_set(ip, AMI_PTP_NEXT_HOP(
+                                                       ip, ctl->nsc_Gateway));
             if (status == NX_SUCCESS)
                 netstack_gateway_override_set(ctl->nsc_Gateway);
             rc = ns_map_status(SocketBase, status);
@@ -2431,7 +2507,8 @@ LONG bsd_NetStackControl(register ULONG magic __asm("d0"),
 #ifdef NX_ENABLE_IP_STATIC_ROUTING
             status = nx_ip_static_route_add(ip, ctl->nsc_Destination,
                                             ctl->nsc_NetMask,
-                                            ctl->nsc_Gateway);
+                                            AMI_PTP_NEXT_HOP(
+                                                ip, ctl->nsc_Gateway));
             if (status == NX_SUCCESS)
                 netstack_config_route_added(ctl->nsc_Destination,
                                             ctl->nsc_NetMask);

@@ -44,6 +44,11 @@ typedef enum
     IF_KEY_ARPREQUESTS,
     IF_KEY_WRITEREQUESTS,
     IF_KEY_PRIORITY,
+#ifdef AMINETXDUO_PTP
+    IF_KEY_POINTTOPOINT,
+    IF_KEY_DESTINATION,
+    IF_KEY_DESTINATION6,
+#endif
     /* Contiguous keys index ami_if_numbers below; these are private IDs. */
     IF_KEY_UNIT,
     IF_KEY_MTU,
@@ -54,6 +59,18 @@ typedef enum
     IF_KEY_GROFRAMES,
     IF_KEY_ACKPACE
 } IfKey;
+
+/* Without point-to-point support both keys are inert Roadshow keywords.
+   With it, AmiTCP's spelling POINTOPOINT is read too: the ptp0 file that
+   ships with the OpenVPN port's vpn.device uses it. */
+#ifdef AMINETXDUO_PTP
+#define IF_PTP_KEYWORDS(X) X(pointopoint, POINTTOPOINT) \
+                           X(destination6, DESTINATION6)
+#else
+#define IF_KEY_POINTTOPOINT IF_KEY_IGNORED
+#define IF_KEY_DESTINATION  IF_KEY_IGNORED
+#define IF_PTP_KEYWORDS(X)
+#endif
 
 /* These settings reject bad values and keep the previous assignment.
    Request counts have a different (clamping) policy and stay separate. */
@@ -159,14 +176,14 @@ IF_NUMBERS(IF_NUMBER_HINT)
     X(iptype6, CONFIGURE6) \
     X(arptype, IGNORED) \
     X(debug, IGNORED) \
-    X(pointtopoint, IGNORED) \
+    X(pointtopoint, POINTTOPOINT) \
     X(multicast, IGNORED) \
     X(reportoffline, IGNORED) \
     X(copymode, IGNORED) \
     X(alias, IGNORED) \
-    X(destination, IGNORED) \
-    X(destinationaddr, IGNORED) \
-    X(destinationaddress, IGNORED) \
+    X(destination, DESTINATION) \
+    X(destinationaddr, DESTINATION) \
+    X(destinationaddress, DESTINATION) \
     X(hardwaretype, IGNORED) \
     X(broadcastaddress, IGNORED) \
     X(metric, IGNORED) \
@@ -174,7 +191,8 @@ IF_NUMBERS(IF_NUMBER_HINT)
     X(dhcpunicast, IGNORED) \
     X(linkstatuscommand, IGNORED) \
     X(nameserver, IGNORED) \
-    X(domain, IGNORED)
+    X(domain, IGNORED) \
+    IF_PTP_KEYWORDS(X)
 
 typedef struct IfKeywordNames
 {
@@ -356,17 +374,23 @@ static const struct { UWORD offset; const char *why; } cfg_inert_keys[] =
     IF_INERT(arptype, "Ethernet only"),
     IF_INERT(hardwaretype, "Ethernet only"),
     IF_INERT(broadcastaddress, "the broadcast address is derived from ADDRESS and NETMASK"),
+#ifndef AMINETXDUO_PTP
     IF_INERT(destinationaddress, "point-to-point links are not supported"),
+#endif
     IF_INERT(copymode, "set by the driver"),
     IF_INERT(debug, "not supported"),
+#ifndef AMINETXDUO_PTP
     IF_INERT(destination, "point-to-point links are not supported"),
     IF_INERT(destinationaddr, "point-to-point links are not supported"),
+#endif
     IF_INERT(dhcpunicast, "DHCP renewal is always broadcast here"),
     IF_INERT(lease, "set by the DHCP server"),
     IF_INERT(linkstatuscommand, "not supported"),
     IF_INERT(metric, "no route metrics; PRIORITY orders interfaces"),
     IF_INERT(multicast, "automatic"),
+#ifndef AMINETXDUO_PTP
     IF_INERT(pointtopoint, "point-to-point links are not supported"),
+#endif
     IF_INERT(reportoffline, "always reported"),
 #undef IF_INERT
     { 0, NULL }
@@ -877,6 +901,44 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                 }
                 break;
 
+#ifdef AMINETXDUO_PTP
+            /* Roadshow: "The stack automatically figures out whether the
+               SANA-II device driver is of the point to point type, so you
+               should not need to specify this option." */
+            case IF_KEY_POINTTOPOINT:
+            {
+                BOOL yes;
+
+                if (ami_cfg_parse_bool(value, &yes))
+                {
+                    out->point_to_point = yes ? AMI_CFG_PTP_YES
+                                              : AMI_CFG_PTP_NO;
+                }
+                else
+                {
+                    AMI_WARN("config: %s: bad POINTTOPOINT '%s'", out->name,
+                             value);
+                    report_bad_value(lineno, AMI_CFG_PROBLEM_WARN,
+                                     "POINTTOPOINT", value,
+                                     AMI_CFG_ADVICE_POINTTOPOINT_IS_YES);
+                }
+                break;
+            }
+
+            case IF_KEY_DESTINATION:
+                if (!ami_config_parse_ip(value, &out->destination) ||
+                    out->destination == 0UL)
+                {
+                    out->destination = 0UL;
+                    AMI_WARN("config: %s: bad DESTINATION '%s'", out->name,
+                             value);
+                    report_bad_value(lineno, AMI_CFG_PROBLEM_ERROR,
+                                     "DESTINATION", value,
+                                     AMI_CFG_ADVICE_AN_ADDRESS_IS_FOUR);
+                }
+                break;
+#endif
+
             case IF_KEY_UNIT:
             case IF_KEY_MTU:
             case IF_KEY_RXBUFFER:
@@ -1141,6 +1203,31 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                 break;
             }
 
+#ifdef AMINETXDUO_PTP
+            /* The peer of a point-to-point link, read as GATEWAY6 is.  ::
+               and a group are no peer. */
+            case IF_KEY_DESTINATION6:
+            {
+                char zone[AMI_CFG_IP6_ZONE_LEN];
+
+                if (!ami_config_parse_ip6_zone(value, out->destination6, NULL,
+                                               zone, sizeof(zone)) ||
+                    (out->destination6[0] | out->destination6[1] |
+                     out->destination6[2] | out->destination6[3]) == 0UL ||
+                    (out->destination6[0] & 0xFF000000UL) == 0xFF000000UL)
+                {
+                    out->have_destination6 = FALSE;
+                    AMI_WARN("config: %s: bad DESTINATION6 '%s'", out->name,
+                             value);
+                    report_bad_value(lineno, AMI_CFG_PROBLEM_ERROR,
+                                     "DESTINATION6", value, AMI_CFG_ADVICE_NONE);
+                }
+                else if (cfg_zone_ok(out, "DESTINATION6", zone, value))
+                    out->have_destination6 = TRUE;
+                break;
+            }
+#endif
+
             case IF_KEY_GATEWAY6:
             {
                 char zone[AMI_CFG_IP6_ZONE_LEN];
@@ -1179,6 +1266,9 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                 break;
 #endif /* AMINETXDUO_IPV6 */
 
+#if defined(AMINETXDUO_PTP) && !defined(AMINETXDUO_IPV6)
+            case IF_KEY_DESTINATION6:
+#endif
             case IF_KEY_IGNORED:
                 AMI_DEBUG("config: %s: ignoring %s=%s", out->name, key, value);
                 report_inert_keyword(lineno, key);

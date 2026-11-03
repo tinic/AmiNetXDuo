@@ -354,7 +354,9 @@ ULONG _nx_amiga_handshake_millis(VOID);
 
 #define NX_IPV6_DESTINATION_TABLE_SIZE          16
 
-#define NX_IPV6_DEFAULT_ROUTER_TABLE_SIZE       2
+/* One per attached interface (AMI_CFG_MAX_ATTACHED): every LAN learns its
+   router from advertisements, and a tunnel adds ::/0 through its peer. */
+#define NX_IPV6_DEFAULT_ROUTER_TABLE_SIZE       4
 
 #define NX_IPV6_PREFIX_LIST_TABLE_SIZE          4
 

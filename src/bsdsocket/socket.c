@@ -1228,9 +1228,11 @@ static AmiSocket *bsd_socket_alloc(struct AmiSocketBase *base,
     }
 
 #ifdef AMINETXDUO_IPV6
-    if (domain == AF_INET6)
+    if (domain == AF_INET6 || domain == BSD_AF_INET6_23)
     {
         sock->as_Flags |= ASF_INET6;
+        if (domain == BSD_AF_INET6_23)
+            sock->as_Flags |= ASF_FAM23;
         version = NX_IP_VERSION_V6;
 
         /*
@@ -1797,6 +1799,12 @@ VOID bsd_addr_from_v4(NXD_ADDRESS *addr, ULONG v4)
 /*
  * Both address families use the BSD length/family prefix. Inspect bytes only
  * after checking the supplied buffer size; reject the former beta IPv6 ABI.
+ *
+ * BSD_AF_INET6_23 is the bebbo sockaddr_in6: 23 at byte 0 and its padding at
+ * byte 1, or 23 at byte 1 when written through struct sockaddr. Padding that
+ * happens to be 2 reads as AF_INET unless byte 0 is 23 and the length is
+ * exactly sizeof(struct sockaddr_in6): a sockaddr_in is 16 bytes with
+ * sin_len 16 or 0, so 23 there with a 28-byte length is no sockaddr_in.
  */
 LONG bsd_sa_family(const struct sockaddr *sa, socklen_t len)
 {
@@ -1808,6 +1816,11 @@ LONG bsd_sa_family(const struct sockaddr *sa, socklen_t len)
 #ifdef AMINETXDUO_IPV6
     if (b[1] == AF_INET6)
         return (len >= (socklen_t)sizeof(struct sockaddr_in6)) ? AF_INET6 : -1;
+
+    if ((b[0] == BSD_AF_INET6_23 || b[1] == BSD_AF_INET6_23) &&
+        (b[1] != AF_INET || len == (socklen_t)sizeof(struct sockaddr_in6)))
+        return (len >= (socklen_t)sizeof(struct sockaddr_in6))
+                   ? BSD_AF_INET6_23 : -1;
 #endif
 
     if (b[1] == AF_INET)
@@ -1841,7 +1854,7 @@ LONG bsd_sockaddr_get(struct AmiSocketBase *base, const struct sockaddr *sa,
     }
 
 #ifdef AMINETXDUO_IPV6
-    if (family == AF_INET6)
+    if (bsd_af_in(base, family) == AF_INET6)
     {
         const struct sockaddr_in6 *sin6 = (const struct sockaddr_in6 *)sa;
 
@@ -1892,6 +1905,13 @@ VOID bsd_sockaddr_put(const AmiSocket *sock, struct sockaddr *sa,
         bsd_bzero(&sin6, sizeof(sin6));
         sin6.sin6_len    = (UBYTE)sizeof(sin6);
         sin6.sin6_family = AF_INET6;
+
+        /* Both of the bebbo program's views: sin6_family and sa_family. */
+        if ((sock->as_Flags & ASF_FAM23) != 0)
+        {
+            sin6.sin6_len    = BSD_AF_INET6_23;
+            sin6.sin6_family = BSD_AF_INET6_23;
+        }
         sin6.sin6_port   = (in_port_t)BSD_HTONS((UWORD)port);
         bsd_words_to_in6(use->nxd_ip_address.v6, sin6.sin6_addr.s6_addr);
         sin6.sin6_scope_id = scope_id;
@@ -1939,15 +1959,20 @@ LONG bsd_socket(register LONG domain   __asm("d0"),
     NX_IP     *ip = bsd_stack_ip(SocketBase);
     UINT       status;
     LONG       fd;
+#ifdef AMINETXDUO_IPV6
+    LONG       family;
+#endif
 
     if (ip == NULL)
         return bsd_fail(SocketBase, AMI_ENETDOWN);
 
 #ifdef AMINETXDUO_IPV6
-    if (domain != AF_INET && domain != AF_INET6)
+    family = bsd_af_in(SocketBase, domain);
+
+    if (family != AF_INET && family != AF_INET6)
         return bsd_fail(SocketBase, AMI_EAFNOSUPPORT);
 
-    if (domain == AF_INET6 && !netstack_ipv6_enabled())
+    if (family == AF_INET6 && !netstack_ipv6_enabled())
         return bsd_fail(SocketBase, AMI_EAFNOSUPPORT);
 #else
     if (domain != AF_INET)

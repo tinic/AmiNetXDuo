@@ -119,6 +119,36 @@ if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
     target_link_options(test_scope_epoch PRIVATE -Wl,--gc-sections)
     add_test(NAME scope_slot_epoch COMMAND test_scope_epoch)
 
+    # AF_INET6 == 23 (bebbo ndk-include) beside 28 at every point a family
+    # enters or leaves: socket.c's sockaddr reader and writer, getaddrinfo(),
+    # getnameinfo(), inet_pton()/inet_ntop() and ObtainSocket().
+    add_executable(test_af_inet6_23 host/test_af_inet6_23_host.c
+        host/test_af_inet6_23_never.c
+        "${CMAKE_SOURCE_DIR}/src/config/config_text.c"
+        "${CMAKE_SOURCE_DIR}/src/config/config_text6.c"
+        "${CMAKE_SOURCE_DIR}/src/ipv6/ipv6_srcsel.c")
+    target_include_directories(test_af_inet6_23 PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/host/shim"
+        "${CMAKE_SOURCE_DIR}/src/bsdsocket"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${AMINETXDUO_THREADX}/common/inc"
+        "${AMINETXDUO_THREADX}/ports/linux/gnu/inc"
+        "${AMINETXDUO_NETXDUO}/common/inc"
+        "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"
+        "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc")
+    target_compile_options(test_af_inet6_23 PRIVATE
+        -include "${CMAKE_CURRENT_SOURCE_DIR}/host/shim/host_prelude.h"
+        -ffunction-sections -fdata-sections -Wno-pointer-to-int-cast)
+    target_compile_definitions(test_af_inet6_23 PRIVATE
+        AMINETXDUO_MULTICAST AMINETXDUO_IPV6 AMINETXDUO_CMSG
+        AMINETXDUO_ADDRINFO NX_INCLUDE_USER_DEFINE_FILE UNIQUE_ID=-1)
+    if(APPLE)
+        target_link_options(test_af_inet6_23 PRIVATE -Wl,-dead_strip)
+    else()
+        target_link_options(test_af_inet6_23 PRIVATE -Wl,--gc-sections)
+    endif()
+    add_test(NAME af_inet6_23 COMMAND test_af_inet6_23)
+
     # socket.c: CloseSocket() and bsd_close_all() without a ThreadX bracket
     # leave no leaked socket naming the closing base (F-059).
     add_executable(test_unbracketed_close host/test_unbracketed_close_host.c)
@@ -330,7 +360,8 @@ if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
     # the header of test_route_host.c says what each stub reproduces and from
     # which line of the vendored source.
     add_executable(test_route host/test_route_host.c
-                              "${CMAKE_SOURCE_DIR}/src/bsdsocket/routing.c")
+                              "${CMAKE_SOURCE_DIR}/src/bsdsocket/routing.c"
+                              "${CMAKE_SOURCE_DIR}/tests/common/host/ptp_passthrough.c")
 
     target_include_directories(test_route PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/host/shim"
@@ -684,6 +715,7 @@ if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
     # wants the REAL tx_amiga.h; the shim's header says so.
     add_executable(test_neighbour host/test_neighbour_host.c
                                   "${CMAKE_SOURCE_DIR}/src/bsdsocket/netstatus.c"
+                                  "${CMAKE_SOURCE_DIR}/tests/common/host/ptp_passthrough.c"
                                   "${CMAKE_SOURCE_DIR}/src/config/config_hostname.c"
                                   "${CMAKE_SOURCE_DIR}/src/config/config_text.c")
 
@@ -720,6 +752,7 @@ if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
     # stubs that stage them are already in this target.
     add_executable(test_dhcp6 host/test_dhcp6_host.c
                               "${CMAKE_SOURCE_DIR}/src/bsdsocket/netstatus.c"
+                              "${CMAKE_SOURCE_DIR}/tests/common/host/ptp_passthrough.c"
                               "${CMAKE_SOURCE_DIR}/src/config/config_hostname.c"
                               "${CMAKE_SOURCE_DIR}/src/config/config_text.c")
 
@@ -747,6 +780,7 @@ if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
     # beside a NetStatusInterface that keeps its 192 bytes.
     add_executable(test_ifdevices host/test_ifdevices_host.c
                                   "${CMAKE_SOURCE_DIR}/src/bsdsocket/netstatus.c"
+                                  "${CMAKE_SOURCE_DIR}/tests/common/host/ptp_passthrough.c"
                                   "${CMAKE_SOURCE_DIR}/src/config/config_hostname.c"
                                   "${CMAKE_SOURCE_DIR}/src/config/config_text.c")
 
@@ -775,6 +809,7 @@ if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
     # field.  config_hostname.c for the rank, config_text.c under it.
     add_executable(test_hostsource host/test_hostsource_host.c
                                    "${CMAKE_SOURCE_DIR}/src/bsdsocket/netstatus.c"
+                                   "${CMAKE_SOURCE_DIR}/tests/common/host/ptp_passthrough.c"
                                    "${CMAKE_SOURCE_DIR}/src/config/config_hostname.c"
                                    "${CMAKE_SOURCE_DIR}/src/config/config_text.c")
 
@@ -802,6 +837,7 @@ if(NOT CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
     # bsd_openers_list() takes sb_Lock and must run before bsd_nx_enter().
     add_executable(test_netstatus_order host/test_netstatus_order_host.c
                                         "${CMAKE_SOURCE_DIR}/src/bsdsocket/netstatus.c"
+                                        "${CMAKE_SOURCE_DIR}/tests/common/host/ptp_passthrough.c"
                                         "${CMAKE_SOURCE_DIR}/src/config/config_hostname.c"
                                         "${CMAKE_SOURCE_DIR}/src/config/config_text.c")
 
@@ -937,6 +973,7 @@ if(NOT CMAKE_CROSSCOMPILING)
     # whose real half includes the host's <net/if.h>.
     set(BSD_ERRNO_HOOK_SOURCES host/test_errno_hook_host.c
                                "${CMAKE_SOURCE_DIR}/src/bsdsocket/errno.c"
+                               "${CMAKE_SOURCE_DIR}/tests/common/host/ptp_passthrough.c"
                                "${CMAKE_SOURCE_DIR}/src/bsdsocket/netx_call.c")
     set(BSD_ERRNO_HOOK_INCLUDES
         "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"

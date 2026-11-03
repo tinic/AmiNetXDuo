@@ -349,6 +349,8 @@ STRPTR bsd_inet_ntop(register LONG af      __asm("d0"),
         return NULL;
     }
 
+    af = bsd_af_in(SocketBase, af);
+
 #ifdef AMINETXDUO_IPV6
     if (af == AF_INET6)
     {
@@ -396,6 +398,8 @@ LONG bsd_inet_pton(register LONG af    __asm("d0"),
                    register struct AmiSocketBase *SocketBase __asm("a6"))
 {
     ULONG addr;
+
+    af = bsd_af_in(SocketBase, af);
 
 #ifdef AMINETXDUO_IPV6
     if (af == AF_INET6)

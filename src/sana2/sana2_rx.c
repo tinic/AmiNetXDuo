@@ -1042,7 +1042,7 @@ AMI_SANA2_BATCH_LINKAGE UWORD ami_sana2_rx_post_batch(AmiSana2Rx *rx, AmiRxBatch
 }
 #endif /* AMINETXDUO_RX_BATCH */
 
-static UWORD ami_sana2_rx_post(AmiSana2Rx *rx)
+AMI_SANA2_BATCH_LINKAGE UWORD ami_sana2_rx_post(AmiSana2Rx *rx)
 {
     UWORD i;
     UWORD live = 0;
@@ -1122,6 +1122,10 @@ static UWORD ami_sana2_rx_post(AmiSana2Rx *rx)
 #endif
         return rx->depth;
     }
+
+    /* Refused by the device: asking again is refused again at once. */
+    if (rx->refused)
+        return 0;
 
 #ifdef AMINETXDUO_RXPROBE
     rx->probe.sweep_run++;
@@ -1325,15 +1329,27 @@ typedef struct AmiSana2GroKey
     UBYTE version;
 } AmiSana2GroKey;
 
+/* Direct loads on the 68k: every frame here comes from a slot armed by
+   ami_sana2_rx_arm(), so the IP and TCP headers are longword-aligned (the
+   assertions above it).  The host tier is little-endian and reads bytes, as
+   N68K_RDW16/N68K_RDW32 do in src/net68k/n68k_rx_verify.c. */
 static UWORD ami_sana2_gro_be16(const UCHAR *p)
 {
+#if defined(__mc68000__) || defined(__m68k__)
+    return *(const UWORD *)(CONST_APTR)p;
+#else
     return (UWORD)(((UWORD)p[0] << 8) | p[1]);
+#endif
 }
 
 static ULONG ami_sana2_gro_be32(const UCHAR *p)
 {
+#if defined(__mc68000__) || defined(__m68k__)
+    return *(const ULONG *)(CONST_APTR)p;
+#else
     return ((ULONG)ami_sana2_gro_be16(p) << 16) |
            ami_sana2_gro_be16(p + 2);
+#endif
 }
 
 /*
@@ -1796,6 +1812,30 @@ AMI_SANA2_BATCH_LINKAGE UWORD ami_sana2_rx_drain_batch(AmiSana2Reader *rd,
 }
 #endif /* AMINETXDUO_RX_BATCH */
 
+/*
+ * A read the device refuses outright: S2ERR_NOT_SUPPORTED for a packet type
+ * it does not carry (a point-to-point driver asked for IPv6), or
+ * IOERR_NOCMD.  Posted again, it is refused again at once, and with its reply
+ * always on the port the reader never blocked: it spun at its priority.  The
+ * ring is retired until ami_sana2_rx_start() builds it again.  Non-static so
+ * the host tier can pin it.
+ */
+BOOL ami_sana2_rx_refused(AmiSana2Rx *rx, UBYTE error)
+{
+    if ((LONG)(BYTE)error != (LONG)S2ERR_NOT_SUPPORTED &&
+        (LONG)(BYTE)error != (LONG)IOERR_NOCMD)
+        return FALSE;
+
+    if (!rx->refused)
+    {
+        rx->refused = TRUE;
+        AMI_WARN("sana2: %s refuses reads of packet type 0x%04lx; "
+                 "they are not asked for again",
+                 rx->iface->device, rx->packet_type);
+    }
+    return TRUE;
+}
+
 static UWORD ami_sana2_rx_drain(AmiSana2Reader *rd, UWORD budget)
 {
     AmiSana2If     *iface = rd->iface;
@@ -2003,6 +2043,7 @@ static UWORD ami_sana2_rx_drain(AmiSana2Reader *rd, UWORD budget)
         }
         else
         {
+            (VOID)ami_sana2_rx_refused(rx, raw);
             iface->stats.rx_errors++;
             iface->stats.rx_err_io++;
         }
@@ -2941,10 +2982,15 @@ LONG ami_sana2_rx_start(AmiSana2If *iface)
         rx->iface       = iface;
         rx->reader      = &iface->reader;
         rx->packet_type = ami_sana2_rx_types[i];
+        rx->refused     = FALSE;
         if (ami_sana2_rx_types[i] == AMI_ETHERTYPE_IPV4)
             rx->depth = depths.ipv4;
         else if (ami_sana2_rx_types[i] == AMI_ETHERTYPE_ARP)
+#ifdef AMINETXDUO_PTP
+            rx->depth = ami_sana2_rx_arp_depth(iface, depths.arp);
+#else
             rx->depth = depths.arp;
+#endif
         else
             rx->depth = depths.ipv6;
 #ifdef AMINETXDUO_GRO
@@ -2969,7 +3015,11 @@ LONG ami_sana2_rx_start(AmiSana2If *iface)
             ami_sana2_rx_free_batches(rx);
 #endif
         }
+#ifdef AMINETXDUO_PTP
+        if (rx->slot == NULL && rx->depth != 0)
+#else
         if (rx->slot == NULL)
+#endif
         {
             rx->slot = (AmiRxSlot *)ami_alloc((ULONG)rx->depth *
                                               (ULONG)sizeof(AmiRxSlot));

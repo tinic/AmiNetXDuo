@@ -474,6 +474,15 @@ static BOOL gateway_is_reachable(struct Library *base, ULONG addr)
 
         if ((nsi->nsi_Address & nsi->nsi_NetMask) == (addr & nsi->nsi_NetMask))
             return TRUE;
+#ifdef AMINETXDUO_PTP
+        /* The other end of a point-to-point link is reached through it. */
+        if ((nsi->nsi_Flags & NETSTATUS_IF_PTP) != 0 && addr != 0UL &&
+            (((ULONG)nsi->nsi_HwAddress[0] << 24) |
+             ((ULONG)nsi->nsi_HwAddress[1] << 16) |
+             ((ULONG)nsi->nsi_HwAddress[2] << 8) |
+             (ULONG)nsi->nsi_HwAddress[3]) == addr)
+            return TRUE;
+#endif
     }
 
     return FALSE;
@@ -591,6 +600,25 @@ static BOOL interface_for_next_hop(struct Library *base, const NrAddr6 *gw,
     if (gw->have_zone)
         return FALSE;
 
+#ifdef AMINETXDUO_PTP
+    /* The peer of a point-to-point link is reached through it, whatever
+       the link's prefixes cover. */
+    n = tool_netstatus_query(base, NETSTATUS_ROUTES6, &nr_answer,
+                             sizeof(nr_answer.route6), sizeof(NetStatusRoute6));
+
+    for (i = 0; i < n; i++)
+    {
+        const NetStatusRoute6 *r = &nr_answer.route6.e[i];
+
+        if ((r->nsr6_Flags & NETSTATUS_RT6_PEER) &&
+            same_address6(r->nsr6_Destination, gw->addr))
+        {
+            *out = r->nsr6_Interface;
+            return TRUE;
+        }
+    }
+#endif
+
     if (is_link_local6(gw->addr))
     {
         if (attached != 1)
@@ -663,6 +691,10 @@ static LONG find_prefix6(struct Library *base, const ULONG addr[4],
 
         if (r->nsr6_Flags & NETSTATUS_RT6_GATEWAY)
             continue;
+#ifdef AMINETXDUO_PTP
+        if (r->nsr6_Flags & NETSTATUS_RT6_PEER)
+            continue;
+#endif
 
         if (exact && r->nsr6_PrefixLength != bits)
             continue;
@@ -868,6 +900,45 @@ static LONG run_ipv6(const LONG *args, BOOL have_default)
         return RETURN_ERROR;
     }
 
+#ifdef AMINETXDUO_PTP
+    /* DESTINATION=::, the default route added by hand, as DESTINATION=0.0.0.0
+       is for IPv4.  One learnt from an advertisement is left alone. */
+    if ((via.addr[0] | via.addr[1] | via.addr[2] | via.addr[3]) == 0UL &&
+        (!via.have_prefix || via.prefix == 0UL))
+    {
+        LONG n = tool_netstatus_query(base, NETSTATUS_ROUTES6, &nr_answer,
+                                      sizeof(nr_answer.route6),
+                                      sizeof(NetStatusRoute6));
+        LONG i;
+
+        for (i = 0; i < n; i++)
+            if ((nr_answer.route6.e[i].nsr6_Flags &
+                 (NETSTATUS_RT6_GATEWAY | NETSTATUS_RT6_STATIC)) ==
+                (NETSTATUS_RT6_GATEWAY | NETSTATUS_RT6_STATIC))
+                break;
+
+        if (i >= n)
+        {
+            tool_error("no static default route");
+            tool_netstatus_close(base);
+            return RETURN_ERROR;
+        }
+
+        if (tool_netstatus_control(base, NETCTRL_ROUTE6_DELETE, &ctl,
+                                   &err) != 0)
+        {
+            tool_error("default route not deleted");
+            explain6(err, NULL);
+            tool_netstatus_close(base);
+            return RETURN_FAIL;
+        }
+
+        say("default route deleted\n");
+        tool_netstatus_close(base);
+        return RETURN_OK;
+    }
+#endif
+
     /*
      * The length comes out of the live table when none was written, so a
      * prefix added with any length can be removed by naming somewhere inside
@@ -1064,6 +1135,17 @@ static int addnetroute_main(int argc, char **argv)
             FreeArgs(rda);
             return RETURN_ERROR;
         }
+
+        /*
+         * DESTINATION=0.0.0.0 is the default route, whichever gateway it
+         * has: AmiTCP's DeleteNetRoute reads it so, and the OpenVPN port's
+         * AmiTCP-NG scripts delete the default route that way.
+         */
+        if (dest == 0UL && (!have_mask || mask == 0UL))
+        {
+            have_default = TRUE;
+            gateway      = 0UL;
+        }
 #else
         if (args[ARG_HOSTDST] != 0)
         {
@@ -1165,6 +1247,13 @@ static int addnetroute_main(int argc, char **argv)
             tool_netstatus_close(base);
             FreeArgs(rda);
             return RETURN_ERROR;
+        }
+
+        /* DESTINATION=0.0.0.0: the one there is. */
+        if (gateway == 0UL)
+        {
+            gateway = live_gw;
+            ami_config_format_ip(gateway, text, sizeof(text));
         }
 
         if (live_gw != gateway)

@@ -199,6 +199,17 @@ static VOID bus_wdata(const NetdevBus *bus, const UBYTE *src, UWORD len)
     const UWORD    *in;
     UWORD           i;
 
+    /* A frame staged at tx_phase 2: one word through the 16-bit port, then
+       the long burst from a longword. */
+    if (BUS_ALIGN(src, 3) == 2 && len >= 6 &&
+        bus_long_ok(bus, src + 2, (UWORD)(len - 2)))
+    {
+        BUS_PUT16((volatile UWORD *)bus->asic,
+                  *(const UWORD *)(const void *)src);
+        bus_wdata_long(bus, src + 2, (UWORD)(len - 2));
+        return;
+    }
+
     if (bus_long_ok(bus, src, len))
     {
         bus_wdata_long(bus, src, len);

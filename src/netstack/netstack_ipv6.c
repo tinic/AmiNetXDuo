@@ -9,9 +9,14 @@
 
 #include "netstack_internal.h"
 #include "aminetxduo/nxstatus.h"
+#include "aminetxduo/ptp.h"
 
 #include "nx_ipv6.h"
 #include "nx_icmpv6.h"
+
+#ifdef AMINETXDUO_PTP
+#include "../ipv6/ipv6_srcsel.h"
+#endif
 
 #include <proto/exec.h>
 
@@ -210,6 +215,12 @@ VOID ami_netstack_ipv6_interface_up(AmiNetStack *ns, UWORD interface_index)
         ns->ns_Config.interfaces[interface_index].ip6type != AMI_IP6TYPE_AUTO)
         return;
 
+#ifdef AMINETXDUO_PTP
+    /* No router is solicited on a point-to-point link. */
+    if (ami_sana2_ptp(ns->ns_Iface[interface_index]))
+        return;
+#endif
+
     ami_ns6_arm_solicitation(ns, interface_index);
 }
 
@@ -218,6 +229,12 @@ static VOID ami_ns6_configure_interface(AmiNetStack *ns, UWORD i)
     const AmiIfConfig *cfg = &ns->ns_Config.interfaces[i];
     UINT               index = 0;
     UINT               status;
+#ifdef AMINETXDUO_PTP
+    BOOL               ptp = (BOOL)ami_sana2_ptp(ns->ns_Iface[i]);
+
+    /* Cleared for whatever had the slot before; set below if IPv6 runs. */
+    ami_ptp_ipv6_peer_set((UINT)i, NULL);
+#endif
 
     if (cfg->ip6type == AMI_IP6TYPE_OFF)
     {
@@ -238,6 +255,17 @@ static VOID ami_ns6_configure_interface(AmiNetStack *ns, UWORD i)
         return;
     }
 
+#ifdef AMINETXDUO_PTP
+    /* A link-local without a MAC, no DAD and no router solicitation:
+       netstack_ptp6.c has the why. */
+    if (ptp)
+    {
+        if (cfg->have_destination6)
+            ami_ptp_ipv6_peer_set((UINT)i, cfg->destination6);
+        status = ami_ptp_ipv6_start(&ns->ns_Ip, (UINT)i);
+    }
+    else
+#endif
     /*
      * Link-local first, always.  A NULL address with prefix length 10 tells
      * NetX Duo to derive fe80::/64 from the MAC of this interface.
@@ -280,6 +308,12 @@ static VOID ami_ns6_configure_interface(AmiNetStack *ns, UWORD i)
             addr.nxd_ip_address.v6[2] = cfg->address6[n].addr[2];
             addr.nxd_ip_address.v6[3] = cfg->address6[n].addr[3];
 
+#ifdef AMINETXDUO_PTP
+            if (ptp)
+                status = ami_ptp_ipv6_address_set(&ns->ns_Ip, (UINT)i, &addr,
+                                                  cfg->address6[n].prefix);
+            else
+#endif
             status = nxd_ipv6_address_set(&ns->ns_Ip, (UINT)i, &addr,
                                           cfg->address6[n].prefix, &gindex);
             if (status != NX_SUCCESS)
@@ -289,6 +323,13 @@ static VOID ami_ns6_configure_interface(AmiNetStack *ns, UWORD i)
             }
         }
     }
+#ifdef AMINETXDUO_PTP
+    /* Autoconfiguration is off on the link already (netstack_ptp6.c). */
+    if (ptp)
+    {
+    }
+    else
+#endif
     if (cfg->ip6type == AMI_IP6TYPE_AUTO)
     {
         /*
@@ -645,7 +686,11 @@ static UINT ami_ns6_route_add(const ULONG dest[4], ULONG prefix_len,
             return NX_INVALID_INTERFACE;
 
         router.nxd_ip_version = NX_IP_VERSION_V6;
+#ifdef AMINETXDUO_PTP
+        ami_ptp_ipv6_next_hop(&ns->ns_Ip, next_hop, router.nxd_ip_address.v6);
+#else
         ami_ns6_copy(next_hop, router.nxd_ip_address.v6);
+#endif
 
         status = nxd_ipv6_default_router_add(&ns->ns_Ip, &router,
                                              AMI_NS6_ROUTER_FOREVER,
@@ -723,12 +768,51 @@ static UINT ami_ns6_route_delete(const ULONG dest[4], ULONG prefix_len,
     if (dest == NULL || prefix_len > 128UL)
         return NX_IP_ADDRESS_ERROR;
 
+#ifdef AMINETXDUO_PTP
+    /* DESTINATION=::, the default route added by hand, as DESTINATION=0.0.0.0
+       is for IPv4 (addnetroute.c).  A router learnt from an advertisement
+       stays: the next one would bring it back. */
+    if ((next_hop == NULL || ami_ns6_is_any(next_hop)) &&
+        prefix_len == 0UL && ami_ns6_is_any(dest))
+    {
+        NX_IPV6_DEFAULT_ROUTER_ENTRY *rt;
+        NXD_ADDRESS                   router;
+
+        AMI_NX_ONLY_SUCCESS(tx_mutex_get(&ns->ns_Ip.nx_ip_protection,
+                                         TX_WAIT_FOREVER));
+        rt = anx6_static_default_router(&ns->ns_Ip);
+        if (rt != NX_NULL)
+            ami_ns6_copy(rt->nx_ipv6_default_router_entry_router_address,
+                         router.nxd_ip_address.v6);
+        AMI_NX_ONLY_SUCCESS(tx_mutex_put(&ns->ns_Ip.nx_ip_protection));
+
+        if (rt == NX_NULL)
+            return NX_ENTRY_NOT_FOUND;
+
+        router.nxd_ip_version = NX_IP_VERSION_V6;
+        status = nxd_ipv6_default_router_delete(&ns->ns_Ip, &router);
+        if (status == NX_SUCCESS)
+        {
+            AMI_NX_ONLY_SUCCESS(tx_mutex_get(&ns->ns_Ip.nx_ip_protection,
+                                         TX_WAIT_FOREVER));
+            ami_ns6_forget_destinations(ns);
+            AMI_NX_ONLY_SUCCESS(tx_mutex_put(&ns->ns_Ip.nx_ip_protection));
+        }
+
+        return status;
+    }
+#endif
+
     if (next_hop != NULL && !ami_ns6_is_any(next_hop))
     {
         NXD_ADDRESS router;
 
         router.nxd_ip_version = NX_IP_VERSION_V6;
+#ifdef AMINETXDUO_PTP
+        ami_ptp_ipv6_next_hop(&ns->ns_Ip, next_hop, router.nxd_ip_address.v6);
+#else
         ami_ns6_copy(next_hop, router.nxd_ip_address.v6);
+#endif
 
         status = nxd_ipv6_default_router_delete(&ns->ns_Ip, &router);
 
@@ -787,6 +871,43 @@ UINT netstack_ipv6_route_delete(const ULONG dest[4], ULONG prefix_len,
     ami_netstack_leave_free(caller);
     return status;
 }
+
+#ifdef AMINETXDUO_PTP
+UINT netstack_ipv6_peer_set(UWORD index, const ULONG peer[4])
+{
+    AmiNetStack  *ns = ami_netstack_raw();
+    AmiNetCaller *caller;
+    AmiIfConfig  *cfg;
+
+    if (ns == NULL || !ns->ns_IpCreated || !ns->ns_Ipv6Enabled)
+        return NX_NOT_ENABLED;
+
+    if (index >= ns->ns_IfaceCount || ns->ns_Iface[index] == NULL ||
+        peer == NULL)
+        return NX_INVALID_INTERFACE;
+
+    if (!ami_sana2_ptp(ns->ns_Iface[index]))
+        return NX_NOT_SUPPORTED;
+
+    caller = ami_netstack_enter_alloc();
+    if (caller == NULL)
+        return NX_CALLER_ERROR;
+
+    /* In the running configuration too, as PRIORITY= is. */
+    cfg = &ns->ns_Config.interfaces[index];
+    ami_ns6_copy(peer, cfg->destination6);
+    cfg->have_destination6 = (BOOL)!ami_ns6_is_any(peer);
+
+    AMI_NX_ONLY_SUCCESS(tx_mutex_get(&ns->ns_Ip.nx_ip_protection,
+                                     TX_WAIT_FOREVER));
+    ami_ptp_ipv6_peer_set((UINT)index, peer);
+    ami_ns6_forget_destinations(ns);
+    AMI_NX_ONLY_SUCCESS(tx_mutex_put(&ns->ns_Ip.nx_ip_protection));
+
+    ami_netstack_leave_free(caller);
+    return NX_SUCCESS;
+}
+#endif
 
 /* Keep NetX's private RFC 6724 selector behind the netstack boundary. */
 static BOOL ami_ns6_source_find(const ULONG dest[4], LONG interface_index,

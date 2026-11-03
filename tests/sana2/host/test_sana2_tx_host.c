@@ -286,14 +286,19 @@ AMIGA_ASM_ARGS VOID n68k_copy_bytes(UCHAR *to, const UCHAR *from, ULONG len)
 AMIGA_ASM_ARGS ULONG n68k_copy_sum_longwords(ULONG *to, const ULONG *from, ULONG count)
 {
     ULONG acc = 0;
+    /* Bytes, not ULONG pointers: since #439 the destination is 2 mod 4, and
+       UBSan checks a memcpy() argument against its pointer type. */
+    UCHAR *t = (UCHAR *)to;
+    const UCHAR *b = (const UCHAR *)from;
 
     while (count != 0UL)
     {
-        const UCHAR *b = (const UCHAR *)from;
         ULONG w = ((ULONG)b[0] << 24) | ((ULONG)b[1] << 16) |
                   ((ULONG)b[2] << 8) | (ULONG)b[3];
 
-        *to++ = *from++;
+        memcpy(t, b, sizeof(ULONG));   /* any phase: the 68k's move.l */
+        t += sizeof(ULONG);
+        b += sizeof(ULONG);
 
         acc += w;
         if (acc < w)
@@ -1027,6 +1032,55 @@ static void test_no_pad_off_ethernet(void)
     h_check(sent_req()->ios2_DataLength == ARP_LEN,
             "and its length is the frame's, unpadded");
 }
+
+#ifdef AMINETXDUO_PTP
+/* vpn.device's shape: PPP, four address bytes, cooked.  IPv6 goes as IPv4
+   does: the bare datagram, type 0x86DD, no destination address. */
+static void test_ptp_ipv6_goes_bare(void)
+{
+    static UCHAR v6[48];
+    ULONG        i;
+    int          zero = 1;
+
+    printf("sana2: IPv6 onto a point-to-point link is the bare datagram\n");
+
+    for (i = 0; i < sizeof(v6); i++)
+        v6[i] = (UCHAR)(i + 3);
+    v6[0] = 0x60;                           /* IPv6                         */
+    v6[4] = 0;  v6[5] = 8;                  /* payload length               */
+    v6[6] = 59;                             /* no next header               */
+
+    fixture_init(FALSE, S2WireType_PPP);
+    iface.addr_bytes = 4;
+    iface.ptp        = TRUE;
+    packet_init(v6, (ULONG)sizeof(v6));
+
+    /* An address NetX Duo would never hand a link without mapping, so a
+       zero below is the shim's doing. */
+    h_check(ami_sana2_tx_send(&iface, &pkt, AMI_ETHERTYPE_IPV6, 0xAABB,
+                              0xCCDDEEFF) == NX_SUCCESS,
+            "ptp: the IPv6 write is posted");
+    h_check(sent_req()->ios2_PacketType == AMI_ETHERTYPE_IPV6,
+            "ptp: with packet type 0x86DD");
+    h_check((sent_req()->ios2_Req.io_Flags & SANA2IOF_RAW) == 0,
+            "ptp: cooked, the high type notwithstanding");
+    for (i = 0; i < SANA2_MAX_ADDR_BYTES; i++)
+        if (sent_req()->ios2_DstAddr[i] != 0)
+            zero = 0;
+    h_check(zero, "ptp: and the destination address zeroed");
+    h_check(sent_req()->ios2_DataLength == sizeof(v6),
+            "ptp: its length is the datagram's, no header, no pad");
+    h_check(device_copy() == TRUE &&
+            memcmp(devbuf, v6, sizeof(v6)) == 0,
+            "ptp: the device copies the datagram from its version byte");
+
+    h_reply();
+    ami_sana2_tx_reap(&iface);
+    h_check(pkt.nx_packet_length == sizeof(v6) &&
+            pkt.nx_packet_prepend_ptr == pool + NX_PHYSICAL_HEADER,
+            "ptp: and the packet goes back as it came");
+}
+#endif
 
 /* A reply arriving during the final permitted sleep is still inside the
    drain deadline.  It must be reaped before the interface is declared unsafe
@@ -2207,6 +2261,46 @@ static void test_gso_pieces_and_restart(void)
     }
 }
 
+/* The whole child into a destination at each of the four phases: the even
+   ones store the header fields directly, the odd ones patch byte by byte,
+   and every one is the same frame. */
+static void test_gso_header_every_phase(void)
+{
+    static ULONG       store[(H_FRAME + 8) / 4];
+    UCHAR             *base = (UCHAR *)store;
+    NX_PACKET         *p;
+    struct IOSana2Req *req;
+    UCHAR              want[H_FRAME];
+    ULONG              len, seg, phase;
+    int                arm;
+
+    printf("sana2: a GSO child's header at every destination phase\n");
+
+    for (arm = 0; arm < 2; arm++)
+        for (seg = 0; seg < 3; seg++)
+        {
+            fixture_init(FALSE, S2WireType_Ethernet);
+            iface.tx_csum_ok = arm ? ANXD_S2_TXF_TCP : 0;
+            p = gso_parent(32, 350, 100, 0x99, 0xFFFFFF60UL, 9, 37,
+                           g_odd_cuts, 5);
+            (VOID)ami_sana2_tx_send(&iface, p, AMI_ETHERTYPE_IPV4, 0xBC24,
+                                    0x11EF103A);
+            req = (struct IOSana2Req *)h_sent_log[seg];
+            len = gso_expect(want, (UWORD)seg, arm);
+
+            for (phase = 0; phase < 4; phase++)
+            {
+                memset(store, 0x5A, sizeof(store));
+                h_check(ami_sana2_copy_from_buff(base + phase, req->ios2_Data,
+                                                 len) == TRUE,
+                        "the child is handed over");
+                h_check(memcmp(base + phase, want, len) == 0 &&
+                        base[phase + len] == 0x5A,
+                        "the frame exactly, at this phase");
+            }
+        }
+}
+
 /*
  * A GSO child copied in two pieces to a device that does not finish the
  * checksum: the sum is walked alone, through the longword routine, before the
@@ -3236,6 +3330,9 @@ int main(void)
     test_raw_refused_falls_back_to_cooked();
     test_no_pad_when_long_enough();
     test_no_pad_off_ethernet();
+#ifdef AMINETXDUO_PTP
+    test_ptp_ipv6_goes_bare();
+#endif
     test_drain_reaps_final_sleep();
 
 #ifdef AMINETXDUO_TCP_GSO
@@ -3243,6 +3340,7 @@ int main(void)
     test_gso_children_offload();
     test_gso_pads_the_last();
     test_gso_pieces_and_restart();
+    test_gso_header_every_phase();
     test_gso_sum_alone_two_pieces();
     test_gso_queues_in_order();
     test_gso_offline_mid_block();

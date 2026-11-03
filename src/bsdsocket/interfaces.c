@@ -17,6 +17,7 @@
 
 #include "aminetxduo/bpf.h"   /* AMI_STATIC_ASSERT */
 #include "aminetxduo/ifindex.h"
+#include "aminetxduo/ptp.h"
 
 #include <proto/exec.h>
 
@@ -275,6 +276,16 @@ static VOID bsd_if_gather(NX_IP *ip, UINT index, BsdIfInfo *info)
         ami_sana2_get_mac(sana, info->bii_HwAddress);
         ami_sana2_get_stats(sana, &info->bii_Stats);
         ami_sana2_get_info(sana, &info->bii_Info);
+
+#ifdef AMINETXDUO_PTP
+        /* One peer and no broadcast, as on 4.4BSD. */
+        if (ami_sana2_ptp(sana))
+        {
+            info->bii_PointToPoint = TRUE;
+            info->bii_Destination  = ami_sana2_ptp_peer(sana);
+            info->bii_Broadcast    = 0;
+        }
+#endif
     }
 
     if (nx_ip_info_get(ip, &scratch[0], &scratch[1], &scratch[2], &scratch[3],
@@ -382,6 +393,14 @@ LONG bsd_QueryInterfaceTagList(register STRPTR name __asm("a0"),
                 bsd_put_sockaddr_in(item, info.bii_Broadcast);
                 break;
 
+#ifdef AMINETXDUO_PTP
+            /* "Retrieve the IP address of the point-to-point partner": 0.0.0.0
+               on an interface that has none. */
+            case IFQ_DestinationAddress:
+                bsd_put_sockaddr_in(item, info.bii_Destination);
+                break;
+#endif
+
             case IFQ_PrimaryDNSAddress:
             case IFQ_SecondaryDNSAddress:
                 bsd_put_sockaddr_in(item, 0);
@@ -426,6 +445,10 @@ typedef struct BsdIfConfigReq
     BOOL    bcr_HaveUnalias;
     ULONG   bcr_Unalias;
     ULONG   bcr_UnaliasMask;        /* parsed, not used: the address names it */
+#ifdef AMINETXDUO_PTP
+    BOOL    bcr_HaveDestination;
+    ULONG   bcr_Destination;
+#endif
 } BsdIfConfigReq;
 
 #ifdef AMINETXDUO_NETADMIN
@@ -517,10 +540,25 @@ LONG bsd_if_set_address(struct AmiSocketBase *SocketBase, LONG index,
     if (!have_netmask)
         netmask = nxif->nx_interface_ip_network_mask;
 
+#ifdef AMINETXDUO_PTP
+    /* No network beyond its own address, so no class to take a mask from:
+       a first address without NETMASK is /32, as 4.4BSD's ifconfig gives a
+       point-to-point interface. */
+    if (ami_sana2_ptp((AmiSana2If *)nxif->nx_interface_additional_link_info) &&
+        (netmask == 0 ||
+         (!have_netmask && nxif->nx_interface_ip_address == 0UL)))
+        netmask = 0xFFFFFFFFUL;
+#endif
+
     if (netmask == 0)
         netmask = bsd_if_classful_mask(address);
 
     status = nx_ip_interface_address_set(ip, (UINT)index, address, netmask);
+
+#ifdef AMINETXDUO_PTP
+    if (status == NX_SUCCESS)
+        ami_ptp_peer_route(ip, (UINT)index);
+#endif
 
     bsd_nx_leave(SocketBase);
 
@@ -617,9 +655,22 @@ static LONG bsd_if_parse_config(struct AmiSocketBase *SocketBase,
                 req->bcr_HaveUnalias = TRUE;
                 break;
 
+#ifdef AMINETXDUO_PTP
+            /* Only a point-to-point interface has one; that is checked once
+               the interface is known. */
+            case IFC_DestinationAddress:
+                if (!bsd_if_parse_address(text, &req->bcr_Destination))
+                    return bsd_fail(SocketBase, AMI_EINVAL);
+                req->bcr_HaveDestination = TRUE;
+                break;
+
+            case IFC_BroadcastAddress:
+                return bsd_fail(SocketBase, AMI_EOPNOTSUPP);
+#else
             case IFC_DestinationAddress:
             case IFC_BroadcastAddress:
                 return bsd_fail(SocketBase, AMI_EOPNOTSUPP);
+#endif
 
             default:
                 break;
@@ -713,6 +764,39 @@ LONG bsd_ConfigureInterfaceTagList(register STRPTR name __asm("a0"),
             goto out;
         }
     }
+
+#ifdef AMINETXDUO_PTP
+    /* "This tag requires the IFC_Address tag to be present and only works
+       for point-to-point interfaces."  An interface that has its address
+       already may be given a new peer on its own. */
+    if (req.bcr_HaveDestination)
+    {
+        AmiSana2If *sana = (AmiSana2If *)nxif->nx_interface_additional_link_info;
+
+        if (!ami_sana2_ptp(sana))
+        {
+            result = bsd_fail(SocketBase, AMI_EOPNOTSUPP);
+            goto out;
+        }
+        if (!req.bcr_HaveAddress && nxif->nx_interface_ip_address == 0UL)
+        {
+            result = bsd_fail(SocketBase, AMI_EINVAL);
+            goto out;
+        }
+        ami_sana2_set_ptp_peer(sana, req.bcr_Destination);
+
+        if (!req.bcr_HaveAddress && !req.bcr_HaveNetMask)
+        {
+            if (bsd_nx_enter(SocketBase) != 0)
+            {
+                result = bsd_fail(SocketBase, bsd_nx_errno(SocketBase));
+                goto out;
+            }
+            ami_ptp_peer_route(ip, (UINT)index);
+            bsd_nx_leave(SocketBase);
+        }
+    }
+#endif
 
     if (req.bcr_HaveAddress || req.bcr_HaveNetMask)
     {
@@ -823,11 +907,25 @@ static LONG bsd_if_parse_add(struct AmiSocketBase *SocketBase,
                     return bsd_fail(SocketBase, AMI_EOPNOTSUPP);
                 break;
 
+#ifdef AMINETXDUO_PTP
+            case IFA_Multicast:
+                if (item->ti_Data == 0)
+                    return bsd_fail(SocketBase, AMI_EOPNOTSUPP);
+                break;
+
+            /* "Not normally necessary since the stack can figure this out
+               all by itself." */
+            case IFA_PointToPoint:
+                cfg->point_to_point = (item->ti_Data != 0) ? AMI_CFG_PTP_YES
+                                                           : AMI_CFG_PTP_NO;
+                break;
+#else
             case IFA_Multicast:
             case IFA_PointToPoint:
                 if ((item->ti_Tag == IFA_Multicast) != (item->ti_Data != 0))
                     return bsd_fail(SocketBase, AMI_EOPNOTSUPP);
                 break;
+#endif
 
             case IFA_IPType:            /* "Default is 2048." */
                 if ((ULONG)item->ti_Data != (ULONG)AMI_ETHERTYPE_IPV4)
@@ -1083,7 +1181,13 @@ static VOID bsd_if_put_addr(struct sockaddr *sa, ULONG addr)
 
 static UWORD bsd_if_flags(const BsdIfInfo *info)
 {
+#ifdef AMINETXDUO_PTP
+    UWORD flags = info->bii_PointToPoint
+                      ? (UWORD)(IFF_POINTOPOINT | IFF_NOARP)
+                      : (UWORD)(IFF_BROADCAST | IFF_MULTICAST | IFF_SIMPLEX);
+#else
     UWORD flags = (UWORD)(IFF_BROADCAST | IFF_MULTICAST | IFF_SIMPLEX);
+#endif
 
     if (info->bii_HaveSana ? info->bii_AdminUp : (info->bii_Address != 0))
         flags |= (UWORD)IFF_UP;
@@ -1184,8 +1288,45 @@ LONG bsd_if_ioctl(ULONG req, APTR argp,
                 return 0;
 
             case SIOCGIFBRDADDR:
+#ifdef AMINETXDUO_PTP
+                /* 4.4BSD: EINVAL without IFF_BROADCAST. */
+                if (info.bii_PointToPoint)
+                    return bsd_fail(SocketBase, AMI_EINVAL);
+#endif
                 bsd_if_put_addr(&ifr->ifr_addr, info.bii_Broadcast);
                 return 0;
+
+#ifdef AMINETXDUO_PTP
+            /* 4.4BSD: EINVAL without IFF_POINTOPOINT. */
+            case SIOCGIFDSTADDR:
+                if (!info.bii_PointToPoint)
+                    return bsd_fail(SocketBase, AMI_EINVAL);
+                bsd_if_put_addr(&ifr->ifr_dstaddr, info.bii_Destination);
+                return 0;
+
+#ifdef AMINETXDUO_NETADMIN
+            /* Deprecated in the Roadshow autodoc, and still a call that
+               existing programs make. */
+            case SIOCSIFDSTADDR:
+            {
+                const struct sockaddr_in *sin =
+                    (const struct sockaddr_in *)&ifr->ifr_dstaddr;
+                NX_INTERFACE *nxif = &ip->nx_ip_interface[index];
+
+                if (!info.bii_PointToPoint)
+                    return bsd_fail(SocketBase, AMI_EINVAL);
+
+                if (bsd_nx_enter(SocketBase) != 0)
+                    return bsd_fail(SocketBase, bsd_nx_errno(SocketBase));
+                ami_sana2_set_ptp_peer(
+                    (AmiSana2If *)nxif->nx_interface_additional_link_info,
+                    (ULONG)ntohl(sin->sin_addr.s_addr));
+                ami_ptp_peer_route(ip, (UINT)index);
+                bsd_nx_leave(SocketBase);
+                return 0;
+            }
+#endif
+#endif
 
             default:
                 break;
