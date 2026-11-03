@@ -43,12 +43,12 @@ case "$OS/$ARCH" in
     Linux/x86_64|Linux/amd64)
         TC_PLATFORM="linux-x86_64"
         TC_ASSET_PLATFORM="x86_64-linux"
-        TC_SHA256="e3a17519ef9869eb34719dad477a029cab309c39c5f9815f9a2146c278076e8c"
+        TC_SHA256="946ce54a18637fea936be24c8fbbb630ebaa938b89c9544a2ba883a1b3770d6f"
         ;;
     Darwin/arm64|Darwin/aarch64)
         TC_PLATFORM="darwin-arm64"
         TC_ASSET_PLATFORM="arm64-darwin"
-        TC_SHA256="dfb8f826fc1fc14d88f4a6c34f92c342282e18c13675697aefb0cac7e90fd37c"
+        TC_SHA256="c5ff60632193bb5c95776f0343dfbec5b0779118f41f7df2917840f6b41dfd21"
         ;;
     *)
         TC_PLATFORM=""

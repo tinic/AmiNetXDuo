@@ -21,7 +21,7 @@ set -euo pipefail
 
 # The amiga-gcc build system itself.
 PIN_AMIGA_GCC_URL="https://github.com/AmigaPorts/m68k-amigaos-gcc"
-PIN_AMIGA_GCC_SHA="a251f574100a9875b2fa00c1ba9e6dd925dc9970"
+PIN_AMIGA_GCC_SHA="7809c2df273947149689f1c73c4e841aaca4af25"
 
 # projects/<name>|<remote that serves this commit>|<commit>|<branch it was on>
 #
@@ -29,21 +29,21 @@ PIN_AMIGA_GCC_SHA="a251f574100a9875b2fa00c1ba9e6dd925dc9970"
 # reads it as a pin.
 PINS="
 amiga-netinclude|https://github.com/AmigaPorts/amiga-netinclude|a2529359b2e06bf9b0a92765f73a5f172378fe8b|main
-binutils|https://github.com/AmigaPorts/binutils-gdb|95312c65a3e70dd24e80b30b5e33f8deb591fe03|amiga-2.46
-clib2|https://github.com/AmigaPorts/clib2|115ebd964d02216155d47a6082207b460b4bbb7c|master
+binutils|https://github.com/AmigaPorts/binutils-gdb|182a5100c88386b6f59b38c4d89eb150235f92c2|amiga-2.46
+clib2|https://github.com/AmigaPorts/clib2|0b527f3f7fa3b806725458c835d185fea04c0902|master
 fd2pragma|https://github.com/AmigaPorts/fd2pragma|bcffac5c89295baf1db033addc984312b4b4a722|master
 fd2sfd|https://github.com/AmigaPorts/fd2sfd|a0ae60d140fdfd30f889810faea07cc6968d1fd0|master
-gcc|https://github.com/AmigaPorts/gcc|bcd5f64e97586a2f60a5a9988d2e2170cb2a0169|amiga16.2
+gcc|https://github.com/AmigaPorts/gcc|4a30559c9f3baf1b3e68a9b3a9185700fd726951|amiga16.2
 ira|https://github.com/AmigaPorts/ira|bb7c11384a32c409341fdb0d16d715b7959a0290|master
 lha|https://github.com/AmigaPorts/lha|979815dc8699a9c5018de067946737c83ec6f697|master
 libdebug|https://github.com/AmigaPorts/libdebug|76c7dbfeaac79516117dc810e3ba9b34d5f54a69|master
-libnix|https://github.com/AmigaPorts/libnix|2efe3df3a006652e3666ff3234c7333bb9c38a5a|master
-newlib-cygwin|https://github.com/AmigaPorts/newlib-cygwin|7d0701e398e26f9ae41b77914bc9740a390bb8e5|amiga
+libnix|https://github.com/AmigaPorts/libnix|00e31461cf7242c03723ad21fd24d65d660c1896|master
+newlib-cygwin|https://github.com/AmigaPorts/newlib-cygwin|25f097be1aa733c34afbf6e3c862ba7db6362c4d|amiga
 sfdc|https://github.com/AmigaPorts/sfdc|4c670c89a1e56708371b5e863421b10302a2e2c1|master
 vasm|https://github.com/AmigaPorts/vasm|de93f7dd067001532cff663730133601edb274cb|master
 vbcc|https://github.com/AmigaPorts/vbcc|8a1ea8062b7ab1301d3a2822ef4188b917fa57f5|vbcc-20260112
 vlink|https://github.com/AmigaPorts/vlink|ce46ccfda0e30eda5b12b9a5d0259d8eaefdefe9|master
-aros-stuff|https://github.com/AmigaPorts/aros-stuff|4ecab9796a58be5fb1faf5b8d43d46c23140b044|master
+aros-stuff|https://github.com/AmigaPorts/aros-stuff|2cb0958d9b1d3642132e8c63d73028438c45c265|master
 "
 
 # Optional per-module fallback remotes, resolved dynamically as

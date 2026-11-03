@@ -4,6 +4,6 @@
 # (tag v$TC_RELEASE) and the GCC version it reports.
 # SPDX-License-Identifier: MIT
 TC_GCC_VERSION="16.2.1b"
-TC_RELEASE="16.2-rc22"
+TC_RELEASE="16.2-rc23"
 TC_ASSET_VERSION="${TC_RELEASE}"
 TC_NDK_VERSION="3.2"
