@@ -118,7 +118,9 @@ BUDGETS=(
     # An ARexx KILL does not wait for the sb_Lock of a last close that waits
     # for the ARexx host: +88, 380,144 -> 380,232.
     # REQUIRESINITDELAY waits its second: +12, 380,232 -> 380,244.
-    "default:src/bsdsocket/bsdsocket.library:380244"
+    # The GSO header fields stored directly at an even destination: +60,
+    # 380,244 -> 380,304.
+    "default:src/bsdsocket/bsdsocket.library:380304"
     # 41,412 after stateless receive-checksum verification was added to the
     # EL3 and word/long NE2000 direct paths, 2026-09-15.  43,620 with
     # ANXD_CMD_RX_BATCH in the shell (claim, completion, staging copy, the
@@ -128,7 +130,9 @@ BUDGETS=(
     # (a3292227): the per-unit push/invalidate record, its lookup and the
     # device-side arm/disarm.  A guard that flushed for every unit on a
     # machine with one card paid for cards that were not there, 2026-09-22.
-    "default:src/netdev/anxnet.device:46000"
+    # 46,016 with the transmit staging at tx_phase and the long-window
+    # lead-in word (payload copy in phase on ne2000, el3 and lance).
+    "default:src/netdev/anxnet.device:46016"
     # 21,724 at the split; 23,032 with the original receive offload (IPv4 and
     # IPv6 verification plus the former driver-side CONTINUES mark); 24,440 in
     # the former batched-reply experiment, plus the held pass and reset
@@ -148,7 +152,9 @@ BUDGETS=(
     # 29,120 -> 29,752, approved by turo 2026-10-29.
     # The queue limit and its stops in ami_sana2_get_stats(): +8,
     # 29,752 -> 29,760.
-    "default:src/netdev/anxgenet.device:29760"
+    # The transmit staging phase and the shared bus lead-in: +84,
+    # 29,760 -> 29,844.
+    "default:src/netdev/anxgenet.device:29844"
     "default:src/wifipi/anxwifipi.device:56000"
     # +832 bytes for Roadshow's native users/groups ReadArgs syntax, strict
     # /N validation and bounded member-vector sizing: existing UID/GID maps
@@ -214,12 +220,14 @@ BUDGETS=(
     # signals a removed Task (#383): +1,372, 256,524 -> 257,896.
     # KILL against a last close: +228, 257,820 -> 258,048.
     # REQUIRESINITDELAY waits its second: +12, 258,048 -> 258,060.
-    "minimal:src/bsdsocket/bsdsocket.library:258060"
-    "minimal:src/netdev/anxnet.device:46000"
+    # GSO header fields stored directly: +60, 258,060 -> 258,120.
+    "minimal:src/bsdsocket/bsdsocket.library:258120"
+    "minimal:src/netdev/anxnet.device:46016"
     # 29,088 on e806188f after the audited device fixes.
     # Batched transmit adds 632, 29,120 -> 29,752, approved by turo 2026-10-29.
     # The queue limit and its stops in ami_sana2_get_stats(): +8, -> 29,760.
-    "minimal:src/netdev/anxgenet.device:29760"
+    # The transmit staging phase and the bus lead-in: +84, -> 29,844.
+    "minimal:src/netdev/anxgenet.device:29844"
     "minimal:src/wifipi/anxwifipi.device:56000"
     # 10,172 on e806188f after the audited parser fixes.
     "minimal:src/usergroup/usergroup.library:10240"

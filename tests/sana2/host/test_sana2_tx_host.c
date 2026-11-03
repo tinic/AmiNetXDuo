@@ -293,7 +293,7 @@ AMIGA_ASM_ARGS ULONG n68k_copy_sum_longwords(ULONG *to, const ULONG *from, ULONG
         ULONG w = ((ULONG)b[0] << 24) | ((ULONG)b[1] << 16) |
                   ((ULONG)b[2] << 8) | (ULONG)b[3];
 
-        *to++ = *from++;
+        memcpy(to++, from++, sizeof(ULONG));   /* any phase: the 68k's move.l */
 
         acc += w;
         if (acc < w)
