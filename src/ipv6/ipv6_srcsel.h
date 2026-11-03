@@ -57,6 +57,10 @@ UINT anx6_ptp_peer_get(UINT interface_index, ULONG *peer);
 /* The default router global traffic goes to, NX_NULL for none.  The caller
    holds nx_ip_protection. */
 NX_IPV6_DEFAULT_ROUTER_ENTRY *anx6_default_router(NX_IP *ip_ptr);
+
+/* The first default router added by hand, never one learnt from an
+   advertisement; NX_NULL for none.  The caller holds nx_ip_protection. */
+NX_IPV6_DEFAULT_ROUTER_ENTRY *anx6_static_default_router(NX_IP *ip_ptr);
 #endif
 
 #ifdef __cplusplus

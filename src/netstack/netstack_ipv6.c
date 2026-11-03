@@ -769,8 +769,9 @@ static UINT ami_ns6_route_delete(const ULONG dest[4], ULONG prefix_len,
         return NX_IP_ADDRESS_ERROR;
 
 #ifdef AMINETXDUO_PTP
-    /* DESTINATION=::, the default route that is carrying traffic, as
-       DESTINATION=0.0.0.0 is for IPv4 (addnetroute.c). */
+    /* DESTINATION=::, the default route added by hand, as DESTINATION=0.0.0.0
+       is for IPv4 (addnetroute.c).  A router learnt from an advertisement
+       stays: the next one would bring it back. */
     if ((next_hop == NULL || ami_ns6_is_any(next_hop)) &&
         prefix_len == 0UL && ami_ns6_is_any(dest))
     {
@@ -779,7 +780,7 @@ static UINT ami_ns6_route_delete(const ULONG dest[4], ULONG prefix_len,
 
         AMI_NX_ONLY_SUCCESS(tx_mutex_get(&ns->ns_Ip.nx_ip_protection,
                                          TX_WAIT_FOREVER));
-        rt = anx6_default_router(&ns->ns_Ip);
+        rt = anx6_static_default_router(&ns->ns_Ip);
         if (rt != NX_NULL)
             ami_ns6_copy(rt->nx_ipv6_default_router_entry_router_address,
                          router.nxd_ip_address.v6);

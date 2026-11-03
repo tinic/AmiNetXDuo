@@ -694,6 +694,77 @@ static void test_ethernet_resolves(void)
     h_check(!h_nd_untouched(), "lan: in an incomplete neighbour cache entry");
 }
 
+static void test_router_table(void)
+{
+    NXD_ADDRESS                   r;
+    NX_IPV6_DEFAULT_ROUTER_ENTRY *rt;
+    ULONG                         lanrt[4];
+    ULONG                         hop[4];
+    UINT                          i;
+    UINT                          advertised;
+
+    printf("ptp6: three LANs' advertised routers and the tunnel's static one\n");
+
+    h_interface_set(2, 0x00000080UL, 0x10AABBCDUL, &h_lan);
+    h_interface_set(3, 0x00000080UL, 0x10AABBCEUL, &h_lan);
+    memset(h_ip.nx_ipv6_default_router_table, 0,
+           sizeof(h_ip.nx_ipv6_default_router_table));
+    h_ip.nx_ipv6_default_router_table_size = 0;
+
+    /* The same router heard on every LAN, as genet and wifipi both hear it. */
+    memcpy(lanrt, h_lanrt, 16);
+    for (i = 0; i < 3U; i++)
+        h_check(_nxd_ipv6_default_router_add_internal(&h_ip, lanrt, 1800,
+                    &h_ip.nx_ip_interface[(i == 0U) ? 0U : i + 1U],
+                    NX_IPV6_ROUTE_TYPE_UNSOLICITATED, NX_NULL) == NX_SUCCESS,
+                "lan: the advertised router is taken");
+
+    h_check(anx6_default_router(&h_ip) != NX_NULL &&
+            anx6_static_default_router(&h_ip) == NX_NULL,
+            "DESTINATION=:: before the tunnel's: no static default route");
+
+    ami_ptp_ipv6_peer_set(1, h_peer);
+    ami_ptp_ipv6_next_hop(&h_ip, h_peer, hop);
+    r.nxd_ip_version = NX_IP_VERSION_V6;
+    memcpy(r.nxd_ip_address.v6, hop, 16);
+    h_check(nxd_ipv6_default_router_add(&h_ip, &r, 0xFFFF, 1) == NX_SUCCESS,
+            "tunnel: DEFAULT=<peer6> fits beside three advertised routers");
+    h_check(h_ip.nx_ipv6_default_router_table_size == 4, "four routers");
+
+    /* DeleteNetRoute DESTINATION=::, as netstack_ipv6.c does it. */
+    rt = anx6_static_default_router(&h_ip);
+    h_check(rt != NX_NULL &&
+            rt -> nx_ipv6_default_router_entry_interface_ptr ==
+                &h_ip.nx_ip_interface[1],
+            "DESTINATION=:: picks the tunnel's static router");
+    if (rt != NX_NULL)
+    {
+        memcpy(r.nxd_ip_address.v6,
+               rt -> nx_ipv6_default_router_entry_router_address, 16);
+        h_check(nxd_ipv6_default_router_delete(&h_ip, &r) == NX_SUCCESS,
+                "and deletes it");
+    }
+
+    advertised = 0;
+    for (i = 0; i < (UINT)NX_IPV6_DEFAULT_ROUTER_TABLE_SIZE; i++)
+    {
+        rt = &h_ip.nx_ipv6_default_router_table[i];
+        if ((rt -> nx_ipv6_default_router_entry_flag &
+             NX_IPV6_ROUTE_TYPE_VALID) &&
+            (rt -> nx_ipv6_default_router_entry_flag &
+             NX_IPV6_ROUTE_TYPE_UNSOLICITATED) &&
+            rt -> nx_ipv6_default_router_entry_interface_ptr !=
+                &h_ip.nx_ip_interface[1])
+            advertised++;
+    }
+    h_check(h_ip.nx_ipv6_default_router_table_size == 3 && advertised == 3,
+            "the three advertised routers stay");
+    h_check(anx6_static_default_router(&h_ip) == NX_NULL,
+            "a second DESTINATION=::, no static default route");
+
+    ami_ptp_ipv6_peer_set(1, NX_NULL);
+}
+
 int main(void)
 {
     h_machine();
@@ -708,6 +779,7 @@ int main(void)
     test_peer_route();
     test_default_via_peer();
     test_ethernet_routing();
+    test_router_table();
 
     printf("ptp6: %lu checks, %lu failures\n", h_checks, h_failures);
     return (h_failures == 0) ? 0 : 1;
