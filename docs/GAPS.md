@@ -98,7 +98,6 @@ it.
 |---|---|
 | `ALIAS` | A second address on one interface. Refused: NetX Duo has one address per interface, and a second demultiplex on every frame is not worth it |
 | `COPYMODE` | Which SANA-II copy mode the driver is asked for |
-| `POINTTOPOINT` `DESTINATION` | Point-to-point links |
 | `MULTICAST` | Asking the driver for multicast explicitly |
 | `REPORTOFFLINE` | Whether an interface going offline is reported |
 | `METRIC` | A route cost |

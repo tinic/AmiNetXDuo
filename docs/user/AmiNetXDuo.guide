@@ -558,12 +558,23 @@
 
   Interface files written for Roadshow usually carry other keywords:
   COPYMODE, ALIAS, METRIC, LEASE, DHCPUNICAST, LINKSTATUSCOMMAND,
-  MULTICAST, POINTTOPOINT, DESTINATION and BROADCASTADDRESS among
-  them.
+  MULTICAST and BROADCASTADDRESS among them.
   AmiNetXDuo recognises them and ignores them, so an existing Roadshow
   file can be used unchanged and produces no complaints. Anything it
   does @{b}not@{ub} recognise is reported as an unknown keyword by
   CheckNetConfig and by AddNetInterface.
+
+  @{b}Point-to-point interfaces@{ub}
+
+  A PPP, SLIP, CSLIP or PLIP driver, such as the vpn.device of the
+  OpenVPN client, is a point-to-point interface. POINTTOPOINT=YES makes
+  any driver without an Ethernet address one. DESTINATION names the
+  address of the other end of the link; POINTOPOINT, AmiTCP's spelling,
+  is accepted as well. Such an interface carries IPv4 only and has no
+  broadcast, multicast, ARP or mDNS. Without NETMASK, its netmask is
+  255.255.255.255. ConfigureNetInterface DESTINATION= changes the other
+  end, AddNetRoute DEFAULT=<peer> sends all traffic through the link, and
+  DeleteNetRoute DST=0.0.0.0 removes the default route.
 
   @{b}More than one card@{ub}
 
