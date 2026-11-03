@@ -132,7 +132,8 @@ BUDGETS=(
     # machine with one card paid for cards that were not there, 2026-09-22.
     # 46,016 with the transmit staging at tx_phase and the long-window
     # lead-in word (payload copy in phase on ne2000, el3 and lance).
-    "default:src/netdev/anxnet.device:46016"
+    # Combined with #438 on main: +16, 46,016 -> 46,032.
+    "default:src/netdev/anxnet.device:46032"
     # 21,724 at the split; 23,032 with the original receive offload (IPv4 and
     # IPv6 verification plus the former driver-side CONTINUES mark); 24,440 in
     # the former batched-reply experiment, plus the held pass and reset
@@ -156,7 +157,8 @@ BUDGETS=(
     # 29,760 -> 29,772.
     # The transmit staging phase and the shared bus lead-in: +84,
     # 29,772 -> 29,856.
-    "default:src/netdev/anxgenet.device:29856"
+    # Measured after the merge: +8, 29,856 -> 29,864.
+    "default:src/netdev/anxgenet.device:29864"
     "default:src/wifipi/anxwifipi.device:56000"
     # +832 bytes for Roadshow's native users/groups ReadArgs syntax, strict
     # /N validation and bounded member-vector sizing: existing UID/GID maps
@@ -224,13 +226,15 @@ BUDGETS=(
     # REQUIRESINITDELAY waits its second: +12, 258,048 -> 258,060.
     # GSO header fields stored directly: +60, 258,060 -> 258,120.
     "minimal:src/bsdsocket/bsdsocket.library:258120"
-    "minimal:src/netdev/anxnet.device:46016"
+    # Combined with #438 on main: +16, 46,016 -> 46,032.
+    "minimal:src/netdev/anxnet.device:46032"
     # 29,088 on e806188f after the audited device fixes.
     # Batched transmit adds 632, 29,120 -> 29,752, approved by turo 2026-10-29.
     # The queue limit and its stops in ami_sana2_get_stats(): +8, -> 29,760.
     # The aligned direct-receive link header copy: +12, -> 29,772.
     # The transmit staging phase and the bus lead-in: +84, -> 29,856.
-    "minimal:src/netdev/anxgenet.device:29856"
+    # Measured after the merge: +8, 29,856 -> 29,864.
+    "minimal:src/netdev/anxgenet.device:29864"
     "minimal:src/wifipi/anxwifipi.device:56000"
     # 10,172 on e806188f after the audited parser fixes.
     "minimal:src/usergroup/usergroup.library:10240"
