@@ -45,6 +45,11 @@ enum
     NP_L_ARPREQUESTS,
     NP_L_WRITEREQUESTS,
     NP_L_NOTE,                      /* "0 = automatic", drawn with Text() */
+#ifdef AMINETXDUO_PTP
+    NP_L_PTP,
+    NP_L_DESTINATION,
+    NP_L_DESTINATION6,
+#endif
     NP_L_COUNT
 };
 
