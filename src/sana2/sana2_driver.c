@@ -655,6 +655,11 @@ static VOID __attribute__((noinline, cold)) ami_sana2_driver_command(
         break;
 
     case NX_LINK_MULTICAST_JOIN:
+#ifdef AMINETXDUO_PTP
+        /* One peer and no groups: every datagram reaches it anyway. */
+        if (iface->ptp)
+            break;
+#endif
         if (ami_sana2_multicast(iface, S2_ADDMULTICASTADDRESS,
                                 driver_req->nx_ip_driver_physical_address_msw,
                                 driver_req->nx_ip_driver_physical_address_lsw)
@@ -670,6 +675,10 @@ static VOID __attribute__((noinline, cold)) ami_sana2_driver_command(
         break;
 
     case NX_LINK_MULTICAST_LEAVE:
+#ifdef AMINETXDUO_PTP
+        if (iface->ptp)
+            break;
+#endif
         (VOID)ami_sana2_multicast(iface, S2_DELMULTICASTADDRESS,
                                   driver_req->nx_ip_driver_physical_address_msw,
                                   driver_req->nx_ip_driver_physical_address_lsw);

@@ -19,6 +19,7 @@
 #include "aminetxduo/sana2.h"
 #include "aminetxduo/config.h"
 #include "aminetxduo/netstack.h"
+#include "aminetxduo/ptp.h"
 #include "aminetxduo/events.h"
 
 #include "tx_amiga.h"
@@ -299,7 +300,7 @@ static VOID ns_fill_system(NX_IP *ip, NetStatusSystem *out)
 
     if (nx_ip_gateway_address_get(ip, &gateway) == NX_SUCCESS && gateway != 0)
     {
-        out->nss_Gateway = gateway;
+        out->nss_Gateway = AMI_PTP_SHOWN_HOP(ip, gateway);
         out->nss_Flags  |= NETSTATUS_SYS_GATEWAY;
     }
 
@@ -1068,6 +1069,24 @@ static VOID ns_fill_interfaces(NX_IP *ip, NsWriter *w)
             if (ami_sana2_is_online(sana))
                 out->nsi_Flags |= NETSTATUS_IF_ONLINE;
 
+#ifdef AMINETXDUO_PTP
+            /* SANA-II's own convention: a PPP driver's "hardware address" is
+               a protocol address (SANA-II 1.0, S2_CONFIGINTERFACE).  The
+               record keeps its version 16 shape. */
+            if (ami_sana2_ptp(sana))
+            {
+                ULONG peer = ami_sana2_ptp_peer(sana);
+
+                out->nsi_Flags |= NETSTATUS_IF_PTP;
+                out->nsi_HwAddress[0] = (UBYTE)(peer >> 24);
+                out->nsi_HwAddress[1] = (UBYTE)(peer >> 16);
+                out->nsi_HwAddress[2] = (UBYTE)(peer >> 8);
+                out->nsi_HwAddress[3] = (UBYTE)peer;
+                out->nsi_HwAddress[4] = 0;
+                out->nsi_HwAddress[5] = 0;
+            }
+#endif
+
             out->nsi_Speed = ami_sana2_get_bps(sana);
 
             ami_sana2_get_stats(sana, &stats);
@@ -1403,7 +1422,8 @@ static VOID ns_fill_routes(NX_IP *ip, NsWriter *w)
 
         out->nsr_Destination = e->nx_ip_routing_dest_ip;
         out->nsr_NetMask     = e->nx_ip_routing_net_mask;
-        out->nsr_Gateway     = e->nx_ip_routing_next_hop_address;
+        out->nsr_Gateway     = AMI_PTP_SHOWN_HOP(ip,
+                                   e->nx_ip_routing_next_hop_address);
         out->nsr_Flags       = NETSTATUS_RT_UP | NETSTATUS_RT_STATIC |
                                NETSTATUS_RT_GATEWAY;
         out->nsr_Interface   = ns_interface_index(ip,
@@ -1422,7 +1442,7 @@ static VOID ns_fill_routes(NX_IP *ip, NsWriter *w)
         {
             out->nsr_Destination = 0;
             out->nsr_NetMask     = 0;
-            out->nsr_Gateway     = gateway;
+            out->nsr_Gateway     = AMI_PTP_SHOWN_HOP(ip, gateway);
             out->nsr_Flags       = NETSTATUS_RT_UP | NETSTATUS_RT_GATEWAY;
             out->nsr_Interface   = ns_interface_index(ip,
                                                       ip->nx_ip_gateway_interface);
@@ -2201,7 +2221,9 @@ LONG bsd_NetStackControl(register ULONG magic __asm("d0"),
                 return bsd_fail(SocketBase, bsd_nx_errno(SocketBase));
 
             status = (ctl->nsc_Gateway != 0)
-                         ? nx_ip_gateway_address_set(cip, ctl->nsc_Gateway)
+                         ? nx_ip_gateway_address_set(cip, AMI_PTP_NEXT_HOP(
+                                                           cip,
+                                                           ctl->nsc_Gateway))
                          : nx_ip_gateway_address_clear(cip);
             if (status == NX_SUCCESS)
             {
@@ -2414,7 +2436,8 @@ LONG bsd_NetStackControl(register ULONG magic __asm("d0"),
     switch (op)
     {
         case NETCTRL_GATEWAY_SET:
-            status = nx_ip_gateway_address_set(ip, ctl->nsc_Gateway);
+            status = nx_ip_gateway_address_set(ip, AMI_PTP_NEXT_HOP(
+                                                       ip, ctl->nsc_Gateway));
             if (status == NX_SUCCESS)
                 netstack_gateway_override_set(ctl->nsc_Gateway);
             rc = ns_map_status(SocketBase, status);
@@ -2431,7 +2454,8 @@ LONG bsd_NetStackControl(register ULONG magic __asm("d0"),
 #ifdef NX_ENABLE_IP_STATIC_ROUTING
             status = nx_ip_static_route_add(ip, ctl->nsc_Destination,
                                             ctl->nsc_NetMask,
-                                            ctl->nsc_Gateway);
+                                            AMI_PTP_NEXT_HOP(
+                                                ip, ctl->nsc_Gateway));
             if (status == NX_SUCCESS)
                 netstack_config_route_added(ctl->nsc_Destination,
                                             ctl->nsc_NetMask);

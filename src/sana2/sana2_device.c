@@ -11,6 +11,7 @@
 #include "aminetxduo/anxnet.h"
 #include "aminetxduo/netstack.h"
 #include "aminetxduo/events.h"
+#include "aminetxduo/ptp.h"
 
 #include <exec/memory.h>
 #include <proto/dos.h>
@@ -1679,6 +1680,18 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
     iface->rx_dst_off  = iface->raw_mode ? 0UL : (ULONG)AMI_ETH_HEADER_SIZE;
     iface->rx_io_flags = iface->raw_mode ? (UBYTE)SANA2IOF_RAW : (UBYTE)0;
 
+#ifdef AMINETXDUO_PTP
+    /* Never raw: a cooked read or write is the bare IP datagram, which is
+       all a point-to-point link carries.  The peer is the file's until a
+       command names another. */
+    iface->ptp      = ami_sana2_ptp_wire(iface->hw_type, iface->addr_bytes,
+                                         cfg->point_to_point);
+    iface->ptp_peer = cfg->destination;
+    if (iface->ptp)
+        AMI_INFO("sana2: %s unit %ld is point-to-point",
+                 iface->device, (long)iface->unit);
+#endif
+
     ami_sana2_tx_init(iface);
 
     AMI_INFO("sana2: %s unit %ld hw %ld mtu %ld bps %ld addr %ld bits %s",
@@ -2035,3 +2048,51 @@ BOOL ami_sana2_raw_mode(const AmiSana2If *iface)
 {
     return (iface != NULL) ? iface->raw_mode : FALSE;
 }
+
+#ifdef AMINETXDUO_PTP
+UINT ami_sana2_ptp_wire(ULONG hardware_type, UINT addr_bytes, UINT asked)
+{
+    switch (hardware_type)
+    {
+        case S2WireType_PPP:
+        case S2WireType_SLIP:
+        case S2WireType_CSLIP:
+        case S2WireType_PLIP:
+            return NX_TRUE;
+
+        default:
+            break;
+    }
+
+    /* A driver with an Ethernet address has a link header to write. */
+    return (asked == AMI_CFG_PTP_YES && addr_bytes != AMI_ETH_ADDR_SIZE)
+               ? NX_TRUE : NX_FALSE;
+}
+
+UINT ami_sana2_ptp(const AmiSana2If *iface)
+{
+    return (iface != NULL && iface->ptp) ? NX_TRUE : NX_FALSE;
+}
+
+ULONG ami_sana2_ptp_peer(const AmiSana2If *iface)
+{
+    return (iface != NULL && iface->ptp) ? iface->ptp_peer : 0UL;
+}
+
+VOID ami_sana2_set_ptp_peer(AmiSana2If *iface, ULONG peer)
+{
+    if (iface != NULL && iface->ptp)
+        iface->ptp_peer = peer;
+}
+
+ULONG ami_sana2_ptp_routed(const AmiSana2If *iface)
+{
+    return (iface != NULL) ? iface->ptp_routed : 0UL;
+}
+
+VOID ami_sana2_set_ptp_routed(AmiSana2If *iface, ULONG peer)
+{
+    if (iface != NULL)
+        iface->ptp_routed = peer;
+}
+#endif /* AMINETXDUO_PTP */

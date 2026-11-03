@@ -229,6 +229,10 @@ LONG tool_snapshot(ToolSnapshot *out, BOOL want_sockets)
 
         for (j = 0; j < (LONG)AMI_ETH_ADDR_SIZE; j++)
             info->mac[j] = src->nsi_HwAddress[j];
+#ifdef AMINETXDUO_PTP
+        info->ptp  = (src->nsi_Flags & NETSTATUS_IF_PTP) ? TRUE : FALSE;
+        info->peer = tool_nsi_peer(src);
+#endif
 
         tool_copy_string(info->nx_name, sizeof(info->nx_name), src->nsi_Name);
         info->nx_device_whole = tool_if_device(info->nx_device,
@@ -1546,3 +1550,16 @@ const char *tool_tcp_state_name(UINT state)
         default:                            return "UNKNOWN";
     }
 }
+
+#ifdef AMINETXDUO_PTP
+ULONG tool_nsi_peer(const NetStatusInterface *nsi)
+{
+    if (nsi == NULL || (nsi->nsi_Flags & NETSTATUS_IF_PTP) == 0)
+        return 0UL;
+
+    return ((ULONG)nsi->nsi_HwAddress[0] << 24) |
+           ((ULONG)nsi->nsi_HwAddress[1] << 16) |
+           ((ULONG)nsi->nsi_HwAddress[2] << 8) |
+           (ULONG)nsi->nsi_HwAddress[3];
+}
+#endif

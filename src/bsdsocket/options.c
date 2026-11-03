@@ -952,6 +952,12 @@ LONG bsd_IoctlSocket(register LONG sock_fd __asm("d0"),
         case SIOCGIFADDR:
         case SIOCGIFNETMASK:
         case SIOCGIFBRDADDR:
+#ifdef AMINETXDUO_PTP
+        case SIOCGIFDSTADDR:
+#ifdef AMINETXDUO_NETADMIN
+        case SIOCSIFDSTADDR:
+#endif
+#endif
             return bsd_if_ioctl(req, argp, SocketBase);
 
         /* The autodoc's errno for a request this object does not answer:

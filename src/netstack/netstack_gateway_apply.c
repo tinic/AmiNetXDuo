@@ -9,6 +9,7 @@
  */
 
 #include "netstack_internal.h"
+#include "aminetxduo/ptp.h"
 
 #include "aminetxduo/events.h"
 
@@ -68,7 +69,7 @@ VOID ami_ns_gateway_reconcile(AmiNetStack *ns, UWORD skip,
 
     if (ns->ns_GatewayMode == (UBYTE)AMI_NS_GATEWAY_FIXED)
     {
-        wanted = ns->ns_GatewayFixed;
+        wanted = AMI_PTP_NEXT_HOP(&ns->ns_Ip, ns->ns_GatewayFixed);
         if (wanted == 0UL || wanted == installed)
             return;
 

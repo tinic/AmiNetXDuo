@@ -2986,6 +2986,13 @@ LONG ami_sana2_rx_start(AmiSana2If *iface)
         if (rx->depth > AMI_SANA2_RX_MAX_DEPTH)
             rx->depth = AMI_SANA2_RX_MAX_DEPTH;
 
+#ifdef AMINETXDUO_PTP
+        /* A point-to-point link carries IPv4 and nothing else: no read is
+           asked for ARP or IPv6, and their rings hold no slots. */
+        if (iface->ptp && ami_sana2_rx_types[i] != AMI_ETHERTYPE_IPV4)
+            rx->depth = 0;
+#endif
+
         /* The slots, to the planned depth.  Kept across a stop and start
            when the plan has not changed; the previous run's reads were all
            reaped (ami_sana2_rx_teardown) or the restart was refused above. */
@@ -2999,7 +3006,11 @@ LONG ami_sana2_rx_start(AmiSana2If *iface)
             ami_sana2_rx_free_batches(rx);
 #endif
         }
+#ifdef AMINETXDUO_PTP
+        if (rx->slot == NULL && rx->depth != 0)
+#else
         if (rx->slot == NULL)
+#endif
         {
             rx->slot = (AmiRxSlot *)ami_alloc((ULONG)rx->depth *
                                               (ULONG)sizeof(AmiRxSlot));

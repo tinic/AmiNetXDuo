@@ -152,6 +152,7 @@ if(NOT CMAKE_CROSSCOMPILING)
         "${AMINETXDUO_NETXDUO}/common/src/nx_ipv4_option_process.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_ip_dispatch_process.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_icmpv4_send_error_message.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_ipv4_directed_broadcast_check.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_igmp_multicast_check.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_packet_pool_initialize.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_udp_enable.c"
@@ -219,6 +220,7 @@ if(NOT CMAKE_CROSSCOMPILING)
         "${AMINETXDUO_NETXDUO}/common/src/nx_ipv4_option_process.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_ip_dispatch_process.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_icmpv4_send_error_message.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_ipv4_directed_broadcast_check.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_igmp_multicast_check.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_packet_pool_initialize.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_udp_enable.c"
@@ -387,6 +389,36 @@ if(NOT CMAKE_CROSSCOMPILING)
         AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
 
     add_test(NAME route_priority COMMAND test_route_priority)
+
+    # Point-to-point interfaces: netstack_ptp.c's next-hop translation and
+    # host route against the real route lookup, gateway set and route table.
+    if(AMINETXDUO_PTP)
+        add_executable(test_ptp
+            host/test_ptp_host.c
+            "${CMAKE_SOURCE_DIR}/src/netstack/netstack_ptp.c"
+            "${AMINETXDUO_NETXDUO}/common/src/nx_ip_route_find.c"
+            "${AMINETXDUO_NETXDUO}/common/src/nx_ip_gateway_address_set.c"
+            "${AMINETXDUO_NETXDUO}/common/src/nx_ip_static_route_add.c"
+            "${AMINETXDUO_NETXDUO}/common/src/nx_ip_static_route_delete.c"
+            "${AMINETXDUO_NETXDUO}/common/src/nxe_ip_static_route_add.c"
+            "${AMINETXDUO_NETXDUO}/common/src/nxe_ip_static_route_delete.c")
+
+        target_compile_options(test_ptp PRIVATE -UAMINETXDUO_IPV6)
+
+        target_include_directories(test_ptp PRIVATE
+            "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first
+            "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"     # nx_port.h
+            "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h, ours
+            "${AMINETXDUO_NETXDUO}/common/inc"
+            "${AMINETXDUO_THREADX}/common/inc"
+            "${CMAKE_SOURCE_DIR}/include")
+
+        target_compile_definitions(test_ptp PRIVATE
+            NX_INCLUDE_USER_DEFINE_FILE
+            AMINETXDUO_HOST_VENDORED_TX_PORT="${AMINETXDUO_THREADX}/ports/linux/gnu/inc/tx_port.h")
+
+        add_test(NAME ptp COMMAND test_ptp)
+    endif()
 
     # RFC 6298's round-trip time estimator: the arithmetic on its own, and the
     # path that feeds it.  Same shim and the same -UAMINETXDUO_IPV6 as above.
@@ -1104,7 +1136,8 @@ if(NOT CMAKE_CROSSCOMPILING)
     # quoted length.  IPv4 only, so -UAMINETXDUO_IPV6.
     add_executable(test_icmpv4_error_quote
         host/test_icmpv4_error_quote_host.c
-        "${AMINETXDUO_NETXDUO}/common/src/nx_icmpv4_send_error_message.c")
+        "${AMINETXDUO_NETXDUO}/common/src/nx_icmpv4_send_error_message.c"
+        "${AMINETXDUO_NETXDUO}/common/src/nx_ipv4_directed_broadcast_check.c")
 
     target_compile_options(test_icmpv4_error_quote PRIVATE -UAMINETXDUO_IPV6)
 
@@ -1295,6 +1328,9 @@ if(NOT CMAKE_CROSSCOMPILING)
         "${CMAKE_SOURCE_DIR}/src/netstack/netstack_slot.c"
         "${AMINETXDUO_NETXDUO}/common/src/nx_ip_route_find.c"
         host/netstack_host_env.c)
+    if(AMINETXDUO_PTP)
+        list(APPEND NETSTACK_HOST_TU "${CMAKE_SOURCE_DIR}/src/netstack/netstack_ptp.c")
+    endif()
 
     set(NETSTACK_HOST_INCLUDES
         "${CMAKE_CURRENT_SOURCE_DIR}/host/shim"         # tx_amiga.h, ours
@@ -1346,7 +1382,8 @@ if(NOT CMAKE_CROSSCOMPILING)
     # netstack_gateway_apply.c, #included, over stubbed gateway calls.
     add_executable(test_gateway_override
         host/test_gateway_override_host.c
-        "${CMAKE_SOURCE_DIR}/src/netstack/netstack_gateway.c")
+        "${CMAKE_SOURCE_DIR}/src/netstack/netstack_gateway.c"
+        "${CMAKE_SOURCE_DIR}/tests/common/host/ptp_passthrough.c")
 
     target_include_directories(test_gateway_override PRIVATE ${NETSTACK_HOST_INCLUDES})
     target_compile_definitions(test_gateway_override PRIVATE ${NETSTACK_HOST_DEFINES})

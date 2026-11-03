@@ -474,6 +474,15 @@ static BOOL gateway_is_reachable(struct Library *base, ULONG addr)
 
         if ((nsi->nsi_Address & nsi->nsi_NetMask) == (addr & nsi->nsi_NetMask))
             return TRUE;
+#ifdef AMINETXDUO_PTP
+        /* The other end of a point-to-point link is reached through it. */
+        if ((nsi->nsi_Flags & NETSTATUS_IF_PTP) != 0 && addr != 0UL &&
+            (((ULONG)nsi->nsi_HwAddress[0] << 24) |
+             ((ULONG)nsi->nsi_HwAddress[1] << 16) |
+             ((ULONG)nsi->nsi_HwAddress[2] << 8) |
+             (ULONG)nsi->nsi_HwAddress[3]) == addr)
+            return TRUE;
+#endif
     }
 
     return FALSE;

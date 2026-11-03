@@ -247,6 +247,11 @@ static LONG network_holding(const AmiConfig *cfg, ULONG addr)
 
         if (same_network(addr, ifc->address, ifc->netmask))
             return (LONG)i;
+#ifdef AMINETXDUO_PTP
+        /* The peer of a point-to-point link is reached through it. */
+        if (ifc->destination != 0 && ifc->destination == addr)
+            return (LONG)i;
+#endif
     }
 
     return -1;
@@ -409,6 +414,13 @@ static VOID check_addressing(const char *path, const AmiIfConfig *ifc)
 
     prefix    = tool_prefix_len(ifc->netmask);
     host_bits = ifc->address & ~ifc->netmask;
+
+#ifdef AMINETXDUO_PTP
+    /* A point-to-point link has no network beyond its two ends: /32 is
+       what it is meant to have, and the peer is DESTINATION. */
+    if (ifc->destination != 0 || ifc->point_to_point == AMI_CFG_PTP_YES)
+        return;
+#endif
 
     if (prefix >= 31)
     {

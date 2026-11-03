@@ -32,6 +32,10 @@ typedef struct BsdIfInfo
     ULONG           bii_ArpDrops;
     BOOL            bii_HaveIpDrops;
     BOOL            bii_HaveArpDrops;
+#ifdef AMINETXDUO_PTP
+    BOOL            bii_PointToPoint;
+    ULONG           bii_Destination;    /* the peer, 0 unknown */
+#endif
 } BsdIfInfo;
 
 enum

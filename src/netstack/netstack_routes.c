@@ -7,6 +7,7 @@
 #include "netstack_internal.h"
 
 #include "aminetxduo/netstack.h"
+#include "aminetxduo/ptp.h"
 
 _Static_assert(AMI_CFG_MAX_STATIC_ROUTES == NX_IP_ROUTING_TABLE_SIZE,
                "configured and live IPv4 route capacities must match");
@@ -31,7 +32,9 @@ VOID ami_netstack_config_routes_install(AmiNetStack *ns)
 
         route = &ns->ns_Config.static_route[i];
         status = nx_ip_static_route_add(&ns->ns_Ip, route->destination,
-                                        route->netmask, route->gateway);
+                                        route->netmask,
+                                        AMI_PTP_NEXT_HOP(&ns->ns_Ip,
+                                                         route->gateway));
         if (status == NX_SUCCESS)
         {
             ns->ns_ConfigRouteInstalled[i] = 1U;

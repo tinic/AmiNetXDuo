@@ -177,6 +177,7 @@ set(_fuzz_nx_src
     "${AMINETXDUO_NETXDUO}/common/src/nx_ipv4_option_process.c"
     "${AMINETXDUO_NETXDUO}/common/src/nx_ip_dispatch_process.c"
     "${AMINETXDUO_NETXDUO}/common/src/nx_icmpv4_send_error_message.c"
+    "${AMINETXDUO_NETXDUO}/common/src/nx_ipv4_directed_broadcast_check.c"
     "${AMINETXDUO_NETXDUO}/common/src/nx_igmp_multicast_check.c"
     "${AMINETXDUO_NETXDUO}/common/src/nx_packet_pool_initialize.c"
     "${AMINETXDUO_NETXDUO}/common/src/nx_udp_enable.c"

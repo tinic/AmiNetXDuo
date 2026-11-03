@@ -26,4 +26,10 @@
  */
 ULONG ami_ns_static_netmask(ULONG netmask);
 
+#ifdef AMINETXDUO_PTP
+/* The same for an interface that may be point-to-point: such a link has no
+   network beyond its own address, so its omitted mask is /32. */
+ULONG ami_ns_static_netmask_ptp(ULONG netmask, BOOL ptp);
+#endif
+
 #endif /* AMINETXDUO_NETSTACK_MASK_H */

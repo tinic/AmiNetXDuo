@@ -20,9 +20,10 @@ static const char version_tag[] __attribute__((used)) =
 /*
  * The AmigaDOS Command Reference's template, then ours.  test_refcompat holds
  * TEMPLATE to it.  Each reference keyword does what the interface file's
- * keyword of the same name does: DEBUG, LEASE, DHCPUNICAST, METRIC and
- * DESTINATION are accepted and change nothing, as they do there
- * (config_parse.c IF_INERT).
+ * keyword of the same name does: DEBUG, LEASE, DHCPUNICAST and METRIC are
+ * accepted and change nothing, as they do there (config_parse.c IF_INERT).
+ * DESTINATION is the peer of a point-to-point interface, IFC_DestinationAddress
+ * (apply_destination); in a build without AMINETXDUO_PTP it is inert too.
  */
 #define REFERENCE_TEMPLATE "INTERFACE/A,QUIET/S,ADDRESS/K,NETMASK/K,"         \
                     "BROADCASTADDR/K,DESTINATION=DESTINATIONADDR/K,"          \
@@ -645,6 +646,53 @@ static BOOL apply_aliases(struct Library *base, const char *name)
     return FALSE;
 }
 
+#ifdef AMINETXDUO_PTP
+/*
+ * DESTINATION through ConfigureInterfaceTagList(), as Roadshow's
+ * IFC_DestinationAddress: the other end of a point-to-point link, with the
+ * address in the same call as Roadshow requires.  Before the address and the
+ * gateway are configured below, so a GATEWAY that names the peer is known
+ * to be one.
+ */
+static BOOL apply_destination(struct Library *base, const char *name,
+                              BOOL have_address, ULONG address)
+{
+    struct TagItem tags[3];
+    char           text[16];
+    ULONG          n = 0;
+    LONG           err = 0;
+
+    if (have_address)
+    {
+        ami_config_format_ip(address, text, sizeof(text));
+        tags[n].ti_Tag  = IFC_Address;
+        tags[n].ti_Data = (ULONG)text;
+        n++;
+    }
+    tags[n].ti_Tag  = IFC_DestinationAddress;
+    tags[n].ti_Data = (ULONG)args[ARG_DESTINATION];
+    n++;
+    tags[n].ti_Tag  = TAG_DONE;
+    tags[n].ti_Data = 0;
+
+    if (tool_configure_interface(base, name, tags, &err) == 0)
+    {
+        say("%s: peer %s\n", (LONG)name, args[ARG_DESTINATION]);
+        return TRUE;
+    }
+
+    if (err == CNI_EOPNOTSUPP)
+        tool_error("%s is not a point-to-point interface", (LONG)name);
+    else if (err == CNI_EINVAL)
+        tool_error("%s: DESTINATION needs an ADDRESS", (LONG)name);
+    else
+        tool_error("%s: peer not changed (%s, %ld)", (LONG)name,
+                   (LONG)tool_code_errno(err), err);
+
+    return FALSE;
+}
+#endif
+
 /* COMPLETE=YES, IFC_Complete: the configuration is whole.  Static routes
    follow the interfaces here already, so the library has nothing to reread. */
 static VOID apply_complete(struct Library *base, const char *name)
@@ -1077,7 +1125,25 @@ static int cni_main(int argc, char **argv)
         }
     }
 
-    /* Accepted and inert, as in the interface file: still a request. */
+#ifdef AMINETXDUO_PTP
+    if (args[ARG_DESTINATION] != 0)
+    {
+        ULONG check;
+        ULONG none;
+        BOOL  bits;
+
+        if (!parse_address((const char *)args[ARG_DESTINATION], &check, &none,
+                           &bits) || bits || check == 0UL)
+        {
+            tool_error("\"%s\" is not an address", args[ARG_DESTINATION]);
+            FreeArgs(rda);
+            return RETURN_ERROR;
+        }
+    }
+#endif
+
+    /* Accepted and inert, as in the interface file: still a request.
+       DESTINATION is a request either way. */
     inert = (BOOL)(args[ARG_DEBUG] != 0 || args[ARG_LEASE] != 0 ||
                    args[ARG_DHCPUNICAST] != 0 || args[ARG_METRIC] != 0 ||
                    args[ARG_DESTINATION] != 0 || args[ARG_TIMEOUT] != 0 ||
@@ -1266,6 +1332,17 @@ static int cni_main(int argc, char **argv)
                 (LONG)cni_text, (LONG)server);
         }
     }
+
+#ifdef AMINETXDUO_PTP
+    if (args[ARG_DESTINATION] != 0 &&
+        !apply_destination(base, name, (BOOL)(have_address && !want_dhcp),
+                           address))
+    {
+        tool_netstatus_close(base);
+        FreeArgs(rda);
+        return RETURN_FAIL;
+    }
+#endif
 
     /* With CONFIGURE=DHCP the ADDRESS was already asked for above; writing it
        on the interface here would overwrite whatever the server granted. */

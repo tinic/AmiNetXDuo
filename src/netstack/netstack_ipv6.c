@@ -9,6 +9,7 @@
 
 #include "netstack_internal.h"
 #include "aminetxduo/nxstatus.h"
+#include "aminetxduo/ptp.h"
 
 #include "nx_ipv6.h"
 #include "nx_icmpv6.h"
@@ -224,6 +225,16 @@ static VOID ami_ns6_configure_interface(AmiNetStack *ns, UWORD i)
         AMI_INFO("netstack: %s: IPv6 switched off by CONFIGURE6", cfg->name);
         return;
     }
+
+#ifdef AMINETXDUO_PTP
+    /* IPv4 alone: the driver's reads are IPv4 reads, and there is no hardware
+       address for a link-local interface identifier. */
+    if (ami_sana2_ptp(ns->ns_Iface[i]))
+    {
+        AMI_INFO("netstack: %s: point-to-point, IPv4 only", cfg->name);
+        return;
+    }
+#endif
 
     /*
      * RFC 8200 section 5 puts a 1280-octet floor under every link IPv6 runs

@@ -540,7 +540,9 @@ host_test_targets() { # builddir
 #      leaves OpenLibrary and the status calls free (x86_64 only).
 #      596 with toolchain_lock_order_gate: static lock-order and
 #      lock-across-blocking-call checker regression tests (all hosts).
-HOST_TESTS_EXPECTED=596
+#      597 with ptp (#437): point-to-point next hop, host route and default
+#      route against the real route lookup (all hosts).
+HOST_TESTS_EXPECTED=597
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,
