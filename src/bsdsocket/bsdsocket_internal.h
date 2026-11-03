@@ -469,7 +469,11 @@ static inline BOOL bsd_stack_last_opener(const struct AmiSocketBase *master)
  * sb_Fam23, set once the opener has used 23 anywhere.
  */
 #define BSD_AF_INET6_23     23
+#ifdef AMINETXDUO_IPV6
 #define BSD_AF_CANON(af)    (((af) == BSD_AF_INET6_23) ? AF_INET6 : (af))
+#else
+#define BSD_AF_CANON(af)    (af)
+#endif
 
 #define ACW_RECVPKTINFO6    (1UL << 0)  /* IPV6_RECVPKTINFO                  */
 #define ACW_RECVHOPLIMIT    (1UL << 1)  /* IPV6_RECVHOPLIMIT                 */

@@ -330,10 +330,20 @@ static VOID bsd_gai_append(struct addrinfo **head, struct addrinfo **tail,
     *tail = &node->ai;
 }
 
+#ifdef AMINETXDUO_IPV6
+/* The lookup, in AF_INET6 == 28; bsd_getaddrinfo() below translates. */
 static LONG bsd_gai_lookup(STRPTR nodename, STRPTR servname,
                            const struct addrinfo *hints,
                            struct addrinfo **res,
                            struct AmiSocketBase *SocketBase)
+#else
+/* pragmas/bsdsocket_pragmas.h:140  getaddrinfo(a0,a1,a2,a3) */
+LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
+                     register STRPTR servname         __asm("a1"),
+                     register struct addrinfo *hints  __asm("a2"),
+                     register struct addrinfo **res   __asm("a3"),
+                     register struct AmiSocketBase *SocketBase __asm("a6"))
+#endif
 {
     struct addrinfo *head = NULL;
     struct addrinfo *tail = NULL;
@@ -646,13 +656,13 @@ static LONG bsd_gai_lookup(STRPTR nodename, STRPTR servname,
  * are looked up as AF_INET6, and the IPv6 results go back in 23 for those
  * hints, or for no family once the opener has used 23 (sb_Fam23).
  */
+#ifdef AMINETXDUO_IPV6
 LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
                      register STRPTR servname         __asm("a1"),
                      register struct addrinfo *hints  __asm("a2"),
                      register struct addrinfo **res   __asm("a3"),
                      register struct AmiSocketBase *SocketBase __asm("a6"))
 {
-#ifdef AMINETXDUO_IPV6
     struct addrinfo  copy;
     struct addrinfo *ai;
     BOOL             as23 = (BOOL)(SocketBase->sb_Fam23 != 0);
@@ -688,10 +698,8 @@ LONG bsd_getaddrinfo(register STRPTR nodename         __asm("a0"),
     }
 
     return rc;
-#else
-    return bsd_gai_lookup(nodename, servname, hints, res, SocketBase);
-#endif
 }
+#endif
 
 VOID bsd_freeaddrinfo(register struct addrinfo *ai __asm("a0"),
                       register struct AmiSocketBase *SocketBase __asm("a6"))
