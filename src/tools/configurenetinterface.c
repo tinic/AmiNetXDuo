@@ -1130,7 +1130,7 @@ static int cni_main(int argc, char **argv)
     {
         ULONG check;
         ULONG none;
-        BOOL  bits;
+        BOOL  bits = FALSE;     /* parse_address() sets it only for a prefix */
 
         if (!parse_address((const char *)args[ARG_DESTINATION], &check, &none,
                            &bits) || bits || check == 0UL)

@@ -51,6 +51,9 @@ CROSS_CONFIGS=(
     # still builds and binds without it, bind() classifies a class D address
     # here and not there.
     "nomcast:-DAMINETXDUO_MULTICAST=OFF"
+    # Point-to-point interfaces off: what 1.0.0 may ship.  The image without
+    # the option is the tree before it, POINTTOPOINT and DESTINATION inert.
+    "noptp:-DAMINETXDUO_PTP=OFF"
     "noasm:-DAMINETXDUO_CRYPTO68K_ASM=OFF"
     # The portable fallbacks for the card-I/O and checksum inner loops.  This
     # is distinct from noasm above, which switches off crypto68k only.
