@@ -650,6 +650,9 @@ typedef struct NetStatusRoute
 #define NETSTATUS_RT6_GATEWAY   0x0002  /* nsr6_NextHop is a next hop        */
 #define NETSTATUS_RT6_HOST      0x0004  /* a /128                            */
 #define NETSTATUS_RT6_STATIC    0x0008  /* added by hand, not advertised     */
+/* The peer of a point-to-point interface, a /128 through it on nsr6_Interface
+   whatever its prefixes cover.  Not a prefix, so not deleted as one. */
+#define NETSTATUS_RT6_PEER      0x0010
 
 /* nsr6_Lifetime for an entry nothing will time out. */
 #define NETSTATUS_RT6_FOREVER   0xFFFFFFFFUL
@@ -1098,6 +1101,10 @@ typedef struct NetStatusRxBudget
 /* RFC 3927 link-local addressing, ConfigureNetInterface CONFIGURE=AUTO.  Not
    waited for.  EBUSY when it already serves another interface. */
 #define NETCTRL_INTERFACE_AUTOIP 28 /* nsc_Index                              */
+
+/* DESTINATION6, the peer of a point-to-point interface; :: clears it.
+   EOPNOTSUPP on any other interface, ENOSYS without point-to-point IPv6. */
+#define NETCTRL_INTERFACE_PEER6 29  /* nsc_Index, nsc_Destination6           */
 
 /* Flags for nsc_Flags. Zero unless an operation above says otherwise. */
 #define NETCTRL_F_FORCE         0x00000001

@@ -443,9 +443,19 @@ if(NOT CMAKE_CROSSCOMPILING)
             "${_n}/nx_nd_cache_add_entry.c"
             "${_n}/nx_nd_cache_find_entry.c"
             "${_n}/nx_nd_cache_delete_internal.c"
-            "${_n}/nx_ipv6_util.c")
+            "${_n}/nx_ipv6_util.c"
+            # Step 3: the peer and the default route through the link.
+            "${CMAKE_SOURCE_DIR}/src/ipv6/ipv6_srcsel.c"
+            "${_n}/nxd_ipv6_default_router_add.c"
+            "${_n}/nxde_ipv6_default_router_add.c"
+            "${_n}/nxd_ipv6_default_router_add_internal.c"
+            "${_n}/nxd_ipv6_default_router_delete.c"
+            "${_n}/nxde_ipv6_default_router_delete.c"
+            "${_n}/nx_invalidate_destination_entry.c"
+            "${_n}/nxd_ipv6_find_max_prefix_length.c")
 
         target_include_directories(test_ptp6 PRIVATE
+            "${CMAKE_SOURCE_DIR}/src/ipv6"
             "${CMAKE_SOURCE_DIR}/tests/perf/host/shim"      # tx_port.h, first
             "${AMINETXDUO_NETXDUO}/ports/linux/gnu/inc"     # nx_port.h
             "${CMAKE_SOURCE_DIR}/port/netxduo-amiga/inc"    # nx_user.h, ours

@@ -66,6 +66,34 @@ VOID ami_sana2_set_ptp_routed(AmiSana2If *iface, ULONG peer)
     (void)peer;
 }
 
+#ifdef AMINETXDUO_IPV6
+/* No IPv6 peer either: every router is shown as NetX Duo holds it. */
+UINT anx6_ptp_peer_get(UINT interface_index, ULONG *peer)
+{
+    (void)interface_index;
+    peer[0] = peer[1] = peer[2] = peer[3] = 0UL;
+    return NX_FALSE;
+}
+
+VOID ami_ptp_ipv6_shown_hop(NX_IP *ip, const NX_INTERFACE *ifp,
+                            const ULONG hop[4], ULONG out[4])
+{
+    (void)ip;
+    (void)ifp;
+    out[0] = hop[0];
+    out[1] = hop[1];
+    out[2] = hop[2];
+    out[3] = hop[3];
+}
+
+UINT netstack_ipv6_peer_set(unsigned short index, const ULONG peer[4])
+{
+    (void)index;
+    (void)peer;
+    return NX_NOT_SUPPORTED;
+}
+#endif
+
 #else
 typedef int ami_ptp_passthrough_unused;
 #endif /* AMINETXDUO_PTP */

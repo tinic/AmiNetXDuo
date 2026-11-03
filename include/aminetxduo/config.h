@@ -312,6 +312,9 @@ typedef struct AmiIfConfig {
      */
     UBYTE       point_to_point;              /* AMI_CFG_PTP_*                    */
     ULONG       destination;
+    /* DESTINATION6=, the peer's IPv6 address. */
+    ULONG       destination6[AMI_CFG_IP6_WORDS];
+    BOOL        have_destination6;
 #endif
 } AmiIfConfig;
 

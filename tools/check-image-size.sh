@@ -126,7 +126,9 @@ BUDGETS=(
     # interfaces, AMINETXDUO_PTP (#437): +1,960, 380,336 -> 382,296.
     # IPv6 link-local on a point-to-point link, no DAD and no router
     # solicitation (#437): +312, 382,296 -> 382,608.
-    "default:src/bsdsocket/bsdsocket.library:382608"
+    # ADDRESS6, DESTINATION6 and ::/0 on a point-to-point link (#437):
+    # +1,900, 382,608 -> 384,508.
+    "default:src/bsdsocket/bsdsocket.library:384508"
     # 41,412 after stateless receive-checksum verification was added to the
     # EL3 and word/long NE2000 direct paths, 2026-09-15.  43,620 with
     # ANXD_CMD_RX_BATCH in the shell (claim, completion, staging copy, the
@@ -273,7 +275,8 @@ BUDGETS=(
     # 210,832 with REQUIRESINITDELAY waiting its second.
     # 212,048 with the /31-/32 broadcast fix (netxduo #43) and
     # AMINETXDUO_PTP (#437).
-    "micro:src/bsdsocket/bsdsocket.library:212048"
+    # 212,176 with DESTINATION6 in the interface file keywords (#437).
+    "micro:src/bsdsocket/bsdsocket.library:212176"
     "micro:src/netdev/anxnet.device:46000"
     "micro:src/netdev/anxgenet.device:29120"
     "micro:src/wifipi/anxwifipi.device:56000"
