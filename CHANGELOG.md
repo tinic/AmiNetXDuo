@@ -7,6 +7,11 @@ are history.
 
 ## Unreleased
 
+- Point-to-point interfaces: POINTTOPOINT and DESTINATION in an interface
+  file, for drivers such as the OpenVPN client's vpn.device (IPv4).
+- An address with a 255.255.255.254 or 255.255.255.255 netmask is no
+  longer treated as a broadcast address, so TCP and ping to it work.
+- DeleteNetRoute DST=0.0.0.0 removes the default route, as on AmiTCP.
 - A network driver that refuses one kind of read, such as ARP or IPv6 on a
   point-to-point device, no longer keeps the stack's receive task busy
   asking for it again.
