@@ -1390,6 +1390,9 @@ BOOL ami_sana2_rx_reclaim(AmiSana2If *iface, BOOL release_packets);
 ULONG ami_sana2_rx_frame_length(const AmiSana2If *iface, ULONG payload);
 BOOL ami_sana2_rx_resolve_length(AmiRxSlot *slot, ULONG *length);
 BOOL ami_sana2_rx_refused(AmiSana2Rx *rx, UBYTE error);
+#ifdef AMINETXDUO_PTP
+UWORD ami_sana2_rx_ptp_depth(ULONG packet_type, UWORD depth);
+#endif
 
 /* Must the reader block?  The port decides; the batch count may not.  See the
    definition in sana2_rx.c, and tests/sana2/host for what holds it there. */

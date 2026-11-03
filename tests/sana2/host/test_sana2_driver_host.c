@@ -707,6 +707,41 @@ static void test_ptp_drops_arp(void)
 }
 #endif
 
+#ifdef AMINETXDUO_PTP
+/* IPv6 onto a point-to-point link is a send like IPv4's, typed 0x86DD. */
+static void test_ptp_sends_ipv6(void)
+{
+    static const UCHAR version[] = { 4, 6 };
+    static const UWORD expect[]  = { AMI_ETHERTYPE_IPV4, AMI_ETHERTYPE_IPV6 };
+    ULONG i;
+
+    printf("sana2: IPv6 onto a point-to-point link\n");
+
+    for (i = 0; i < sizeof(version); i++)
+    {
+        fixture_init(4);
+        iface.ptp = TRUE;
+        ami_sana2_attach(&iface, &ip, 0);
+        packet.nx_packet_ip_version = version[i];
+
+        memset(&req, 0, sizeof(req));
+        req.nx_ip_driver_command   = NX_LINK_PACKET_SEND;
+        req.nx_ip_driver_ptr       = &ip;
+        req.nx_ip_driver_interface = &interface_obj;
+        req.nx_ip_driver_packet    = &packet;
+
+        ami_sana2_driver_entry(&req);
+
+        h_check(h_sends == 1 && h_sent_type == expect[i],
+                (i == 0) ? "ptp: IPv4 is sent as 0x0800"
+                         : "ptp: IPv6 is sent as 0x86DD");
+
+        ami_sana2_unbind(&iface);
+        interface_obj.nx_interface_additional_link_info = NULL;
+    }
+}
+#endif
+
 /* A send command with no packet is a caller error, not a null dereference. */
 static void test_send_without_a_packet(void)
 {
@@ -1446,6 +1481,7 @@ int main(void)
     test_ether_type();
 #ifdef AMINETXDUO_PTP
     test_ptp_drops_arp();
+    test_ptp_sends_ipv6();
 #endif
     test_send_without_a_packet();
     test_send_status_is_passed_up();

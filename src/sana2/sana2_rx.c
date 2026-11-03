@@ -1814,7 +1814,7 @@ AMI_SANA2_BATCH_LINKAGE UWORD ami_sana2_rx_drain_batch(AmiSana2Reader *rd,
 
 /*
  * A read the device refuses outright: S2ERR_NOT_SUPPORTED for a packet type
- * it does not carry (a point-to-point driver asked for ARP or IPv6), or
+ * it does not carry (a point-to-point driver asked for IPv6), or
  * IOERR_NOCMD.  Posted again, it is refused again at once, and with its reply
  * always on the port the reader never blocked: it spun at its priority.  The
  * ring is retired until ami_sana2_rx_start() builds it again.  Non-static so
@@ -2941,6 +2941,19 @@ UWORD ami_sana2_rx_ask_ip(const AmiSana2If *iface)
     return ami_sana2_default_ip_reads(iface->device);
 }
 
+#ifdef AMINETXDUO_PTP
+/*
+ * A ring's depth on a point-to-point link.  No ARP: there is no hardware
+ * address to resolve.  IPv6 is read beside IPv4, bare datagrams both; a
+ * driver that does not carry 0x86DD refuses the read and the ring retires
+ * (ami_sana2_rx_refused).
+ */
+UWORD ami_sana2_rx_ptp_depth(ULONG packet_type, UWORD depth)
+{
+    return (packet_type == AMI_ETHERTYPE_ARP) ? (UWORD)0 : depth;
+}
+#endif
+
 LONG ami_sana2_rx_start(AmiSana2If *iface)
 {
     UWORD       i;
@@ -2999,10 +3012,9 @@ LONG ami_sana2_rx_start(AmiSana2If *iface)
             rx->depth = AMI_SANA2_RX_MAX_DEPTH;
 
 #ifdef AMINETXDUO_PTP
-        /* A point-to-point link carries IPv4 and nothing else: no read is
-           asked for ARP or IPv6, and their rings hold no slots. */
-        if (iface->ptp && ami_sana2_rx_types[i] != AMI_ETHERTYPE_IPV4)
-            rx->depth = 0;
+        if (iface->ptp)
+            rx->depth = ami_sana2_rx_ptp_depth(ami_sana2_rx_types[i],
+                                               rx->depth);
 #endif
 
         /* The slots, to the planned depth.  Kept across a stop and start

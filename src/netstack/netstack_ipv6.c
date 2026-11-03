@@ -227,8 +227,8 @@ static VOID ami_ns6_configure_interface(AmiNetStack *ns, UWORD i)
     }
 
 #ifdef AMINETXDUO_PTP
-    /* IPv4 alone: the driver's reads are IPv4 reads, and there is no hardware
-       address for a link-local interface identifier. */
+    /* No addresses yet: the link carries IPv6 (sana2_rx.c), but there is no
+       hardware address for a link-local interface identifier. */
     if (ami_sana2_ptp(ns->ns_Iface[i]))
     {
         AMI_INFO("netstack: %s: point-to-point, IPv4 only", cfg->name);

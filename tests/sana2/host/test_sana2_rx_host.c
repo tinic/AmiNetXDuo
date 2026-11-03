@@ -2111,6 +2111,145 @@ static void test_refused_read_retires_the_ring(void)
     }
 }
 
+#ifdef AMINETXDUO_PTP
+/* --------------------------------------------- IPv6 on a point-to-point -- */
+
+/*
+ * vpn.device's shape: PPP, four address bytes, cooked.  A point-to-point
+ * link reads IPv6 beside IPv4 and nothing for ARP.  A driver that does not
+ * carry 0x86DD refuses the read; that ring retires and IPv4 goes on.
+ */
+static void ptp_iface(void)
+{
+    iface.ptp        = TRUE;
+    iface.hw_type    = S2WireType_PPP;
+    iface.addr_bytes = 4;
+}
+
+/* What ami_sana2_rx_settle() leaves of a cooked read on a wire without
+   Ethernet addresses: twelve zero bytes, the type, then the datagram, here
+   an IPv6 header's first byte and a counted payload. */
+static void ptp_frame(UWORD type, ULONG payload)
+{
+    frame_init(type, payload);
+    memset(pkt.nx_packet_prepend_ptr, 0, 2 * AMI_ETH_ADDR_SIZE);
+    pkt.nx_packet_prepend_ptr[AMI_ETH_HEADER_SIZE] =
+        (type == AMI_ETHERTYPE_IPV6) ? 0x60 : 0x45;
+}
+
+static void test_ptp_rings(void)
+{
+    AmiSana2Reader     rd;
+    AmiSana2Rx        *rx = &iface.rx[0];
+    struct IOSana2Req *req;
+
+    printf("sana2: a point-to-point link reads IPv6 beside IPv4\n");
+
+    h_check(ami_sana2_rx_ptp_depth(AMI_ETHERTYPE_IPV4, 12) == 12,
+            "ptp: the IPv4 ring keeps the planned depth");
+    h_check(ami_sana2_rx_ptp_depth(AMI_ETHERTYPE_IPV6, 8) == 8,
+            "ptp: so does the IPv6 ring");
+    h_check(ami_sana2_rx_ptp_depth(AMI_ETHERTYPE_ARP, 4) == 0,
+            "ptp: the ARP ring holds no slots");
+
+    rf_ring(&rd, rx);
+    ptp_iface();
+    rx->packet_type = AMI_ETHERTYPE_IPV6;
+    h_last_begun = NULL;
+    h_check(ami_sana2_rx_post(rx) == RF_SLOTS && h_last_begun != NULL,
+            "ptp: the IPv6 ring is posted");
+    req = (struct IOSana2Req *)h_last_begun;
+    h_check(req->ios2_PacketType == AMI_ETHERTYPE_IPV6 &&
+            (req->ios2_Req.io_Flags & SANA2IOF_RAW) == 0,
+            "ptp: as a cooked read of 0x86DD");
+}
+
+static void test_ptp_ipv6_delivered(void)
+{
+    printf("sana2: an IPv6 datagram off a point-to-point link goes up whole\n");
+
+    fixture_init();
+    ptp_iface();
+    ptp_frame(AMI_ETHERTYPE_IPV6, 48);
+
+    h_deliver();
+
+    h_check(h_went == TO_IP, "ptp: IPv6 goes to the IP receiver");
+    h_check(h_seen_length == 48 && h_seen_first == 0x60,
+            "ptp: the whole datagram, from its version byte");
+    h_check(h_seen_interface == &interface_obj,
+            "ptp: on the interface it came in on");
+    h_check(iface.stats.packets_received == 1 &&
+            iface.stats.rx_multicast == 0 && iface.stats.rx_errors == 0,
+            "ptp: received once, not multicast, no error");
+}
+
+static UCHAR     p4_buf[RF_SLOTS][256];
+static NX_PACKET p4_pkt[RF_SLOTS];
+static AmiRxSlot p4_slot[RF_SLOTS];
+
+static void test_ptp_ipv6_refused_ipv4_goes_on(void)
+{
+    AmiSana2Reader     rd;
+    AmiSana2Rx        *v6 = &iface.rx[AMI_SANA2_RX_READERS - 1];
+    AmiSana2Rx        *v4 = &iface.rx[0];
+    struct IOSana2Req *req;
+    UWORD              i;
+
+    printf("sana2: a point-to-point driver without IPv6 keeps IPv4\n");
+
+    rf_ring(&rd, v6);
+    ptp_iface();
+    v6->packet_type = AMI_ETHERTYPE_IPV6;
+
+    memset(p4_slot, 0, sizeof(p4_slot));
+    memset(p4_pkt, 0, sizeof(p4_pkt));
+    v4->iface       = &iface;
+    v4->reader      = &rd;
+    v4->packet_type = AMI_ETHERTYPE_IPV4;
+    v4->depth       = RF_SLOTS;
+    v4->slot        = p4_slot;
+    v4->unposted    = RF_SLOTS;
+    v4->refused     = FALSE;
+    for (i = 0; i < RF_SLOTS; i++)
+    {
+        p4_pkt[i].nx_packet_data_start = p4_buf[i];
+        p4_pkt[i].nx_packet_data_end   = p4_buf[i] + sizeof(p4_buf[i]);
+        p4_slot[i].owner  = v4;
+        p4_slot[i].stats  = &iface.stats;
+        p4_slot[i].packet = &p4_pkt[i];
+    }
+
+    h_check(ami_sana2_rx_post(v6) == RF_SLOTS, "ptp: the IPv6 ring is posted");
+    h_check(ami_sana2_rx_post(v4) == RF_SLOTS, "ptp: and the IPv4 ring");
+
+    /* vpn.device's answer to a read of a type it does not carry. */
+    rf_complete(v6);
+    h_check(ami_sana2_rx_refused(v6, (UBYTE)S2ERR_NOT_SUPPORTED) &&
+            v6->refused, "ptp: S2ERR_NOT_SUPPORTED retires the IPv6 ring");
+    h_last_begun = NULL;
+    h_check(ami_sana2_rx_post(v6) == 0 && h_last_begun == NULL,
+            "ptp: the retired IPv6 ring is not posted again");
+
+    /* An IPv4 read comes back; its slot goes back to the device. */
+    p4_slot[0].posted = FALSE;
+    v4->unposted++;
+    h_last_begun = NULL;
+    h_check(ami_sana2_rx_post(v4) == RF_SLOTS && h_last_begun != NULL,
+            "ptp: the IPv4 ring is posted as before");
+    req = (struct IOSana2Req *)h_last_begun;
+    h_check(req->ios2_PacketType == AMI_ETHERTYPE_IPV4,
+            "ptp: as a read of 0x0800");
+    h_check(!v4->refused, "ptp: and it is in service");
+
+    h_went = TO_NOWHERE;
+    ptp_frame(AMI_ETHERTYPE_IPV4, 40);
+    h_deliver();
+    h_check(h_went == TO_IP && h_seen_length == 40 && h_seen_first == 0x45,
+            "ptp: an IPv4 datagram still goes up whole");
+}
+#endif /* AMINETXDUO_PTP */
+
 #ifdef AMINETXDUO_RX_BATCH
 /* ---------------------------------------------------- ANXD_CMD_RX_BATCH -- */
 
@@ -2586,6 +2725,11 @@ int main(void)
     test_block_only_on_an_empty_port();
     test_a_burst_is_never_left_on_the_port();
     test_refused_read_retires_the_ring();
+#ifdef AMINETXDUO_PTP
+    test_ptp_rings();
+    test_ptp_ipv6_delivered();
+    test_ptp_ipv6_refused_ipv4_goes_on();
+#endif
     test_plan_ladder();
     test_plan_degenerate_bps();
     test_plan_budget();
