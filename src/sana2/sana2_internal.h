@@ -909,6 +909,9 @@ typedef struct AmiSana2Rx
      */
     UWORD               unposted;
 
+    /* The device refused this ring's reads outright: ami_sana2_rx_refused(). */
+    UBYTE               refused;
+
 #ifdef AMINETXDUO_GRO
     /*
      * THE HELD HEAD.  The receive layer parses verified TCP frames itself;
@@ -1378,6 +1381,7 @@ VOID ami_sana2_rx_stop(AmiSana2If *iface);
 BOOL ami_sana2_rx_reclaim(AmiSana2If *iface, BOOL release_packets);
 ULONG ami_sana2_rx_frame_length(const AmiSana2If *iface, ULONG payload);
 BOOL ami_sana2_rx_resolve_length(AmiRxSlot *slot, ULONG *length);
+BOOL ami_sana2_rx_refused(AmiSana2Rx *rx, UBYTE error);
 
 /* Must the reader block?  The port decides; the batch count may not.  See the
    definition in sana2_rx.c, and tests/sana2/host for what holds it there. */
@@ -1406,6 +1410,7 @@ UWORD ami_sana2_rx_drain_batch(AmiSana2Reader *rd, AmiRxBatch *bt);
 #endif
 VOID  ami_sana2_rx_abort_outstanding(AmiSana2Reader *rd);
 VOID  ami_sana2_rx_flush(AmiSana2Reader *rd);
+UWORD ami_sana2_rx_post(AmiSana2Rx *rx);
 #endif
 
 /* sana2_tx.c */

@@ -1967,6 +1967,101 @@ static void test_a_burst_is_never_left_on_the_port(void)
             "the shipped rule takes the whole burst before it blocks");
 }
 
+/* ------------------------------------------------------- refused reads -- */
+
+/*
+ * A device that does not carry a packet type refuses its reads with
+ * S2ERR_NOT_SUPPORTED, every time and at once; vpn.device does so for ARP and
+ * IPv6.  The first refusal retires the ring, and the sweep posts nothing for
+ * it again.  Before, every drain re-posted it, the reply was back on the port
+ * before the reader looked, and the reader never blocked.  Any other error
+ * leaves the ring in service.
+ */
+#define RF_SLOTS 2
+static UCHAR     rf_buf[RF_SLOTS][256];
+static NX_PACKET rf_pkt[RF_SLOTS];
+static AmiRxSlot rf_slot[RF_SLOTS];
+
+static void rf_ring(AmiSana2Reader *rd, AmiSana2Rx *rx)
+{
+    UWORD i;
+
+    fixture_init();
+    memset(rd, 0, sizeof(*rd));
+    memset(rf_slot, 0, sizeof(rf_slot));
+    memset(rf_pkt, 0, sizeof(rf_pkt));
+    iface.online      = TRUE;
+    iface.rx_dst_off  = AMI_ETH_HEADER_SIZE;
+    rd->iface         = &iface;
+    rx->iface         = &iface;
+    rx->reader        = rd;
+    rx->packet_type   = AMI_ETHERTYPE_ARP;
+    rx->depth         = RF_SLOTS;
+    rx->slot          = rf_slot;
+    rx->unposted      = RF_SLOTS;
+    rx->refused       = FALSE;
+    for (i = 0; i < RF_SLOTS; i++)
+    {
+        rf_pkt[i].nx_packet_data_start = rf_buf[i];
+        rf_pkt[i].nx_packet_data_end   = rf_buf[i] + sizeof(rf_buf[i]);
+        rf_slot[i].owner  = rx;
+        rf_slot[i].stats  = &iface.stats;
+        rf_slot[i].packet = &rf_pkt[i];
+    }
+}
+
+/* What the drain does to each slot whose read came back. */
+static void rf_complete(AmiSana2Rx *rx)
+{
+    UWORD i;
+
+    for (i = 0; i < RF_SLOTS; i++)
+        if (rf_slot[i].posted)
+        {
+            rf_slot[i].posted = FALSE;      /* ami_sana2_rx_mark(), FALSE */
+            rx->unposted++;
+        }
+}
+
+static void test_refused_read_retires_the_ring(void)
+{
+    static const BYTE kept[] = {
+        S2ERR_OUTOFSERVICE, IOERR_ABORTED, S2ERR_NO_RESOURCES, S2ERR_MTU_EXCEEDED
+    };
+    static const BYTE refusals[] = { S2ERR_NOT_SUPPORTED, IOERR_NOCMD };
+    AmiSana2Reader rd;
+    AmiSana2Rx    *rx = &iface.rx[0];
+    unsigned       k;
+
+    for (k = 0; k < sizeof kept; k++)
+    {
+        rf_ring(&rd, rx);
+        h_check(ami_sana2_rx_post(rx) == RF_SLOTS, "refused: a fresh ring is posted");
+        rf_complete(rx);
+        h_check(!ami_sana2_rx_refused(rx, (UBYTE)kept[k]) && !rx->refused,
+                "refused: any other error leaves the ring in service");
+        h_last_begun = NULL;
+        h_check(ami_sana2_rx_post(rx) == RF_SLOTS && h_last_begun != NULL,
+                "refused: a ring in service is posted again");
+    }
+
+    for (k = 0; k < sizeof refusals; k++)
+    {
+        rf_ring(&rd, rx);
+        h_check(ami_sana2_rx_post(rx) == RF_SLOTS, "refused: a fresh ring is posted");
+        rf_complete(rx);
+        h_check(ami_sana2_rx_refused(rx, (UBYTE)refusals[k]) && rx->refused,
+                "refused: S2ERR_NOT_SUPPORTED and IOERR_NOCMD retire the ring");
+        h_last_begun = NULL;
+        h_check(ami_sana2_rx_post(rx) == 0 && h_last_begun == NULL,
+                "refused: a retired ring is not posted, so nothing returns to the port");
+        h_check(ami_sana2_rx_post(rx) == 0 && h_last_begun == NULL,
+                "refused: nor on the next sweep");
+        h_check(ami_sana2_rx_refused(rx, (UBYTE)refusals[k]) && rx->refused,
+                "refused: a second refusal changes nothing");
+    }
+}
+
 #ifdef AMINETXDUO_RX_BATCH
 /* ---------------------------------------------------- ANXD_CMD_RX_BATCH -- */
 
@@ -2441,6 +2536,7 @@ int main(void)
     test_link_header_is_counted_either_way();
     test_block_only_on_an_empty_port();
     test_a_burst_is_never_left_on_the_port();
+    test_refused_read_retires_the_ring();
     test_plan_ladder();
     test_plan_degenerate_bps();
     test_plan_budget();
