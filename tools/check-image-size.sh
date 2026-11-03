@@ -118,7 +118,9 @@ BUDGETS=(
     # An ARexx KILL does not wait for the sb_Lock of a last close that waits
     # for the ARexx host: +88, 380,144 -> 380,232.
     # REQUIRESINITDELAY waits its second: +12, 380,232 -> 380,244.
-    "default:src/bsdsocket/bsdsocket.library:380244"
+    # A ring whose reads the device refuses is retired, not re-posted in a
+    # spin (#437): +32, 380,244 -> 380,276.
+    "default:src/bsdsocket/bsdsocket.library:380276"
     # 41,412 after stateless receive-checksum verification was added to the
     # EL3 and word/long NE2000 direct paths, 2026-09-15.  43,620 with
     # ANXD_CMD_RX_BATCH in the shell (claim, completion, staging copy, the
@@ -214,7 +216,8 @@ BUDGETS=(
     # signals a removed Task (#383): +1,372, 256,524 -> 257,896.
     # KILL against a last close: +228, 257,820 -> 258,048.
     # REQUIRESINITDELAY waits its second: +12, 258,048 -> 258,060.
-    "minimal:src/bsdsocket/bsdsocket.library:258060"
+    # A refused read retires its ring (#437): +32, 258,060 -> 258,092.
+    "minimal:src/bsdsocket/bsdsocket.library:258092"
     "minimal:src/netdev/anxnet.device:46000"
     # 29,088 on e806188f after the audited device fixes.
     # Batched transmit adds 632, 29,120 -> 29,752, approved by turo 2026-10-29.
