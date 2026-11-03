@@ -79,13 +79,15 @@ BUDGETS=(
     # netxduo #37): the per-interface slow-start fields in NX_INTERFACE.
     # +24 default and fat / +12 minimal / +12 micro on 2026-11-01 (#383): the
     # adopted Tasks ln_Name in each TX_THREAD, the dispatchs cheap look.
-    "default:89576"
+    # +56 default and fat on 2026-11-03 (#437): two more 28-byte IPv6
+    # default router entries in NX_IP, one per attached interface.
+    "default:89632"
     "minimal:18116"
     # First budgeted as a shipping profile at 0.28.9: 15,716 bytes, with
     # headroom to the next KiB boundary.
     "micro:16500"
     # The full stack's options, so the full stack's budget.
-    "fat:89576"
+    "fat:89632"
 )
 
 budget=""
