@@ -682,12 +682,13 @@ static UINT ami_ns6_route_add(const ULONG dest[4], ULONG prefix_len,
         /* A prefix through a point-to-point peer (netstack_ptp6.c). */
         if (prefix_len != 0UL)
         {
-            tx_mutex_get(&ns->ns_Ip.nx_ip_protection, TX_WAIT_FOREVER);
+            AMI_NX_ONLY_SUCCESS(tx_mutex_get(&ns->ns_Ip.nx_ip_protection,
+                                         TX_WAIT_FOREVER));
             status = ami_ptp_ipv6_route_add(&ns->ns_Ip, dest, prefix_len,
                                             next_hop, (UINT)interface_index);
             if (status == NX_SUCCESS)
                 ami_ns6_forget_destinations(ns);
-            tx_mutex_put(&ns->ns_Ip.nx_ip_protection);
+            AMI_NX_ONLY_SUCCESS(tx_mutex_put(&ns->ns_Ip.nx_ip_protection));
 
             return status;
         }
@@ -820,12 +821,13 @@ static UINT ami_ns6_route_delete(const ULONG dest[4], ULONG prefix_len,
     /* A prefix through a point-to-point peer. */
     if (next_hop != NULL && !ami_ns6_is_any(next_hop) && prefix_len != 0UL)
     {
-        tx_mutex_get(&ns->ns_Ip.nx_ip_protection, TX_WAIT_FOREVER);
+        AMI_NX_ONLY_SUCCESS(tx_mutex_get(&ns->ns_Ip.nx_ip_protection,
+                                         TX_WAIT_FOREVER));
         status = ami_ptp_ipv6_route_delete(&ns->ns_Ip, dest, prefix_len,
                                            next_hop);
         if (status == NX_SUCCESS)
             ami_ns6_forget_destinations(ns);
-        tx_mutex_put(&ns->ns_Ip.nx_ip_protection);
+        AMI_NX_ONLY_SUCCESS(tx_mutex_put(&ns->ns_Ip.nx_ip_protection));
 
         return status;
     }
