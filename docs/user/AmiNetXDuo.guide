@@ -586,6 +586,15 @@
   router on the LAN. DeleteNetRoute DST=:: removes only a default route
   that was added this way, never one learned from a router.
 
+  AddNetRoute DESTINATION=<prefix>/<length> GATEWAY=<peer> sends an IPv6
+  prefix through the point-to-point interface whose DESTINATION6 is
+  <peer>; the interface must be up, and a link-local peer is written
+  <peer>%<interface>. A gateway that is not such a peer is refused. Up to
+  eight such routes are kept; the same prefix and length replaces a route,
+  and DeleteNetRoute DESTINATION=<prefix>/<length> removes it. An on-link
+  prefix of equal or greater length takes precedence. Clearing
+  DESTINATION6 or taking the interface down removes its routes.
+
   @{b}More than one card@{ub}
 
   Put one file in DEVS:NetInterfaces per card. A file is a definition,
