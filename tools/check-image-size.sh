@@ -152,9 +152,11 @@ BUDGETS=(
     # 29,120 -> 29,752, approved by turo 2026-10-29.
     # The queue limit and its stops in ami_sana2_get_stats(): +8,
     # 29,752 -> 29,760.
+    # The aligned link header copy on the direct receive path: +12,
+    # 29,760 -> 29,772.
     # The transmit staging phase and the shared bus lead-in: +84,
-    # 29,760 -> 29,844.
-    "default:src/netdev/anxgenet.device:29844"
+    # 29,772 -> 29,856.
+    "default:src/netdev/anxgenet.device:29856"
     "default:src/wifipi/anxwifipi.device:56000"
     # +832 bytes for Roadshow's native users/groups ReadArgs syntax, strict
     # /N validation and bounded member-vector sizing: existing UID/GID maps
@@ -226,8 +228,9 @@ BUDGETS=(
     # 29,088 on e806188f after the audited device fixes.
     # Batched transmit adds 632, 29,120 -> 29,752, approved by turo 2026-10-29.
     # The queue limit and its stops in ami_sana2_get_stats(): +8, -> 29,760.
-    # The transmit staging phase and the bus lead-in: +84, -> 29,844.
-    "minimal:src/netdev/anxgenet.device:29844"
+    # The aligned direct-receive link header copy: +12, -> 29,772.
+    # The transmit staging phase and the bus lead-in: +84, -> 29,856.
+    "minimal:src/netdev/anxgenet.device:29856"
     "minimal:src/wifipi/anxwifipi.device:56000"
     # 10,172 on e806188f after the audited parser fixes.
     "minimal:src/usergroup/usergroup.library:10240"
