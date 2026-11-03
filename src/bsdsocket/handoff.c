@@ -77,7 +77,9 @@ static BsdHandoff *bsd_handoff_match(struct AmiSocketBase *master, LONG id,
         if (sock == NULL)
             continue;
 
-        if ((LONG)sock->as_Domain != domain || (LONG)sock->as_Type != type)
+        /* AF_INET6 matches in either spelling (BSD_AF_INET6_23). */
+        if (BSD_AF_CANON((LONG)sock->as_Domain) != BSD_AF_CANON(domain) ||
+            (LONG)sock->as_Type != type)
             continue;
 
         /* Protocol 0 means "the default for this type", which is what the
@@ -338,6 +340,20 @@ LONG bsd_ObtainSocket(register LONG id       __asm("d0"),
      * a ReleaseCopyOfSocket() therefore no longer signals the base that still
      */
     bsd_owner_set(sock, SocketBase);
+
+#ifdef AMINETXDUO_IPV6
+    /* Answers come in the obtainer's spelling of AF_INET6. */
+    if ((sock->as_Flags & ASF_INET6) != 0)
+    {
+        Forbid();
+        sock->as_Domain = (UWORD)domain;
+        if (bsd_af_in(SocketBase, domain) != domain)  /* 23 */
+            sock->as_Flags |= ASF_FAM23;
+        else
+            sock->as_Flags &= ~ASF_FAM23;
+        Permit();
+    }
+#endif
 
     return fd;
 }

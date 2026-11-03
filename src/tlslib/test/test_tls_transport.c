@@ -495,6 +495,26 @@ static void test_send_failure_keeps_packet(void)
     rig_close(&rig);
 }
 
+/*
+ * The peer family of an application's socket. One created with AF_INET6 ==
+ * 23 (bebbo ndk-include) answers getpeername() with 23 at bytes 0 and 1.
+ */
+static void test_peer_family(void)
+{
+    static const UBYTE v4[4]      = { 16, TLS_SOCK_AF_INET, 0, 1 };
+    static const UBYTE v4_old[4]  = { TLS_SOCK_AF_INET, 0, 0, 1 };
+    static const UBYTE v6[4]      = { 28, TLS_SOCK_AF_INET6, 0, 1 };
+    static const UBYTE v6_23[4]   = { TLS_SOCK_AF_INET6_23,
+                                      TLS_SOCK_AF_INET6_23, 0, 1 };
+
+    printf("tls_transport: a peer address's family in every spelling\n");
+
+    CHECK(tls_sock_family(v4) == TLS_SOCK_AF_INET);
+    CHECK(tls_sock_family(v4_old) == TLS_SOCK_AF_INET);
+    CHECK(tls_sock_family(v6) == TLS_SOCK_AF_INET6);
+    CHECK(tls_sock_family(v6_23) == TLS_SOCK_AF_INET6);
+}
+
 static void test_socket_type(void)
 {
     Rig rig;
@@ -615,6 +635,7 @@ int main(void)
     test_send_chain();
     test_send_failure_keeps_packet();
     test_socket_type();
+    test_peer_family();
     test_forbid_balance();
     test_rig_open_fail_closed();
 

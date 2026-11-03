@@ -247,7 +247,7 @@ struct BsdProfSegTag
 struct AmiSocketBase
 {
     struct Library          sb_Lib;
-    UWORD                   sb_Pad;
+    UWORD                   sb_Fam23;       /* see BSD_AF_INET6_23            */
     APTR                    sb_SegList;
     struct ExecBase        *sb_SysBase;
 
@@ -456,6 +456,20 @@ static inline BOOL bsd_stack_last_opener(const struct AmiSocketBase *master)
 #define ASF_OOBHAVE     (1UL << 23)   /* an urgent byte is waiting, oob.c   */
 #define ASF_CLOSING     (1UL << 24)   /* FIN sent, parked for a late reap   */
 #define ASF_RELISTENING (1UL << 25)   /* inside the listen callback's relisten */
+#define ASF_FAM23       (1UL << 26)   /* created with BSD_AF_INET6_23       */
+
+/*
+ * AF_INET6 in the AmigaPorts/bebbo ndk-include (sys/socket.h:199), the value
+ * of AF_IPX, which no Amiga stack implements. Its sockaddr_in6 has no
+ * sin6_len: the family is at byte 0 and byte 1 is padding, which the
+ * program's struct sockaddr reads as sa_family. Bytes 2..27 are ours.
+ *
+ * Accepted wherever a family comes in. Answers go out in the caller's value:
+ * per socket by ASF_FAM23, and for getaddrinfo() without a family by
+ * sb_Fam23, set once the opener has used 23 anywhere.
+ */
+#define BSD_AF_INET6_23     23
+#define BSD_AF_CANON(af)    (((af) == BSD_AF_INET6_23) ? AF_INET6 : (af))
 
 #define ACW_RECVPKTINFO6    (1UL << 0)  /* IPV6_RECVPKTINFO                  */
 #define ACW_RECVHOPLIMIT    (1UL << 1)  /* IPV6_RECVHOPLIMIT                 */
@@ -1082,6 +1096,24 @@ VOID  bsd_handoff_flush(struct AmiSocketBase *base, struct MinList *list,
 /* socket.c, sockaddr helpers.
  */
 LONG  bsd_sa_family(const struct sockaddr *sa, socklen_t len);
+
+/* A family in, as the caller spelt it. BSD_AF_INET6_23 is AF_INET6, and
+   marks the opener as one that answers in 23. */
+static inline LONG bsd_af_in(struct AmiSocketBase *base, LONG af)
+{
+#ifdef AMINETXDUO_IPV6
+    if (af == BSD_AF_INET6_23)
+    {
+        base->sb_Fam23 = 1;
+        return AF_INET6;
+    }
+#else
+    (VOID)base;
+#endif
+
+    return af;
+}
+
 LONG  bsd_sockaddr_get(struct AmiSocketBase *base, const struct sockaddr *sa,
                        socklen_t len, NXD_ADDRESS *addr, UINT *port,
                        ULONG *scope_id);

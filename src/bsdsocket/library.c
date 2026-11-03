@@ -570,6 +570,7 @@ static struct AmiSocketBase *bsd_child_create(struct AmiSocketBase *master)
     child->sb_StackPool          = NULL;
     child->sb_StackHeld          = FALSE;
     child->sb_NextHandoffId      = 0;
+    child->sb_Fam23              = 0;
 
     bsd_bzero(&child->sb_NxCaller, sizeof(child->sb_NxCaller));
     child->sb_NxNest       = 0;
