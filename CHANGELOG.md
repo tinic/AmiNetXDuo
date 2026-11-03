@@ -7,6 +7,9 @@ are history.
 
 ## Unreleased
 
+- A network driver that refuses one kind of read, such as ARP or IPv6 on a
+  point-to-point device, no longer keeps the stack's receive task busy
+  asking for it again.
 - Uploads through an NE2000-compatible card, a 3Com 3C589 or an A2065 copy
   each frame in longwords on the card's word boundary, which speeds up
   uploads on a 68020 to 68060; an A3000 with an X-Surf 100 sends 3% faster.
