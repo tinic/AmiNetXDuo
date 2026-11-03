@@ -52,6 +52,20 @@ VOID  ami_ptp_peer_route(NX_IP *ip, UINT index);
 /* IPv6 on interface `index`: a random link-local, no DAD, no router
    solicitation.  NX_DUPLICATED_ENTRY when it has a link-local already. */
 UINT  ami_ptp_ipv6_start(NX_IP *ip, UINT index);
+
+/* An ADDRESS6 on interface `index`, with no duplicate address detection. */
+UINT  ami_ptp_ipv6_address_set(NX_IP *ip, UINT index, NXD_ADDRESS *addr,
+                               ULONG prefix);
+
+/* DESTINATION6, the peer of interface `index`: NULL or :: for none. */
+VOID  ami_ptp_ipv6_peer_set(UINT index, const ULONG *peer);
+
+/* A default router as NetX Duo takes it: a peer becomes the link-local of
+   the interface it is the peer of, anything else is unchanged.  And the
+   reverse, for a router on interface `ifp`, for whatever reports one. */
+VOID  ami_ptp_ipv6_next_hop(NX_IP *ip, const ULONG gw[4], ULONG out[4]);
+VOID  ami_ptp_ipv6_shown_hop(NX_IP *ip, const NX_INTERFACE *ifp,
+                             const ULONG hop[4], ULONG out[4]);
 #endif
 
 #define AMI_PTP_NEXT_HOP(ip, gateway)   ami_ptp_next_hop((ip), (gateway))

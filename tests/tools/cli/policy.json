@@ -55,6 +55,7 @@
       "DEBUG": "NO",
       "DELETEADDR": "10.77.0.9",
       "DESTINATION": "10.77.0.1",
+      "DESTINATION6": "2001:db8::2",
       "DHCPUNICAST": "NO",
       "CONFIGURE": "DHCP",
       "CONFIGURE6": "AUTO",

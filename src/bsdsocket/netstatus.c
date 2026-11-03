@@ -33,6 +33,9 @@
 #ifdef AMINETXDUO_IPV6
 /* ND_CACHE_STATE_*, which nx_api.h does not carry. */
 #include "nx_nd_cache.h"
+#ifdef AMINETXDUO_PTP
+#include "../ipv6/ipv6_srcsel.h"        /* anx6_ptp_peer_get() */
+#endif
 #endif
 
 /*
@@ -728,6 +731,33 @@ static VOID ns_fill_routes6(NX_IP *ip, NsWriter *w)
         }
     }
 
+#ifdef AMINETXDUO_PTP
+    /* The peer of each point-to-point link, the host route through it. */
+    for (i = 0; i < (UINT)NX_MAX_PHYSICAL_INTERFACES; i++)
+    {
+        NetStatusRoute6 *out;
+        ULONG            peer[4];
+
+        if (ip->nx_ip_interface[i].nx_interface_valid == 0 ||
+            !anx6_ptp_peer_get(i, peer))
+            continue;
+
+        out = (NetStatusRoute6 *)ns_writer_next(w);
+        if (out == NULL)
+            continue;
+
+        out->nsr6_Destination[0] = peer[0];
+        out->nsr6_Destination[1] = peer[1];
+        out->nsr6_Destination[2] = peer[2];
+        out->nsr6_Destination[3] = peer[3];
+        out->nsr6_PrefixLength   = 128UL;
+        out->nsr6_Lifetime       = NETSTATUS_RT6_FOREVER;
+        out->nsr6_Flags          = NETSTATUS_RT6_UP | NETSTATUS_RT6_HOST |
+                                   NETSTATUS_RT6_PEER;
+        out->nsr6_Interface      = (UWORD)i;
+    }
+#endif
+
     for (i = 0; i < (UINT)NX_IPV6_DEFAULT_ROUTER_TABLE_SIZE; i++)
     {
         const NX_IPV6_DEFAULT_ROUTER_ENTRY *e = &ip->nx_ipv6_default_router_table[i];
@@ -740,10 +770,17 @@ static VOID ns_fill_routes6(NX_IP *ip, NsWriter *w)
         if (out == NULL)
             continue;
 
+#ifdef AMINETXDUO_PTP
+        /* The peer, where NetX Duo holds the link's own link-local. */
+        ami_ptp_ipv6_shown_hop(ip, e->nx_ipv6_default_router_entry_interface_ptr,
+                               e->nx_ipv6_default_router_entry_router_address,
+                               out->nsr6_NextHop);
+#else
         out->nsr6_NextHop[0] = e->nx_ipv6_default_router_entry_router_address[0];
         out->nsr6_NextHop[1] = e->nx_ipv6_default_router_entry_router_address[1];
         out->nsr6_NextHop[2] = e->nx_ipv6_default_router_entry_router_address[2];
         out->nsr6_NextHop[3] = e->nx_ipv6_default_router_entry_router_address[3];
+#endif
         out->nsr6_Flags      = NETSTATUS_RT6_UP | NETSTATUS_RT6_GATEWAY;
         out->nsr6_Interface  =
             ns_interface_index(ip, e->nx_ipv6_default_router_entry_interface_ptr);
@@ -2354,6 +2391,22 @@ LONG bsd_NetStackControl(register ULONG magic __asm("d0"),
                             (st == AMI_NET_ERR_KERNEL) ? AMI_EIO     :
                                                          AMI_EBUSY);
         }
+
+#ifdef AMINETXDUO_PTP
+        case NETCTRL_INTERFACE_PEER6:
+        {
+#ifdef AMINETXDUO_IPV6
+            UINT st = netstack_ipv6_peer_set(ctl->nsc_Index,
+                                             ctl->nsc_Destination6);
+
+            if (st == NX_NOT_SUPPORTED)
+                return bsd_fail(SocketBase, AMI_EOPNOTSUPP);
+            return ns_map_status(SocketBase, st);
+#else
+            return bsd_fail(SocketBase, AMI_ENOSYS);
+#endif
+        }
+#endif
 
         case NETCTRL_INTERFACE_PRIORITY:
         {

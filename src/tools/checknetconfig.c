@@ -993,6 +993,19 @@ static VOID check_addressing6(const char *path, const AmiIfConfig *ifc)
                                                       ifc->address6[m].addr,
                                                       0));
 
+#ifdef AMINETXDUO_PTP
+    /* The file says point-to-point the two ways check_addressing() reads. */
+    if (ifc->have_destination6 && ifc->destination == 0 &&
+        ifc->point_to_point != AMI_CFG_PTP_YES)
+    {
+        finding(path, ami_cfg_keyword_line_file(path, "DESTINATION6"),
+                AMI_CFG_PROBLEM_WARN);
+        note("DESTINATION6 is the peer of a point-to-point interface and is "
+             "ignored on any other; this file has neither POINTTOPOINT=YES "
+             "nor DESTINATION");
+    }
+#endif
+
     /* Two ADDRESS6 lines on ONE interface naming one address, which the
        cross-interface walk above cannot see because it never compares an
        interface with itself. */

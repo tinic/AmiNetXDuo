@@ -8,6 +8,30 @@
 #include "aminetxduo/ptp.h"
 #include "aminetxduo/nxstatus.h"
 
+#include "../ipv6/ipv6_srcsel.h"
+
+/*
+ * An address on the link with no duplicate address detection.  Held across
+ * the set, so the IP thread never sees the address with NetX Duo's own
+ * count.  The caller does not hold nx_ip_protection.
+ */
+UINT ami_ptp_ipv6_address_set(NX_IP *ip, UINT index, NXD_ADDRESS *addr,
+                              ULONG prefix)
+{
+    UINT slot = 0;
+    UINT status;
+
+    AMI_NX_ONLY_SUCCESS(tx_mutex_get(&ip->nx_ip_protection, TX_WAIT_FOREVER));
+
+    status = nxd_ipv6_address_set(ip, index, addr, prefix, &slot);
+    if (status == NX_SUCCESS)
+        ip->nx_ipv6_address[slot].nxd_ipv6_address_DupAddrDetectTransmit = 0;
+
+    AMI_NX_ONLY_SUCCESS(tx_mutex_put(&ip->nx_ip_protection));
+
+    return status;
+}
+
 /*
  * IPv6 on a point-to-point link, as RFC 4861 section 2.2 and RFC 4862 have
  * it for a link without link-layer addresses.  The driver has no MAC for
@@ -24,14 +48,12 @@ UINT ami_ptp_ipv6_start(NX_IP *ip, UINT index)
 {
     NXD_IPV6_ADDRESS *a;
     NXD_ADDRESS       ll;
-    UINT              slot = 0;
     UINT              status;
 
     if (ip == NULL || index >= (UINT)NX_MAX_PHYSICAL_INTERFACES)
         return NX_INVALID_INTERFACE;
 
-    /* Held across the set, so the IP thread never sees the address with
-       NetX Duo's own count. */
+    /* Held across the check and the set; the set takes it again. */
     AMI_NX_ONLY_SUCCESS(tx_mutex_get(&ip->nx_ip_protection, TX_WAIT_FOREVER));
 
     /* A link-local already: brought up before, and done then. */
@@ -52,9 +74,7 @@ UINT ami_ptp_ipv6_start(NX_IP *ip, UINT index)
                                0xFDFFFFFFUL);
     ll.nxd_ip_address.v6[3] = ((ULONG)NX_RAND() << 16) ^ (ULONG)NX_RAND();
 
-    status = nxd_ipv6_address_set(ip, index, &ll, 10, &slot);
-    if (status == NX_SUCCESS)
-        ip->nx_ipv6_address[slot].nxd_ipv6_address_DupAddrDetectTransmit = 0;
+    status = ami_ptp_ipv6_address_set(ip, index, &ll, 10);
 
     AMI_NX_ONLY_SUCCESS(tx_mutex_put(&ip->nx_ip_protection));
 
@@ -63,4 +83,84 @@ UINT ami_ptp_ipv6_start(NX_IP *ip, UINT index)
             nxd_ipv6_stateless_address_autoconfig_disable(ip, index));
 
     return status;
+}
+
+/*
+ * The peer: reached through the link whatever ADDRESS6's prefix covers
+ * (src/ipv6/ipv6_srcsel.c, 2b), and the next hop a default route through
+ * the link names.  NULL or :: for none.
+ */
+VOID ami_ptp_ipv6_peer_set(UINT index, const ULONG *peer)
+{
+    anx6_ptp_peer_set(index, peer);
+}
+
+static const ULONG *ami_ptp6_link_local(const NX_INTERFACE *ifp)
+{
+    const NXD_IPV6_ADDRESS *a;
+
+    for (a = ifp->nxd_interface_ipv6_address_list_head; a != NX_NULL;
+         a = a->nxd_ipv6_address_next)
+        if ((a->nxd_ipv6_address[0] & 0xFFC00000UL) == 0xFE800000UL)
+            return a->nxd_ipv6_address;
+
+    return NX_NULL;
+}
+
+/*
+ * The IPv4 answer (netstack_ptp.c) again.  NetX Duo takes a global router
+ * only inside a prefix of the interface, and a /128 covers no peer.  The
+ * router a default route through the link is given is the link's own
+ * link-local, which is unicast and so taken as it is; the driver ignores
+ * the next hop.  A peer is unique to its link, so the reverse is exact.
+ */
+VOID ami_ptp_ipv6_next_hop(NX_IP *ip, const ULONG gw[4], ULONG out[4])
+{
+    const ULONG *hop = gw;
+    ULONG        peer[4];
+    UINT         i;
+
+    for (i = 0; i < (UINT)NX_MAX_PHYSICAL_INTERFACES; i++)
+    {
+        const ULONG *ll;
+
+        if (!anx6_ptp_peer_get(i, peer) ||
+            peer[0] != gw[0] || peer[1] != gw[1] ||
+            peer[2] != gw[2] || peer[3] != gw[3])
+            continue;
+
+        ll = ami_ptp6_link_local(&ip->nx_ip_interface[i]);
+        if (ll != NX_NULL)
+            hop = ll;
+        break;
+    }
+
+    out[0] = hop[0];
+    out[1] = hop[1];
+    out[2] = hop[2];
+    out[3] = hop[3];
+}
+
+VOID ami_ptp_ipv6_shown_hop(NX_IP *ip, const NX_INTERFACE *ifp,
+                            const ULONG hop[4], ULONG out[4])
+{
+    const ULONG *ll;
+    ULONG        peer[4];
+    UINT         i;
+
+    out[0] = hop[0];
+    out[1] = hop[1];
+    out[2] = hop[2];
+    out[3] = hop[3];
+
+    if (ifp == NX_NULL || !anx6_ptp_peer_get((UINT)ifp->nx_interface_index, peer))
+        return;
+
+    ll = ami_ptp6_link_local(&ip->nx_ip_interface[ifp->nx_interface_index]);
+    if (ll == NX_NULL || ll[0] != hop[0] || ll[1] != hop[1] ||
+        ll[2] != hop[2] || ll[3] != hop[3])
+        return;
+
+    for (i = 0; i < 4U; i++)
+        out[i] = peer[i];
 }

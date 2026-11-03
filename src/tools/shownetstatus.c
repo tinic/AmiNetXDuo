@@ -392,6 +392,28 @@ static const ToolDhcpInfo *lease_for(const ToolDhcp *dhcp,
     return NULL;
 }
 
+#ifdef AMINETXDUO_PTP
+/* DESTINATION6 as it runs, the PEER row of the IPv6 table, or NULL. */
+static const char *peer6_of(const ToolIfInfo *live)
+{
+    static ToolRoutes6 snr_peer6;
+    UWORD              i;
+
+    if (tool_routes6(&snr_peer6) != 0)
+        return NULL;
+
+    for (i = 0; i < snr_peer6.count; i++)
+    {
+        const ToolRoute6 *r = &snr_peer6.route[i];
+
+        if ((r->flags & NETSTATUS_RT6_PEER) && r->nx_index == live->nx_index)
+            return r->dest;
+    }
+
+    return NULL;
+}
+#endif
+
 static VOID show_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
                            const ToolSnapshot *snap,
                            const ToolDhcpInfo *lease,
@@ -511,6 +533,16 @@ static VOID show_interface(const AmiIfConfig *cfg, const ToolIfInfo *live,
         tool_printf("\n");
 
         show_addresses6(snap, live);
+#ifdef AMINETXDUO_PTP
+        /* The IPv6 peer under the IPv6 addresses, when one is set. */
+        if (live->ptp)
+        {
+            const char *peer6 = peer6_of(live);
+
+            if (peer6 != NULL)
+                tool_printf("  peer6       %s\n", (LONG)peer6);
+        }
+#endif
     }
     else if (cfg->iptype == AMI_IPTYPE_DHCP)
     {

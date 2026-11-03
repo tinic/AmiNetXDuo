@@ -32,6 +32,51 @@ static const char version_tag[] __attribute__((used)) =
                     "LEASE/K,RELEASE=RELEASEADDRESS/S,ID/K,TIMEOUT/K/N,"      \
                     "DHCPUNICAST/K"
 
+/* With point-to-point support, DESTINATION6 after the rest: the peer's
+   IPv6 address. */
+#ifdef AMINETXDUO_PTP
+#define TEMPLATE    "INTERFACE/A,QUIET/S,ADDRESS/K,NETMASK/K,"                \
+                    "BROADCASTADDR/K,DESTINATION=DESTINATIONADDR/K,"          \
+                    "METRIC/K/N,MTU/K/N,ALIASADDR/K,DELETEADDR/K,ONLINE/S,"   \
+                    "OFFLINE/S,UP/S,DOWN/S,DEBUG/K,COMPLETE/K,CONFIGURE/K,"   \
+                    "LEASE/K,RELEASE=RELEASEADDRESS/S,ID/K,TIMEOUT/K/N,"      \
+                    "DHCPUNICAST/K,GATEWAY/K,ADDRESS6/K,GATEWAY6/K,MDNS/K,"   \
+                    "CONFIGURE6/K,PRIORITY/K/N,DESTINATION6/K"
+
+enum
+{
+    ARG_INTERFACE = 0,
+    ARG_QUIET,
+    ARG_ADDRESS,
+    ARG_NETMASK,
+    ARG_BROADCASTADDR,
+    ARG_DESTINATION,
+    ARG_METRIC,
+    ARG_MTU,
+    ARG_ALIASADDR,
+    ARG_DELETEADDR,
+    ARG_ONLINE,
+    ARG_OFFLINE,
+    ARG_UP,
+    ARG_DOWN,
+    ARG_DEBUG,
+    ARG_COMPLETE,
+    ARG_CONFIGURE,
+    ARG_LEASE,
+    ARG_RELEASE,
+    ARG_ID,
+    ARG_TIMEOUT,
+    ARG_DHCPUNICAST,
+    ARG_GATEWAY,
+    ARG_ADDRESS6,
+    ARG_GATEWAY6,
+    ARG_MDNS,
+    ARG_CONFIGURE6,
+    ARG_PRIORITY,
+    ARG_DESTINATION6,
+    ARG_COUNT
+};
+#else
 #define TEMPLATE    "INTERFACE/A,QUIET/S,ADDRESS/K,NETMASK/K,"                \
                     "BROADCASTADDR/K,DESTINATION=DESTINATIONADDR/K,"          \
                     "METRIC/K/N,MTU/K/N,ALIASADDR/K,DELETEADDR/K,ONLINE/S,"   \
@@ -72,6 +117,7 @@ enum
     ARG_PRIORITY,
     ARG_COUNT
 };
+#endif
 
 /* PRIORITY= is a signed byte in the interface file (config.h) and here. */
 #define CNI_PRIORITY_MIN    (-128)
@@ -154,6 +200,9 @@ static NetStatusControl cni_control;
 static LONG  args[ARG_COUNT];
 static ULONG cni_gateway6[4];
 static char  cni_text[16];
+#ifdef AMINETXDUO_PTP
+static ULONG cni_destination6[4];       /* :: for DESTINATION6 NONE */
+#endif
 
 static BOOL same_name(const char *a, const char *b)
 {
@@ -693,6 +742,54 @@ static BOOL apply_destination(struct Library *base, const char *name,
 }
 #endif
 
+#ifdef AMINETXDUO_PTP
+/*
+ * DESTINATION6, NETCTRL_INTERFACE_PEER6: the other end of a point-to-point
+ * link.  Before GATEWAY6 below, so a GATEWAY6 that names the peer is known
+ * to be one.
+ */
+static BOOL apply_destination6(struct Library *base, const char *name,
+                               LONG index)
+{
+    LONG err = 0;
+    char text[CNI_IP6_STRLEN];
+    ULONG w;
+
+    for (w = 0; w < (ULONG)(sizeof(cni_control) / sizeof(ULONG)); w++)
+        ((ULONG *)&cni_control)[w] = 0;
+
+    cni_control.nsc_Magic   = AMI_NETSTATUS_MAGIC;
+    cni_control.nsc_Version = (UWORD)AMI_NETSTATUS_VERSION;
+    cni_control.nsc_Index   = (UWORD)index;
+    for (w = 0; w < 4UL; w++)
+        cni_control.nsc_Destination6[w] = cni_destination6[w];
+
+    if (tool_netstatus_control(base, NETCTRL_INTERFACE_PEER6, &cni_control,
+                               &err) == 0)
+    {
+        if ((cni_destination6[0] | cni_destination6[1] |
+             cni_destination6[2] | cni_destination6[3]) == 0UL)
+            say("%s: no IPv6 peer\n", (LONG)name);
+        else
+        {
+            tool_format_ip6(cni_destination6, text, sizeof(text));
+            say("%s: peer6 %s\n", (LONG)name, (LONG)text);
+        }
+        return TRUE;
+    }
+
+    if (err == CNI_EOPNOTSUPP)
+        tool_error("%s is not a point-to-point interface", (LONG)name);
+    else if (err == CNI_ENOSYS)
+        tool_error("bsdsocket.library has no IPv6 peer support");
+    else
+        tool_error("%s: peer6 not changed (%s, %ld)", (LONG)name,
+                   (LONG)tool_code_errno(err), err);
+
+    return FALSE;
+}
+#endif
+
 /* COMPLETE=YES, IFC_Complete: the configuration is whole.  Static routes
    follow the interfaces here already, so the library has nothing to reread. */
 static VOID apply_complete(struct Library *base, const char *name)
@@ -957,6 +1054,30 @@ static int cni_main(int argc, char **argv)
         }
     }
 
+#ifdef AMINETXDUO_PTP
+    /* DESTINATION6 <address> or NONE, no zone: the interface is named. */
+    if (args[ARG_DESTINATION6] != 0)
+    {
+        const char *d = (const char *)args[ARG_DESTINATION6];
+        ULONG       w;
+
+        if (tool_stricmp(d, "NONE") == 0)
+        {
+            for (w = 0; w < 4UL; w++)
+                cni_destination6[w] = 0;
+        }
+        else if (!tool_parse_ip6(d, cni_destination6) ||
+                 (cni_destination6[0] | cni_destination6[1] |
+                  cni_destination6[2] | cni_destination6[3]) == 0UL ||
+                 (cni_destination6[0] & 0xFF000000UL) == 0xFF000000UL)
+        {
+            tool_error("\"%s\" is not an IPv6 peer address", (LONG)d);
+            FreeArgs(rda);
+            return RETURN_ERROR;
+        }
+    }
+#endif
+
     /* Only the two words DEVS:NetInterfaces takes; a wider set here would
        teach a spelling that fails at the next boot. */
     if (args[ARG_MDNS] != 0)
@@ -1153,7 +1274,11 @@ static int cni_main(int argc, char **argv)
         !have_mdns && !want_dhcp && !want_release && !have_mtu && !have_state &&
         !have_priority && !want_autoip && !inert && args[ARG_ID] == 0 &&
         args[ARG_COMPLETE] == 0 && args[ARG_ALIASADDR] == 0 &&
-        args[ARG_DELETEADDR] == 0)
+        args[ARG_DELETEADDR] == 0
+#ifdef AMINETXDUO_PTP
+        && args[ARG_DESTINATION6] == 0
+#endif
+        )
     {
         tool_error("nothing to change");
         FreeArgs(rda);
@@ -1213,7 +1338,11 @@ static int cni_main(int argc, char **argv)
      * minimal or micro library -- is refused here, before anything below
      * changes the interface, so a mixed request is not half applied (F-147).
      */
-    if (have_gateway6)
+    if (have_gateway6
+#ifdef AMINETXDUO_PTP
+        || args[ARG_DESTINATION6] != 0
+#endif
+        )
     {
         LONG v6 = stack_has_ipv6(base);
 
@@ -1438,6 +1567,15 @@ static int cni_main(int argc, char **argv)
      * around it are what they are going to be. A router is REPLACED, not
      * added to; AddNetRoute DEFAULTGATEWAY adds a second.
      */
+#ifdef AMINETXDUO_PTP
+    if (args[ARG_DESTINATION6] != 0 && !apply_destination6(base, name, index))
+    {
+        tool_netstatus_close(base);
+        FreeArgs(rda);
+        return RETURN_FAIL;
+    }
+#endif
+
     if (have_gateway6)
     {
         ULONG dropped = 0;

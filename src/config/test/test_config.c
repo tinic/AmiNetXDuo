@@ -1455,6 +1455,80 @@ static void test_interface_point_to_point(void)
     CHECK(iface.point_to_point == AMI_CFG_PTP_AUTO);
     free(buf);
 
+#ifdef AMINETXDUO_IPV6
+    /* DESTINATION6, the peer's IPv6 address, beside ADDRESS6. */
+    seen_count = 0;
+    buf = dup_text("device=vpn.device\n"
+                   "address6=2001:db8::1000/64\n"
+                   "destination6=2001:db8::1\n");
+    CHECK(ami_cfg_parse_interface("ptp0", buf, &iface) == AMI_CFG_OK);
+    CHECK(seen_count == 0);
+    CHECK(iface.have_destination6);
+    CHECK(iface.destination6[0] == 0x20010DB8UL && iface.destination6[1] == 0 &&
+          iface.destination6[2] == 0 && iface.destination6[3] == 1UL);
+    CHECK(iface.ip6type == AMI_IP6TYPE_STATIC);
+    free(buf);
+
+    /* A link-local peer, with this interface as its zone. */
+    seen_count = 0;
+    buf = dup_text("device=vpn.device\nconfigure6=linklocal\n"
+                   "destination6=fe80::1%ptp0\n");
+    CHECK(ami_cfg_parse_interface("ptp0", buf, &iface) == AMI_CFG_OK);
+    CHECK(seen_count == 0);
+    CHECK(iface.have_destination6 && iface.destination6[0] == 0xFE800000UL &&
+          iface.destination6[3] == 1UL);
+    free(buf);
+
+    /* Not given: no peer. */
+    buf = dup_text("device=vpn.device\naddress6=2001:db8::1000/128\n");
+    CHECK(ami_cfg_parse_interface("ptp0", buf, &iface) == AMI_CFG_OK);
+    CHECK(!iface.have_destination6);
+    CHECK(iface.address6_count == 1 && iface.address6[0].prefix == 128);
+    free(buf);
+
+    /* No peer at all: an error on its line, and nothing taken. */
+    {
+        static const char *const bad[] =
+        {
+            "::",                   /* unspecified */
+            "ff02::1",              /* a group */
+            "10.8.0.1",             /* IPv4 */
+            "2001:db8::1/64",       /* a prefix, not an address */
+            "2001:db8::g",
+            ""
+        };
+        UWORD b;
+
+        for (b = 0; b < (UWORD)(sizeof(bad) / sizeof(bad[0])); b++)
+        {
+            char text[96];
+
+            strcpy(text, "device=vpn.device\nconfigure6=linklocal\n"
+                         "destination6=");
+            strcat(text, bad[b]);
+            strcat(text, "\n");
+
+            seen_count = 0;
+            buf = dup_text(text);
+            CHECK(ami_cfg_parse_interface("ptp0", buf, &iface) == AMI_CFG_OK);
+            CHECK(!iface.have_destination6);
+            CHECK(seen_count == 1);
+            CHECK(seen_count == 1 && seen[0].severity == AMI_CFG_PROBLEM_ERROR &&
+                  seen[0].line == 3 &&
+                  strstr(seen[0].text, "DESTINATION6") != NULL);
+            free(buf);
+        }
+    }
+
+    /* Another interface's zone: warned about, not taken. */
+    seen_count = 0;
+    buf = dup_text("device=vpn.device\nconfigure6=linklocal\n"
+                   "destination6=fe80::1%eth0\n");
+    CHECK(ami_cfg_parse_interface("ptp0", buf, &iface) == AMI_CFG_OK);
+    CHECK(!iface.have_destination6);
+    free(buf);
+#endif
+
     ami_config_set_reporter(NULL, NULL);
 }
 #endif

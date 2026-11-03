@@ -18,6 +18,7 @@
 #include "nx_icmpv6.h"
 
 #include "aminetxduo/ptp.h"
+#include "ipv6_srcsel.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -408,6 +409,277 @@ static void test_straight_to_the_peer(void)
             "ptp: off-link too, with no router to resolve");
 }
 
+/* ----------------------------------- step 3: ADDRESS6, DESTINATION6, ::/0 */
+
+static const ULONG h_ptp64[4]  = { 0x20010DB8UL, 0x00030000UL, 0UL, 0x1000UL };
+static const ULONG h_ptp128[4] = { 0x20010DB8UL, 0x00010000UL, 0UL, 0x1000UL };
+static const ULONG h_peer[4]   = { 0x20010DB8UL, 0x00010000UL, 0UL, 1UL };
+static const ULONG h_lan64[4]  = { 0x20010DB8UL, 0x00020000UL, 0UL, 0x100UL };
+static const ULONG h_lanrt[4]  = { 0xFE800000UL, 0UL, 0UL, 1UL };
+static const ULONG h_far[4]    = { 0x26064700UL, 0UL, 0UL, 0x1111UL };
+
+static NXD_IPV6_ADDRESS *h_find(UINT index, const ULONG addr[4])
+{
+    NXD_IPV6_ADDRESS *a;
+
+    for (a = h_first(index); a != NX_NULL; a = a -> nxd_ipv6_address_next)
+        if (memcmp(a -> nxd_ipv6_address, addr, 16) == 0)
+            return a;
+    return NX_NULL;
+}
+
+static UINT h_set(UINT index, const ULONG addr[4], ULONG prefix, int ptp)
+{
+    NXD_ADDRESS a;
+    UINT        slot = 0;
+
+    a.nxd_ip_version = NX_IP_VERSION_V6;
+    memcpy(a.nxd_ip_address.v6, addr, 16);
+    if (ptp)
+        return ami_ptp_ipv6_address_set(&h_ip, index, &a, prefix);
+    return nxd_ipv6_address_set(&h_ip, index, &a, prefix, &slot);
+}
+
+/* The source the stack picks for `dest`, and the interface it leaves by. */
+static NXD_IPV6_ADDRESS *h_route(const ULONG dest[4])
+{
+    NXD_IPV6_ADDRESS *src = NX_NULL;
+    ULONG             d[4];
+
+    memcpy(d, dest, sizeof(d));
+    if (_nxd_ipv6_interface_find(&h_ip, d, &src, NX_NULL) != NX_SUCCESS)
+        return NX_NULL;
+    return src;
+}
+
+/* Through the real send path from what h_route() picked; the source the
+   datagram carries, read back from its header. */
+static int h_send_routed(const ULONG dest[4], UINT *index_out,
+                         ULONG src_out[4])
+{
+    NXD_IPV6_ADDRESS *src = h_route(dest);
+    ULONG             d[4];
+    UINT              w;
+
+    if (src == NX_NULL)
+        return 0;
+
+    memcpy(d, dest, sizeof(d));
+    memset(&h_packet, 0, sizeof(h_packet));
+    h_packet.nx_packet_data_start    = h_buffer;
+    h_packet.nx_packet_data_end      = h_buffer + sizeof(h_buffer);
+    h_packet.nx_packet_prepend_ptr   = h_buffer + 128;
+    h_packet.nx_packet_append_ptr    = h_buffer + 128 + 8;
+    h_packet.nx_packet_length        = 8;
+    h_packet.nx_packet_ip_version    = NX_IP_VERSION_V6;
+    h_packet.nx_packet_address.nx_packet_ipv6_address_ptr = src;
+
+    h_sent = 0;
+    _nx_ipv6_packet_send(&h_ip, &h_packet, NX_PROTOCOL_NO_NEXT_HEADER, 8, 64,
+                         0, src -> nxd_ipv6_address, d);
+    if (h_sent != 1)
+        return 0;
+
+    *index_out = h_req.nx_ip_driver_interface -> nx_interface_index;
+    for (w = 0; w < 4; w++)
+    {
+        const UCHAR *b = h_packet.nx_packet_prepend_ptr + 8 + (w * 4);
+
+        src_out[w] = ((ULONG)b[0] << 24) | ((ULONG)b[1] << 16) |
+                     ((ULONG)b[2] << 8) | (ULONG)b[3];
+    }
+    return 1;
+}
+
+static void h_dad_pass(void)
+{
+    UINT n;
+
+    for (n = 0; n <= NX_IPV6_DAD_TRANSMITS; n++)
+        _nx_icmpv6_perform_DAD(&h_ip);
+}
+
+static void test_static_address6(void)
+{
+    NXD_IPV6_ADDRESS *a64;
+    NXD_IPV6_ADDRESS *a128;
+
+    printf("ptp6: ADDRESS6 /64 and /128 on a point-to-point link\n");
+
+    h_ns = 0;
+    h_check(h_set(1, h_ptp64, 64, 1) == NX_SUCCESS, "ptp: the /64 is set");
+    h_check(h_set(1, h_ptp128, 128, 1) == NX_SUCCESS, "ptp: the /128 is set");
+    a64  = h_find(1, h_ptp64);
+    a128 = h_find(1, h_ptp128);
+    h_check(a64 != NX_NULL && a64 -> nxd_ipv6_address_prefix_length == 64 &&
+            a64 -> nxd_ipv6_address_attached == &h_ip.nx_ip_interface[1],
+            "ptp: the /64 on the tunnel");
+    h_check(a128 != NX_NULL && a128 -> nxd_ipv6_address_prefix_length == 128,
+            "ptp: the /128 on the tunnel");
+    h_check(a64 != NX_NULL && a128 != NX_NULL &&
+            a64 -> nxd_ipv6_address_DupAddrDetectTransmit == 0 &&
+            a128 -> nxd_ipv6_address_DupAddrDetectTransmit == 0,
+            "ptp: DAD transmits are 0 for both");
+
+    _nx_icmpv6_perform_DAD(&h_ip);
+    h_check(h_ns == 0, "ptp: no solicitation for either");
+    h_check(a64 != NX_NULL && a128 != NX_NULL &&
+            a64 -> nxd_ipv6_address_state == NX_IPV6_ADDR_STATE_VALID &&
+            a128 -> nxd_ipv6_address_state == NX_IPV6_ADDR_STATE_VALID,
+            "ptp: both valid after one pass");
+
+    /* The LAN card's global, with DAD as NetX Duo has it. */
+    h_check(h_set(0, h_lan64, 64, 0) == NX_SUCCESS &&
+            h_find(0, h_lan64) -> nxd_ipv6_address_DupAddrDetectTransmit ==
+                NX_IPV6_DAD_TRANSMITS,
+            "lan: a global with NetX Duo's DAD transmits");
+    h_dad_pass();
+    h_check(h_find(0, h_lan64) -> nxd_ipv6_address_state ==
+                NX_IPV6_ADDR_STATE_VALID && h_ns == NX_IPV6_DAD_TRANSMITS,
+            "lan: valid after its own solicitations");
+}
+
+static void test_peer_route(void)
+{
+    static const ULONG in64[4] = { 0x20010DB8UL, 0x00030000UL, 0UL, 1UL };
+    NXD_IPV6_ADDRESS *src;
+    ULONG             carried[4];
+    UINT              index = 99;
+
+    printf("ptp6: DESTINATION6 outside every prefix is reached through the link\n");
+
+    h_check(h_route(h_peer) == NX_NULL,
+            "no peer set: 2001:db8:1::1 has no route (/128, no router)");
+
+    ami_ptp_ipv6_peer_set(1, h_peer);
+    src = h_route(h_peer);
+    h_check(src != NX_NULL &&
+            src -> nxd_ipv6_address_attached == &h_ip.nx_ip_interface[1],
+            "peer set: it leaves by the tunnel");
+    h_check(src != NX_NULL &&
+            memcmp(src -> nxd_ipv6_address, h_ptp128, 16) == 0,
+            "peer set: from the tunnel's /128, the longest match");
+
+    h_ns = 0;
+    h_check(h_send_routed(h_peer, &index, carried) && index == 1,
+            "ptp: the datagram reaches the tunnel's driver");
+    h_check(memcmp(carried, h_ptp128, 16) == 0,
+            "ptp: carrying 2001:db8:1::1000 as its source");
+    h_check(h_ns == 0, "ptp: and nothing is solicited");
+
+    h_check(h_send_routed(in64, &index, carried) && index == 1 &&
+            memcmp(carried, h_ptp64, 16) == 0,
+            "ptp: a peer inside the /64 goes the same way, from the /64");
+
+    h_check(h_route(h_far) == NX_NULL,
+            "global traffic: no default route yet, no route");
+}
+
+static void test_default_via_peer(void)
+{
+    NXD_ADDRESS                   r;
+    NX_IPV6_DEFAULT_ROUTER_ENTRY *rt;
+    ULONG                         hop[4];
+    ULONG                         shown[4];
+    ULONG                         carried[4];
+    UINT                          index = 99;
+
+    printf("ptp6: ::/0 through the peer, beside the LAN's default\n");
+
+    /* The LAN's router, as GATEWAY6=fe80::1 gives it. */
+    r.nxd_ip_version = NX_IP_VERSION_V6;
+    memcpy(r.nxd_ip_address.v6, h_lanrt, 16);
+    h_check(nxd_ipv6_default_router_add(&h_ip, &r, 0xFFFF, 0) == NX_SUCCESS,
+            "lan: default router fe80::1");
+    h_check(h_route(h_far) != NX_NULL &&
+            memcmp(h_route(h_far) -> nxd_ipv6_address, h_lan64, 16) == 0,
+            "global traffic: from the LAN's global, before");
+
+    /* NetX Duo takes no global router outside the interface's prefixes. */
+    memcpy(r.nxd_ip_address.v6, h_peer, 16);
+    h_check(nxd_ipv6_default_router_add(&h_ip, &r, 0xFFFF, 1) ==
+                NX_IP_ADDRESS_ERROR,
+            "the peer as it is: refused, outside the /128 and the /64");
+
+    ami_ptp_ipv6_next_hop(&h_ip, h_peer, hop);
+    h_check((hop[0] & 0xFFC00000UL) == 0xFE800000UL &&
+            memcmp(hop, h_first(1) -> nxd_ipv6_address, 16) == 0,
+            "next hop: the tunnel's own link-local");
+    memcpy(r.nxd_ip_address.v6, hop, 16);
+    h_check(nxd_ipv6_default_router_add(&h_ip, &r, 0xFFFF, 1) == NX_SUCCESS,
+            "the default through the tunnel is taken");
+
+    ami_ptp_ipv6_shown_hop(&h_ip, &h_ip.nx_ip_interface[1], hop, shown);
+    h_check(memcmp(shown, h_peer, 16) == 0, "shown as the peer");
+    ami_ptp_ipv6_shown_hop(&h_ip, &h_ip.nx_ip_interface[0], h_lanrt, shown);
+    h_check(memcmp(shown, h_lanrt, 16) == 0, "the LAN's router shown as it is");
+    ami_ptp_ipv6_next_hop(&h_ip, h_lanrt, shown);
+    h_check(memcmp(shown, h_lanrt, 16) == 0, "and handed over as it is");
+
+    rt = anx6_default_router(&h_ip);
+    h_check(rt != NX_NULL &&
+            rt -> nx_ipv6_default_router_entry_interface_ptr ==
+                &h_ip.nx_ip_interface[1],
+            "equal priority: the tunnel's router is the one in use");
+
+    h_ns = 0;
+    h_released = 0;
+    h_check(h_send_routed(h_far, &index, carried) && index == 1,
+            "global traffic: out of the tunnel");
+    h_check(memcmp(carried, h_ptp64, 16) == 0 ||
+            memcmp(carried, h_ptp128, 16) == 0,
+            "global traffic: from a tunnel global");
+    h_check(h_ns == 0 && h_released == 0, "global traffic: nothing resolved");
+
+    /* PRIORITY still decides first. */
+    h_ip.nx_ip_interface[0].nx_interface_priority = 1;
+    h_check(h_route(h_far) != NX_NULL &&
+            h_route(h_far) -> nxd_ipv6_address_attached ==
+                &h_ip.nx_ip_interface[0],
+            "a LAN of higher PRIORITY keeps the default");
+    h_ip.nx_ip_interface[0].nx_interface_priority = 0;
+
+    /* DeleteNetRoute DESTINATION=:: removes the router in use. */
+    rt = anx6_default_router(&h_ip);
+    memcpy(r.nxd_ip_address.v6, rt -> nx_ipv6_default_router_entry_router_address,
+           16);
+    h_check(nxd_ipv6_default_router_delete(&h_ip, &r) == NX_SUCCESS,
+            "the router in use is deleted");
+    h_check(h_ip.nx_ipv6_default_router_table_size == 1,
+            "the LAN's is left");
+    h_check(h_route(h_far) != NX_NULL &&
+            memcmp(h_route(h_far) -> nxd_ipv6_address, h_lan64, 16) == 0,
+            "global traffic: from the LAN's global again");
+    h_check(h_route(h_peer) != NX_NULL &&
+            h_route(h_peer) -> nxd_ipv6_address_attached ==
+                &h_ip.nx_ip_interface[1],
+            "the peer: still through the tunnel");
+
+    ami_ptp_ipv6_peer_set(1, NX_NULL);
+    h_check(h_route(h_peer) != NX_NULL &&
+            h_route(h_peer) -> nxd_ipv6_address_attached ==
+                &h_ip.nx_ip_interface[0],
+            "the peer cleared: 2001:db8:1::1 goes by the LAN's default");
+}
+
+static void test_ethernet_routing(void)
+{
+    static const ULONG on_lan[4] = { 0x20010DB8UL, 0x00020000UL, 0UL, 0x200UL };
+    NXD_IPV6_ADDRESS *src;
+
+    printf("ptp6: the LAN card routes as before\n");
+
+    src = h_route(on_lan);
+    h_check(src != NX_NULL && memcmp(src -> nxd_ipv6_address, h_lan64, 16) == 0,
+            "lan: on-link destination from the LAN's global");
+
+    h_ns = 0;
+    h_sent = 0;
+    h_send(0, on_lan);
+    h_check(h_ns == 1 && h_sent == 0,
+            "lan: resolved by a solicitation first");
+}
+
 static void test_ethernet_resolves(void)
 {
     static const ULONG neighbour[4] = { 0xFE800000UL, 0UL, 0UL, 0x1234UL };
@@ -432,6 +704,10 @@ int main(void)
     test_no_router_solicitation();
     test_straight_to_the_peer();
     test_ethernet_resolves();
+    test_static_address6();
+    test_peer_route();
+    test_default_via_peer();
+    test_ethernet_routing();
 
     printf("ptp6: %lu checks, %lu failures\n", h_checks, h_failures);
     return (h_failures == 0) ? 0 : 1;

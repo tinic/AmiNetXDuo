@@ -45,6 +45,20 @@ UINT anx6_scope(const ULONG *addr);
  */
 UINT anx6_policy_lookup(const ULONG *addr, UINT *precedence, UINT *label);
 
+#ifdef AMINETXDUO_PTP
+/*
+ * The peer of point-to-point interface `interface_index`, which is reached
+ * through it whatever the prefixes say; NX_NULL or :: for none.  The get
+ * answers NX_TRUE when there is one.
+ */
+VOID anx6_ptp_peer_set(UINT interface_index, const ULONG *peer);
+UINT anx6_ptp_peer_get(UINT interface_index, ULONG *peer);
+
+/* The default router global traffic goes to, NX_NULL for none.  The caller
+   holds nx_ip_protection. */
+NX_IPV6_DEFAULT_ROUTER_ENTRY *anx6_default_router(NX_IP *ip_ptr);
+#endif
+
 #ifdef __cplusplus
 }
 #endif

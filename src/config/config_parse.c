@@ -47,6 +47,7 @@ typedef enum
 #ifdef AMINETXDUO_PTP
     IF_KEY_POINTTOPOINT,
     IF_KEY_DESTINATION,
+    IF_KEY_DESTINATION6,
 #endif
     /* Contiguous keys index ami_if_numbers below; these are private IDs. */
     IF_KEY_UNIT,
@@ -63,7 +64,8 @@ typedef enum
    With it, AmiTCP's spelling POINTOPOINT is read too: the ptp0 file that
    ships with the OpenVPN port's vpn.device uses it. */
 #ifdef AMINETXDUO_PTP
-#define IF_PTP_KEYWORDS(X) X(pointopoint, POINTTOPOINT)
+#define IF_PTP_KEYWORDS(X) X(pointopoint, POINTTOPOINT) \
+                           X(destination6, DESTINATION6)
 #else
 #define IF_KEY_POINTTOPOINT IF_KEY_IGNORED
 #define IF_KEY_DESTINATION  IF_KEY_IGNORED
@@ -1201,6 +1203,31 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                 break;
             }
 
+#ifdef AMINETXDUO_PTP
+            /* The peer of a point-to-point link, read as GATEWAY6 is.  ::
+               and a group are no peer. */
+            case IF_KEY_DESTINATION6:
+            {
+                char zone[AMI_CFG_IP6_ZONE_LEN];
+
+                if (!ami_config_parse_ip6_zone(value, out->destination6, NULL,
+                                               zone, sizeof(zone)) ||
+                    (out->destination6[0] | out->destination6[1] |
+                     out->destination6[2] | out->destination6[3]) == 0UL ||
+                    (out->destination6[0] & 0xFF000000UL) == 0xFF000000UL)
+                {
+                    out->have_destination6 = FALSE;
+                    AMI_WARN("config: %s: bad DESTINATION6 '%s'", out->name,
+                             value);
+                    report_bad_value(lineno, AMI_CFG_PROBLEM_ERROR,
+                                     "DESTINATION6", value, AMI_CFG_ADVICE_NONE);
+                }
+                else if (cfg_zone_ok(out, "DESTINATION6", zone, value))
+                    out->have_destination6 = TRUE;
+                break;
+            }
+#endif
+
             case IF_KEY_GATEWAY6:
             {
                 char zone[AMI_CFG_IP6_ZONE_LEN];
@@ -1239,6 +1266,9 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                 break;
 #endif /* AMINETXDUO_IPV6 */
 
+#if defined(AMINETXDUO_PTP) && !defined(AMINETXDUO_IPV6)
+            case IF_KEY_DESTINATION6:
+#endif
             case IF_KEY_IGNORED:
                 AMI_DEBUG("config: %s: ignoring %s=%s", out->name, key, value);
                 report_inert_keyword(lineno, key);

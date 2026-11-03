@@ -273,6 +273,103 @@ static UINT anx6_prefer(const NX_INTERFACE *candidate, const NX_INTERFACE *best)
            (candidate -> nx_interface_priority > best -> nx_interface_priority);
 }
 
+#ifdef AMINETXDUO_PTP
+/*
+ * The peer of each point-to-point link, by interface index, :: for none: a
+ * host route through the link, which NetX Duo has no table for.  One NX_IP
+ * per library, so one table.  anx6_ptp_peers counts the set ones, and none
+ * skips the walk.
+ */
+static ULONG anx6_ptp_peer[NX_MAX_PHYSICAL_INTERFACES][4];
+static UINT  anx6_ptp_peers;
+
+VOID anx6_ptp_peer_set(UINT interface_index, const ULONG *peer)
+{
+UINT i;
+
+    if (interface_index >= NX_MAX_PHYSICAL_INTERFACES)
+    {
+        return;
+    }
+
+    for (i = 0; i < 4; i++)
+    {
+        anx6_ptp_peer[interface_index][i] = (peer != NX_NULL) ? peer[i] : 0UL;
+    }
+
+    anx6_ptp_peers = 0;
+    for (i = 0; i < NX_MAX_PHYSICAL_INTERFACES; i++)
+    {
+        if ((anx6_ptp_peer[i][0] | anx6_ptp_peer[i][1] |
+             anx6_ptp_peer[i][2] | anx6_ptp_peer[i][3]) != 0UL)
+        {
+            anx6_ptp_peers++;
+        }
+    }
+}
+
+UINT anx6_ptp_peer_get(UINT interface_index, ULONG *peer)
+{
+UINT i;
+
+    if (interface_index >= NX_MAX_PHYSICAL_INTERFACES)
+    {
+        return NX_FALSE;
+    }
+
+    for (i = 0; i < 4; i++)
+    {
+        peer[i] = anx6_ptp_peer[interface_index][i];
+    }
+
+    return (UINT)((peer[0] | peer[1] | peer[2] | peer[3]) != 0UL);
+}
+
+/*
+ * The default router a global destination goes to: on the interface of the
+ * highest priority, and among equals one on a point-to-point link before
+ * one on a LAN -- a tunnel brought up with a default route through it is
+ * there to carry that route -- then the first.  A link with no address
+ * mapping is a point-to-point one (sana2_driver.c).
+ */
+NX_IPV6_DEFAULT_ROUTER_ENTRY *anx6_default_router(NX_IP *ip_ptr)
+{
+UINT                          i;
+NX_IPV6_DEFAULT_ROUTER_ENTRY *best = NX_NULL;
+
+    for (i = 0; i < NX_IPV6_DEFAULT_ROUTER_TABLE_SIZE; i++)
+    {
+    NX_IPV6_DEFAULT_ROUTER_ENTRY *rt = &ip_ptr -> nx_ipv6_default_router_table[i];
+    NX_INTERFACE                 *rif = rt -> nx_ipv6_default_router_entry_interface_ptr;
+    NX_INTERFACE                 *bif;
+
+        if ((rt -> nx_ipv6_default_router_entry_flag == 0) || (rif == NX_NULL) ||
+            (rif -> nx_interface_link_up == NX_FALSE))
+        {
+            continue;
+        }
+
+        if (best == NX_NULL)
+        {
+            best = rt;
+            continue;
+        }
+
+        bif = best -> nx_ipv6_default_router_entry_interface_ptr;
+
+        if ((rif -> nx_interface_priority > bif -> nx_interface_priority) ||
+            ((rif -> nx_interface_priority == bif -> nx_interface_priority) &&
+             !rif -> nx_interface_address_mapping_needed &&
+             bif -> nx_interface_address_mapping_needed))
+        {
+            best = rt;
+        }
+    }
+
+    return best;
+}
+#endif /* AMINETXDUO_PTP */
+
 static NX_INTERFACE *anx6_outgoing_interface(NX_IP *ip_ptr, const ULONG *dest)
 {
 UINT              i;
@@ -303,6 +400,22 @@ UINT              best_length = 0;
         return &ip_ptr -> nx_ip_interface[NX_LOOPBACK_INTERFACE];
     }
 #endif /* NX_DISABLE_LOOPBACK_INTERFACE */
+
+#ifdef AMINETXDUO_PTP
+    /* 2b. the peer of a point-to-point link, a host route through it: no
+       prefix is longer, and a link-local peer needs no zone. */
+    if (anx6_ptp_peers != 0)
+    {
+        for (i = 0; i < NX_MAX_PHYSICAL_INTERFACES; i++)
+        {
+            if ((ip_ptr -> nx_ip_interface[i].nx_interface_link_up != NX_FALSE) &&
+                anx6_same_address(anx6_ptp_peer[i], dest))
+            {
+                return &ip_ptr -> nx_ip_interface[i];
+            }
+        }
+    }
+#endif /* AMINETXDUO_PTP */
 
     /*
      * Up is not enough: an interface with no usable IPv6 address contributes
@@ -400,6 +513,14 @@ UINT              best_length = 0;
     }
 
     /* 6. a default router. */
+#ifdef AMINETXDUO_PTP
+    {
+    NX_IPV6_DEFAULT_ROUTER_ENTRY *rt = anx6_default_router(ip_ptr);
+
+        return (rt != NX_NULL) ? rt -> nx_ipv6_default_router_entry_interface_ptr
+                               : NX_NULL;
+    }
+#else
     for (i = 0; i < NX_IPV6_DEFAULT_ROUTER_TABLE_SIZE; i++)
     {
     NX_IPV6_DEFAULT_ROUTER_ENTRY *rt = &ip_ptr -> nx_ipv6_default_router_table[i];
@@ -427,6 +548,7 @@ UINT              best_length = 0;
     }
 
     return best;
+#endif /* AMINETXDUO_PTP */
 }
 
 
