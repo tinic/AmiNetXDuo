@@ -644,7 +644,7 @@ int main(int argc, char **argv)
     {
         struct MsgPort *other;
 
-        stop_port->mp_Node.ln_Name = (STRPTR)NW_STATUS_PORT;
+        stop_port->mp_Node.ln_Name = (char *)NW_STATUS_PORT;
         Forbid();
         other = FindPort((CONST_STRPTR)NW_STATUS_PORT);
         if (other != NULL)
