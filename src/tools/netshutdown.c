@@ -404,12 +404,17 @@ int main(int argc, char **argv)
             ULONG len = 0;
 
             while (device[len] != '\0') len++;
-            if (!whole && len >= NETSTATUS_DEVICE_LEN - 1)
+            if (len == 0)
+            {
+                tool_error("device name unavailable; cannot verify hardware shutdown");
+                failed++;
+            }
+            else if (!whole && len >= NETSTATUS_DEVICE_LEN - 1)
             {
                 tool_error("device name truncated; cannot verify hardware shutdown");
                 failed++;
             }
-            else if (device[0] != '\0')
+            else
                 nsd_device_count++;
         }
 

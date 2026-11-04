@@ -781,6 +781,18 @@ endif()
 # that does not build on a host, which is why the sources are named directly
 # (src/mbuf/CMakeLists.txt and tests/fuzz/CMakeLists.txt say the same).
 if(NOT CMAKE_CROSSCOMPILING)
+    # Execute the production shutdown command and Wi-Fi exit requester with
+    # the existing Exec/DOS host shims. Pointer casts are the AmigaDOS LONG
+    # calling convention; the model never dereferences those logging arguments.
+    add_executable(test_netshutdown test/test_netshutdown.c)
+    target_include_directories(test_netshutdown PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/test/shim"
+        "${CMAKE_SOURCE_DIR}/tests/bsdsocket/host/shim"
+        "${CMAKE_SOURCE_DIR}/include")
+    target_compile_options(test_netshutdown PRIVATE -Wall -Wextra -Werror
+        -Wno-pointer-to-int-cast -Wno-int-to-pointer-cast -Wno-pointer-sign)
+    set_target_properties(test_netshutdown PROPERTIES C_STANDARD 11)
+
     add_executable(test_httppath
         test/test_httppath.c
         httppath.c
@@ -1314,6 +1326,7 @@ if(NOT CMAKE_CROSSCOMPILING)
     add_test(NAME netprobe_pcmcia_kind COMMAND test_netprobe_card)
     add_test(NAME netwireless_prefs_text COMMAND test_netwireless_prefs)
     add_test(NAME netwireless_wpa_key COMMAND test_netwireless_key)
+    add_test(NAME netshutdown_wifi_lifecycle COMMAND test_netshutdown)
     add_test(NAME netwireless_signal COMMAND test_netwireless_sig)
     add_test(NAME netwireless_font_layout COMMAND test_netwireless_layout)
     add_test(NAME console_clipboard_text COMMAND test_clipftxt)
