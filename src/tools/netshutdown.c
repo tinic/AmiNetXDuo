@@ -44,13 +44,19 @@ static BOOL nsd_quiet;
 static char nsd_devices[NX_MAX_PHYSICAL_INTERFACES][NETSTATUS_FILE_LEN];
 static LONG nsd_device_count;
 
-static BOOL stop_wireless(ULONG timeout, ULONG *waited)
+static BOOL stop_wireless(ULONG timeout, ULONG *waited, BOOL *broken)
 {
     while (nw_wireless_request_stop())
     {
-        if (*waited >= timeout || tool_delay_ticks((ULONG)TICKS_PER_SECOND))
+        if (*waited >= timeout)
         {
             tool_error("Wi-Fi programs have not stopped; hardware still in use");
+            return FALSE;
+        }
+        if (tool_delay_ticks((ULONG)TICKS_PER_SECOND))
+        {
+            *broken = TRUE;
+            tool_error("Wi-Fi shutdown wait aborted; hardware still in use");
             return FALSE;
         }
         (*waited)++;
@@ -255,6 +261,7 @@ int main(int argc, char **argv)
         return RETURN_FAIL;
 
     tool_break_arm();
+    nsd_device_count = 0;
 
     args[ARG_TIMEOUT] = 0;
     args[ARG_QUIET]   = 0;
@@ -304,7 +311,7 @@ int main(int argc, char **argv)
 
     /* A Wi-Fi client can keep the unit alive even with no stack running.
        Stop those clients before removing the stack's own device open. */
-    if (!stop_wireless(timeout, &waited))
+    if (!stop_wireless(timeout, &waited, &stopped_waiting))
         failed++;
 
     /* Nothing to stop. tool_netstatus_open() does not start the stack. */
@@ -349,7 +356,8 @@ int main(int argc, char **argv)
         {
             say("Signalled; waiting up to %lu s.\n", timeout);
 
-            while ((holding = others_holding(base, &listed)) > 0)
+            while (!stopped_waiting &&
+                   (holding = others_holding(base, &listed)) > 0)
             {
                 if (waited >= timeout)
                     break;
