@@ -11,6 +11,12 @@
 #include <exec/types.h>
 
 #define NW_WM_COMMAND   "C:WirelessManager"
+#define NW_STATUS_PORT  "AmiNetXDuo.NetWireless"
+
+/* NetShutdown: request orderly exit of the Wi-Fi clients, including a
+   Workbench-started commodity/window. TRUE while any is still present.
+   Call repeatedly until FALSE; their ports remain until CloseDevice(). */
+BOOL nw_wireless_request_stop(VOID);
 
 /* TRUE when it is running; path gets the command as it was started. */
 BOOL nw_wm_running(char *path, ULONG cap);

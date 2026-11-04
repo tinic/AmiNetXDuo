@@ -7,6 +7,11 @@ are history.
 
 ## Unreleased
 
+- NetShutdown stops the Wi-Fi commodity, preferences and WirelessManager
+  before removing interfaces, and reports drivers that remain open or hold
+  requests. Full foreground shutdown is documented for WHDLoad; normal
+  Prism2/genet Offline and Online retain their reconnect protection.
+
 - NetPrefs edits point-to-point interfaces: a Point-to-point checkbox and
   Peer fields for DESTINATION and DESTINATION6.
 - AddNetRoute DESTINATION=<prefix> GATEWAY=<peer> routes an IPv6 prefix

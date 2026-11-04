@@ -1115,10 +1115,55 @@
   the programs holding sockets to stop. Once no program has them open,
   it removes bsdsocket.library and usergroup.library from memory. A later
   AddNetInterface starts the stack again.
-  @{"Offline" link OFFLINE}
-  takes one interface off the wire, which stops its traffic, and
-  @{"Online" link ONLINE} puts it back. An uncooperative program which keeps
-  the library open also keeps it resident.
+  NetShutdown also asks NetWireless, NetWirelessPrefs and WirelessManager
+  to exit and waits for their device opens to be released. TIMEOUT is the
+  whole wait budget, including these programs. A driver that still owns
+  requests or remains open is reported as incomplete shutdown, with return
+  code 5; it is not a successful hardware stop. Use matching versions of
+  NetShutdown and NetWireless, including when the commodity starts from a
+  Workbench icon.
+
+  @{"Offline" link OFFLINE} stops one interface's traffic, and
+  @{"Online" link ONLINE} puts it back. Prism2 and genet devices deliberately
+  remain online during Offline: their drivers can hang or crash when the
+  same open unit is restarted. This protects normal reconnects; it does not
+  silence the hardware for a program that takes over the machine. An
+  uncooperative program which keeps the library open also keeps it resident.
+
+  @{b}WHDLoad and other programs that take over the hardware@{ub}
+
+  A network card can continue issuing interrupts while a game owns the
+  machine. Stop the whole network first, including Wi-Fi programs that
+  keep the driver open. In S:WHDLoad-Startup, replace a backgrounded Offline
+  command with a foreground shutdown, preserving unrelated display lines:
+
+    FailAt 5
+    NetShutdown TIMEOUT 15
+
+  Run this command in a Shell first and check that it returns 0. Do not
+  hide an incomplete-shutdown result with NIL:, a Wait or a later command
+  returning success. If a driver is still open, close other programs using
+  that card before continuing. An already-stopped network returns 5 as
+  before; diagnose that separately rather than treating every 5 as harmless.
+  Do not use Run for the shutdown: the startup hook must wait for completion.
+
+  WHDLoad itself must also wait for ExecuteStartup. Its maintainer reported
+  that versions starting with 18.9 ran these hooks asynchronously, with the
+  waiting behavior restored in a v20 beta (WHDLoad Mantis issue 6830). Check
+  the installed WHDLoad version. If its hooks do not wait, stop the network
+  manually before launching the game; this command cannot make an external
+  asynchronous caller wait. NoNetwork disables WHDLoad's update checks; it
+  does not disable the card's interrupts.
+
+  In S:WHDLoad-Cleanup, restart the network with the existing installation
+  script, instead of Online on the old unit:
+
+    Execute S:Network-Startup
+
+  This starts WirelessManager and adds the configured interfaces again.
+  Restart the Wi-Fi commodity from its usual icon (so its ToolTypes are
+  retained), and any other network programs that the shutdown stopped.
+  Keep other hardware/display cleanup commands already present in the hook.
 
   @{b}How much memory the network takes@{ub}
 

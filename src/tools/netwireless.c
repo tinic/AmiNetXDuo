@@ -579,6 +579,7 @@ static BOOL nw_cx_msgs(VOID)
 int main(int argc, char **argv)
 {
     struct RDArgs *rda = NULL;
+    struct MsgPort *stop_port = NULL;
     const char    *device, *iface;
     ULONG          sigs;
     BOOL           run = TRUE;
@@ -629,6 +630,34 @@ int main(int argc, char **argv)
             PutStr((CONST_STRPTR)message);
         result = RETURN_ERROR;
         goto out;
+    }
+
+    /* Register before opening the unit, and keep this port until it has
+       closed. NetShutdown must be able to stop a Workbench-started commodity
+       even when commodities.library is absent (#455). Claim atomically. */
+    stop_port = CreateMsgPort();
+    if (stop_port == NULL)
+    {
+        result = RETURN_FAIL;
+        goto out;
+    }
+    {
+        struct MsgPort *other;
+
+        stop_port->mp_Node.ln_Name = (STRPTR)NW_STATUS_PORT;
+        Forbid();
+        other = FindPort((CONST_STRPTR)NW_STATUS_PORT);
+        if (other != NULL)
+            Signal(other->mp_SigTask, SIGBREAKF_CTRL_F);
+        else
+            AddPort(stop_port);
+        Permit();
+        if (other != NULL)
+        {
+            DeleteMsgPort(stop_port);
+            stop_port = NULL;
+            goto out;
+        }
     }
 
     device = nw_opt(ARG_DEVICE);
@@ -710,9 +739,11 @@ int main(int argc, char **argv)
         ULONG dev = nw.dev_open ? 1UL << nw.dev.async->mp_SigBit : 0;
         struct AppMessage *am;
 
-        sigs = Wait(cx | app | tim | dev | SIGBREAKF_CTRL_C);
-        if (sigs & SIGBREAKF_CTRL_C) run = FALSE;
+        sigs = Wait(cx | app | tim | dev | SIGBREAKF_CTRL_C | SIGBREAKF_CTRL_F);
+        if (sigs & SIGBREAKF_CTRL_C) break;
         if (sigs & cx) run = nw_cx_msgs() && run;
+        if (!run) break;                 /* no new preferences on shutdown */
+        if (sigs & SIGBREAKF_CTRL_F) nw_launch();
         if (sigs & app)
             while ((am = (struct AppMessage *)GetMsg(nw.appport)) != NULL)
             {
@@ -783,6 +814,11 @@ out:
         DeleteMsgPort(nw.cxport);
     }
     if (nw.dev_open) nw_dev_close(&nw.dev);
+    if (stop_port != NULL)
+    {
+        RemPort(stop_port);              /* the unit is no longer ours */
+        DeleteMsgPort(stop_port);
+    }
     if (IntuitionBase != NULL) CloseLibrary((struct Library *)IntuitionBase);
     if (WorkbenchBase != NULL) CloseLibrary(WorkbenchBase);
     if (CxBase != NULL) CloseLibrary(CxBase);

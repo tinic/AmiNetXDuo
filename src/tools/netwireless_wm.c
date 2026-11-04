@@ -24,11 +24,13 @@ static int nw_lower(int c)
     return (c >= 'A' && c <= 'Z') ? c - 'A' + 'a' : c;
 }
 
-/* The Shell number running WirelessManager, or 0.  Call under Forbid(). */
-static ULONG nw_wm_cli(char *path, ULONG cap)
+/* Shell command name, path aside; 0 when absent. Call under Forbid(). */
+static ULONG nw_cli(const char *name, char *path, ULONG cap)
 {
-    static const char name[] = NW_WM_NAME;
+    ULONG size = 0;
     ULONG n, max = MaxCli();
+
+    while (name[size] != '\0') size++;
 
     for (n = 1; n <= max; n++)
     {
@@ -45,10 +47,10 @@ static ULONG nw_wm_cli(char *path, ULONG cap)
         len = b[0];
         start = len;
         while (start > 0 && b[start] != ':' && b[start] != '/') start--;
-        if (len - start != sizeof(name) - 1) continue;
-        for (i = 0; i < sizeof(name) - 1; i++)
+        if (len - start != size) continue;
+        for (i = 0; i < size; i++)
             if (nw_lower(b[start + 1 + i]) != nw_lower(name[i])) break;
-        if (i != sizeof(name) - 1) continue;
+        if (i != size) continue;
         if (path != NULL && cap > len)
         {
             for (i = 0; i < len; i++) path[i] = (char)b[i + 1];
@@ -64,9 +66,46 @@ BOOL nw_wm_running(char *path, ULONG cap)
     ULONG n;
 
     Forbid();
-    n = nw_wm_cli(path, cap);
+    n = nw_cli(NW_WM_NAME, path, cap);
     Permit();
     return n != 0;
+}
+
+/* A named port is also the exit acknowledgement: its owner removes it only
+   after closing the device. CLI lookup covers older Shell-started clients. */
+BOOL nw_wireless_request_stop(VOID)
+{
+    static const char *const ports[] = { NW_STATUS_PORT, "NetWirelessPrefs" };
+    static const char *const commands[] =
+        { "NetWireless", "NetWirelessPrefs", NW_WM_NAME };
+    BOOL pending = FALSE;
+    ULONG i;
+
+    Forbid();
+    for (i = 0; i < sizeof(ports) / sizeof(ports[0]); i++)
+    {
+        struct MsgPort *port = FindPort((CONST_STRPTR)ports[i]);
+
+        if (port != NULL)
+        {
+            Signal(port->mp_SigTask, SIGBREAKF_CTRL_C);
+            pending = TRUE;
+        }
+    }
+    for (i = 0; i < sizeof(commands) / sizeof(commands[0]); i++)
+    {
+        ULONG n = nw_cli(commands[i], NULL, 0);
+
+        if (n != 0)
+        {
+            struct Process *p = FindCliProc(n);
+
+            Signal(&p->pr_Task, SIGBREAKF_CTRL_C);
+            pending = TRUE;
+        }
+    }
+    Permit();
+    return pending;
 }
 
 BOOL nw_wm_stop(VOID)
@@ -78,7 +117,7 @@ BOOL nw_wm_stop(VOID)
         ULONG n;
 
         Forbid();
-        n = nw_wm_cli(NULL, 0);
+        n = nw_cli(NW_WM_NAME, NULL, 0);
         if (n != 0 && tries % 25 == 0)
         {
             /* Two statements: an inline library call as the argument of

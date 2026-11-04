@@ -327,7 +327,8 @@ aminetxduo_add_tool(tool_getnetstatus GetNetStatus NX SOURCES getnetstatus.c)
 
 # NetShutdown stops every interface at once.  Config-only: it reaches the live
 # interfaces through NetStackControl(), exactly as Offline does.
-aminetxduo_add_tool(tool_netshutdown NetShutdown SOURCES netshutdown.c)
+aminetxduo_add_tool(tool_netshutdown NetShutdown
+    SOURCES netshutdown.c netwireless_wm.c)
 
 # RemoveNetInterface takes one interface out, where NetShutdown stops them all
 # and keeps them.  Config-only for the same reason: NetStackControl() again.

@@ -6,6 +6,9 @@
  */
 
 #include "tools.h"
+#include "netwireless_wm.h"
+#include <exec/execbase.h>
+#include <exec/devices.h>
 
 /* The library's 4.4BSD number: removed, with the device kept open holding
    requests (AMI_NET_ERR_RETAINED).  Down all the same. */
@@ -34,6 +37,48 @@ enum
 #define NSD_MAX_OPENERS 12
 
 static BOOL nsd_quiet;
+
+/* Device names survive the interface-table refreshes during removal. A unit
+   still opened by a wireless monitor or another stack can keep interrupting
+   after every interface is gone. Static, not on the Shell's 4 KB stack. */
+static char nsd_devices[NX_MAX_PHYSICAL_INTERFACES][NETSTATUS_FILE_LEN];
+static LONG nsd_device_count;
+
+static BOOL stop_wireless(ULONG timeout, ULONG *waited)
+{
+    while (nw_wireless_request_stop())
+    {
+        if (*waited >= timeout || tool_delay_ticks((ULONG)TICKS_PER_SECOND))
+        {
+            tool_error("Wi-Fi programs have not stopped; hardware still in use");
+            return FALSE;
+        }
+        (*waited)++;
+    }
+    return TRUE;
+}
+
+/* No device/library pointer escapes Forbid: the last CloseDevice can expunge
+   it. Do not open a device to test whether shutdown managed to close it. */
+static BOOL device_still_open(const char *name)
+{
+    struct Node *node;
+    BOOL open = FALSE;
+
+    Forbid();
+    for (node = SysBase->DeviceList.lh_Head;
+         node->ln_Succ != NULL; node = node->ln_Succ)
+    {
+        if (tool_stricmp(tool_basename(node->ln_Name), name) == 0 &&
+            ((struct Device *)node)->dd_Library.lib_OpenCnt != 0)
+        {
+            open = TRUE;
+            break;
+        }
+    }
+    Permit();
+    return open;
+}
 
 static VOID say(const char *fmt, ...)
 {
@@ -240,6 +285,28 @@ int main(int argc, char **argv)
         timeout = (ULONG)given;
     }
 
+    {
+        struct Library *lib;
+        BOOL foreign;
+
+        Forbid();
+        lib = (struct Library *)FindName(&SysBase->LibList,
+                                         (CONST_STRPTR)"bsdsocket.library");
+        foreign = lib != NULL && !tool_stack_is_ours(lib);
+        Permit();
+        if (foreign)
+        {
+            tool_error("another TCP/IP stack is installed");
+            FreeArgs(rda);
+            return RETURN_WARN;
+        }
+    }
+
+    /* A Wi-Fi client can keep the unit alive even with no stack running.
+       Stop those clients before removing the stack's own device open. */
+    if (!stop_wireless(timeout, &waited))
+        failed++;
+
     /* Nothing to stop. tool_netstatus_open() does not start the stack. */
     if (!tool_stack_library_running())
     {
@@ -311,6 +378,7 @@ int main(int argc, char **argv)
         return RETURN_FAIL;
     }
 
+    tool_netstatus_devices(base);
     for (i = 0; i < n && i < (LONG)NX_MAX_PHYSICAL_INTERFACES; i++)
     {
         const NetStatusInterface *nsi = &nsd_ifaces.e[i];
@@ -319,6 +387,23 @@ int main(int argc, char **argv)
 
         if (!(nsi->nsi_Flags & NETSTATUS_IF_ATTACHED))
             continue;
+
+        if ((nsi->nsi_Flags & NETSTATUS_IF_SANA2) != 0 &&
+            nsd_device_count < (LONG)NX_MAX_PHYSICAL_INTERFACES)
+        {
+            char *device = nsd_devices[nsd_device_count];
+            BOOL whole = tool_if_device(device, NETSTATUS_FILE_LEN, nsi);
+            ULONG len = 0;
+
+            while (device[len] != '\0') len++;
+            if (!whole && len >= NETSTATUS_DEVICE_LEN - 1)
+            {
+                tool_error("device name truncated; cannot verify hardware shutdown");
+                failed++;
+            }
+            else if (device[0] != '\0')
+                nsd_device_count++;
+        }
 
         name = (nsi->nsi_Flags & NETSTATUS_IF_NAMED) ? nsi->nsi_Name
                                                      : "(unnamed)";
@@ -344,9 +429,13 @@ int main(int argc, char **argv)
         ctl.nsc_Flags = NETCTRL_F_FORCE;
 
         if (tool_netstatus_control(base, NETCTRL_INTERFACE_REMOVE, &ctl,
-                                   &err) != 0 && err != NSD_EINPROGRESS)
+                                   &err) != 0)
         {
-            tool_error("%s did not go down", (LONG)name);
+            if (err == NSD_EINPROGRESS)
+                tool_error("%s: removed, but the driver still holds requests",
+                           (LONG)name);
+            else
+                tool_error("%s did not go down", (LONG)name);
             failed++;
             continue;
         }
@@ -429,6 +518,17 @@ int main(int argc, char **argv)
     tool_netstatus_close(base);
 
     unload_library();
+
+    for (i = 0; i < nsd_device_count; i++)
+    {
+        const char *name = tool_basename(nsd_devices[i]);
+
+        if (device_still_open(name))
+        {
+            tool_error("%s: still open; hardware shutdown incomplete", (LONG)name);
+            failed++;
+        }
+    }
 
     if (stopped_waiting)
     {
