@@ -32,6 +32,21 @@ command -v gh >/dev/null 2>&1 || {
     exit 2
 }
 
+# A run whose only non-success job is the hosted macOS/clang job that GitHub
+# never gave a runner (cancelled with no runner and no steps), while the
+# tier 1 report passed, is a success: the gate already counted it as not run.
+macos_unacquired_only() {        # run-id
+    gh api "repos/{owner}/{repo}/actions/runs/$1/jobs?per_page=100" 2>/dev/null |
+    jq -e '
+      ([.jobs[] | select(.name == "tier 1 report") | .conclusion] == ["success"]) and
+      ([.jobs[] | select(.conclusion != "success" and .conclusion != "skipped")] as $bad |
+        ($bad | length) > 0 and
+        ($bad | all(.name == "host tests (macOS / clang)" and
+                    .conclusion == "cancelled" and
+                    (.runner_name // "") == "" and
+                    ((.steps // []) | length) == 0)))' >/dev/null
+}
+
 deadline=$((SECONDS + wait_seconds))
 artifact="release-candidate-$sha"
 proof="ci-full-$sha"
@@ -57,12 +72,13 @@ while :; do
             state=active
             break
         fi
-        if [ "$(printf '%s' "$run" | jq -r .conclusion)" != success ]; then
+        id=$(printf '%s' "$run" | jq -r .databaseId)
+        if [ "$(printf '%s' "$run" | jq -r .conclusion)" != success ] &&
+           ! macos_unacquired_only "$id"; then
             printf '%s\n' "$run" | jq -r '
                 "ci_success=FAIL run=\(.databaseId) sha=\(.headSha) conclusion=\(.conclusion) url=\(.url)"' >&2
             exit 1
         fi
-        id=$(printf '%s' "$run" | jq -r .databaseId)
         if gh api "repos/{owner}/{repo}/actions/runs/$id/artifacts" 2>/dev/null |
            jq -e --arg candidate "$artifact" --arg proof "$proof" '
              [.artifacts[] | select(.expired == false) | .name] as $names |
