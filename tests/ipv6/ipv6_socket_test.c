@@ -889,6 +889,27 @@ LONG                rc;
     (VOID)t_check((BOOL)(p == NULL), "inet_ntop refuses a short buffer", 0);
 }
 
+/* AF_INET6 23, the bebbo ndk-include spelling, is IPv6. Taken in a second
+   opener: 23 marks its opener (sb_Fam23) and getaddrinfo() then answers in
+   23, and this opener must go on answering in 28. */
+static VOID t_test_af_inet6_23(VOID)
+{
+struct Library *base28 = SocketBase;
+LONG            fd;
+
+    SocketBase = OpenLibrary((STRPTR)"bsdsocket.library", 4);
+    if (t_check((BOOL)(SocketBase != NULL),
+                "a second opener for AF_INET6 23", 0))
+    {
+        fd = bsd_socket(23, T_SOCK_DGRAM, 0);
+        (VOID)t_check((BOOL)(fd >= 0), "AF_INET6 23 is accepted as IPv6",
+                      bsd_Errno());
+        if (fd >= 0) bsd_CloseSocket(fd);
+        CloseLibrary(SocketBase);
+    }
+    SocketBase = base28;
+}
+
 static VOID t_test_socket_basics(VOID)
 {
 LONG                fd;
@@ -901,10 +922,7 @@ struct sockaddr_storage storage;
 UBYTE               short_addr[4];
 
     t_log("AF_INET6 socket basics");
-    fd = bsd_socket(23, T_SOCK_DGRAM, 0);
-    (VOID)t_check((BOOL)(fd < 0 && bsd_Errno() == T_EAFNOSUPPORT),
-                  "AF_IPX 23 no longer aliases IPv6", bsd_Errno());
-    if (fd >= 0) bsd_CloseSocket(fd);
+    t_test_af_inet6_23();
 
     fd = bsd_socket(T_AF_INET6, T_SOCK_STREAM, 0);
     if (!t_check((BOOL)(fd >= 0), "socket(AF_INET6, SOCK_STREAM)", bsd_Errno()))
