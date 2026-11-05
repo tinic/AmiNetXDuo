@@ -7,6 +7,9 @@ are history.
 
 ## Unreleased
 
+- WaitSelect() no longer reports a TCP socket readable while only data that
+  arrived out of order is queued, so a blocking recv() after it no longer
+  waits forever when the sender is gone.
 - NetPrefs edits point-to-point interfaces: a Point-to-point checkbox and
   Peer fields for DESTINATION and DESTINATION6.
 - AddNetRoute DESTINATION=<prefix> GATEWAY=<peer> routes an IPv6 prefix
