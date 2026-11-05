@@ -510,7 +510,7 @@ jobs:
           # cancelled mid-run still fails the gate.
           if [ "$HOST_CLANG" = cancelled ]; then
               got=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs" \
-                  --jq '.jobs[] | select(.name == "host tests (macOS / clang)") | "\(.runner_name // "")|\(.steps | length)"' 2>/dev/null)
+                  --jq '.jobs[] | select(.name == "host tests (macOS / clang)") | "\(.runner_name // "")|\(.steps | length)"' 2>/dev/null || true)
               case "$got" in
                   "|0") HOST_CLANG=unacquired
                         echo "::warning::macOS/clang host tests were not run: no hosted macOS runner was available" ;;
