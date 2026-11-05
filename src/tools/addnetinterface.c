@@ -8,6 +8,7 @@
 #include "tools.h"
 #include "libfit.h"
 #include "addif_wb.h"
+#include "addiflink.h"
 
 #include <intuition/intuition.h>
 #include <workbench/startup.h>
@@ -1098,6 +1099,7 @@ static int addif_main(int argc, char **argv)
             char  text6[AMI_CFG_IP6_STRLEN];
             LONG  where;
             BOOL  left_down = FALSE;
+            ULONG spent = 0;
 
             name = tool_basename((const char *)names[n]);
             (VOID)load_interface((const char *)names[n], &ifc, TRUE);
@@ -1113,10 +1115,32 @@ static int addif_main(int argc, char **argv)
             }
 
             {
-                LONG add_err;
+                LONG      add_err;
+                AddifLink link = { NULL, NULL, FALSE };
+
+                /* A Wi-Fi card joins first, then the interface asks for its
+                   address (addiflink.h): the wait comes out of the same
+                   allowance as DHCP's. */
+                if (where == -1 && ifc.up && ifc.iptype == AMI_IPTYPE_DHCP &&
+                    allowance != 0)
+                {
+                    ToolWait joined;
+
+                    tool_wait_init(&joined, allowance);
+                    (VOID)addif_link_wait(&link, &ifc, &joined);
+                    spent = joined.elapsed;
+                    if (joined.broken)
+                    {
+                        addif_link_close(&link);
+                        broken = TRUE;
+                        break;
+                    }
+                }
 
                 add_err = add_to_running_stack(base, name,
                                                (const char *)names[n]);
+                /* After the stack has the unit open, never before. */
+                addif_link_close(&link);
 
                 if (add_err == EEXIST)
                 {
@@ -1196,7 +1220,9 @@ static int addif_main(int argc, char **argv)
             if (left_down)
                 addr = 0;
             else if (ifc.iptype == AMI_IPTYPE_DHCP || addr == 0)
-                (VOID)wait_for_running_ready(base, name, &ifc, allowance,
+                (VOID)wait_for_running_ready(base, name, &ifc,
+                                             allowance > spent + 1UL
+                                                 ? allowance - spent : 1UL,
                                              !needs_async_address(&ifc),
                                              &addr, text6, sizeof(text6),
                                              &broken);
