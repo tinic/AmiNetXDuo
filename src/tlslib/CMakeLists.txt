@@ -146,6 +146,9 @@ if(AMINETXDUO_TLSLIB_LINK)
     if(AMINETXDUO_SCHEDCOUNT)
         target_compile_options(tls_library PRIVATE -UAMINETXDUO_SCHEDCOUNT)
     endif()
+    if(AMINETXDUO_FORBIDSTATS)
+        target_compile_options(tls_library PRIVATE -UAMINETXDUO_FORBIDSTATS)
+    endif()
 
     add_dependencies(tls_library aminetxduo_tls nx_secure nx_crypto crypto68k)
 

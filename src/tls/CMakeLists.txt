@@ -233,3 +233,10 @@ if(AMINETXDUO_SCHEDCOUNT)
         target_compile_options(${_sc_target} PRIVATE -UAMINETXDUO_SCHEDCOUNT)
     endforeach()
 endif()
+
+# The same for AMINETXDUO_FORBIDSTATS: its TX_DISABLE calls into the port.
+if(AMINETXDUO_FORBIDSTATS)
+    foreach(_fs_target nx_crypto nx_secure aminetxduo_tls)
+        target_compile_options(${_fs_target} PRIVATE -UAMINETXDUO_FORBIDSTATS)
+    endforeach()
+endif()

@@ -34,6 +34,9 @@
 #include <proto/timer.h>
 
 #include "aminetxduo/compat.h"      /* AMI_ERROR/AMI_WARN/AMI_INFO */
+#ifdef AMINETXDUO_FORBIDSTATS
+#include "aminetxduo/forbidstats.h"
+#endif
 
 /* Freed with FreeMem and the same size, so nothing downstream cares.  */
 static APTR _tx_amiga_alloc(ULONG size, ULONG memf)
@@ -922,6 +925,9 @@ UINT                 armed;
         AMI_WARN("tick: ReadEClock reported 0 Hz; assuming %ld",
                 (LONG) eclock_hz);
     }
+#ifdef AMINETXDUO_FORBIDSTATS
+    ami_fs_calibrate(_tx_amiga_timer_base, eclock_hz);
+#endif
     eclock_per_ms =  eclock_hz / 1000UL;
     if (eclock_per_ms == 0UL)
     {
@@ -1140,6 +1146,9 @@ UINT                 armed;
     /* Retire the shared service before its timer base goes away: the realm
        tests tr_live under the same Forbid() the service holds, so after
        this no caller can reach ReadEClock() on a dead base.  */
+#ifdef AMINETXDUO_FORBIDSTATS
+    ami_fs_timer_gone();
+#endif
     Forbid();
     _tx_amiga_tick_run.tr_live  =  (UINT) TX_FALSE;
     _tx_amiga_tick_run.tr_realm =  (UINT) TX_FALSE;

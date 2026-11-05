@@ -13,6 +13,15 @@ target_link_libraries(aminetxduo_common PUBLIC threadx)
 target_compile_definitions(aminetxduo_common
     PRIVATE AMINETXDUO_EVENT_RING=${AMINETXDUO_EVENT_RING})
 
+# The Forbid()/Disable() census, aminetxduo/forbidstats.h.  netdev_dtree.c
+# finds the Pi's system timer on an Emu68.
+if(AMINETXDUO_FORBIDSTATS AND CMAKE_CROSSCOMPILING)
+    target_sources(aminetxduo_common PRIVATE forbidstats.c forbidstats_core.c
+                   "${CMAKE_SOURCE_DIR}/src/netdev/netdev_dtree.c")
+    target_include_directories(aminetxduo_common PRIVATE
+                               "${CMAKE_SOURCE_DIR}/src/netdev")
+endif()
+
 # ---------------------------------------------------------------- host test --
 #
 # The ring and the table that decodes it live in different binaries on the
@@ -47,6 +56,14 @@ if(NOT CMAKE_CROSSCOMPILING)
 
     include(CTest)
     add_test(NAME event_ring COMMAND test_events)
+
+    # The census accounting, as built: no AmigaOS calls in it.
+    add_executable(test_forbidstats test/test_forbidstats.c forbidstats_core.c)
+    target_include_directories(test_forbidstats PRIVATE
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_SOURCE_DIR}/src/config/test/shim")
+    target_compile_options(test_forbidstats PRIVATE -Wall -Wextra)
+    add_test(NAME forbidstats_core COMMAND test_forbidstats)
 
     # Local codeset <-> UTF-8, shared by ssh and httpd: plain C, no AmigaOS.
     add_executable(test_textconv test/test_textconv.c textconv.c)

@@ -23,6 +23,9 @@
 #include "aminetxduo/events.h"
 
 #include "tx_amiga.h"
+#ifdef AMINETXDUO_FORBIDSTATS
+#include "aminetxduo/forbidstats.h"
+#endif
 
 #include <proto/exec.h>
 #include <proto/dos.h>
@@ -218,6 +221,9 @@ static const NsQueryLayout ns_query_layout[] =
     [NETSTATUS_HOSTSOURCE]    = { sizeof(NetStatusHostSource), 1 },
     [NETSTATUS_IFBYTES]       = { sizeof(NetStatusIfBytes),   0 },
     [NETSTATUS_IFQUEUE]       = { sizeof(NetStatusIfQueue),   0 }
+#ifdef AMINETXDUO_FORBIDSTATS
+  , [NETSTATUS_FORBIDSTATS]   = { sizeof(NetStatusForbidStats), 1 }
+#endif
 };
 
 typedef struct NsWriter
@@ -1262,6 +1268,76 @@ static VOID ns_fill_stats(NX_IP *ip, NetStatusStats *out)
  * baton to read it. A query that takes the baton to ask whether the baton is
  * stuck cannot answer.
  */
+#ifdef AMINETXDUO_FORBIDSTATS
+static VOID ns_fs_name(char *dst, const char *src)
+{
+    ULONG i = 0;
+
+    if (src != NULL)
+        for (; i + 1 < NETSTATUS_FS_NAME && src[i] != 0; i++)
+            dst[i] = src[i];
+    dst[i] = 0;
+}
+
+/* Static: the copy is bigger than a caller's stack can be assumed to hold. */
+static AmiFsState ns_fs_copy;
+
+static VOID ns_fill_forbidstats(NetStatusForbidStats *out)
+{
+    const AmiFsState *st = &ns_fs_copy;
+    ULONG             i;
+    ULONG             n = 0;
+
+    ami_fs_read(&ns_fs_copy, &out->nfr_NowHi, &out->nfr_NowLo);
+
+    out->nfr_Hz           = st->st_Hz;
+    out->nfr_Ovh16        = st->st_Ovh16;
+    out->nfr_Outer16      = st->st_Outer16;
+    out->nfr_Nested16     = st->st_Nested16;
+    out->nfr_Clock16      = st->st_Clock16;
+    out->nfr_Calibrated   = st->st_Calibrated;
+    out->nfr_SiteOverflow = st->st_SiteOverflow;
+
+    for (i = 0; i < AMI_FS_KINDS; i++)
+    {
+        const AmiFsKind *k = &st->st_Kind[i];
+        NetStatusFsKind *o = &out->nfr_Kind[i];
+        ULONG            b;
+
+        o->nfk_Pairs     = k->k_Pairs;
+        o->nfk_Sections  = k->k_Sections;
+        o->nfk_Untimed   = k->k_Untimed;
+        o->nfk_HeldLo    = k->k_HeldLo;
+        o->nfk_HeldHi    = k->k_HeldHi;
+        o->nfk_Max16     = k->k_Max16;
+        ns_fs_name(o->nfk_MaxSite, k->k_MaxSite);
+        for (b = 0; b < AMI_FS_BUCKETS; b++)
+            o->nfk_Hist[b] = k->k_Hist[b];
+        o->nfk_Sleeps    = k->k_Sleeps;
+        o->nfk_Lost      = k->k_Lost;
+        o->nfk_Unmatched = k->k_Unmatched;
+        o->nfk_Broken    = k->k_Broken;
+        o->nfk_BrokenHeld = k->k_BrokenHeld;
+    }
+
+    for (i = 0; i < AMI_FS_SITES && n < NETSTATUS_FS_SITES; i++)
+    {
+        const AmiFsSite *s = &st->st_Site[i];
+
+        if (s->s_Site == NULL)
+            continue;
+        ns_fs_name(out->nfr_Site[n].nfs_Name, s->s_Site);
+        out->nfr_Site[n].nfs_Kind  = s->s_Kind;
+        out->nfr_Site[n].nfs_Count = s->s_Count;
+        out->nfr_Site[n].nfs_Held  = s->s_Held;
+        out->nfr_Site[n].nfs_Max16 = s->s_Max16;
+        out->nfr_Site[n].nfs_Broken = s->s_Broken;
+        n++;
+    }
+    out->nfr_Sites = n;
+}
+#endif
+
 static VOID ns_fill_health(NetStatusHealth *out)
 {
     TX_AMIGA_TICK_STATS tick;
@@ -1950,6 +2026,18 @@ LONG bsd_NetStackQuery(register ULONG magic __asm("d0"),
         }
         goto query_done;
     }
+
+#ifdef AMINETXDUO_FORBIDSTATS
+    if (what == NETSTATUS_FORBIDSTATS)
+    {
+        NetStatusForbidStats *fs = (NetStatusForbidStats *)ns_writer_next(&w);
+
+        if (fs == NULL)
+            return bsd_fail(SocketBase, AMI_EINVAL);
+        ns_fill_forbidstats(fs);
+        goto query_done;
+    }
+#endif
 
     /* Answered before the stack is looked for, and without the baton: it reads
        the tick task and the bracket's own counters, not NetX Duo. */

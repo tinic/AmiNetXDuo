@@ -18,6 +18,10 @@
 
 #include <exec/ports.h>
 
+#ifdef AMINETXDUO_FORBIDSTATS
+#include "aminetxduo/forbidstats.h"
+#endif
+
 
 /* TX_DISABLE / TX_RESTORE.  These are always strictly paired in the ThreadX
    core, so the saved posture is informational and the nesting is carried by
@@ -65,8 +69,32 @@ __attribute__((noinline, cold)) VOID _tx_amiga_permit_finish(void)
 
     __asm volatile ("addq.b #1,%0" : "+m" (SysBase -> TDNestCnt) : : "cc");
     TX_AMIGA_COUNT(TX_AMIGA_SC_PERMIT_SLOW);
+#ifdef AMINETXDUO_FORBIDSTATS
+    ami_fs_raw_permit();            /* TX_RESTORE already accounted for it */
+#else
     Permit();
+#endif
 }
+
+
+#ifdef AMINETXDUO_FORBIDSTATS
+UINT _tx_amiga_fs_disable(const char *site)
+{
+UINT    previous_posture;
+
+    previous_posture =  _tx_amiga_int_disable();
+    ami_fs_entered(AMI_FS_FORBID, site);
+    return(previous_posture);
+}
+
+
+VOID _tx_amiga_fs_restore(UINT previous_posture)
+{
+
+    ami_fs_leaving(AMI_FS_FORBID);
+    _tx_amiga_int_restore(previous_posture);
+}
+#endif
 
 
 /* The out-of-line spellings.  Nothing on the data path reaches them -- TX_DISABLE
@@ -75,14 +103,22 @@ __attribute__((noinline, cold)) VOID _tx_amiga_permit_finish(void)
 UINT _tx_thread_interrupt_disable(void)
 {
 
+#ifdef AMINETXDUO_FORBIDSTATS
+    return(_tx_amiga_fs_disable("_tx_thread_interrupt_disable"));
+#else
     return(_tx_amiga_int_disable());
+#endif
 }
 
 
 VOID _tx_thread_interrupt_restore(UINT previous_posture)
 {
 
+#ifdef AMINETXDUO_FORBIDSTATS
+    _tx_amiga_fs_restore(previous_posture);
+#else
     _tx_amiga_int_restore(previous_posture);
+#endif
 }
 
 

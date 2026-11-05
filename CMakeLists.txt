@@ -983,6 +983,15 @@ if(AMINETXDUO_SCHEDCOUNT)
     add_compile_definitions(AMINETXDUO_SCHEDCOUNT)
 endif()
 
+# Count and time every Forbid()/Permit() and Disable()/Enable() pair the
+# library makes, ThreadX's TX_DISABLE/TX_RESTORE included, and print them under
+# `netstat STATS`.  OFF, and byte-identical when off: aminetxduo/forbidstats.h,
+# and the shim list below the add_subdirectory() calls.
+option(AMINETXDUO_FORBIDSTATS "Count and time the Forbid/Disable sections" OFF)
+if(AMINETXDUO_FORBIDSTATS)
+    add_compile_definitions(AMINETXDUO_FORBIDSTATS)
+endif()
+
 # Keep the calling task's TX_THREAD between brackets instead of building and
 # deleting one per call.  ON, and the OFF arm is the control: two libraries out
 # of one tree differing in this one decision, which is how the before and after
@@ -1907,6 +1916,21 @@ add_subdirectory(src/rfb)
 # is the only way to see what this stack costs on real hardware, no emulator
 # above a 68020 has a usable cycle model.  tools/profiler/CMakeLists.txt.
 add_subdirectory(tools/profiler)
+
+# AMINETXDUO_FORBIDSTATS: the direct Exec calls of the library's own archives
+# go through include/forbidstats/proto/exec.h.  Only these: the census lives
+# in aminetxduo_common, and a driver or tls.library does not link it.
+if(AMINETXDUO_FORBIDSTATS AND CMAKE_CROSSCOMPILING)
+    foreach(_fs_target threadx_port aminetxduo_common aminetxduo_config
+                       aminetxduo_sana2 aminetxduo_mbuf aminetxduo_bpf
+                       aminetxduo_ipv6 aminetxduo_netstack aminetxduo_bsdsocket
+                       bsdsocket_library)
+        if(TARGET ${_fs_target})
+            target_include_directories(${_fs_target} BEFORE PRIVATE
+                "${CMAKE_SOURCE_DIR}/include/forbidstats")
+        endif()
+    endforeach()
+endif()
 
 # forbidrec, every Forbid()/Disable() hold on a running machine, with its
 # workload.  Instruments, not shipped.  tools/forbidrec/CMakeLists.txt.

@@ -53,7 +53,7 @@ fi
 CACHE="$BUILD/CMakeCache.txt"
 if [ -r "$CACHE" ]; then
     for opt in PROFILER PROFILER_NOINLINE RXPROBE NXCENSUS SCHEDCOUNT \
-               SANA2_PROBE_RAW NETDEV_TIME ALLOCCENSUS NX_COUNTERS; do
+               SANA2_PROBE_RAW NETDEV_TIME ALLOCCENSUS FORBIDSTATS NX_COUNTERS; do
         if grep -q "^AMINETXDUO_$opt:BOOL=ON" "$CACHE"; then
             echo "hotpath_budget=skipped reason=instrumented opt=$opt"
             exit 0

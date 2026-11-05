@@ -169,7 +169,7 @@ CROSS_CONFIGS=(
     # by default (CMakeLists.txt) and has the `log' arm below to itself, which
     # is why AMI_ERROR/WARN compile to do { if (0) ... } while (0) everywhere
     # else.  A failure a user must see takes an event, not a diagnostic line.
-    "instr:-DAMINETXDUO_KEEP_SYMBOLS=ON -DAMINETXDUO_NXCENSUS=ON -DAMINETXDUO_SCHEDCOUNT=ON -DAMINETXDUO_RXPROBE=ON -DAMINETXDUO_SANA2_PROBE_RAW=ON -DAMINETXDUO_PROFILER=ON -DAMINETXDUO_RX_VERIFY_STATS=ON -DAMINETXDUO_NX_ERROR_CHECKING=ON -DAMINETXDUO_STACKPROBE=ON"
+    "instr:-DAMINETXDUO_KEEP_SYMBOLS=ON -DAMINETXDUO_NXCENSUS=ON -DAMINETXDUO_SCHEDCOUNT=ON -DAMINETXDUO_FORBIDSTATS=ON -DAMINETXDUO_RXPROBE=ON -DAMINETXDUO_SANA2_PROBE_RAW=ON -DAMINETXDUO_PROFILER=ON -DAMINETXDUO_RX_VERIFY_STATS=ON -DAMINETXDUO_NX_ERROR_CHECKING=ON -DAMINETXDUO_STACKPROBE=ON"
     # The profiler's attribution aid, on its own arm.  It CANNOT ride `instr`:
     # -fno-inline-functions-called-once is the whole point of it, and `instr`
     # is the arm check-hot-calls.sh reads to assert that the per-frame receive

@@ -405,6 +405,64 @@ static VOID show_budget_holds(const NetStatusRxBudget *b)
  * (AMINETXDUO_RXPROBE). Any library answers the selector; only an instrumented
  * one has counts.
  */
+#ifdef AMINETXDUO_FORBIDSTATS
+/*
+ * The Forbid()/Disable() census (aminetxduo/forbidstats.h), raw and
+ * key=value: ticks, x16 fields, the E-Clock rate and its clock, so two reads
+ * difference into a window.  The max fields cover the time since the last
+ * read.  A library without the census refuses the selector: no lines.
+ */
+static VOID show_forbidstats(VOID)
+{
+    static UBYTE          buf[sizeof(NetStatusHeader) +
+                              sizeof(NetStatusForbidStats)];
+    static const char    *kinds[2] = { "forbid", "disable" };
+    NetStatusForbidStats *f;
+    struct Library       *base = tool_netstatus_open(TRUE);
+    LONG                  got;
+    ULONG                 i;
+
+    if (base == NULL)
+        return;
+    got = tool_netstatus_query(base, NETSTATUS_FORBIDSTATS, buf, sizeof(buf),
+                               sizeof(NetStatusForbidStats));
+    tool_netstatus_close(base);
+    if (got <= 0)
+        return;
+
+    f = (NetStatusForbidStats *)(buf + sizeof(NetStatusHeader));
+    tool_printf("fs hz=%lu now_hi=%lu now_lo=%lu ovh16=%lu outer16=%lu "
+                "nested16=%lu clock16=%lu calibrated=%lu sites=%lu "
+                "site_overflow=%lu\n", f->nfr_Hz, f->nfr_NowHi, f->nfr_NowLo,
+                f->nfr_Ovh16, f->nfr_Outer16, f->nfr_Nested16, f->nfr_Clock16,
+                f->nfr_Calibrated, f->nfr_Sites, f->nfr_SiteOverflow);
+    for (i = 0; i < 2; i++)
+    {
+        const NetStatusFsKind *k = &f->nfr_Kind[i];
+
+        tool_printf("fs.kind kind=%s pairs=%lu sections=%lu untimed=%lu "
+                    "held_hi=%lu held_lo=%lu max16=%lu max_site=%s ",
+                    (LONG)kinds[i], k->nfk_Pairs, k->nfk_Sections,
+                    k->nfk_Untimed, k->nfk_HeldHi, k->nfk_HeldLo,
+                    k->nfk_Max16, (LONG)k->nfk_MaxSite);
+        tool_printf("h10us=%lu h100us=%lu h1ms=%lu hover=%lu sleeps=%lu "
+                    "lost=%lu unmatched=%lu broken=%lu broken_held=%lu\n",
+                    k->nfk_Hist[0], k->nfk_Hist[1], k->nfk_Hist[2],
+                    k->nfk_Hist[3], k->nfk_Sleeps, k->nfk_Lost,
+                    k->nfk_Unmatched, k->nfk_Broken, k->nfk_BrokenHeld);
+    }
+    for (i = 0; i < f->nfr_Sites && i < NETSTATUS_FS_SITES; i++)
+    {
+        const NetStatusFsSite *s = &f->nfr_Site[i];
+
+        tool_printf("fs.site kind=%s site=%s count=%lu held=%lu max16=%lu "
+                    "broken=%lu\n", (LONG)kinds[s->nfs_Kind & 1],
+                    (LONG)s->nfs_Name, s->nfs_Count, s->nfs_Held,
+                    s->nfs_Max16, s->nfs_Broken);
+    }
+}
+#endif
+
 static VOID show_budget(VOID)
 {
     static UBYTE buf[sizeof(NetStatusHeader) + sizeof(NetStatusRxBudget)];
@@ -910,6 +968,9 @@ int main(int argc, char **argv)
         show_protocol_stats(&stats);
         show_stats(cfg, &snap);
         show_budget();
+#ifdef AMINETXDUO_FORBIDSTATS
+        show_forbidstats();
+#endif
     }
     if (want_routes)
         show_routes(cfg);

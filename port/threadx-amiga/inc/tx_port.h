@@ -244,8 +244,19 @@ char   *execbase;
 }
 
 #define TX_INTERRUPT_SAVE_AREA                  UINT tx_saved_posture;
+#ifdef AMINETXDUO_FORBIDSTATS
+/* The census build (aminetxduo/forbidstats.h): the same pair out of line, with
+   the expansion site, in tx_thread_interrupt_control.c.  */
+UINT   _tx_amiga_fs_disable(const char *site);
+VOID   _tx_amiga_fs_restore(UINT previous_posture);
+#define TX_AMIGA_FS_STR2(x)                     #x
+#define TX_AMIGA_FS_STR(x)                      TX_AMIGA_FS_STR2(x)
+#define TX_DISABLE                              tx_saved_posture = _tx_amiga_fs_disable(__FILE_NAME__ ":" TX_AMIGA_FS_STR(__LINE__));
+#define TX_RESTORE                              _tx_amiga_fs_restore(tx_saved_posture);
+#else
 #define TX_DISABLE                              tx_saved_posture = _tx_amiga_int_disable();
 #define TX_RESTORE                              _tx_amiga_int_restore(tx_saved_posture);
+#endif
 
 
 /* Per-object lockout macros.  */

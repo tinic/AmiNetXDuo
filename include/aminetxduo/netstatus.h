@@ -1159,6 +1159,61 @@ typedef struct NetStatusControl
     char    nsc_File[NETSTATUS_FILE_LEN];
 } NetStatusControl;
 
+/* ------------------------------------------------- NETSTATUS_FORBIDSTATS --- */
+
+/* The Forbid()/Disable() census, a library built with AMINETXDUO_FORBIDSTATS
+   only; any other library refuses the selector.  Fields are those of
+   aminetxduo/forbidstats.h: ticks at nfr_Hz, "16" = ticks x 16, held raw, max
+   net and reset by this query.  Kind 0 is Forbid, 1 is Disable. */
+#ifdef AMINETXDUO_FORBIDSTATS
+#define NETSTATUS_FORBIDSTATS   26  /* one NetStatusForbidStats              */
+#define NETSTATUS_FS_NAME       40
+#define NETSTATUS_FS_SITES      512
+
+typedef struct NetStatusFsKind
+{
+    ULONG   nfk_Pairs;
+    ULONG   nfk_Sections;
+    ULONG   nfk_Untimed;
+    ULONG   nfk_HeldLo;
+    ULONG   nfk_HeldHi;
+    ULONG   nfk_Max16;
+    char    nfk_MaxSite[NETSTATUS_FS_NAME];
+    ULONG   nfk_Hist[4];                /* <10 us, <100 us, <1 ms, >= 1 ms   */
+    ULONG   nfk_Sleeps;
+    ULONG   nfk_Lost;
+    ULONG   nfk_Unmatched;
+    ULONG   nfk_Broken;                 /* Exec dispatched inside: slept     */
+    ULONG   nfk_BrokenHeld;
+} NetStatusFsKind;
+
+typedef struct NetStatusFsSite
+{
+    char    nfs_Name[NETSTATUS_FS_NAME];
+    ULONG   nfs_Kind;
+    ULONG   nfs_Count;
+    ULONG   nfs_Held;
+    ULONG   nfs_Max16;
+    ULONG   nfs_Broken;
+} NetStatusFsSite;
+
+typedef struct NetStatusForbidStats
+{
+    ULONG           nfr_Hz;
+    ULONG           nfr_NowHi;
+    ULONG           nfr_NowLo;
+    ULONG           nfr_Ovh16;
+    ULONG           nfr_Outer16;
+    ULONG           nfr_Nested16;
+    ULONG           nfr_Clock16;
+    ULONG           nfr_Calibrated;
+    ULONG           nfr_SiteOverflow;
+    ULONG           nfr_Sites;
+    NetStatusFsKind nfr_Kind[2];
+    NetStatusFsSite nfr_Site[NETSTATUS_FS_SITES];
+} NetStatusForbidStats;
+#endif
+
 #ifdef __cplusplus
 }
 #endif

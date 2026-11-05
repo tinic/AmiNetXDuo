@@ -123,7 +123,7 @@ fi
 CACHE="$BUILD/CMakeCache.txt"
 if [ -r "$CACHE" ]; then
     for opt in PROFILER PROFILER_NOINLINE RXPROBE NXCENSUS SCHEDCOUNT \
-               SANA2_PROBE_RAW NETDEV_TIME ALLOCCENSUS; do
+               SANA2_PROBE_RAW NETDEV_TIME ALLOCCENSUS FORBIDSTATS; do
         if grep -q "^AMINETXDUO_$opt:BOOL=ON" "$CACHE"; then
             echo "hot_calls=skipped reason=instrumented opt=$opt"
             exit 0
