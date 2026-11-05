@@ -42,6 +42,7 @@
 
 #include "sana2_internal.h"
 
+#include "aminetxduo/nxstatus.h"
 #include "tx_amiga.h"
 
 #include <exec/execbase.h>
@@ -195,8 +196,9 @@ VOID ami_sana2_server_bind(AmiSana2Reader *rd)
     ami_rx_server.bound++;
     Permit();
 
+    /* Created just above, inactive: TX_SUCCESS is its one outcome. */
     if (ami_rx_server.bound == 1)
-        (VOID)tx_timer_activate(&ami_rx_server.refill);
+        AMI_NX_ONLY_SUCCESS(tx_timer_activate(&ami_rx_server.refill));
 }
 
 /* The reader's own context, after its loop: back at the band priority. */
@@ -218,8 +220,8 @@ VOID ami_sana2_server_unbind(AmiSana2Reader *rd)
 
     if (last)
     {
-        (VOID)tx_timer_deactivate(&ami_rx_server.refill);
-        (VOID)tx_timer_delete(&ami_rx_server.refill);
+        AMI_NX_CLEANUP(tx_timer_deactivate(&ami_rx_server.refill));
+        AMI_NX_CLEANUP(tx_timer_delete(&ami_rx_server.refill));
     }
 }
 
