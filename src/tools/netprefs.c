@@ -52,7 +52,11 @@ struct Library       *AslBase;
 #define NP_PATH_LEN        192
 #define NP_FILE_MAX        (256UL * 1024UL)
 #define NP_VALUE_LEN       160
+#ifdef AMINETXDUO_PTP
+#define NP_SAVE_FIELDS     27
+#else
 #define NP_SAVE_FIELDS     24
+#endif
 /* Roadshow and the live status ABI expose at most 15 name characters. */
 #define NP_IFNAME_LEN      16
 #define NP_DNS_FIELDS      2
@@ -99,7 +103,12 @@ enum
     GID_REMOVE,
     GID_CLOSE,
     GID_DNS_1,
-    GID_DNS_2
+    GID_DNS_2,
+#ifdef AMINETXDUO_PTP
+    GID_PTP,
+    GID_DESTINATION,
+    GID_DESTINATION6,
+#endif
 };
 
 enum
@@ -150,6 +159,11 @@ typedef struct NetPrefs
     struct Gadget *g_ipv6;
     struct Gadget *g_address6[AMI_CFG_MAX_ADDRESS6];
     struct Gadget *g_gateway6;
+#ifdef AMINETXDUO_PTP
+    struct Gadget *g_ptp;
+    struct Gadget *g_destination;
+    struct Gadget *g_destination6;
+#endif
     struct Gadget *g_mdns;
     struct Gadget *g_state;
     struct Gadget *g_boot;
@@ -187,9 +201,8 @@ static char np_address[16];
 static char np_netmask[16];
 static char np_gateway[16];
 #ifdef AMINETXDUO_PTP
-/* The file's DESTINATION: a gateway that names the peer is reached through
-   the link, whatever the netmask says. */
-static ULONG np_destination;
+static char np_destination[16];
+static char np_destination6[AMI_CFG_IP6_STRLEN];
 #endif
 /* The name servers the form showed: name_resolution is written only when
    they are edited. */
@@ -492,6 +505,9 @@ static VOID set_static_fields(BOOL enabled)
     set_attr(np.g_gateway, GA_Disabled, (ULONG)!enabled);
     for (i = 0; i < NP_DNS_FIELDS; i++)
         set_attr(np.g_dns[i], GA_Disabled, (ULONG)!enabled);
+#ifdef AMINETXDUO_PTP
+    set_attr(np.g_destination, GA_Disabled, (ULONG)!enabled);
+#endif
 }
 
 static VOID set_static6_fields(BOOL enabled)
@@ -500,6 +516,9 @@ static VOID set_static6_fields(BOOL enabled)
     for (i = 0; i < AMI_CFG_MAX_ADDRESS6; i++)
         set_attr(np.g_address6[i], GA_Disabled, (ULONG)!enabled);
     set_attr(np.g_gateway6, GA_Disabled, (ULONG)!enabled);
+#ifdef AMINETXDUO_PTP
+    set_attr(np.g_destination6, GA_Disabled, (ULONG)!enabled);
+#endif
 }
 
 /* For a path that may name an absent assign or volume: no requester. */
@@ -1061,6 +1080,9 @@ static VOID clear_form(VOID)
     set_attr(np.g_state, GTCB_Checked, TRUE);
     set_attr(np.g_boot, GTCB_Checked, FALSE);
     set_attr(np.g_priority, GTIN_Number, 0);
+#ifdef AMINETXDUO_PTP
+    set_attr(np.g_ptp, GTCB_Checked, FALSE);
+#endif
     fill_panel(NP_PANEL_DEVICE);
     set_attr(np.g_device, GTST_String, (ULONG)"");
     set_attr(np.g_unit, GTIN_Number, 0);
@@ -1074,6 +1096,9 @@ static VOID clear_form(VOID)
     set_attr(np.g_address, GTST_String, (ULONG)"");
     set_attr(np.g_netmask, GTST_String, (ULONG)"");
     set_attr(np.g_gateway, GTST_String, (ULONG)"");
+#ifdef AMINETXDUO_PTP
+    set_attr(np.g_destination, GTST_String, (ULONG)"");
+#endif
     load_dns();
     for (i = 0; i < NP_DNS_FIELDS; i++)
         set_attr(np.g_dns[i], GTST_String, (ULONG)np_dns[i]);
@@ -1087,6 +1112,9 @@ static VOID clear_form(VOID)
     for (i = 0; i < AMI_CFG_MAX_ADDRESS6; i++)
         set_attr(np.g_address6[i], GTST_String, (ULONG)"");
     set_attr(np.g_gateway6, GTST_String, (ULONG)"");
+#ifdef AMINETXDUO_PTP
+    set_attr(np.g_destination6, GTST_String, (ULONG)"");
+#endif
     set_static6_fields(FALSE);
     fill_panel(NP_PANEL_TUNING);
     set_attr(np.g_mtu, GTIN_Number, 0);
@@ -1131,7 +1159,16 @@ static VOID load_form(LONG index)
     }
     np.selected = index;
 #ifdef AMINETXDUO_PTP
-    np_destination = cfg.destination;
+    if (cfg.destination != 0)
+        ami_config_format_ip(cfg.destination, np_destination,
+                             sizeof(np_destination));
+    else
+        np_destination[0] = '\0';
+    if (cfg.have_destination6)
+        ami_config_format_ip6(cfg.destination6, np_destination6,
+                              sizeof(np_destination6));
+    else
+        np_destination6[0] = '\0';
 #endif
     ami_config_format_ip(cfg.address, np_address, sizeof(np_address));
     ami_config_format_ip(cfg.netmask, np_netmask, sizeof(np_netmask));
@@ -1163,6 +1200,10 @@ static VOID load_form(LONG index)
     set_attr(np.g_boot, GTCB_Checked,
              (ULONG)boot_state(cfg.name, &wildcard, NULL));
     set_attr(np.g_priority, GTIN_Number, (ULONG)(LONG)cfg.priority);
+#ifdef AMINETXDUO_PTP
+    set_attr(np.g_ptp, GTCB_Checked,
+             (ULONG)(cfg.point_to_point == AMI_CFG_PTP_YES));
+#endif
     fill_panel(NP_PANEL_DEVICE);
     set_attr(np.g_device, GTST_String, (ULONG)cfg.device);
     set_attr(np.g_unit, GTIN_Number, cfg.unit);
@@ -1179,6 +1220,9 @@ static VOID load_form(LONG index)
              (ULONG)(cfg.netmask != 0 ? np_netmask : ""));
     set_attr(np.g_gateway, GTST_String,
              (ULONG)(cfg.gateway != 0 ? np_gateway : ""));
+#ifdef AMINETXDUO_PTP
+    set_attr(np.g_destination, GTST_String, (ULONG)np_destination);
+#endif
     load_dns();
     for (i = 0; i < NP_DNS_FIELDS; i++)
         set_attr(np.g_dns[i], GTST_String, (ULONG)np_dns[i]);
@@ -1192,6 +1236,9 @@ static VOID load_form(LONG index)
     for (i = 0; i < AMI_CFG_MAX_ADDRESS6; i++)
         set_attr(np.g_address6[i], GTST_String, (ULONG)np_address6[i]);
     set_attr(np.g_gateway6, GTST_String, (ULONG)np_gateway6);
+#ifdef AMINETXDUO_PTP
+    set_attr(np.g_destination6, GTST_String, (ULONG)np_destination6);
+#endif
 #ifdef AMINETXDUO_IPV6
     set_static6_fields((BOOL)(cfg.ip6type == AMI_IP6TYPE_STATIC));
 #else
@@ -1233,6 +1280,22 @@ static BOOL parse_mac(const char *s)
     return (BOOL)(*s == '\0');
 }
 
+#if defined(AMINETXDUO_PTP) && defined(AMINETXDUO_IPV6)
+/* DESTINATION6 as config_parse.c reads it: not ::, not a group, and a zone
+   names this interface. */
+static BOOL destination6_ok(const char *text, const char *name)
+{
+    ULONG peer[AMI_CFG_IP6_WORDS];
+    char zone[AMI_CFG_IP6_ZONE_LEN];
+
+    return (BOOL)(ami_config_parse_ip6_zone(text, peer, NULL, zone,
+                                            sizeof(zone)) &&
+                  (peer[0] | peer[1] | peer[2] | peer[3]) != 0UL &&
+                  (peer[0] & 0xFF000000UL) != 0xFF000000UL &&
+                  (zone[0] == '\0' || tool_stricmp(zone, name) == 0));
+}
+#endif
+
 static BOOL save_form(BOOL apply)
 {
     char name[AMI_CFG_NAME_LEN], path[NP_PATH_LEN], resolved[AMI_CFG_PATH_LEN];
@@ -1247,6 +1310,9 @@ static BOOL save_form(BOOL apply)
     LONG arprequests_n = integer_value(np.g_arprequests);
     LONG writerequests_n = integer_value(np.g_writerequests);
     ULONG address, mask, gateway = 0;
+#ifdef AMINETXDUO_PTP
+    ULONG destination = 0;
+#endif
 #ifdef AMINETXDUO_IPV6
     ULONG parsed6[AMI_CFG_IP6_WORDS], prefix6;
 #endif
@@ -1329,6 +1395,15 @@ static BOOL save_form(BOOL apply)
             requester("The IPv6 gateway is not valid.");
             return FALSE;
         }
+#ifdef AMINETXDUO_PTP
+        if (string_value(np.g_destination6)[0] != '\0' &&
+            !destination6_ok(string_value(np.g_destination6), name))
+        {
+            select_panel(NP_PANEL_IPV6);
+            requester("The IPv6 destination is not a valid peer address.");
+            return FALSE;
+        }
+#endif
     }
 #else
     (VOID)ipv6;
@@ -1351,6 +1426,16 @@ static BOOL save_form(BOOL apply)
             requester("The gateway is not a valid IPv4 address.");
             return FALSE;
         }
+#ifdef AMINETXDUO_PTP
+        if (string_value(np.g_destination)[0] != '\0' &&
+            (!ami_config_parse_ip(string_value(np.g_destination),
+                                  &destination) || destination == 0))
+        {
+            select_panel(NP_PANEL_IPV4);
+            requester("The destination is not a valid IPv4 address.");
+            return FALSE;
+        }
+#endif
         for (i = 0; i < NP_DNS_FIELDS; i++)
         {
             ULONG server;
@@ -1366,7 +1451,7 @@ static BOOL save_form(BOOL apply)
         }
         if (gateway != 0 && (gateway & mask) != (address & mask) &&
 #ifdef AMINETXDUO_PTP
-            gateway != np_destination &&
+            gateway != destination &&
 #endif
             !confirm("Gateway is outside this interface's network. Save anyway?",
                      "Save"))
@@ -1407,6 +1492,12 @@ static BOOL save_form(BOOL apply)
                      ? string_value(np.g_netmask) : NULL);
     FIELD("GATEWAY", ipv4 == AMI_IPTYPE_STATIC && gateway != 0
                      ? string_value(np.g_gateway) : NULL);
+#ifdef AMINETXDUO_PTP
+    /* Unticked is the wire type's choice, which NO only repeats. */
+    FIELD("POINTTOPOINT", checked(np.g_ptp) ? "YES" : NULL);
+    FIELD("DESTINATION", ipv4 == AMI_IPTYPE_STATIC && destination != 0
+                         ? string_value(np.g_destination) : NULL);
+#endif
 #ifdef AMINETXDUO_IPV6
     FIELD("CONFIGURE6", ipv6 == AMI_IP6TYPE_LINKLOCAL ? "LINKLOCAL" :
                         ipv6 == AMI_IP6TYPE_AUTO ? "AUTO" :
@@ -1420,6 +1511,11 @@ static BOOL save_form(BOOL apply)
     FIELD("GATEWAY6", ipv6 == AMI_IP6TYPE_STATIC &&
                       string_value(np.g_gateway6)[0] != '\0'
                       ? string_value(np.g_gateway6) : NULL);
+#ifdef AMINETXDUO_PTP
+    FIELD("DESTINATION6", ipv6 == AMI_IP6TYPE_STATIC &&
+                          string_value(np.g_destination6)[0] != '\0'
+                          ? string_value(np.g_destination6) : NULL);
+#endif
 #endif
     FIELD("MDNS", checked(np.g_mdns) ? "YES" : "NO");
     FIELD("PRIORITY", priority);
@@ -2106,6 +2202,9 @@ static BOOL make_window(VOID)
     CHECK(FALSE);
     ITEM(np.g_boot,CHECKBOX_KIND,GID_BOOT,NP_L_BOOT);
     ITEM(np.g_mdns,CHECKBOX_KIND,GID_MDNS,NP_L_MDNS);
+#ifdef AMINETXDUO_PTP
+    ITEM(np.g_ptp,CHECKBOX_KIND,GID_PTP,NP_L_PTP);
+#endif
 
     /* IPv4 page. */
     context = CreateContext(&np.panel_gadgets[NP_PANEL_IPV4]);
@@ -2124,6 +2223,10 @@ static BOOL make_window(VOID)
         TAG1(GTST_MaxChars, 15);
         ITEM(np.g_dns[i],STRING_KIND,GID_DNS_1 + i,NP_L_DNS_1 + i);
     }
+#ifdef AMINETXDUO_PTP
+    TAG1(GTST_MaxChars, 15);
+    ITEM(np.g_destination,STRING_KIND,GID_DESTINATION,NP_L_DESTINATION);
+#endif
 
     /* IPv6 page. */
     context = CreateContext(&np.panel_gadgets[NP_PANEL_IPV6]);
@@ -2131,6 +2234,10 @@ static BOOL make_window(VOID)
     g = context;
     CYCLE(np_ipv6_labels, AMI_IP6TYPE_AUTO);
     ITEM(np.g_ipv6,CYCLE_KIND,GID_IPV6,NP_L_IPV6);
+#ifdef AMINETXDUO_PTP
+    TAG1(GTST_MaxChars, AMI_CFG_IP6_ZONE_STRLEN - 1);
+    ITEM(np.g_destination6,STRING_KIND,GID_DESTINATION6,NP_L_DESTINATION6);
+#endif
     TAG1(GTST_MaxChars, AMI_CFG_IP6_STRLEN + 3);
     ITEM(np.g_address6[0],STRING_KIND,GID_ADDRESS6_1,NP_L_ADDRESS6_1);
     TAG1(GTST_MaxChars, AMI_CFG_IP6_STRLEN + 3);

@@ -54,6 +54,10 @@ static const char *const np_key_aliases[][5] =
     { "PRIORITY",  "PRI",         NULL },
     { "ADDRESS6",  "IPADDRESS6",  NULL },
     { "CONFIGURE6","IPTYPE6",     NULL },
+#ifdef AMINETXDUO_PTP
+    { "POINTTOPOINT", "POINTOPOINT", NULL },
+    { "DESTINATION", "DESTINATIONADDR", "DESTINATIONADDRESS", NULL },
+#endif
     { NULL }
 };
 

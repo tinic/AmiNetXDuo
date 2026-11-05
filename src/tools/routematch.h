@@ -76,6 +76,10 @@ static inline LONG route6_find_router(const NetStatusRoute6 *r, LONG n,
 
         if (!(r[i].nsr6_Flags & NETSTATUS_RT6_GATEWAY))
             continue;
+#ifdef AMINETXDUO_PTP
+        if (r[i].nsr6_PrefixLength != 0UL)
+            continue;                   /* a prefix through a peer */
+#endif
         if ((LONG)r[i].nsr6_Interface != index)
             continue;
 

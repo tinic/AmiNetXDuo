@@ -86,6 +86,16 @@ VOID ami_ptp_ipv6_shown_hop(NX_IP *ip, const NX_INTERFACE *ifp,
     out[3] = hop[3];
 }
 
+UINT anx6_ptp_route_get(UINT n, ULONG *prefix, UINT *length,
+                        UINT *interface_index)
+{
+    (void)n;
+    (void)prefix;
+    (void)length;
+    (void)interface_index;
+    return NX_FALSE;
+}
+
 UINT netstack_ipv6_peer_set(unsigned short index, const ULONG peer[4])
 {
     (void)index;

@@ -177,6 +177,30 @@ int main(void)
         check(strcmp(out, "PRIORITY = 7\n") == 0,
               "aliases are the GUI's keys: removed and rewritten in place");
     }
+#ifdef AMINETXDUO_PTP
+    {
+        /* AmiTCP's spelling and the parser's DESTINATION aliases are
+           edited in place, so a save leaves one line each. */
+        static const char ptp[] =
+            "POINTOPOINT=YES\n"
+            "DESTINATIONADDR=10.8.0.1\n"
+            "DESTINATION6=fd00::1\n"
+            "MTU=1400\n";
+        NpTextField pf[] = {
+            { "POINTTOPOINT", NULL, 0 },
+            { "DESTINATION", "10.8.0.5", 0 },
+            { "DESTINATION6", "fd00::5", 0 }
+        };
+        len = 0;
+        check(np_text_patch(ptp, sizeof(ptp) - 1, pf, 3,
+                            out, sizeof(out), &len), "ptp patch fits");
+        out[len] = '\0';
+        check(strcmp(out, "DESTINATION = 10.8.0.5\n"
+                          "DESTINATION6 = fd00::5\n"
+                          "MTU=1400\n") == 0,
+              "point-to-point aliases are the GUI's keys");
+    }
+#endif
     {
         static const char iptype[] =
             "IPTYPE=2048\n"

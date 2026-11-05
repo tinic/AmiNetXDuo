@@ -7,6 +7,11 @@ are history.
 
 ## Unreleased
 
+- NetPrefs edits point-to-point interfaces: a Point-to-point checkbox and
+  Peer fields for DESTINATION and DESTINATION6.
+- AddNetRoute DESTINATION=<prefix> GATEWAY=<peer> routes an IPv6 prefix
+  through a point-to-point link, for split VPN routes; DeleteNetRoute
+  DESTINATION=<prefix> removes it.
 - Point-to-point interfaces carry IPv6: ADDRESS6 and DESTINATION6 in the
   interface file, ConfigureNetInterface DESTINATION6=, and AddNetRoute
   DEFAULTGATEWAY <peer> for an IPv6 default route through the link.

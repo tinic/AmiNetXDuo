@@ -641,7 +641,9 @@ typedef struct NetStatusRoute
 /* -------------------------------------------------- NETSTATUS_ROUTES6 --- */
 
 /* The two lists NetX Duo routes IPv6 from -- on-link prefixes first, then
-   default routers -- and not a destination table.  fe80::/64 is never an
+   default routers -- and not a destination table.  With AMINETXDUO_PTP the
+   prefixes through a point-to-point peer follow, GATEWAY with a prefix
+   length, nsr6_NextHop the peer.  fe80::/64 is never an
    entry, so there is none to report and none to remove.  An IPv4-only build
    answers with no entries. */
 
@@ -1027,9 +1029,12 @@ typedef struct NetStatusRxBudget
 #define NETCTRL_ARP_FLUSH       9   /*,                                    */
 
 /* nsc_PrefixLength 0 with a next hop is a default router; any prefix length
-   with no next hop is an on-link prefix; a prefix length WITH a next hop is
-   refused EINVAL.  nsc_Index is required for a link-local next hop and ignored
-   for a prefix.  Both invalidate the IPv6 destination cache. */
+   with no next hop is an on-link prefix.  A prefix length WITH a next hop is
+   refused ENOSYS, except through the peer of a point-to-point interface that
+   is up (AMINETXDUO_PTP): eight such prefixes, the same prefix and length
+   replaced, ENOBUFS past that, dropped when the peer is cleared.  nsc_Index is
+   required for a link-local next hop and ignored for an on-link prefix.  Both
+   invalidate the IPv6 destination cache. */
 #define NETCTRL_ROUTE6_ADD     10   /* nsc_Destination6/PrefixLength/Gateway6/Index */
 #define NETCTRL_ROUTE6_DELETE  11   /* nsc_Destination6/PrefixLength/Gateway6 */
 

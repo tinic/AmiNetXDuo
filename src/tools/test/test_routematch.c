@@ -96,6 +96,12 @@ int main(void)
         CHECK(route6_find_router(r6, 3, 3, 1, gw_a, FALSE, out) == 0);   /* keep gw_a */
         CHECK(route6_find_router(r6, 3, 3, 1, NULL, FALSE, out) == 1 && out[3] == 1);
         CHECK(route6_find_router(r6, 3, 2, 2, NULL, FALSE, out) == 0);   /* past max */
+#ifdef AMINETXDUO_PTP
+        /* A prefix through a point-to-point peer is not a default router. */
+        r6[1].nsr6_PrefixLength = 3;
+        CHECK(route6_find_router(r6, 3, 3, 1, gw_a, TRUE, NULL) == 0);
+        r6[1].nsr6_PrefixLength = 0;
+#endif
     }
 
     {   /* F-147: IPv6 in the running library, or no answer. */

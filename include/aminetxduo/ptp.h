@@ -66,6 +66,15 @@ VOID  ami_ptp_ipv6_peer_set(UINT index, const ULONG *peer);
 VOID  ami_ptp_ipv6_next_hop(NX_IP *ip, const ULONG gw[4], ULONG out[4]);
 VOID  ami_ptp_ipv6_shown_hop(NX_IP *ip, const NX_INTERFACE *ifp,
                              const ULONG hop[4], ULONG out[4]);
+
+/* A prefix through gateway gw, which must be the peer of a point-to-point
+   interface: up, and interface `zone` for a link-local peer.  Any other
+   gateway is NX_NOT_SUPPORTED to the add and NX_ENTRY_NOT_FOUND to the
+   delete.  The caller holds nx_ip_protection. */
+UINT  ami_ptp_ipv6_route_add(NX_IP *ip, const ULONG dest[4], ULONG prefix_len,
+                             const ULONG gw[4], UINT zone);
+UINT  ami_ptp_ipv6_route_delete(NX_IP *ip, const ULONG dest[4],
+                                ULONG prefix_len, const ULONG gw[4]);
 #endif
 
 #define AMI_PTP_NEXT_HOP(ip, gateway)   ami_ptp_next_hop((ip), (gateway))
