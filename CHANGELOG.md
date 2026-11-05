@@ -7,6 +7,9 @@ are history.
 
 ## Unreleased
 
+- sntp takes the time zone from ENV:TZONE when it is set, including
+  daylight saving, so the clock is no longer an hour out in summer;
+  without it, Locale is used as before.
 - WaitSelect() no longer reports a TCP socket readable while only data that
   arrived out of order is queued, so a blocking recv() after it no longer
   waits forever when the sender is gone.
