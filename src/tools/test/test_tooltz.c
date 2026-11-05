@@ -49,6 +49,60 @@ int main(void)
     CHECK(tooltz_local_secs(60UL, 300) == 60UL);
     CHECK(tooltz_local_secs(0xffffff00UL, -60) == 0xffffff00UL);
 
+    /* ENV:TZONE.  Amiga-epoch instants: 2026-07-01 12:00 UTC (summer),
+       2026-01-15 12:00 UTC (winter), and both sides of the EU changeovers
+       of 2026 (29 March and 25 October, 01:00 UTC). */
+    {
+        long w = 12345;
+        const unsigned long jul  = 1530446400UL;
+        const unsigned long jan  = 1516017600UL;
+        const unsigned long mar1 = 1522285200UL;   /* 2026-03-29 01:00 UTC */
+        const unsigned long oct1 = 1540429200UL;   /* 2026-10-25 01:00 UTC */
+
+        CHECK(tooltz_posix_west("GMT0BST", jul, &w) && w == -3600);
+        CHECK(tooltz_posix_west("GMT0BST", jan, &w) && w == 0);
+        CHECK(tooltz_posix_west("GMT0BST", mar1 - 1UL, &w) && w == 0);
+        CHECK(tooltz_posix_west("GMT0BST", mar1, &w) && w == -3600);
+        CHECK(tooltz_posix_west("GMT0BST", oct1 - 1UL, &w) && w == -3600);
+        CHECK(tooltz_posix_west("GMT0BST", oct1, &w) && w == 0);
+        CHECK(tooltz_posix_west("CET-1CEST", jul, &w) && w == -7200);
+        CHECK(tooltz_posix_west("CET-1CEST", mar1 - 1UL, &w) && w == -3600);
+        CHECK(tooltz_posix_west("CET-1CEST", mar1, &w) && w == -7200);
+        CHECK(tooltz_posix_west("CET-1CEST,M3.5.0/2,M10.5.0/3", jul, &w)
+              && w == -7200);
+        CHECK(tooltz_posix_west("CET-1CEST,M3.5.0/2,M10.5.0/3", oct1, &w)
+              && w == -3600);
+        CHECK(tooltz_posix_west("CET-1CEST,M3.5.0/2,M10.5.0/3", oct1 - 1UL,
+                                &w) && w == -7200);
+        /* US default rule: 2026-03-08 and 2026-11-01. */
+        CHECK(tooltz_posix_west("EST5EDT", jul, &w) && w == 4 * 3600);
+        CHECK(tooltz_posix_west("EST5EDT", jan, &w) && w == 5 * 3600);
+        CHECK(tooltz_posix_west("EST5EDT", 1520406000UL, &w)  /* 03-07 07:00Z */
+              && w == 5 * 3600);
+        CHECK(tooltz_posix_west("EST5EDT", 1520492400UL, &w)  /* 03-08 07:00Z */
+              && w == 4 * 3600);
+        /* Southern hemisphere: summer spans New Year. */
+        CHECK(tooltz_posix_west("AEST-10AEDT,M10.1.0,M4.1.0/3", jan, &w)
+              && w == -11 * 3600);
+        CHECK(tooltz_posix_west("AEST-10AEDT,M10.1.0,M4.1.0/3", jul, &w)
+              && w == -10 * 3600);
+        /* No DST, half hours, quoted names, Julian rules. */
+        CHECK(tooltz_posix_west("UTC0", jul, &w) && w == 0);
+        CHECK(tooltz_posix_west("IST-5:30", jul, &w) && w == -19800);
+        CHECK(tooltz_posix_west("<+04>-4", jul, &w) && w == -14400);
+        CHECK(tooltz_posix_west("EST5EDT,J60,J300", jul, &w) && w == 4 * 3600);
+        /* Not a time zone: refused, *seconds_west untouched. */
+        w = 777;
+        CHECK(!tooltz_posix_west("", jul, &w));
+        CHECK(!tooltz_posix_west("GMT", jul, &w));
+        CHECK(!tooltz_posix_west("Europe/London", jul, &w));
+        CHECK(!tooltz_posix_west(":Europe/London", jul, &w));
+        CHECK(!tooltz_posix_west("GMT0BST,M13.5.0,M10.5.0", jul, &w));
+        CHECK(!tooltz_posix_west("GMT99", jul, &w));
+        CHECK(!tooltz_posix_west("XXX1193047", jul, &w));
+        CHECK(w == 777);
+    }
+
     printf("tooltz: %d checks, %d failures\n", checks, failures);
     return failures != 0;
 }
