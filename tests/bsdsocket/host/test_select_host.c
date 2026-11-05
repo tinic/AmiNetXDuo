@@ -6,6 +6,7 @@
  */
 
 #include "bsdsocket_vectors.h"
+#include "nx_packet.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -564,23 +565,25 @@ static void t_tcp_readability(void)
     s = h_tcp(0, NX_TCP_ESTABLISHED);
     CHECK(bsd_readable(s) == FALSE, "an idle established socket is not readable");
 
+    /* bsd_readable() tests what _nx_tcp_socket_receive() tests: a head marked
+       NX_PACKET_READY. NetX Duo marks a segment ready when it arrives in
+       order, or when the segment before it fills the gap; one that arrived
+       out of order stays queued, and counted, with nx_packet_queue_next at
+       NX_NULL, and recv() cannot return it. */
     h_reset();
     s = h_tcp(0, NX_TCP_ESTABLISHED);
+    h_probe_packet.nx_packet_queue_next = (NX_PACKET *)NX_PACKET_READY;
+    s->as_Nx.tcp.nx_tcp_socket_receive_queue_head  = &h_probe_packet;
     s->as_Nx.tcp.nx_tcp_socket_receive_queue_count = 1;
-    CHECK(bsd_readable(s) == TRUE, "a queued segment is readable");
+    CHECK(bsd_readable(s) == TRUE, "an in-order segment at the head is readable");
 
-    /* The old case here set tcp_bytes_available with the queue count at zero
-       and asserted readable. That state is not reachable: the count is bumped
-       for every segment put on the receive queue, in order or not, so a zero
-       count means an empty queue and nx_tcp_socket_bytes_available() would
-       return zero too. It asserted the mock's freedom, not the stack's.
-       What bsd_readable() now tests is the queue head itself, so assert on
-       that -- including the defensive case where head and count disagree,
-       which must still report ready rather than lose the wakeup. */
     h_reset();
     s = h_tcp(0, NX_TCP_ESTABLISHED);
-    s->as_Nx.tcp.nx_tcp_socket_receive_queue_head = &h_probe_packet;
-    CHECK(bsd_readable(s) == TRUE, "a packet on the queue is readable");
+    h_probe_packet.nx_packet_queue_next = NX_NULL;
+    s->as_Nx.tcp.nx_tcp_socket_receive_queue_head  = &h_probe_packet;
+    s->as_Nx.tcp.nx_tcp_socket_receive_queue_count = 1;
+    CHECK(bsd_readable(s) == FALSE,
+          "only out-of-order segments queued: not readable, recv() would block");
 
     h_reset();
     s = h_tcp(0, NX_TCP_ESTABLISHED);

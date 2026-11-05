@@ -132,7 +132,10 @@ BUDGETS=(
     # 384,508 -> 384,932.
     # IPv6 prefix routes through a point-to-point peer, an 8-entry table
     # and its lookup (#437): +1,216, 384,932 -> 386,148.
-    "default:src/bsdsocket/bsdsocket.library:386148"
+    # A TCP socket readable only when recv() can return data (nx_ready.h):
+    # the head's READY mark tested, a 32-bit constant: +8, 386,148 ->
+    # 386,156.
+    "default:src/bsdsocket/bsdsocket.library:386156"
     # 41,412 after stateless receive-checksum verification was added to the
     # EL3 and word/long NE2000 direct paths, 2026-09-15.  43,620 with
     # ANXD_CMD_RX_BATCH in the shell (claim, completion, staging copy, the

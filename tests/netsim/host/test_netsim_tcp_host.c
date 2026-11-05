@@ -71,6 +71,7 @@
 #include "netsim.h"
 #include "thread_priorities.h"
 #include "aminetxduo/pool.h"
+#include "aminetxduo/nx_ready.h"
 #include "bsdsocket_window.h"
 
 /* The pool a 4,096-packet machine carves (pool.h, the clamp): the A1200. */
@@ -206,6 +207,9 @@ typedef struct NsPhase
     ULONG64         done_ns;
     ULONG64         ss_ns;          /* NS_SS_BYTES delivered               */
     ULONG           retransmits;    /* the sender's NetX Duo count         */
+    ULONG           ready_wrong;    /* nx_ready.h disagreed with a receive */
+    ULONG           ooo_held;       /* segments queued, none readable: a   */
+                                    /* gap before them (nx_ready.h)        */
     NsEnd           end[NETSIM_SIDES];
     TX_SEMAPHORE    finished;
 } NsPhase;
@@ -455,7 +459,17 @@ static VOID ns_send_all(NsPhase *ph, NsEnd *e)
 
 /* nx_tcp_socket_receive() hands over in-order data only, so the time
    between two deliveries is the time the connection made no progress --
-   what a stall is, wherever in the path it came from. */
+   what a stall is, wherever in the path it came from.
+
+   Each turn also holds bsd_readable()'s TCP data test, nx_ready.h, to what
+   a receive that does not wait returns: ready and a packet, or not ready
+   and NX_NO_PACKET.  WaitSelect() promises that a socket it reports
+   readable does not block a read.  Loss leaves segments queued behind a
+   gap, counted but not returned until the gap is filled; a test on the
+   count or the bare queue head reported those readable, and the "loss"
+   scenario shows it.  No segment arrives between the test and the receive:
+   frames come off the wire in the idle hook, which runs only when no
+   thread is ready (tx_sim_port.c). */
 static VOID ns_receive_all(NsPhase *ph, NsEnd *e)
 {
     ULONG64 last = netsim_now_ns();
@@ -465,9 +479,17 @@ static VOID ns_receive_all(NsPhase *ph, NsEnd *e)
         NX_PACKET *packet;
         NX_PACKET *seg;
         UINT       status;
+        UINT       ready;
         ULONG64    now;
 
-        status = nx_tcp_socket_receive(&e->tcp, &packet, NS_SLICE);
+        ready  = ami_nx_tcp_receive_ready(&e->tcp);
+        status = nx_tcp_socket_receive(&e->tcp, &packet, NX_NO_WAIT);
+        if ((status == NX_SUCCESS) != (ready == NX_TRUE))
+            ph->ready_wrong++;
+        if (!ready && e->tcp.nx_tcp_socket_receive_queue_count != 0)
+            ph->ooo_held++;
+        if (status == NX_NO_PACKET)
+            status = nx_tcp_socket_receive(&e->tcp, &packet, NS_SLICE);
         if (status == NX_NO_PACKET)
             continue;
         if (status != NX_SUCCESS)
@@ -663,6 +685,14 @@ static ULONG ns_run_phase(const char *label, UINT from, UINT port)
     }
 
     ns_check(ph->got == ph->bytes && !ph->corrupt, label, "data");
+
+    printf("readiness phase=%s wrong=%lu ooo_held=%lu\n", label,
+           (unsigned long)ph->ready_wrong, (unsigned long)ph->ooo_held);
+    ns_check(ph->ready_wrong == 0, label, "readiness");
+    /* With loss towards the receiver, the check has to have met the case it
+       is for: segments queued behind a gap, none of them readable. */
+    if (path->loss_ppm != 0)
+        ns_check(ph->ooo_held != 0, label, "readiness_exercised");
 
     if (ns_sc->goodput_floor != 0)
         ns_check(steady >= ns_sc->goodput_floor, label, "goodput");

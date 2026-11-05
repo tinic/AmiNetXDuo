@@ -8,6 +8,7 @@
 #include "aminetxduo/budget.h"
 #include "aminetxduo/exec_port.h"
 #include "aminetxduo/nxstatus.h"
+#include "aminetxduo/nx_ready.h"
 #include "connfail.h"
 
 #include "nx_tcp.h"
@@ -632,18 +633,13 @@ BOOL bsd_readable(AmiSocket *sock)
                 return TRUE;
         }
 
-        if (sock->as_Nx.tcp.nx_tcp_socket_receive_queue_count > 0)
-            return TRUE;
-
-        /* Only reached with the count at zero, and the count is bumped for
-           every queued segment, in order or not (nx_tcp_socket_state_data_
-           check.c:589 and :935). nx_tcp_socket_bytes_available() would take
-           nx_ip_protection and the THREADS_ONLY Forbid/FindTask/Permit to
-           walk a queue it has just been told is empty, and return zero. Test
-           the head instead: one aligned load, and it still reports ready if
-           the count and the queue ever disagree. Select may over-report. */
-        return (sock->as_Nx.tcp.nx_tcp_socket_receive_queue_head != NX_NULL)
-                   ? TRUE : FALSE;
+        /* Readable only if recv() can return something now (nx_ready.h).
+           Neither the receive count nor a bare queue head will do: both
+           include segments that arrived out of order, which stay queued but
+           unreadable until the gap before them is filled, so a blocking
+           recv() after WaitSelect() would wait for the missing bytes, for
+           good if the peer is gone. */
+        return ami_nx_tcp_receive_ready(&sock->as_Nx.tcp) ? TRUE : FALSE;
     }
 
     if (sock->as_SoError != 0)
