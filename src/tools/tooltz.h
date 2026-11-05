@@ -26,4 +26,14 @@ long tooltz_minutes_west(long loc_gmtoffset, int prefs_loaded);
    32 bits leaves the UTC value, as before. */
 unsigned long tooltz_local_secs(unsigned long utc_secs, long minutes_west);
 
+/*
+ * A POSIX TZ string, as SetDST writes to ENV:TZONE ("GMT0BST",
+ * "CET-1CEST,M3.5.0/2,M10.5.0/3"), at the instant `utc_secs` (Amiga epoch):
+ * 1 and the zone in seconds west, daylight saving included, or 0 when the
+ * string does not parse.  A DST name without rules takes the EU rule for
+ * zones from UTC-1 to UTC+2 and the US rule otherwise.
+ */
+int tooltz_posix_west(const char *tz, unsigned long utc_secs,
+                      long *seconds_west);
+
 #endif
