@@ -409,6 +409,12 @@ VOID ami_sana2_refresh_stats(AmiSana2If *iface) { (VOID)iface; }
 VOID ami_sana2_ack_reader_start(AmiSana2Reader *rd) { rd->ack_mask = 0; }
 VOID ami_sana2_ack_reader_pass(AmiSana2Reader *rd)  { (VOID)rd; }
 VOID ami_sana2_ack_reader_stop(AmiSana2Reader *rd)  { (VOID)rd; }
+/* The receive server is sana2_server.c's and shapes Exec priorities only. */
+VOID ami_sana2_server_bind(AmiSana2Reader *rd)    { (VOID)rd; }
+VOID ami_sana2_server_unbind(AmiSana2Reader *rd)  { (VOID)rd; }
+VOID ami_sana2_server_run(AmiSana2Reader *rd)     { (VOID)rd; }
+BOOL ami_sana2_server_spent(AmiSana2Reader *rd)   { (VOID)rd; return FALSE; }
+VOID ami_sana2_server_settle(AmiSana2Reader *rd)  { (VOID)rd; }
 /* The capacity the reader asks again for once a second (sana2_device.c),
    and the ThreadX clock that paces it: the reader's loop is not driven
    here. */

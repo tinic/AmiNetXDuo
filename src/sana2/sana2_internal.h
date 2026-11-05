@@ -306,6 +306,28 @@ UINT ami_sana2_gso_max_segs(NX_INTERFACE *interface_ptr);
 #define AMI_SANA2_RX_RUN_MAX        AMI_SANA2_RX_MAX_DEPTH
 #endif
 
+/*
+ * The receive server's budget, in credits per ThreadX tick (sana2_server.c):
+ * a tick in which a reader at the band priority is ready costs COST, every
+ * tick refills SHARE, and the bucket holds CAP.  3 of 10 holds the band
+ * priority for about 30% of a busy reader's ticks, the share the A1200 needed
+ * to keep its read rate with a priority-0 decoder fed (#353); CAP lets a
+ * burst of four busy ticks through before the level drops.
+ */
+#ifndef AMI_SANA2_RX_SERVER_SHARE
+#define AMI_SANA2_RX_SERVER_SHARE   3
+#endif
+#ifndef AMI_SANA2_RX_SERVER_COST
+#define AMI_SANA2_RX_SERVER_COST    10
+#endif
+#ifndef AMI_SANA2_RX_SERVER_CAP
+#define AMI_SANA2_RX_SERVER_CAP     40
+#endif
+/* Ready-list nodes the tick looks at for a waiting program, at most. */
+#ifndef AMI_SANA2_RX_SERVER_WALK
+#define AMI_SANA2_RX_SERVER_WALK    8
+#endif
+
 #if AMI_SANA2_RX_RUN_MAX < 1
 #error "AMI_SANA2_RX_RUN_MAX must be at least one"
 #endif
@@ -793,6 +815,16 @@ typedef struct AmiRxSum
  */
 struct AmiSana2Rx;
 
+/*
+ * A reader under the receive server (sana2_server.c): its node on the
+ * server's list and its Task, NULL when not bound.
+ */
+typedef struct AmiSana2Served
+{
+    struct MinNode      node;
+    struct Task        *task;
+} AmiSana2Served;
+
 typedef struct AmiSana2Reader
 {
     AmiSana2If         *iface;
@@ -852,6 +884,9 @@ typedef struct AmiSana2Reader
     BOOL                ack_tr_open;
     BOOL                ack_tr_busy;
     ULONG               ack_mask;
+
+    /* The receive server (sana2_server.c). */
+    AmiSana2Served      served;
 } AmiSana2Reader;
 
 /* One ring of reads for one Ethernet type. */
@@ -1440,6 +1475,13 @@ VOID  ami_sana2_rx_poll(AmiSana2Reader *rd);
 UWORD ami_sana2_rx_drain(AmiSana2Reader *rd, UWORD budget);
 VOID  ami_sana2_rx_teardown(AmiSana2Reader *rd);
 #endif
+
+/* sana2_server.c */
+VOID  ami_sana2_server_bind(AmiSana2Reader *rd);
+VOID  ami_sana2_server_unbind(AmiSana2Reader *rd);
+VOID  ami_sana2_server_run(AmiSana2Reader *rd);
+BOOL  ami_sana2_server_spent(AmiSana2Reader *rd);
+VOID  ami_sana2_server_settle(AmiSana2Reader *rd);
 
 /* sana2_tx.c */
 VOID ami_sana2_tx_init(AmiSana2If *iface);

@@ -2512,6 +2512,8 @@ static VOID ami_sana2_rx_thread(ULONG argument)
     rd->running = TRUE;
     tx_semaphore_put(&rd->ready);
 
+    ami_sana2_server_bind(rd);
+
     while (!rd->stop)
     {
         UWORD live = 0;
@@ -2593,6 +2595,7 @@ static VOID ami_sana2_rx_thread(ULONG argument)
             /* Either the pool is empty or the interface is down. Back off
                rather than spin. ami_sana2_rx_stop() signals out of this. */
             tx_thread_sleep(2);
+            ami_sana2_server_run(rd);
             continue;
         }
 
@@ -2625,6 +2628,7 @@ static VOID ami_sana2_rx_thread(ULONG argument)
         if (ami_sana2_rx_should_block(rd, AMI_SANA2_RX_RUN_MAX))
         {
             ami_sana2_block_enter();
+            ami_sana2_server_settle(rd);
             Wait(rd->wake_mask | rd->reap_mask | rd->ack_mask);
 #ifdef AMINETXDUO_RXPROBE
             {
@@ -2644,6 +2648,7 @@ static VOID ami_sana2_rx_thread(ULONG argument)
 #else
             ami_sana2_block_leave();
 #endif
+            ami_sana2_server_run(rd);
         }
 
         (VOID)ami_sana2_rx_drain(rd, (UWORD)AMI_SANA2_RX_RUN_MAX);
@@ -2662,6 +2667,21 @@ static VOID ami_sana2_rx_thread(ULONG argument)
          */
         ami_sana2_rx_poll(rd);
 
+        /*
+         * The receive server's budget is spent with frames still waiting:
+         * stand aside at the program priority through a baton release, so
+         * the band's other threads can run, and carry on at that priority
+         * until the tick refills it (sana2_server.c).
+         */
+        if (ami_sana2_server_spent(rd) &&
+            !ami_sana2_rx_should_block(rd, AMI_SANA2_RX_RUN_MAX))
+        {
+            ami_sana2_block_enter();
+            ami_sana2_server_settle(rd);
+            ami_sana2_block_leave();
+            ami_sana2_server_run(rd);
+        }
+
 #ifdef AMINETXDUO_RXPROBE
         /* Keep probe_dev_rx within a few hundred frames of the truth: the
            report runs from NetStat, which cannot issue a device command. */
@@ -2669,6 +2689,8 @@ static VOID ami_sana2_rx_thread(ULONG argument)
             ami_sana2_refresh_stats(iface);
 #endif
     }
+
+    ami_sana2_server_unbind(rd);
 
     /* Held acknowledgments go before the transmit side is unbound. */
     ami_sana2_ack_reader_stop(rd);
