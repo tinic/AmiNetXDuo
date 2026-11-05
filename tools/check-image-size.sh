@@ -135,7 +135,9 @@ BUDGETS=(
     # A TCP socket readable only when recv() can return data (nx_ready.h):
     # the head's READY mark tested, a 32-bit constant: +8, 386,148 ->
     # 386,156.
-    "default:src/bsdsocket/bsdsocket.library:386156"
+    # The receive server and the RX_POLL reply kept (#9): +1,292,
+    # 386,156 -> 387,448.
+    "default:src/bsdsocket/bsdsocket.library:387448"
     # 41,412 after stateless receive-checksum verification was added to the
     # EL3 and word/long NE2000 direct paths, 2026-09-15.  43,620 with
     # ANXD_CMD_RX_BATCH in the shell (claim, completion, staging copy, the
@@ -243,7 +245,9 @@ BUDGETS=(
     # A refused read retires its ring (#437): +32, 258,120 -> 258,152.
     # /31-/32 broadcast (netxduo #43) and AMINETXDUO_PTP (#437): +1,600,
     # 258,152 -> 259,752.
-    "minimal:src/bsdsocket/bsdsocket.library:259752"
+    # The receive server and the RX_POLL reply kept (#9): +1,112,
+    # 259,752 -> 260,864.
+    "minimal:src/bsdsocket/bsdsocket.library:260864"
     # Combined with #438 on main: +16, 46,016 -> 46,032.
     "minimal:src/netdev/anxnet.device:46032"
     # 29,088 on e806188f after the audited device fixes.
@@ -283,7 +287,8 @@ BUDGETS=(
     # 212,048 with the /31-/32 broadcast fix (netxduo #43) and
     # AMINETXDUO_PTP (#437).
     # 212,176 with DESTINATION6 in the interface file keywords (#437).
-    "micro:src/bsdsocket/bsdsocket.library:212176"
+    # 213,440 with the receive server and the RX_POLL reply kept (#9).
+    "micro:src/bsdsocket/bsdsocket.library:213440"
     "micro:src/netdev/anxnet.device:46000"
     "micro:src/netdev/anxgenet.device:29120"
     "micro:src/wifipi/anxwifipi.device:56000"
