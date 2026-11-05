@@ -1780,6 +1780,7 @@ static CtGive          cg_web;
 static CtGive          cg_probe[4];
 static volatile UWORD  cg_listening;
 static volatile UWORD  cg_release;
+static volatile UWORD  cg_stop;      /* the servers close their sockets */
 static UBYTE           cg_buf[4096];
 
 static ULONG cg_now(VOID)
@@ -1862,7 +1863,7 @@ static VOID cg_server_body(CtGive *g, struct Library *base, UWORD port)
     cg_listening++;
     Permit();
 
-    while (cg_release == 0U)
+    while (cg_stop == 0U)
     {
         LONG s = c_accept(base, ls);
 
@@ -2147,7 +2148,7 @@ static VOID ct_giveback_phase(struct Library *base)
         return;
     }
 
-    cg_listening = cg_release = 0U;
+    cg_listening = cg_release = cg_stop = 0U;
 
     ct_check(cg_spawn(&cg_sink, CG_SINK, "anxd-give-sink") &&
              cg_spawn(&cg_web, CG_WEB, "anxd-give-web"),
@@ -2266,6 +2267,10 @@ static VOID ct_giveback_phase(struct Library *base)
         ct_check(cg_worker[i].cg_Result < 0 && cg_worker[i].cg_Errno == C_EINTR,
                  "give: a worker ends with EINTR", cg_worker[i].cg_Errno);
     }
+
+    /* Only now: a sink that closes while a sender is still blocked gives
+       that sender EPIPE, not EINTR. */
+    cg_stop = 1U;
 
     /* Every Process must be gone before the segment is. */
     for (;;)
@@ -2442,7 +2447,7 @@ static VOID ct_removed_timer_phase(VOID)
            (LONG)CR_VICTIMS);
     ct_trace("removed: start");
 
-    cg_listening = cg_release = 0U;
+    cg_listening = cg_release = cg_stop = 0U;
     ct_check(cg_spawn(&cg_sink, CG_SINK, "anxd-removed-sink"),
              "removed: spawn the server", 0);
     (VOID)cp_wait(&cg_listening, 1U);
@@ -2543,7 +2548,7 @@ static VOID ct_removed_timer_phase(VOID)
                  "removed: a newcomer makes a socket", (LONG)tn);
     }
 
-    cg_release = 1U;
+    cg_release = cg_stop = 1U;
     while (cg_sink.cg_Done == 0U)
         Delay(5);
     ct_trace("removed: done");
