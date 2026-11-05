@@ -500,8 +500,22 @@ jobs:
           SHELLCHECK: ${{ needs.shellcheck.result }}
           PACKAGE: ${{ needs.package.result }}
           DOCS: ${{ needs.docs.result }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           echo "option_plan=$OPTION_PLAN reuse_run=$REUSE_RUN"
+          # A hosted macOS job that GitHub never gave a runner (capacity:
+          # "not acquired by Runner of type hosted") is cancelled with no
+          # runner and no steps.  That is GitHub's queue, not our code, so it
+          # counts as not run.  A macOS job that ran and failed or was
+          # cancelled mid-run still fails the gate.
+          if [ "$HOST_CLANG" = cancelled ]; then
+              got=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs" \
+                  --jq '.jobs[] | select(.name == "host tests (macOS / clang)") | "\(.runner_name // "")|\(.steps | length)"' 2>/dev/null)
+              case "$got" in
+                  "|0") HOST_CLANG=unacquired
+                        echo "::warning::macOS/clang host tests were not run: no hosted macOS runner was available" ;;
+              esac
+          fi
           printf 'event=%s mode=%s plan=%s gitlinks=%s analyze=%s options=%s stackframes=%s tier1=%s host_clang=%s shellcheck=%s package=%s docs=%s\n' \
             "$EVENT" "$MODE" "$PLAN" "$GITLINKS" "$ANALYZE" "$OPTIONS" "$STACKFRAMES" \
             "$TIER1" "$HOST_CLANG" "$SHELLCHECK" "$PACKAGE" "$DOCS"
@@ -509,6 +523,7 @@ jobs:
           # Pull requests skip macOS/clang; everything else must run it.
           want_clang=success
           [ "$EVENT" != pull_request ] || want_clang=skipped
+          [ "$HOST_CLANG" != unacquired ] || want_clang=unacquired
           case "$MODE" in
             full|shipping)
               case "$MODE:$OPTION_PLAN:$OPTIONS" in
