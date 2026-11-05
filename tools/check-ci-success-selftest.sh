@@ -20,6 +20,8 @@ cat > "$work/bin/gh" <<'GH'
 #!/usr/bin/env bash
 case "$1 $2" in
     "run list") cat "$FAKE/runs.json" ;;
+    api*/jobs*) id=$(printf '%s' "$2" | sed -n 's|.*/runs/\([0-9]*\)/jobs.*|\1|p')
+          if [ -f "$FAKE/jobs-$id" ]; then cat "$FAKE/jobs-$id"; else printf '{"jobs":[]}'; fi ;;
     api*) id=$(printf '%s' "$2" | sed -n 's|.*/runs/\([0-9]*\)/artifacts|\1|p')
           if [ -f "$FAKE/art-$id" ]; then
               printf '{"artifacts":['
@@ -42,7 +44,8 @@ chmod +x "$work/bin/gh"
 cases=0 failures=0
 run_case() {                    # name  want-rc  want-text  runs-json  [id:artifact ...]
     local name=$1 want_rc=$2 want_text=$3 json=$4; shift 4
-    rm -f "$work"/art-*
+    rm -f "$work"/art-* "$work"/jobs-*
+    [ -z "${JOBS:-}" ] || printf '%s' "$JOBS" > "$work/jobs-${JOBS_ID}"
     printf '%s' "$json" > "$work/runs.json"
     for a in "$@"; do printf '%s\n' "${a#*:}" > "$work/art-${a%%:*}"; done
     local out rc
@@ -118,6 +121,15 @@ run_case "weekly full run" 0 "run=25 " \
     "[$(r 25 completed success schedule)]" "25:$fullcand"
 run_case "expired full coverage proof" 1 "reason=no_successful_run_with_candidate" \
     "[$(r 26 completed success push)]" "26:$cand"$'\n'"ci-full-$sha true"
+# The hosted macOS job never got a runner; tier 1 passed: a success.
+gate='{"name":"tier 1 report","conclusion":"success","runner_name":"r","steps":[{}]}'
+mac0='{"name":"host tests (macOS / clang)","conclusion":"cancelled","runner_name":"","steps":[]}'
+macrun='{"name":"host tests (macOS / clang)","conclusion":"cancelled","runner_name":"GitHub Actions 7","steps":[{}]}'
+JOBS="{\"jobs\":[$gate,$mac0]}" JOBS_ID=27 run_case "macOS never acquired, gate passed" 0 "run=27 " \
+    "[$(r 27 completed failure push)]" "27:$fullcand"
+# The macOS job started and was cancelled: still a failure.
+JOBS="{\"jobs\":[$gate,$macrun]}" JOBS_ID=28 run_case "macOS cancelled after starting" 1 "run=28 .*conclusion=failure" \
+    "[$(r 28 completed failure push)]" "28:$fullcand"
 run_case "proof alone without candidate" 1 "reason=no_successful_run_with_candidate" \
     "[$(r 27 completed success push)]" "27:ci-full-$sha"
 
