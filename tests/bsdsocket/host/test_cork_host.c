@@ -1661,9 +1661,10 @@ static void t_recv(void)
 
 static void t_select(void)
 {
-    AmiSocket     *s;
-    ULONG          rd[BSD_FD_WORDS];
-    struct timeval poll = { 0, 0 };
+    AmiSocket       *s;
+    ULONG            rd[BSD_FD_WORDS];
+    struct timeval   poll = { 0, 0 };
+    static NX_PACKET ready;     /* an in-order segment: readable */
 
     printf("cork: WaitSelect()\n");
 
@@ -1671,6 +1672,8 @@ static void t_select(void)
     s = h_tcp(0);
     (VOID)h_send(0, 0, 30, 0);
 
+    ready.nx_packet_queue_next = (NX_PACKET *)NX_PACKET_READY;
+    s->as_Nx.tcp.nx_tcp_socket_receive_queue_head  = &ready;
     s->as_Nx.tcp.nx_tcp_socket_receive_queue_count = 1;
     memset(rd, 0, sizeof(rd));
     rd[0] = 1;
@@ -1678,6 +1681,7 @@ static void t_select(void)
           "readable");
     CHECK(h.sends == 0, "a readable socket is not flushed");
 
+    s->as_Nx.tcp.nx_tcp_socket_receive_queue_head  = NX_NULL;
     s->as_Nx.tcp.nx_tcp_socket_receive_queue_count = 0;
     memset(rd, 0, sizeof(rd));
     rd[0] = 1;
