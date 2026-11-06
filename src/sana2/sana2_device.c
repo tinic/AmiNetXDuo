@@ -546,7 +546,13 @@ LONG ami_sana2_online(AmiSana2If *iface)
  * prism2.device is not here.  A unit left online keeps its card raising
  * PORTS interrupts, which no WHDLoad program answers: the demo freezes
  * (#455).  S2_OFFLINE is GoOffline(), which masks and acknowledges them,
- * and is what the AmiTCP and EasyNetPro Offline commands send.
+ * and is what the AmiTCP and EasyNetPro Offline commands send.  The
+ * Online hang that once kept it here (#314) does not come from the stack:
+ * the same A1200 and card, reflashed to STA 1.8.4, cycle cleanly with
+ * WirelessManager running, the rc1 stack included.  The card had stock
+ * firmware then.  Below STA 1.7 the driver skips P2_CMD_DISABLE
+ * (UNITF_BROKENDISABLE), so the next S2_ONLINE sends P2_CMD_ENABLE to a
+ * port still enabled and waits for P2_EVENTF_CMD without a bound.
  */
 BOOL ami_sana2_keeps_online(const char *device)
 {
