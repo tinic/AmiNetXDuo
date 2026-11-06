@@ -1382,7 +1382,10 @@
              wait ends when that interface's lease is BOUND and its route
              and name-server options have been installed, not merely when
              some address appears. An interface with its address in its
-             file does not wait.
+             file does not wait. For a Wi-Fi card that reports its link,
+             such as prism2.device 2.9, the interface is attached once the
+             card has joined its network; that wait comes out of the same
+             TIMEOUT.
 
   @{b}Example@{ub}
 
@@ -3815,8 +3818,9 @@
   1.5 is installed beside it and S:Network-Startup starts that one.
 
   S:Network-Startup starts the Wi-Fi only when ENV:Sys/Wireless.prefs
-  exists: WirelessManager first, then the interface, which waits at most
-  30 seconds for an address. A PC Card Wi-Fi that is the primary
+  exists: WirelessManager first, then the interface, which waits for the
+  card to join and for an address, at most 30 seconds in all.
+  A PC Card Wi-Fi that is the primary
   interface starts without the file as well, for an open network; DHCP continues after the boot goes on. With
   the Pi Ethernet as well, both start, the Ethernet first with
   PRIORITY=10, so the default route stays on the cable, and the Wi-Fi in

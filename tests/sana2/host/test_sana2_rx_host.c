@@ -6,6 +6,7 @@
 
 #include "sana2_internal.h"
 #include "aminetxduo/anxs2ext.h"
+#include "aminetxduo/events.h"
 
 /* BeginIO(), which the transmit path posts with; the shim declares it and
    this file defines it. */
@@ -57,7 +58,20 @@ VOID Permit(VOID)  { }
 
 VOID SendIO(struct IORequest *req) { (VOID)req; }
 static struct IORequest *h_last_begun;
-VOID BeginIO(struct IORequest *req) { h_last_begun = req; }
+/* A unit that is not online: prism2.device 2.9 refuses a CMD_READ in
+   BeginIO() and replies it at once (request.c CmdRead). */
+static BOOL h_out_of_service;
+VOID AddTail(struct List *list, struct Node *node);
+VOID BeginIO(struct IORequest *req)
+{
+    h_last_begun = req;
+    if (h_out_of_service)
+    {
+        req->io_Error = (BYTE)S2ERR_OUTOFSERVICE;
+        AddTail(&req->io_Message.mn_ReplyPort->mp_MsgList,
+                &req->io_Message.mn_Node);
+    }
+}
 
 /* What the teardown asked the device to give back, in order. */
 static struct IORequest *h_aborted[16];
@@ -389,7 +403,8 @@ VOID ami_sana2_capacity_changed(AmiSana2If *iface) { (VOID)iface; }
    target does not link: no TCP here. */
 VOID _nx_tcp_receive_pass_begin(NX_IP *ip_ptr) { (VOID)ip_ptr; }
 VOID _nx_tcp_receive_pass_complete(NX_IP *ip_ptr) { (VOID)ip_ptr; }
-ULONG _tx_time_get(VOID) { return 0; }
+static ULONG h_now;
+ULONG _tx_time_get(VOID) { return h_now; }
 UWORD ami_sana2_bound_count(VOID) { return 1; }
 VOID ami_sana2_block_enter(VOID) { }
 VOID ami_sana2_block_leave(VOID) { }
@@ -2111,6 +2126,121 @@ static void test_refused_read_retires_the_ring(void)
     }
 }
 
+/* ------------------------------------------------- out of service -- */
+
+/*
+ * #457: prism2.device refuses every read while its unit is not online, and
+ * WirelessManager brings the unit up after the stack has attached.  The
+ * first refusal marks the link down; the reader bounces its reads off the
+ * unit once a second, and the unit that keeps them has the link marked up.
+ */
+static struct MsgPort oos_port;
+
+static void oos_ring(AmiSana2Reader *rd, AmiSana2Rx *rx)
+{
+    UWORD i;
+
+    rf_ring(rd, rx);
+    NewList(&oos_port.mp_MsgList);
+    rd->port = &oos_port;
+    for (i = 0; i < RF_SLOTS; i++)
+        rf_slot[i].req.ios2_Req.io_Message.mn_ReplyPort = &oos_port;
+    iface.admin_up      = TRUE;
+    iface.offline_state = AMI_SANA2_OFFLINE_UP;
+    interface_obj.nx_interface_link_up = NX_TRUE;
+}
+
+/* What the drain does with the refusals on the port. */
+static void oos_drain(AmiSana2Rx *rx)
+{
+    NewList(&oos_port.mp_MsgList);
+    rf_complete(rx);
+    ami_sana2_rx_out_of_service(&iface);
+}
+
+static void test_out_of_service_comes_back(void)
+{
+    const ULONG    sec = (ULONG)TX_TIMER_TICKS_PER_SECOND;
+    AmiSana2Reader rd;
+    AmiSana2Rx    *rx = &iface.rx[0];
+    ULONG          events;
+
+    printf("sana2: an out-of-service unit is probed until it is back\n");
+
+    h_now = 1000;
+    oos_ring(&rd, rx);
+    h_check(ami_sana2_rx_post(rx) == RF_SLOTS, "oos: a fresh ring is posted");
+
+    events = host_event_count;
+    oos_drain(rx);
+    h_check(!iface.online && interface_obj.nx_interface_link_up == NX_FALSE &&
+            iface.out_of_service,
+            "oos: the first refusal marks the link down");
+    h_check(host_event_count == events + 1 &&
+            host_last_event_code == NETEVENT_OUT_OF_SERVICE,
+            "oos: and records NETEVENT_OUT_OF_SERVICE");
+
+    h_now += sec - 1;
+    h_last_begun = NULL;
+    ami_sana2_rx_resume(&rd);
+    h_check(h_last_begun == NULL && !iface.online,
+            "oos: nothing is posted within the second");
+
+    h_out_of_service = TRUE;
+    h_now += 1;
+    ami_sana2_rx_resume(&rd);
+    h_check(h_last_begun != NULL && rf_slot[0].posted && rf_slot[1].posted,
+            "oos: a second on, the reads are posted again");
+    h_check(interface_obj.nx_interface_link_up == NX_FALSE &&
+            iface.out_of_service,
+            "oos: a unit that refuses them leaves the link down");
+    oos_drain(rx);
+    h_check(!iface.online && host_event_count == events + 1,
+            "oos: the refusal is taken quietly, one event an outage");
+
+    h_out_of_service = FALSE;
+    h_now += sec - 1;
+    h_last_begun = NULL;
+    ami_sana2_rx_resume(&rd);
+    h_check(h_last_begun == NULL, "oos: once a second, not more");
+
+    h_now += 1;
+    ami_sana2_rx_resume(&rd);
+    h_check(h_last_begun != NULL && rf_slot[0].posted && rf_slot[1].posted &&
+            oos_port.mp_MsgList.lh_Head->ln_Succ == NULL,
+            "oos: the unit online keeps the reads");
+    h_check(iface.online && !iface.out_of_service &&
+            interface_obj.nx_interface_link_up == NX_TRUE,
+            "oos: and the link is marked up");
+    h_check(host_event_count == events + 2 &&
+            host_last_event_code == NETEVENT_BACK_IN_SERVICE,
+            "oos: and records NETEVENT_BACK_IN_SERVICE");
+
+    /* Never against the stack's own intent. */
+    {
+        unsigned k;
+
+        for (k = 0; k < 4; k++)
+        {
+            oos_ring(&rd, rx);
+            (VOID)ami_sana2_rx_post(rx);
+            oos_drain(rx);
+            if (k == 0) iface.admin_up = FALSE;
+            if (k == 1) iface.offline_state = AMI_SANA2_OFFLINE_ISSUED;
+            if (k == 2) iface.detaching = TRUE;
+            if (k == 3) rd.stop = TRUE;
+            h_now += sec;
+            h_last_begun = NULL;
+            ami_sana2_rx_resume(&rd);
+            h_check(h_last_begun == NULL && !iface.online &&
+                    interface_obj.nx_interface_link_up == NX_FALSE,
+                    "oos: not while down, offlined, detaching or stopping");
+        }
+    }
+
+    h_now = 0;
+}
+
 #ifdef AMINETXDUO_PTP
 /* --------------------------------------------- IPv6 on a point-to-point -- */
 
@@ -2768,6 +2898,7 @@ int main(void)
     test_block_only_on_an_empty_port();
     test_a_burst_is_never_left_on_the_port();
     test_refused_read_retires_the_ring();
+    test_out_of_service_comes_back();
 #ifdef AMINETXDUO_PTP
     test_ptp_rings();
     test_ptp_ipv6_reads_reposted();

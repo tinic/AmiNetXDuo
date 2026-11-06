@@ -519,8 +519,9 @@ LONG ami_sana2_online(AmiSana2If *iface)
         iface->stats.reconfigurations = 0;
     }
 
-    iface->online        = TRUE;
-    iface->offline_state = AMI_SANA2_OFFLINE_UP;
+    iface->online         = TRUE;
+    iface->offline_state  = AMI_SANA2_OFFLINE_UP;
+    iface->out_of_service = FALSE;
 
     return 0;
 }
