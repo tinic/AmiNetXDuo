@@ -549,7 +549,9 @@ host_test_targets() { # builddir
 #      router solicitation, no address resolution (all hosts).
 #      599 with af_inet6_23: AF_INET6 == 23 beside 28 at every family
 #      entry and exit (x86_64 only).
-HOST_TESTS_EXPECTED=599
+#      600 with addif_link (#457): AddNetInterface holds a Wi-Fi interface
+#      back until the card has joined (all hosts).
+HOST_TESTS_EXPECTED=600
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,

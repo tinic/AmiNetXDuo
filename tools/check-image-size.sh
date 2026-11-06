@@ -132,7 +132,15 @@ BUDGETS=(
     # 384,508 -> 384,932.
     # IPv6 prefix routes through a point-to-point peer, an 8-entry table
     # and its lookup (#437): +1,216, 384,932 -> 386,148.
-    "default:src/bsdsocket/bsdsocket.library:386148"
+    # A TCP socket readable only when recv() can return data (nx_ready.h):
+    # the head's READY mark tested, a 32-bit constant: +8, 386,148 ->
+    # 386,156.
+    # An out-of-service unit probed once a second and the link marked up
+    # when it takes reads again (#457): +208, 386,156 -> 386,364.
+    # The receive server, its per-tick slice and the RX_POLL reply kept
+    # (#9): +1,592, 386,364 -> 387,956.
+    # Opener code called with a6 clobbered (foreign_call.h): +24, 387,956 -> 387,980.
+    "default:src/bsdsocket/bsdsocket.library:387980"
     # 41,412 after stateless receive-checksum verification was added to the
     # EL3 and word/long NE2000 direct paths, 2026-09-15.  43,620 with
     # ANXD_CMD_RX_BATCH in the shell (claim, completion, staging copy, the
@@ -145,7 +153,8 @@ BUDGETS=(
     # 46,016 with the transmit staging at tx_phase and the long-window
     # lead-in word (payload copy in phase on ne2000, el3 and lance).
     # Combined with #438 on main: +16, 46,016 -> 46,032.
-    "default:src/netdev/anxnet.device:46032"
+    # Opener code called with a6 clobbered (foreign_call.h): +12, 46,032 -> 46,044.
+    "default:src/netdev/anxnet.device:46044"
     # 21,724 at the split; 23,032 with the original receive offload (IPv4 and
     # IPv6 verification plus the former driver-side CONTINUES mark); 24,440 in
     # the former batched-reply experiment, plus the held pass and reset
@@ -170,7 +179,8 @@ BUDGETS=(
     # The transmit staging phase and the shared bus lead-in: +84,
     # 29,772 -> 29,856.
     # Measured after the merge: +8, 29,856 -> 29,864.
-    "default:src/netdev/anxgenet.device:29864"
+    # Opener code called with a6 clobbered (foreign_call.h): +12, 29,864 -> 29,876.
+    "default:src/netdev/anxgenet.device:29876"
     "default:src/wifipi/anxwifipi.device:56000"
     # +832 bytes for Roadshow's native users/groups ReadArgs syntax, strict
     # /N validation and bounded member-vector sizing: existing UID/GID maps
@@ -240,16 +250,23 @@ BUDGETS=(
     # A refused read retires its ring (#437): +32, 258,120 -> 258,152.
     # /31-/32 broadcast (netxduo #43) and AMINETXDUO_PTP (#437): +1,600,
     # 258,152 -> 259,752.
-    "minimal:src/bsdsocket/bsdsocket.library:259752"
+    # An out-of-service unit probed back into service (#457): +268,
+    # 259,752 -> 260,020.
+    # The receive server, its per-tick slice and the RX_POLL reply kept
+    # (#9): +1,388, 260,020 -> 261,408.
+    # Opener code called with a6 clobbered (foreign_call.h): +20, 261,408 -> 261,428.
+    "minimal:src/bsdsocket/bsdsocket.library:261428"
     # Combined with #438 on main: +16, 46,016 -> 46,032.
-    "minimal:src/netdev/anxnet.device:46032"
+    # Opener code called with a6 clobbered (foreign_call.h): +12, 46,032 -> 46,044.
+    "minimal:src/netdev/anxnet.device:46044"
     # 29,088 on e806188f after the audited device fixes.
     # Batched transmit adds 632, 29,120 -> 29,752, approved by turo 2026-10-29.
     # The queue limit and its stops in ami_sana2_get_stats(): +8, -> 29,760.
     # The aligned direct-receive link header copy: +12, -> 29,772.
     # The transmit staging phase and the bus lead-in: +84, -> 29,856.
     # Measured after the merge: +8, 29,856 -> 29,864.
-    "minimal:src/netdev/anxgenet.device:29864"
+    # Opener code called with a6 clobbered (foreign_call.h): +12, 29,864 -> 29,876.
+    "minimal:src/netdev/anxgenet.device:29876"
     "minimal:src/wifipi/anxwifipi.device:56000"
     # 10,172 on e806188f after the audited parser fixes.
     "minimal:src/usergroup/usergroup.library:10240"
@@ -280,7 +297,11 @@ BUDGETS=(
     # 212,048 with the /31-/32 broadcast fix (netxduo #43) and
     # AMINETXDUO_PTP (#437).
     # 212,176 with DESTINATION6 in the interface file keywords (#437).
-    "micro:src/bsdsocket/bsdsocket.library:212176"
+    # 212,448 with an out-of-service unit probed back into service (#457).
+    # 213,948 with the receive server, its per-tick slice and the RX_POLL
+    # reply kept (#9).
+    # Opener code called with a6 clobbered (foreign_call.h): +16, 213,948 -> 213,964.
+    "micro:src/bsdsocket/bsdsocket.library:213964"
     "micro:src/netdev/anxnet.device:46000"
     "micro:src/netdev/anxgenet.device:29120"
     "micro:src/wifipi/anxwifipi.device:56000"

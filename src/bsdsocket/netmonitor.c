@@ -5,6 +5,7 @@
 
 #include "bsdsocket_vectors.h"
 #include "netmonitor.h"
+#include "aminetxduo/foreign_call.h"
 
 #include <exec/memory.h>
 #include <proto/exec.h>
@@ -291,16 +292,6 @@ VOID bsd_netmon_detach_owner(struct AmiSocketBase *owner)
     Permit();
 }
 
-typedef LONG (*BsdMonitorFn)(register struct Hook *hook __asm("a0"),
-                             register APTR reserved __asm("a2"),
-                             register APTR message __asm("a1"));
-
-typedef union BsdMonitorEntry
-{
-    ULONG        (*bme_Raw)(VOID);
-    BsdMonitorFn   bme_Fn;
-} BsdMonitorEntry;
-
 LONG bsd_netmon_dispatch(LONG type, APTR message)
 {
     ULONG last = 0;
@@ -319,7 +310,7 @@ LONG bsd_netmon_dispatch(LONG type, APTR message)
     {
         BsdMonitorNode *mn = NULL;
         BsdMonitorCall  call;
-        BsdMonitorEntry entry;
+        ULONG         (*entry)(VOID);
         struct Hook    *hook;
         BOOL            free_after = FALSE;
         struct MinNode *n;
@@ -347,10 +338,10 @@ LONG bsd_netmon_dispatch(LONG type, APTR message)
         AddTail((struct List *)&mn->bmn_Calls, (struct Node *)&call.bmc_Node);
         mn->bmn_Refs++;
         hook = mn->bmn_Hook;
-        entry.bme_Raw = hook->h_Entry;
+        entry = hook->h_Entry;
         Permit();
 
-        result = entry.bme_Fn(hook, NULL, message);
+        result = (LONG)ami_call_hook_entry(entry, hook, NULL, message);
 
         Forbid();
         Remove((struct Node *)&call.bmc_Node);

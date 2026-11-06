@@ -1160,6 +1160,91 @@ AMI_SANA2_BATCH_LINKAGE UWORD ami_sana2_rx_post(AmiSana2Rx *rx)
     return live;
 }
 
+/* ------------------------------------------------------- out of service */
+
+/*
+ * A read came back S2ERR_OUTOFSERVICE: the unit is not online.  NetX Duo
+ * learns link state only from NX_LINK_ENABLE/DISABLE, so the interface is
+ * marked down here or it stays up with every send failing.  Recorded once an
+ * outage: ami_sana2_rx_resume() bounces a read off the unit every second
+ * until it is back.  Out of line, as it is off the per-frame path.
+ */
+AMI_SANA2_BATCH_LINKAGE VOID __attribute__((noinline, cold))
+ami_sana2_rx_out_of_service(AmiSana2If *iface)
+{
+    iface->online = FALSE;
+    if (iface->interface_ptr != NULL)
+        iface->interface_ptr->nx_interface_link_up = NX_FALSE;
+    if (iface->alias_count != 0U)
+        ami_sana2_alias_sync(iface);
+
+    if (iface->out_of_service)
+        return;
+
+    iface->out_of_service = TRUE;
+    iface->oos_retry_at   = (ULONG)tx_time_get();
+    ami_event(NETEVENT_OUT_OF_SERVICE, (UWORD)iface->index, 0UL);
+    AMI_WARN("sana2: %s went out of service. The link is marked down",
+             iface->device);
+}
+
+/*
+ * Back in service without an `Online`.  The unit comes up under another
+ * opener -- prism2.device when WirelessManager configures it, a PCMCIA card
+ * back in its slot, an S2_ONLINE from another program -- and the stack is
+ * not told.  S2_ONEVENT cannot tell it either: not every device has it, a
+ * device that follows the spec answers only the next change, and a request
+ * left outstanding must come back at close.  The reads are the probe
+ * instead: once a second, while the reader idles, they are posted again.  A
+ * unit still out of service refuses them in BeginIO() onto the port, and
+ * the drain takes the refusal (ami_sana2_rx_out_of_service()).  A unit that
+ * keeps them is back.  Never while the stack holds the interface down or
+ * has sent S2_OFFLINE.
+ */
+AMI_SANA2_BATCH_LINKAGE VOID __attribute__((noinline, cold))
+ami_sana2_rx_resume(AmiSana2Reader *rd)
+{
+    AmiSana2If           *iface = rd->iface;
+    const struct Message *head;
+    UWORD                 live = 0;
+    UWORD                 r;
+
+    if (rd->stop || !iface->admin_up || iface->detaching ||
+        iface->offline_state != AMI_SANA2_OFFLINE_UP)
+        return;
+    if ((ULONG)tx_time_get() - iface->oos_retry_at <
+        (ULONG)TX_TIMER_TICKS_PER_SECOND)
+        return;
+    iface->oos_retry_at = (ULONG)tx_time_get();
+
+    iface->online = TRUE;
+    for (r = 0; r < (UWORD)AMI_SANA2_RX_READERS; r++)
+        live += ami_sana2_rx_post(&iface->rx[r]);
+
+    /* Nothing posted, for want of packets: no answer, try next second. */
+    if (live == 0)
+    {
+        iface->online = FALSE;
+        return;
+    }
+
+    /* Only this thread takes messages off the port, so the head stays. */
+    head = (const struct Message *)rd->port->mp_MsgList.lh_Head;
+    if (head->mn_Node.ln_Succ != NULL &&
+        ((const struct IOSana2Req *)head)->ios2_Req.io_Error ==
+            (BYTE)S2ERR_OUTOFSERVICE)
+        return;
+
+    iface->out_of_service = FALSE;
+    if (iface->interface_ptr != NULL)
+        iface->interface_ptr->nx_interface_link_up = NX_TRUE;
+    if (iface->alias_count != 0U)
+        ami_sana2_alias_sync(iface);
+    ami_event(NETEVENT_BACK_IN_SERVICE, (UWORD)iface->index, 0UL);
+    AMI_INFO("sana2: %s is back in service. The link is marked up",
+             iface->device);
+}
+
 /* ------------------------------------------------------------ completion */
 
 /* Reconcile the device's ios2_DataLength answer with the bytes its CopyToBuff
@@ -1781,14 +1866,7 @@ AMI_SANA2_BATCH_LINKAGE UWORD ami_sana2_rx_drain_batch(AmiSana2Reader *rd,
     }
     else if ((LONG)(BYTE)raw == (LONG)S2ERR_OUTOFSERVICE)
     {
-        iface->online = FALSE;
-        if (iface->interface_ptr != NULL)
-            iface->interface_ptr->nx_interface_link_up = NX_FALSE;
-        if (iface->alias_count != 0U)
-            ami_sana2_alias_sync(iface);
-        ami_event(NETEVENT_OUT_OF_SERVICE, (UWORD)iface->index, 0UL);
-        AMI_WARN("sana2: %s went out of service. The link is marked down",
-                 iface->device);
+        ami_sana2_rx_out_of_service(iface);
     }
     else if ((LONG)(BYTE)raw == (LONG)IOERR_NOCMD ||
              (LONG)(BYTE)raw == (LONG)S2ERR_NOT_SUPPORTED ||
@@ -1836,7 +1914,43 @@ BOOL ami_sana2_rx_refused(AmiSana2Rx *rx, UBYTE error)
     return TRUE;
 }
 
-static UWORD ami_sana2_rx_drain(AmiSana2Reader *rd, UWORD budget)
+/*
+ * RX_POLL promises a quick answer. A device that queues it instead loses the
+ * optimization, but still owns the request until its reply is collected. Do
+ * not WaitIO with the ThreadX baton held: this path is also suitable for a
+ * caller doing optional receive work, which must never wait for device I/O.
+ */
+AMI_SANA2_BATCH_LINKAGE VOID ami_sana2_rx_poll(AmiSana2Reader *rd)
+{
+    if (!rd->iface->rx_poll_ok || rd->stop || rd->poll_pending)
+        return;
+
+    rd->poll.ios2_Req.io_Flags = IOF_QUICK;
+    rd->poll.ios2_Req.io_Error = 0;
+    rd->poll_pending = TRUE;
+    BeginIO((struct IORequest *)&rd->poll);
+    if ((rd->poll.ios2_Req.io_Flags & IOF_QUICK) != 0)
+    {
+        rd->poll_pending = FALSE;
+        if (rd->poll.ios2_Req.io_Error == 0)
+            return;
+    }
+    rd->iface->rx_poll_ok = FALSE;
+}
+
+/* The poll has no AmiRxSlot owner after its request. Test the message's
+   identity before reading anything beyond that request, including at stop.
+   A quick refusal never queues a reply and clears pending in the sender. */
+static BOOL ami_sana2_rx_poll_reply(AmiSana2Reader *rd, struct Message *msg)
+{
+    if (msg != &rd->poll.ios2_Req.io_Message)
+        return FALSE;
+
+    rd->poll_pending = FALSE;
+    return TRUE;
+}
+
+AMI_SANA2_BATCH_LINKAGE UWORD ami_sana2_rx_drain(AmiSana2Reader *rd, UWORD budget)
 {
     AmiSana2If     *iface = rd->iface;
     NX_IP          *ip = iface->ip;
@@ -1973,8 +2087,8 @@ static UWORD ami_sana2_rx_drain(AmiSana2Reader *rd, UWORD budget)
     {
         /* The reply message is the slot: ios2_Req.io_Message is its first
            member's first member.  The slot names its ring. */
-        AmiRxSlot  *slot = (AmiRxSlot *)msg;
-        AmiSana2Rx *rx   = slot->owner;
+        AmiRxSlot  *slot;
+        AmiSana2Rx *rx;
         /*
          * THE BYTE IS TESTED, THE SIGN EXTENSION IS NOT ON THIS PATH.  It was
          * `LONG err = (LONG)(BYTE)...` before the branch, and the drain loop
@@ -1983,7 +2097,16 @@ static UWORD ami_sana2_rx_drain(AmiSana2Reader *rd, UWORD budget)
          * The widening still happens where io_Error is compared against the
          * negative Exec codes, which is what it is for.
          */
-        UBYTE      raw  = slot->req.ios2_Req.io_Error;
+        UBYTE      raw;
+
+        /* At most one: an asynchronous poll disables further polls. It is
+           control traffic, not a received frame in this pass's budget. */
+        if (ami_sana2_rx_poll_reply(rd, msg))
+            continue;
+
+        slot = (AmiRxSlot *)msg;
+        rx   = slot->owner;
+        raw  = slot->req.ios2_Req.io_Error;
 
         /* A batch reply: its frames are complete whatever io_Error says,
            so they are delivered first; the error then means what it means
@@ -2024,22 +2147,7 @@ static UWORD ami_sana2_rx_drain(AmiSana2Reader *rd, UWORD budget)
         }
         else if ((LONG)(BYTE)raw == (LONG)S2ERR_OUTOFSERVICE)
         {
-            /*
-             * NetX Duo learns link state only from NX_LINK_ENABLE/DISABLE, so
-             * an out-of-service device must be marked down here or the
-             * interface stays up with every send failing.  `Online` recovers it.
-             */
-            iface->online = FALSE;
-
-            if (iface->interface_ptr != NULL)
-                iface->interface_ptr->nx_interface_link_up = NX_FALSE;
-            if (iface->alias_count != 0U)
-                ami_sana2_alias_sync(iface);
-
-            ami_event(NETEVENT_OUT_OF_SERVICE, (UWORD)iface->index, 0UL);
-
-            AMI_WARN("sana2: %s went out of service. The link is marked down",
-                     iface->device);
+            ami_sana2_rx_out_of_service(iface);
         }
         else
         {
@@ -2163,7 +2271,12 @@ static UWORD ami_sana2_rx_reap(AmiSana2Reader *rd, UWORD tries)
 
         while ((msg = GetMsg(rd->port)) != NULL)
         {
-            AmiRxSlot *slot = (AmiRxSlot *)msg;
+            AmiRxSlot *slot;
+
+            if (ami_sana2_rx_poll_reply(rd, msg))
+                continue;
+
+            slot = (AmiRxSlot *)msg;
 
 #ifdef AMINETXDUO_RX_BATCH
             if (slot->req.ios2_Req.io_Command == ANXD_CMD_RX_BATCH)
@@ -2185,7 +2298,7 @@ static UWORD ami_sana2_rx_reap(AmiSana2Reader *rd, UWORD tries)
 #endif
         }
 
-        outstanding = 0;
+        outstanding = (UWORD)(rd->poll_pending ? 1 : 0);
         for (r = 0; r < (UWORD)AMI_SANA2_RX_READERS; r++)
         {
             const AmiSana2Rx *rx = &rd->iface->rx[r];
@@ -2245,6 +2358,9 @@ ami_sana2_rx_abort_outstanding(AmiSana2Reader *rd)
 {
     UWORD r, i;
 
+    if (rd->poll_pending)
+        AbortIO((struct IORequest *)&rd->poll);
+
     for (r = 0; r < (UWORD)AMI_SANA2_RX_READERS; r++)
     {
         AmiSana2Rx *rx = &rd->iface->rx[r];
@@ -2269,7 +2385,7 @@ ami_sana2_rx_abort_outstanding(AmiSana2Reader *rd)
     }
 }
 
-static VOID ami_sana2_rx_teardown(AmiSana2Reader *rd)
+AMI_SANA2_BATCH_LINKAGE VOID ami_sana2_rx_teardown(AmiSana2Reader *rd)
 {
     UWORD outstanding;
     UWORD r, i;
@@ -2280,7 +2396,7 @@ static VOID ami_sana2_rx_teardown(AmiSana2Reader *rd)
 
     if (outstanding != 0)
     {
-        AMI_WARN("sana2: %ld read(s) survived AbortIO; trying CMD_FLUSH",
+        AMI_WARN("sana2: %ld request(s) survived AbortIO; trying CMD_FLUSH",
                  (long)outstanding);
         ami_sana2_rx_flush(rd);
         outstanding = ami_sana2_rx_reap(rd, AMI_SANA2_RX_REAP_TRIES);
@@ -2292,7 +2408,7 @@ static VOID ami_sana2_rx_teardown(AmiSana2Reader *rd)
     {
         /* Nothing below this line can run: each of those is a pointer the
            device still holds. */
-        AMI_ERROR("sana2: %ld read(s) still owned by the device. The "
+        AMI_ERROR("sana2: %ld request(s) still owned by the device. The "
                   "reader leaks. A free here corrupts memory",
                   (long)outstanding);
         return;
@@ -2459,9 +2575,12 @@ static VOID ami_sana2_rx_thread(ULONG argument)
     rd->running = TRUE;
     tx_semaphore_put(&rd->ready);
 
+    ami_sana2_server_bind(rd);
+
     while (!rd->stop)
     {
         UWORD live = 0;
+        UWORD took;
 
         /*
          * At the top of the loop, not after the Wait(): the pool-empty path
@@ -2539,7 +2658,10 @@ static VOID ami_sana2_rx_thread(ULONG argument)
         {
             /* Either the pool is empty or the interface is down. Back off
                rather than spin. ami_sana2_rx_stop() signals out of this. */
+            if (iface->out_of_service)
+                ami_sana2_rx_resume(rd);
             tx_thread_sleep(2);
+            ami_sana2_server_run(rd);
             continue;
         }
 
@@ -2572,6 +2694,7 @@ static VOID ami_sana2_rx_thread(ULONG argument)
         if (ami_sana2_rx_should_block(rd, AMI_SANA2_RX_RUN_MAX))
         {
             ami_sana2_block_enter();
+            ami_sana2_server_settle(rd);
             Wait(rd->wake_mask | rd->reap_mask | rd->ack_mask);
 #ifdef AMINETXDUO_RXPROBE
             {
@@ -2591,9 +2714,10 @@ static VOID ami_sana2_rx_thread(ULONG argument)
 #else
             ami_sana2_block_leave();
 #endif
+            ami_sana2_server_run(rd);
         }
 
-        (VOID)ami_sana2_rx_drain(rd, (UWORD)AMI_SANA2_RX_RUN_MAX);
+        took = ami_sana2_rx_drain(rd, (UWORD)AMI_SANA2_RX_RUN_MAX);
 
         /*
          * THE POLL, AFTER THE DRAIN AND BEFORE THE SLEEP.  Every slot this
@@ -2602,23 +2726,26 @@ static VOID ami_sana2_rx_thread(ULONG argument)
          * reader was behind a burst) can deliver them now; they arrive as
          * completions on this port and the loop goes round again without
          * blocking.  A driver that does not know the command says so once,
-         * IOERR_NOCMD, and is not asked again.  Quick on our device; a
-         * device that queues it instead replies here, and the reply is taken
-         * back before the drain can mistake it for a slot.  Once per pass
+         * IOERR_NOCMD, and is not asked again. Quick on our device; a
+         * device that queues it instead loses the optimization, and the
+         * drain or teardown collects its reply by identity. Once per pass
          * for the unit, not once per ring: the command is the unit's.
          */
-        if (iface->rx_poll_ok && !rd->stop)
+        ami_sana2_rx_poll(rd);
+
+        /*
+         * The receive server's budget is spent with frames still waiting:
+         * stand aside at the program priority through a baton release, so
+         * the band's other threads can run, and carry on at that priority
+         * until the tick refills it (sana2_server.c).
+         */
+        if (ami_sana2_server_spent(rd, took) &&
+            !ami_sana2_rx_should_block(rd, AMI_SANA2_RX_RUN_MAX))
         {
-            rd->poll.ios2_Req.io_Flags = IOF_QUICK;
-            rd->poll.ios2_Req.io_Error = 0;
-            BeginIO((struct IORequest *)&rd->poll);
-            if ((rd->poll.ios2_Req.io_Flags & IOF_QUICK) == 0)
-                (VOID)WaitIO((struct IORequest *)&rd->poll);
-            /* Any refusal ends the polling: IOERR_NOCMD from a device that
-               does not know the command, S2ERR_NOT_SUPPORTED from a unit
-               that holds nothing for a late read and has nothing to say. */
-            if (rd->poll.ios2_Req.io_Error != 0)
-                iface->rx_poll_ok = FALSE;
+            ami_sana2_block_enter();
+            ami_sana2_server_settle(rd);
+            ami_sana2_block_leave();
+            ami_sana2_server_run(rd);
         }
 
 #ifdef AMINETXDUO_RXPROBE
@@ -2628,6 +2755,8 @@ static VOID ami_sana2_rx_thread(ULONG argument)
             ami_sana2_refresh_stats(iface);
 #endif
     }
+
+    ami_sana2_server_unbind(rd);
 
     /* Held acknowledgments go before the transmit side is unbound. */
     ami_sana2_ack_reader_stop(rd);
@@ -3049,6 +3178,7 @@ LONG ami_sana2_rx_start(AmiSana2If *iface)
            signalled on a bit it does not hold. */
         rd->wake_mask   = 0;
         rd->orphans     = 0;
+        rd->poll_pending = FALSE;
         rd->joined      = FALSE;
         rd->zombie      = FALSE;
 
@@ -3246,7 +3376,7 @@ VOID ami_sana2_rx_stop(AmiSana2If *iface)
          */
         if (rd->orphans != 0)
         {
-            AMI_ERROR("sana2: reader left %ld read(s) with the "
+            AMI_ERROR("sana2: reader left %ld request(s) with the "
                       "device. Its thread and stack leak. The reply "
                       "port they will complete through signals that Task",
                       (long)rd->orphans);

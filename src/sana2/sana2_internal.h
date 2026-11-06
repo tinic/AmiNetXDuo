@@ -306,6 +306,30 @@ UINT ami_sana2_gso_max_segs(NX_INTERFACE *interface_ptr);
 #define AMI_SANA2_RX_RUN_MAX        AMI_SANA2_RX_MAX_DEPTH
 #endif
 
+/*
+ * The receive server's budget, in credits per ThreadX tick (sana2_server.c):
+ * a tick in which a reader at the band priority is ready costs COST, every
+ * tick refills SHARE, and the bucket holds CAP.  Below zero 3 of 10 holds
+ * the band priority for about 30% of what the readers drain, in a slice at
+ * the start of each tick, the share the A1200 needed to keep its read rate
+ * with a priority-0 decoder fed (#353, #9).  A receive with nobody waiting is
+ * not charged, so its rate does not depend on the share.  CAP lets a burst
+ * of four busy ticks through before the slices start.
+ */
+#ifndef AMI_SANA2_RX_SERVER_SHARE
+#define AMI_SANA2_RX_SERVER_SHARE   3
+#endif
+#ifndef AMI_SANA2_RX_SERVER_COST
+#define AMI_SANA2_RX_SERVER_COST    10
+#endif
+#ifndef AMI_SANA2_RX_SERVER_CAP
+#define AMI_SANA2_RX_SERVER_CAP     40
+#endif
+/* Ready-list nodes the tick looks at for a waiting program, at most. */
+#ifndef AMI_SANA2_RX_SERVER_WALK
+#define AMI_SANA2_RX_SERVER_WALK    8
+#endif
+
 #if AMI_SANA2_RX_RUN_MAX < 1
 #error "AMI_SANA2_RX_RUN_MAX must be at least one"
 #endif
@@ -793,6 +817,16 @@ typedef struct AmiRxSum
  */
 struct AmiSana2Rx;
 
+/*
+ * A reader under the receive server (sana2_server.c): its node on the
+ * server's list and its Task, NULL when not bound.
+ */
+typedef struct AmiSana2Served
+{
+    struct MinNode      node;
+    struct Task        *task;
+} AmiSana2Served;
+
 typedef struct AmiSana2Reader
 {
     AmiSana2If         *iface;
@@ -831,16 +865,19 @@ typedef struct AmiSana2Reader
        block.  Nothing of the interface can ever be freed. */
     BOOL                zombie;
 
-    /* Reads the device would not give back at teardown, over every ring.
-       Nonzero means slots, pinned packets and the reply port are still
+    /* Requests the device would not give back at teardown, over every ring
+       and the poll below. Nonzero means packets and the reply port are still
        reachable by the device and none of them can be freed. */
     volatile UWORD      orphans;
 
     /* ANXD_CMD_RX_POLL (aminetxduo/anxs2ext.h), sent once at the end of
        every drain so a driver holding frames for the reads just re-posted
        delivers them before the reader sleeps.  Replied on the port when a
-       device does not honour IOF_QUICK, and taken back at once. */
+       device does not honour IOF_QUICK. Such a reply is collected by identity
+       in the drain/reap, never cast to a receive slot. Protected by the
+       ThreadX baton, like the reader's rings. */
     struct IOSana2Req   poll;
+    BOOL                poll_pending;
 
     /* ACKPACE: the timer that wakes this reader when the next held
        acknowledgment is due and nothing else would (sana2_ackpace.c). */
@@ -849,6 +886,9 @@ typedef struct AmiSana2Reader
     BOOL                ack_tr_open;
     BOOL                ack_tr_busy;
     ULONG               ack_mask;
+
+    /* The receive server (sana2_server.c). */
+    AmiSana2Served      served;
 } AmiSana2Reader;
 
 /* One ring of reads for one Ethernet type. */
@@ -1183,6 +1223,11 @@ struct AmiSana2If
     /* AMI_LINK_DETACH_BEGIN has run: the removal owns the teardown, and the
        driver entry leaves the device alone.  Never cleared. */
     BOOL                detaching;
+    /* A read came back S2ERR_OUTOFSERVICE and the link is marked down for it,
+       not by the stack.  ami_sana2_rx_resume() probes once a second from
+       oos_retry_at; ami_sana2_online() and the probe clear it. */
+    BOOL                out_of_service;
+    ULONG               oos_retry_at;
     /* A status query wants the device-derived counters of now: it sets
        stats_want and wakes the reader (ami_sana2_stats_request()), the reader
        runs the two device commands and bumps stats_epoch.  Never on the
@@ -1433,7 +1478,19 @@ UWORD ami_sana2_rx_drain_batch(AmiSana2Reader *rd, AmiRxBatch *bt);
 VOID  ami_sana2_rx_abort_outstanding(AmiSana2Reader *rd);
 VOID  ami_sana2_rx_flush(AmiSana2Reader *rd);
 UWORD ami_sana2_rx_post(AmiSana2Rx *rx);
+VOID  ami_sana2_rx_poll(AmiSana2Reader *rd);
+UWORD ami_sana2_rx_drain(AmiSana2Reader *rd, UWORD budget);
+VOID  ami_sana2_rx_teardown(AmiSana2Reader *rd);
+VOID  ami_sana2_rx_out_of_service(AmiSana2If *iface);
+VOID  ami_sana2_rx_resume(AmiSana2Reader *rd);
 #endif
+
+/* sana2_server.c */
+VOID  ami_sana2_server_bind(AmiSana2Reader *rd);
+VOID  ami_sana2_server_unbind(AmiSana2Reader *rd);
+VOID  ami_sana2_server_run(AmiSana2Reader *rd);
+BOOL  ami_sana2_server_spent(AmiSana2Reader *rd, UWORD took);
+VOID  ami_sana2_server_settle(AmiSana2Reader *rd);
 
 /* sana2_tx.c */
 VOID ami_sana2_tx_init(AmiSana2If *iface);

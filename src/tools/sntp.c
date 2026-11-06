@@ -244,6 +244,31 @@ static BOOL battclock_write(ULONG secs)
 }
 
 /*
+ * Minutes west of Greenwich from ENV:TZONE, daylight saving included, for the
+ * instant `utc`.  SetDST keeps the zone there and Locale has no daylight
+ * saving, so the variable wins when it parses (tooltz.h).
+ */
+static BOOL tzone_gmt_offset(ULONG utc, LONG *minutes_west)
+{
+    char tz[64];
+    long west;
+    LONG n;
+
+    n = GetVar((CONST_STRPTR)"TZONE", (STRPTR)tz, sizeof(tz), 0);
+    if (n <= 0)
+        return FALSE;
+    /* A file written with an editor ends in a newline. */
+    while (n > 0 && (tz[n - 1] == '\n' || tz[n - 1] == '\r' ||
+                     tz[n - 1] == ' '  || tz[n - 1] == '\t'))
+        tz[--n] = '\0';
+    if (!tooltz_posix_west(tz, utc, &west))
+        return FALSE;
+
+    *minutes_west = (LONG)(west / 60L);
+    return TRUE;
+}
+
+/*
  * Minutes west of Greenwich, the zone the Locale preferences show (tooltz.h).
  * FALSE when locale.library is not on the machine; the caller then falls
  * back to UTC.
@@ -698,7 +723,8 @@ int main(int argc, char **argv)
         new_utc++;
     }
 
-    have_locale = locale_gmt_offset(&gmt_west);
+    have_locale = tzone_gmt_offset(new_utc, &gmt_west) ||
+                  locale_gmt_offset(&gmt_west);
 
     /*
      * Local time is UTC minus the offset west of Greenwich, and the Amiga clock

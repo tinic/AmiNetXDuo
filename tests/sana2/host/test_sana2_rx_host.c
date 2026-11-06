@@ -6,10 +6,12 @@
 
 #include "sana2_internal.h"
 #include "aminetxduo/anxs2ext.h"
+#include "aminetxduo/events.h"
 
 /* BeginIO(), which the transmit path posts with; the shim declares it and
    this file defines it. */
 #include <inline/alib.h>
+#include <proto/exec.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -57,21 +59,60 @@ VOID Permit(VOID)  { }
 
 VOID SendIO(struct IORequest *req) { (VOID)req; }
 static struct IORequest *h_last_begun;
-VOID BeginIO(struct IORequest *req) { h_last_begun = req; }
+static BOOL h_poll_async;
+static BOOL h_poll_reply_now;
+static BYTE h_poll_error;
+static unsigned h_poll_begins;
+static unsigned h_wait_ios;
+/* A unit that is not online: prism2.device 2.9 refuses a CMD_READ in
+   BeginIO() and replies it at once (request.c CmdRead). */
+static BOOL h_out_of_service;
+VOID AddTail(struct List *list, struct Node *node);
+VOID BeginIO(struct IORequest *req)
+{
+    h_last_begun = req;
+    if (h_out_of_service)
+    {
+        req->io_Error = (BYTE)S2ERR_OUTOFSERVICE;
+        AddTail(&req->io_Message.mn_ReplyPort->mp_MsgList,
+                &req->io_Message.mn_Node);
+        return;
+    }
+    if (req->io_Command == ANXD_CMD_RX_POLL)
+    {
+        h_poll_begins++;
+        req->io_Error = h_poll_error;
+        if (h_poll_async)
+        {
+            req->io_Flags &= (UBYTE)~IOF_QUICK;
+            if (h_poll_reply_now)
+                AddTail(&req->io_Message.mn_ReplyPort->mp_MsgList,
+                         &req->io_Message.mn_Node);
+        }
+    }
+}
 
 /* What the teardown asked the device to give back, in order. */
 static struct IORequest *h_aborted[16];
 static unsigned          h_aborts;
+static BOOL              h_poll_reply_on_abort;
 LONG AbortIO(struct IORequest *req)
 {
     if (h_aborts < 16)
         h_aborted[h_aborts] = req;
     h_aborts++;
+    if (h_poll_reply_on_abort && req->io_Command == ANXD_CMD_RX_POLL)
+    {
+        req->io_Error = IOERR_ABORTED;
+        AddTail(&req->io_Message.mn_ReplyPort->mp_MsgList,
+                 &req->io_Message.mn_Node);
+    }
     return 0;
 }
 BYTE WaitIO(struct IORequest *req)
 {
     (VOID)req;
+    h_wait_ios++;
     return 0;
 }
 /* Off except in the reclaim test: there the device's replies are real
@@ -196,7 +237,8 @@ UINT _txe_thread_delete(TX_THREAD *p)
     return TX_SUCCESS;
 }
 UINT _txe_thread_terminate(TX_THREAD *p) { (VOID)p; return TX_SUCCESS; }
-UINT _tx_thread_sleep(ULONG t) { (VOID)t; return TX_SUCCESS; }
+static unsigned h_sleeps;
+UINT _tx_thread_sleep(ULONG t) { (VOID)t; h_sleeps++; return TX_SUCCESS; }
 
 UINT _txe_semaphore_create(TX_SEMAPHORE *s, CHAR *n, ULONG c, UINT size)
 {
@@ -379,6 +421,12 @@ VOID ami_sana2_refresh_stats(AmiSana2If *iface) { (VOID)iface; }
 VOID ami_sana2_ack_reader_start(AmiSana2Reader *rd) { rd->ack_mask = 0; }
 VOID ami_sana2_ack_reader_pass(AmiSana2Reader *rd)  { (VOID)rd; }
 VOID ami_sana2_ack_reader_stop(AmiSana2Reader *rd)  { (VOID)rd; }
+/* The receive server is sana2_server.c's and shapes Exec priorities only. */
+VOID ami_sana2_server_bind(AmiSana2Reader *rd)    { (VOID)rd; }
+VOID ami_sana2_server_unbind(AmiSana2Reader *rd)  { (VOID)rd; }
+VOID ami_sana2_server_run(AmiSana2Reader *rd)     { (VOID)rd; }
+BOOL ami_sana2_server_spent(AmiSana2Reader *rd, UWORD took) { (VOID)rd; (VOID)took; return FALSE; }
+VOID ami_sana2_server_settle(AmiSana2Reader *rd)  { (VOID)rd; }
 /* The capacity the reader asks again for once a second (sana2_device.c),
    and the ThreadX clock that paces it: the reader's loop is not driven
    here. */
@@ -389,7 +437,8 @@ VOID ami_sana2_capacity_changed(AmiSana2If *iface) { (VOID)iface; }
    target does not link: no TCP here. */
 VOID _nx_tcp_receive_pass_begin(NX_IP *ip_ptr) { (VOID)ip_ptr; }
 VOID _nx_tcp_receive_pass_complete(NX_IP *ip_ptr) { (VOID)ip_ptr; }
-ULONG _tx_time_get(VOID) { return 0; }
+static ULONG h_now;
+ULONG _tx_time_get(VOID) { return h_now; }
 UWORD ami_sana2_bound_count(VOID) { return 1; }
 VOID ami_sana2_block_enter(VOID) { }
 VOID ami_sana2_block_leave(VOID) { }
@@ -2111,6 +2160,121 @@ static void test_refused_read_retires_the_ring(void)
     }
 }
 
+/* ------------------------------------------------- out of service -- */
+
+/*
+ * #457: prism2.device refuses every read while its unit is not online, and
+ * WirelessManager brings the unit up after the stack has attached.  The
+ * first refusal marks the link down; the reader bounces its reads off the
+ * unit once a second, and the unit that keeps them has the link marked up.
+ */
+static struct MsgPort oos_port;
+
+static void oos_ring(AmiSana2Reader *rd, AmiSana2Rx *rx)
+{
+    UWORD i;
+
+    rf_ring(rd, rx);
+    NewList(&oos_port.mp_MsgList);
+    rd->port = &oos_port;
+    for (i = 0; i < RF_SLOTS; i++)
+        rf_slot[i].req.ios2_Req.io_Message.mn_ReplyPort = &oos_port;
+    iface.admin_up      = TRUE;
+    iface.offline_state = AMI_SANA2_OFFLINE_UP;
+    interface_obj.nx_interface_link_up = NX_TRUE;
+}
+
+/* What the drain does with the refusals on the port. */
+static void oos_drain(AmiSana2Rx *rx)
+{
+    NewList(&oos_port.mp_MsgList);
+    rf_complete(rx);
+    ami_sana2_rx_out_of_service(&iface);
+}
+
+static void test_out_of_service_comes_back(void)
+{
+    const ULONG    sec = (ULONG)TX_TIMER_TICKS_PER_SECOND;
+    AmiSana2Reader rd;
+    AmiSana2Rx    *rx = &iface.rx[0];
+    ULONG          events;
+
+    printf("sana2: an out-of-service unit is probed until it is back\n");
+
+    h_now = 1000;
+    oos_ring(&rd, rx);
+    h_check(ami_sana2_rx_post(rx) == RF_SLOTS, "oos: a fresh ring is posted");
+
+    events = host_event_count;
+    oos_drain(rx);
+    h_check(!iface.online && interface_obj.nx_interface_link_up == NX_FALSE &&
+            iface.out_of_service,
+            "oos: the first refusal marks the link down");
+    h_check(host_event_count == events + 1 &&
+            host_last_event_code == NETEVENT_OUT_OF_SERVICE,
+            "oos: and records NETEVENT_OUT_OF_SERVICE");
+
+    h_now += sec - 1;
+    h_last_begun = NULL;
+    ami_sana2_rx_resume(&rd);
+    h_check(h_last_begun == NULL && !iface.online,
+            "oos: nothing is posted within the second");
+
+    h_out_of_service = TRUE;
+    h_now += 1;
+    ami_sana2_rx_resume(&rd);
+    h_check(h_last_begun != NULL && rf_slot[0].posted && rf_slot[1].posted,
+            "oos: a second on, the reads are posted again");
+    h_check(interface_obj.nx_interface_link_up == NX_FALSE &&
+            iface.out_of_service,
+            "oos: a unit that refuses them leaves the link down");
+    oos_drain(rx);
+    h_check(!iface.online && host_event_count == events + 1,
+            "oos: the refusal is taken quietly, one event an outage");
+
+    h_out_of_service = FALSE;
+    h_now += sec - 1;
+    h_last_begun = NULL;
+    ami_sana2_rx_resume(&rd);
+    h_check(h_last_begun == NULL, "oos: once a second, not more");
+
+    h_now += 1;
+    ami_sana2_rx_resume(&rd);
+    h_check(h_last_begun != NULL && rf_slot[0].posted && rf_slot[1].posted &&
+            oos_port.mp_MsgList.lh_Head->ln_Succ == NULL,
+            "oos: the unit online keeps the reads");
+    h_check(iface.online && !iface.out_of_service &&
+            interface_obj.nx_interface_link_up == NX_TRUE,
+            "oos: and the link is marked up");
+    h_check(host_event_count == events + 2 &&
+            host_last_event_code == NETEVENT_BACK_IN_SERVICE,
+            "oos: and records NETEVENT_BACK_IN_SERVICE");
+
+    /* Never against the stack's own intent. */
+    {
+        unsigned k;
+
+        for (k = 0; k < 4; k++)
+        {
+            oos_ring(&rd, rx);
+            (VOID)ami_sana2_rx_post(rx);
+            oos_drain(rx);
+            if (k == 0) iface.admin_up = FALSE;
+            if (k == 1) iface.offline_state = AMI_SANA2_OFFLINE_ISSUED;
+            if (k == 2) iface.detaching = TRUE;
+            if (k == 3) rd.stop = TRUE;
+            h_now += sec;
+            h_last_begun = NULL;
+            ami_sana2_rx_resume(&rd);
+            h_check(h_last_begun == NULL && !iface.online &&
+                    interface_obj.nx_interface_link_up == NX_FALSE,
+                    "oos: not while down, offlined, detaching or stopping");
+        }
+    }
+
+    h_now = 0;
+}
+
 #ifdef AMINETXDUO_PTP
 /* --------------------------------------------- IPv6 on a point-to-point -- */
 
@@ -2750,8 +2914,175 @@ static void test_flush_is_bounded(void)
             "flush: no reply port of its own");
 }
 
+/* A negotiated poll normally finishes inside BeginIO. The hostile cases
+   below queue it, answer inside BeginIO, ignore AbortIO, or answer only after
+   the reader has exited. None may turn a control reply into an AmiRxSlot. */
+static AmiSana2Reader *poll_fixture(void)
+{
+    AmiSana2Reader *rd = &iface.reader;
+
+    fixture_init();
+    rd->iface = &iface;
+    ami_sana2_port_init(&rd->port_mem, &rc_task, 20, PA_SIGNAL);
+    rd->port = &rd->port_mem;
+    rd->poll.ios2_Req.io_Command = ANXD_CMD_RX_POLL;
+    rd->poll.ios2_Req.io_Message.mn_ReplyPort = rd->port;
+    iface.rx_poll_ok = TRUE;
+    h_getmsg_real = TRUE;
+    h_poll_async = FALSE;
+    h_poll_reply_now = FALSE;
+    h_poll_reply_on_abort = FALSE;
+    h_poll_error = 0;
+    h_poll_begins = 0;
+    h_wait_ios = 0;
+    h_aborts = 0;
+    h_sleeps = 0;
+    h_commands = 0;
+    h_signal_frees = 0;
+    return rd;
+}
+
+static void test_poll_quick_and_async_replies(void)
+{
+    AmiSana2Reader *rd = poll_fixture();
+    AmiSana2Rx *rx = &iface.rx[0];
+
+    printf("  receive poll completion and nonblocking fallback\n");
+    ami_sana2_rx_poll(rd);
+    ami_sana2_rx_poll(rd);
+    h_check(h_poll_begins == 2 && !rd->poll_pending && iface.rx_poll_ok,
+            "poll: quick success permits the next pass to poll");
+    h_check(h_wait_ios == 0, "poll: quick success never waits");
+
+    h_poll_error = IOERR_NOCMD;
+    ami_sana2_rx_poll(rd);
+    h_check(h_poll_begins == 3 && !rd->poll_pending && !iface.rx_poll_ok,
+            "poll: quick refusal disables polling with nothing outstanding");
+    ami_sana2_rx_poll(rd);
+    h_check(h_poll_begins == 3, "poll: unsupported command is not retried");
+
+    rd = poll_fixture();
+    rd->stop = TRUE;
+    ami_sana2_rx_poll(rd);
+    h_check(h_poll_begins == 0, "poll: stopping reader posts nothing");
+    rd->stop = FALSE;
+    iface.rx_poll_ok = FALSE;
+    ami_sana2_rx_poll(rd);
+    h_check(h_poll_begins == 0, "poll: negotiation is required");
+
+    rd = poll_fixture();
+    h_poll_async = TRUE;
+    ami_sana2_rx_poll(rd);
+    h_check(h_poll_begins == 1 && rd->poll_pending && !iface.rx_poll_ok,
+            "poll: queued request remains owned and disables the optimization");
+    h_check(h_wait_ios == 0 && h_sleeps == 0,
+            "poll: queued request does not wait for its answer");
+    /* Even a later capability update cannot reuse the outstanding request. */
+    iface.rx_poll_ok = TRUE;
+    ami_sana2_rx_poll(rd);
+    h_check(h_poll_begins == 1 && rd->poll_pending,
+            "poll: an in-flight request is never reused");
+    iface.rx_poll_ok = FALSE;
+
+    /* A poll reply ahead of an ordinary completion does not consume its
+       frame budget, and the ordinary slot is still settled correctly. */
+    AddTail(&rd->port->mp_MsgList, &rd->poll.ios2_Req.io_Message.mn_Node);
+    rx->iface = &iface;
+    rx->reader = rd;
+    rx->slot = &slot;
+    rx->depth = 1;
+    slot.owner = rx;
+    slot.posted = TRUE;
+    slot.req.ios2_Req.io_Command = CMD_READ;
+    slot.req.ios2_Req.io_Error = IOERR_ABORTED;
+    AddTail(&rd->port->mp_MsgList, &slot.req.ios2_Req.io_Message.mn_Node);
+    h_check(ami_sana2_rx_drain(rd, 1) == 1 && !rd->poll_pending && !slot.posted,
+            "poll: drain recognizes control reply then settles the read");
+    h_check(rx->unposted == 1 && iface.stats.rx_errors == 0 &&
+            h_lock_depth == 0 && _nx_ip_input_thread == TX_NULL,
+            "poll: reply changes neither receive statistics nor lock ownership");
+    h_check(ami_sana2_rx_should_block(rd, 0),
+            "poll: both messages were collected");
+
+    rd = poll_fixture();
+    h_poll_async = TRUE;
+    h_poll_reply_now = TRUE;
+    ami_sana2_rx_poll(rd);
+    h_check(rd->poll_pending && !iface.rx_poll_ok && h_wait_ios == 0,
+            "poll: synchronous ReplyMsg with QUICK cleared still needs collection");
+    h_check(ami_sana2_rx_drain(rd, 1) == 0 && !rd->poll_pending,
+            "poll: already-queued reply is collected without a packet");
+    ami_sana2_rx_poll(rd);
+    h_check(h_poll_begins == 1, "poll: collection does not re-enable async polling");
+    h_getmsg_real = FALSE;
+    h_poll_async = FALSE;
+    h_poll_reply_now = FALSE;
+}
+
+static void test_poll_teardown_and_late_reply(void)
+{
+    AmiSana2Reader *rd = poll_fixture();
+
+    printf("  receive poll abort and late-reply retention\n");
+    h_poll_async = TRUE;
+    ami_sana2_rx_poll(rd);
+    rd->stop = TRUE;
+    h_poll_reply_on_abort = TRUE;
+    ami_sana2_rx_teardown(rd);
+    h_check(h_aborts == 1 && h_aborted[0] == (struct IORequest *)&rd->poll,
+            "poll: teardown aborts the outstanding control request");
+    h_check(!rd->poll_pending && rd->orphans == 0 && rd->port == NULL &&
+            h_signal_frees == 1,
+            "poll: aborted reply is collected before the signal is freed");
+    h_check(h_wait_ios == 0 && h_sleeps == 0 && h_commands == 0,
+            "poll: immediate abort reply needs neither a wait nor a flush");
+
+    rd = poll_fixture();
+    h_poll_async = TRUE;
+    ami_sana2_rx_poll(rd);
+    rd->stop = TRUE;
+    ami_sana2_rx_teardown(rd);
+    h_check(h_aborts == 1 && h_commands == 1 && h_command_last == CMD_FLUSH,
+            "poll: ignored abort falls back to the bounded flush");
+    h_check(rd->poll_pending && rd->orphans == 1 &&
+            rd->port == &rd->port_mem && h_signal_frees == 0,
+            "poll: unanswered control request retains its port and signal");
+    h_check(h_sleeps == 2 * AMI_SANA2_RX_REAP_TRIES && h_wait_ios == 0,
+            "poll: teardown has only the existing bounded reap waits");
+
+    /* The reader may have exited, but its Task and stack must remain until
+       this last device-owned request is back, just as for a late CMD_READ. */
+    rd->started = TRUE;
+    rd->joined = TRUE;
+    rd->stack = rc_stack;
+    rd->thread.tx_thread_state = TX_COMPLETED;
+    iface.rx_orphaned = TRUE;
+    h_free_watch = rc_stack;
+    h_free_watched = 0;
+    h_thread_deletes = 0;
+    h_sleeps = 0;
+    h_check(!ami_sana2_rx_reclaim(&iface, TRUE) && rd->orphans == 1,
+            "poll: retained sweep holds a lone outstanding poll");
+    h_check(h_free_watched == 0 && h_thread_deletes == 0 && h_sleeps == 0,
+            "poll: retained sweep neither frees nor waits while poll is out");
+    AddTail(&rd->port_mem.mp_MsgList, &rd->poll.ios2_Req.io_Message.mn_Node);
+    h_check(ami_sana2_rx_reclaim(&iface, TRUE) && !rd->poll_pending &&
+            rd->orphans == 0 && !iface.rx_orphaned,
+            "poll: late control reply allows reclamation");
+    h_check(h_free_watched == 1 && h_thread_deletes == 1 &&
+            rd->port_mem.mp_Flags == PA_IGNORE && rd->port_mem.mp_SigTask == NULL,
+            "poll: late reply is collected before Task and stack retire");
+    h_check(h_signal_frees == 0 && h_wait_ios == 0 && h_sleeps == 0,
+            "poll: reclaim never frees another Task's signal or waits");
+    h_getmsg_real = FALSE;
+    h_poll_async = FALSE;
+    h_free_watch = NULL;
+}
+
 int main(void)
 {
+    test_poll_quick_and_async_replies();
+    test_poll_teardown_and_late_reply();
     test_flush_is_bounded();
 #ifdef AMINETXDUO_RX_BATCH
     test_batch_post_and_drain();
@@ -2768,6 +3099,7 @@ int main(void)
     test_block_only_on_an_empty_port();
     test_a_burst_is_never_left_on_the_port();
     test_refused_read_retires_the_ring();
+    test_out_of_service_comes_back();
 #ifdef AMINETXDUO_PTP
     test_ptp_rings();
     test_ptp_ipv6_reads_reposted();
