@@ -212,7 +212,8 @@ function(aminetxduo_add_tool target output)
 endfunction()
 
 aminetxduo_add_tool(tool_addnetinterface AddNetInterface
-    SOURCES addnetinterface.c libfit.c ${TOOLS_DEVDIAG})
+    SOURCES addnetinterface.c libfit.c addiflink.c netwireless_wm.c
+            ${TOOLS_DEVDIAG})
 
 # Used only by Install-AmiNetXDuo before it copies anything.  Commodore
 # Installer can compare bytes but cannot ask whether two paths are the same
@@ -1094,6 +1095,13 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_include_directories(test_nsltxt PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
     target_compile_options(test_nsltxt PRIVATE -Wall -Wextra)
     add_test(NAME nslookup_txt COMMAND test_nsltxt)
+
+    # AddNetInterface holds a Wi-Fi interface back until the card has joined
+    # (GitHub #457).
+    add_executable(test_addiflink test/test_addiflink.c)
+    target_include_directories(test_addiflink PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    target_compile_options(test_addiflink PRIVATE -Wall -Wextra)
+    add_test(NAME addif_link COMMAND test_addiflink)
 
     # Online/Offline: a driver name without UNIT finds its only interface (F-172).
     add_executable(test_onoffpick test/test_onoffpick.c)

@@ -4756,8 +4756,9 @@
   (cat ";\n"
        "; Wi-Fi: with ENV:Sys/Wireless.prefs, WirelessManager joins that\n"
        (if WIFI_PRIMARY
-           (cat "; network, then the interface asks for an address and waits at most\n"
-                "; " ("%ld" WIFI_TIMEOUT) " seconds; DHCP goes on asking after the boot continues.\n")
+           (cat "; network, then the interface waits for the card to join and for an\n"
+                "; address, at most " ("%ld" WIFI_TIMEOUT) " seconds in all; DHCP goes on asking after\n"
+                "; the boot continues.\n")
            (cat "; network, then the interface asks for an address in the\n"
                 "; background, so the boot does not wait for it.\n"))
        (if (AND WIFI_CARD WIFI_PRIMARY)
