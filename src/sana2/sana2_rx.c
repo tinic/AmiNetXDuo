@@ -1160,6 +1160,91 @@ AMI_SANA2_BATCH_LINKAGE UWORD ami_sana2_rx_post(AmiSana2Rx *rx)
     return live;
 }
 
+/* ------------------------------------------------------- out of service */
+
+/*
+ * A read came back S2ERR_OUTOFSERVICE: the unit is not online.  NetX Duo
+ * learns link state only from NX_LINK_ENABLE/DISABLE, so the interface is
+ * marked down here or it stays up with every send failing.  Recorded once an
+ * outage: ami_sana2_rx_resume() bounces a read off the unit every second
+ * until it is back.  Out of line, as it is off the per-frame path.
+ */
+AMI_SANA2_BATCH_LINKAGE VOID __attribute__((noinline, cold))
+ami_sana2_rx_out_of_service(AmiSana2If *iface)
+{
+    iface->online = FALSE;
+    if (iface->interface_ptr != NULL)
+        iface->interface_ptr->nx_interface_link_up = NX_FALSE;
+    if (iface->alias_count != 0U)
+        ami_sana2_alias_sync(iface);
+
+    if (iface->out_of_service)
+        return;
+
+    iface->out_of_service = TRUE;
+    iface->oos_retry_at   = (ULONG)tx_time_get();
+    ami_event(NETEVENT_OUT_OF_SERVICE, (UWORD)iface->index, 0UL);
+    AMI_WARN("sana2: %s went out of service. The link is marked down",
+             iface->device);
+}
+
+/*
+ * Back in service without an `Online`.  The unit comes up under another
+ * opener -- prism2.device when WirelessManager configures it, a PCMCIA card
+ * back in its slot, an S2_ONLINE from another program -- and the stack is
+ * not told.  S2_ONEVENT cannot tell it either: not every device has it, a
+ * device that follows the spec answers only the next change, and a request
+ * left outstanding must come back at close.  The reads are the probe
+ * instead: once a second, while the reader idles, they are posted again.  A
+ * unit still out of service refuses them in BeginIO() onto the port, and
+ * the drain takes the refusal (ami_sana2_rx_out_of_service()).  A unit that
+ * keeps them is back.  Never while the stack holds the interface down or
+ * has sent S2_OFFLINE.
+ */
+AMI_SANA2_BATCH_LINKAGE VOID __attribute__((noinline, cold))
+ami_sana2_rx_resume(AmiSana2Reader *rd)
+{
+    AmiSana2If           *iface = rd->iface;
+    const struct Message *head;
+    UWORD                 live = 0;
+    UWORD                 r;
+
+    if (rd->stop || !iface->admin_up || iface->detaching ||
+        iface->offline_state != AMI_SANA2_OFFLINE_UP)
+        return;
+    if ((ULONG)tx_time_get() - iface->oos_retry_at <
+        (ULONG)TX_TIMER_TICKS_PER_SECOND)
+        return;
+    iface->oos_retry_at = (ULONG)tx_time_get();
+
+    iface->online = TRUE;
+    for (r = 0; r < (UWORD)AMI_SANA2_RX_READERS; r++)
+        live += ami_sana2_rx_post(&iface->rx[r]);
+
+    /* Nothing posted, for want of packets: no answer, try next second. */
+    if (live == 0)
+    {
+        iface->online = FALSE;
+        return;
+    }
+
+    /* Only this thread takes messages off the port, so the head stays. */
+    head = (const struct Message *)rd->port->mp_MsgList.lh_Head;
+    if (head->mn_Node.ln_Succ != NULL &&
+        ((const struct IOSana2Req *)head)->ios2_Req.io_Error ==
+            (BYTE)S2ERR_OUTOFSERVICE)
+        return;
+
+    iface->out_of_service = FALSE;
+    if (iface->interface_ptr != NULL)
+        iface->interface_ptr->nx_interface_link_up = NX_TRUE;
+    if (iface->alias_count != 0U)
+        ami_sana2_alias_sync(iface);
+    ami_event(NETEVENT_BACK_IN_SERVICE, (UWORD)iface->index, 0UL);
+    AMI_INFO("sana2: %s is back in service. The link is marked up",
+             iface->device);
+}
+
 /* ------------------------------------------------------------ completion */
 
 /* Reconcile the device's ios2_DataLength answer with the bytes its CopyToBuff
@@ -1781,14 +1866,7 @@ AMI_SANA2_BATCH_LINKAGE UWORD ami_sana2_rx_drain_batch(AmiSana2Reader *rd,
     }
     else if ((LONG)(BYTE)raw == (LONG)S2ERR_OUTOFSERVICE)
     {
-        iface->online = FALSE;
-        if (iface->interface_ptr != NULL)
-            iface->interface_ptr->nx_interface_link_up = NX_FALSE;
-        if (iface->alias_count != 0U)
-            ami_sana2_alias_sync(iface);
-        ami_event(NETEVENT_OUT_OF_SERVICE, (UWORD)iface->index, 0UL);
-        AMI_WARN("sana2: %s went out of service. The link is marked down",
-                 iface->device);
+        ami_sana2_rx_out_of_service(iface);
     }
     else if ((LONG)(BYTE)raw == (LONG)IOERR_NOCMD ||
              (LONG)(BYTE)raw == (LONG)S2ERR_NOT_SUPPORTED ||
@@ -2024,22 +2102,7 @@ static UWORD ami_sana2_rx_drain(AmiSana2Reader *rd, UWORD budget)
         }
         else if ((LONG)(BYTE)raw == (LONG)S2ERR_OUTOFSERVICE)
         {
-            /*
-             * NetX Duo learns link state only from NX_LINK_ENABLE/DISABLE, so
-             * an out-of-service device must be marked down here or the
-             * interface stays up with every send failing.  `Online` recovers it.
-             */
-            iface->online = FALSE;
-
-            if (iface->interface_ptr != NULL)
-                iface->interface_ptr->nx_interface_link_up = NX_FALSE;
-            if (iface->alias_count != 0U)
-                ami_sana2_alias_sync(iface);
-
-            ami_event(NETEVENT_OUT_OF_SERVICE, (UWORD)iface->index, 0UL);
-
-            AMI_WARN("sana2: %s went out of service. The link is marked down",
-                     iface->device);
+            ami_sana2_rx_out_of_service(iface);
         }
         else
         {
@@ -2539,6 +2602,8 @@ static VOID ami_sana2_rx_thread(ULONG argument)
         {
             /* Either the pool is empty or the interface is down. Back off
                rather than spin. ami_sana2_rx_stop() signals out of this. */
+            if (iface->out_of_service)
+                ami_sana2_rx_resume(rd);
             tx_thread_sleep(2);
             continue;
         }
