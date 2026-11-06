@@ -7,6 +7,12 @@ are history.
 
 ## Unreleased
 
+- AddNetInterface waits for a Wi-Fi card such as prism2.device to join
+  its network before it attaches the interface, so the network starts at
+  boot without WaitForLink; the wait shares the command's TIMEOUT.
+- An interface whose card answers "out of service" when it is first
+  opened comes back by itself once the card goes online, instead of
+  staying down until the next boot.
 - sntp takes the time zone from ENV:TZONE when it is set, including
   daylight saving, so the clock is no longer an hour out in summer;
   without it, Locale is used as before.

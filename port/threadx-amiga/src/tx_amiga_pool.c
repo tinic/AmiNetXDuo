@@ -177,6 +177,26 @@ ULONG   free_slots;
 }
 
 
+UINT tx_amiga_adopt_task_known_locked(struct Task *task)
+{
+
+ULONG   i;
+
+
+    for (i = 0UL; i < ((ULONG) TX_AMIGA_ADOPT_SLOTS); i++)
+    {
+        if ((_tx_amiga_adopt_pool[i].as_busy != ((UINT) 0)) &&
+            (_tx_amiga_adopt_pool[i].as_published != ((UINT) TX_FALSE)) &&
+            (_tx_amiga_adopt_pool[i].as_thread.tx_thread_amiga_task == (VOID *) task))
+        {
+            return((UINT) TX_TRUE);
+        }
+    }
+
+    return((UINT) TX_FALSE);
+}
+
+
 ULONG tx_amiga_adopt_generation(TX_THREAD *thread_ptr)
 {
 
