@@ -43,7 +43,9 @@ case "$OS/$ARCH" in
     Linux/x86_64|Linux/amd64)
         TC_PLATFORM="linux-x86_64"
         TC_ASSET_PLATFORM="x86_64-linux"
-        TC_SHA256="946ce54a18637fea936be24c8fbbb630ebaa938b89c9544a2ba883a1b3770d6f"
+        TC_SHA256="29f6ded348ed27fbed20eca83c9a1d3a966c6428982a2c2941ad3b43aef0d015"
+        # Experiment: rc23 with cc1/cc1plus/lto1 from tinic/gcc m68k-save-written-regs.
+        TC_EXPERIMENT_URL="https://github.com/tinic/gcc/releases/download/saveregs-proto-1/m68k-amigaos-gcc-16.2-rc23-saveregs-ab-x86_64-linux.tar.xz"
         ;;
     Darwin/arm64|Darwin/aarch64)
         TC_PLATFORM="darwin-arm64"
@@ -75,7 +77,7 @@ no_asset() {
 }
 
 TC_MIRROR_ASSET="m68k-amigaos-gcc-${TC_RELEASE}-${TC_ASSET_PLATFORM}.tar.xz"
-TC_MIRROR_URL="${AMINETXDUO_TOOLCHAIN_URL:-https://github.com/${TC_MIRROR_REPO}/releases/download/${TC_MIRROR_TAG}/${TC_MIRROR_ASSET}}"
+TC_MIRROR_URL="${AMINETXDUO_TOOLCHAIN_URL:-${TC_EXPERIMENT_URL:-https://github.com/${TC_MIRROR_REPO}/releases/download/${TC_MIRROR_TAG}/${TC_MIRROR_ASSET}}}"
 
 # ---------------------------------------------------------------- options ----
 
