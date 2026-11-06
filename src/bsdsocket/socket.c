@@ -19,6 +19,7 @@
 #endif
 
 #include "aminetxduo/random.h"
+#include "aminetxduo/foreign_call.h"
 
 #include <proto/exec.h>
 
@@ -962,7 +963,7 @@ static LONG bsd_fd_callback(struct AmiSocketBase *base, LONG fd, LONG action)
     if (base->sb_FDCallback == NULL)
         return 0;
 
-    return base->sb_FDCallback(fd, action);
+    return ami_call_fd((APTR)base->sb_FDCallback, fd, action);
 }
 
 /* The store that ends one: under Forbid(), so it reaches the current table

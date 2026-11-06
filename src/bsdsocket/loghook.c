@@ -30,20 +30,11 @@
 
 #include "bsdsocket_internal.h"
 #include "aminetxduo/exec_port.h"
+#include "aminetxduo/foreign_call.h"
 
 #include <proto/dos.h>
 #include <proto/exec.h>
 #include <sys/syslog.h>
-
-typedef LONG (*BsdLogHookFn)(register struct Hook *hook __asm("a0"),
-                             register APTR reserved __asm("a2"),
-                             register struct LogHookMessage *lhm __asm("a1"));
-
-typedef union BsdLogHookEntry
-{
-    ULONG        (*blhe_Raw)(VOID);
-    BsdLogHookFn   blhe_Fn;
-} BsdLogHookEntry;
 
 static struct Hook          *bsd_log_hook;
 static struct AmiSocketBase *bsd_log_hook_owner;
@@ -94,7 +85,6 @@ VOID bsd_log_hook_deliver(LONG priority, STRPTR tag, ULONG id,
 {
     struct Hook          *hook = bsd_log_hook;
     struct LogHookMessage lhm;
-    BsdLogHookEntry       entry;
     BOOL                  taken;
 
     if (hook == NULL || hook->h_Entry == NULL || message == NULL)
@@ -123,8 +113,7 @@ VOID bsd_log_hook_deliver(LONG priority, STRPTR tag, ULONG id,
     lhm.lhm_ID      = id;
     lhm.lhm_Message = (STRPTR)message;
 
-    entry.blhe_Raw = hook->h_Entry;
-    (VOID)entry.blhe_Fn(hook, NULL, &lhm);
+    (VOID)ami_call_hook(hook, NULL, &lhm);
 
     bsd_log_hook_busy = FALSE;
 }
