@@ -543,25 +543,22 @@ LONG ami_sana2_online(AmiSana2If *iface)
  * online.  What S2_OFFLINE would have saved is the MAC receiving into a
  * ring nobody reads, which the driver counts and drops.
  *
- * prism2.device 2.9 (Aminet driver/net/prism2v2), whose unit WirelessManager
- * shares with us: S2_OFFLINE runs GoOffline(), which issues P2_CMD_DISABLE;
- * the S2_ONLINE after it runs GoOnline(), which issues P2_CMD_ENABLE and
- * then busy-waits for P2_EVENTF_CMD with no bound (P2DoCmd()).  DevBeginIO()
- * runs the command in the caller's task, so the spin is ours, at network
- * priority.  Measured on a real A1200 (MA401RA, Prism 2.5) twice: with
- * WirelessManager 1.5 running, `Offline prism2` returns and the machine
- * stays up; `Online prism2` then hangs the whole machine.  Without
- * WirelessManager our close is the last one and Online opens a fresh unit,
- * which does not hang.  The driver honours AbortIO() on a queued CMD_READ,
- * CMD_FLUSH returns every opener's reads, and its S2_ONLINE acts only when
- * UNITF_ONLINE is clear, so the same reasoning as genet holds.
+ * prism2.device is not here.  A unit left online keeps its card raising
+ * PORTS interrupts, which no WHDLoad program answers: the demo freezes
+ * (#455).  S2_OFFLINE is GoOffline(), which masks and acknowledges them,
+ * and is what the AmiTCP and EasyNetPro Offline commands send.  The
+ * Online hang that once kept it here (#314) does not come from the stack:
+ * the same A1200 and card, reflashed to STA 1.8.4, cycle cleanly with
+ * WirelessManager running, the rc1 stack included.  The card had stock
+ * firmware then.  Below STA 1.7 the driver skips P2_CMD_DISABLE
+ * (UNITF_BROKENDISABLE), so the next S2_ONLINE sends P2_CMD_ENABLE to a
+ * port still enabled and waits for P2_EVENTF_CMD without a bound.
  */
 BOOL ami_sana2_keeps_online(const char *device)
 {
     static const char *const keep[] =
     {
         "genet.device",
-        "prism2.device",
     };
     const char *base;
     UWORD       i;
