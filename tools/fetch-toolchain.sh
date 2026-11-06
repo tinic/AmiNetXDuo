@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# Acquire the pinned codewiz/AmigaPorts m68k-amigaos toolchain. Package
-# identity is upstream GCC version plus our revision (toolchain-version.sh).
+# Acquire the pinned AmigaPorts m68k-amigaos-gcc release toolchain. Package
+# identity is the release tag and its GCC version (toolchain-version.sh).
 #
 #   tools/fetch-toolchain.sh              # fetch (or reuse), report the root
 #   eval "$(tools/fetch-toolchain.sh --export)"   # ... and export it
@@ -12,8 +12,8 @@
 #   tools/fetch-toolchain.sh --force      # re-fetch even if cached
 #
 # Assets cover Linux x86_64 and macOS arm64; any other host builds its own.
-# One release is the only download source -- nothing else publishes this
-# pairing -- so a bad hash stops, loudly, and writes nothing.
+# The AmigaPorts release is the only download source, so a bad hash stops,
+# loudly, and writes nothing.
 #
 #   AMINETXDUO_TOOLCHAIN_CACHE   where to unpack (default ~/.cache/aminetxduo)
 #   AMINETXDUO_TOOLCHAIN_URL     a mirror; still hash-checked against the pin
@@ -24,14 +24,13 @@ set -euo pipefail
 
 # ------------------------------------------------------------------- pin ----
 
-# The immutable package contains the complete upstream toolchain, including
-# NDK 3.2 and its runtime libraries. Historical releases remain unchanged.
+# The stock release tarball: the complete toolchain, NDK 3.2 and its runtime
+# libraries, under one top directory named for the GCC series.
 . "$(dirname "$0")/toolchain-version.sh"
-TC_PREFIX_IN_TAR="opt/m68k-amigaos"
+TC_PREFIX_IN_TAR="m68k-amigaos-gcc-${TC_RELEASE%%-*}"
 
-# Compiler assets live with the fork rather than topping the product releases.
-TC_MIRROR_REPO="tinic/gcc"
-TC_MIRROR_TAG="toolchain-m68k-amigaos-gcc-${TC_ASSET_VERSION}"
+TC_MIRROR_REPO="AmigaPorts/m68k-amigaos-gcc"
+TC_MIRROR_TAG="v${TC_RELEASE}"
 
 # --------------------------------------------------------------- platform ---
 
@@ -43,14 +42,17 @@ ARCH=$(uname -m)
 case "$OS/$ARCH" in
     Linux/x86_64|Linux/amd64)
         TC_PLATFORM="linux-x86_64"
-        TC_SHA256="8529a742091a28f23c03c4bbfbd9148eaeb15a9c362fb200c79ed818e5390369"
+        TC_ASSET_PLATFORM="x86_64-linux"
+        TC_SHA256="946ce54a18637fea936be24c8fbbb630ebaa938b89c9544a2ba883a1b3770d6f"
         ;;
     Darwin/arm64|Darwin/aarch64)
         TC_PLATFORM="darwin-arm64"
-        TC_SHA256="b3b4bac39a02b57b0d463e064df0780f80b397e5200ae38bb393034054a375b7"
+        TC_ASSET_PLATFORM="arm64-darwin"
+        TC_SHA256="c5ff60632193bb5c95776f0343dfbec5b0779118f41f7df2917840f6b41dfd21"
         ;;
     *)
         TC_PLATFORM=""
+        TC_ASSET_PLATFORM=""
         TC_SHA256=""
         ;;
 esac
@@ -72,7 +74,7 @@ no_asset() {
     exit 2
 }
 
-TC_MIRROR_ASSET="m68k-amigaos-gcc-${TC_ASSET_VERSION}-ndk${TC_NDK_VERSION}-${TC_PLATFORM}.tar.xz"
+TC_MIRROR_ASSET="m68k-amigaos-gcc-${TC_RELEASE}-${TC_ASSET_PLATFORM}.tar.xz"
 TC_MIRROR_URL="${AMINETXDUO_TOOLCHAIN_URL:-https://github.com/${TC_MIRROR_REPO}/releases/download/${TC_MIRROR_TAG}/${TC_MIRROR_ASSET}}"
 
 # ---------------------------------------------------------------- options ----
@@ -305,6 +307,26 @@ fi
     echo "!! extracted tree has no NDK headers" >&2
     exit 1
 }
+
+# The release says which one it is in its --version banner.  The hash already
+# pins the bytes; this catches a pin edited on one line and not the other.
+# The marker then carries that identity for verify_identity on a warm cache.
+banner=$("$TMP/x/$TC_PREFIX_IN_TAR/bin/m68k-amigaos-gcc" --version 2>/dev/null | sed -n 1p)
+case "$banner" in
+    *"(AmigaDev ${TC_RELEASE})"*) ;;
+    *)
+        echo "!! the asset is not AmigaDev ${TC_RELEASE}: ${banner:-no banner}" >&2
+        exit 1 ;;
+esac
+printf '%s\n' "$TC_ASSET_VERSION" > "$TMP/x/$TC_PREFIX_IN_TAR/.aminetxduo-toolchain-version"
+
+# Plain ar, ranlib and nm load LTO objects only through lib/bfd-plugins, and
+# the release links nothing there; tools/build-toolchain.sh says why it is
+# needed.  The same relative link that script makes.
+lto_plugin=$(cd "$TMP/x/$TC_PREFIX_IN_TAR" && ls libexec/gcc/m68k-amigaos/*/liblto_plugin.so 2>/dev/null | sed -n 1p)
+[ -n "$lto_plugin" ] || { echo "!! the asset has no liblto_plugin.so" >&2; exit 1; }
+mkdir -p "$TMP/x/$TC_PREFIX_IN_TAR/lib/bfd-plugins"
+ln -sf "../../$lto_plugin" "$TMP/x/$TC_PREFIX_IN_TAR/lib/bfd-plugins/liblto_plugin.so"
 python3 "$(dirname "$0")/check-toolchain-malloc.py" \
     "$TMP/x/$TC_PREFIX_IN_TAR" >&2 || exit 1
 

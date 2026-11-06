@@ -21,35 +21,33 @@ set -euo pipefail
 
 # The amiga-gcc build system itself.
 PIN_AMIGA_GCC_URL="https://github.com/AmigaPorts/m68k-amigaos-gcc"
-PIN_AMIGA_GCC_SHA="de370a15e783261e82d0ba0ab809eff128356de1"
+PIN_AMIGA_GCC_SHA="7809c2df273947149689f1c73c4e841aaca4af25"
 
 # projects/<name>|<remote that serves this commit>|<commit>|<branch it was on>
 #
 # The branch is recorded only so a human can find the commit again; nothing
 # reads it as a pin.
 PINS="
-amiga-netinclude|https://github.com/AmigaPorts/amiga-netinclude|7d155ca3a3090afe3466f819dd178f2af6f5c176|main
-binutils|https://github.com/AmigaPorts/binutils-gdb|15f4b0aa860f74022c6aff7ace15bc0a307d5510|amiga-2.46
-clib2|https://github.com/AmigaPorts/clib2|78e05e255495382bbf880d0d37d20763d129f01e|master
+amiga-netinclude|https://github.com/AmigaPorts/amiga-netinclude|a2529359b2e06bf9b0a92765f73a5f172378fe8b|main
+binutils|https://github.com/AmigaPorts/binutils-gdb|182a5100c88386b6f59b38c4d89eb150235f92c2|amiga-2.46
+clib2|https://github.com/AmigaPorts/clib2|0b527f3f7fa3b806725458c835d185fea04c0902|master
 fd2pragma|https://github.com/AmigaPorts/fd2pragma|bcffac5c89295baf1db033addc984312b4b4a722|master
 fd2sfd|https://github.com/AmigaPorts/fd2sfd|a0ae60d140fdfd30f889810faea07cc6968d1fd0|master
-gcc|https://github.com/tinic/gcc|8dc8d8365a3825b74dfba58f8e80545b052e0cd5|amiga16.2
+gcc|https://github.com/AmigaPorts/gcc|4a30559c9f3baf1b3e68a9b3a9185700fd726951|amiga16.2
 ira|https://github.com/AmigaPorts/ira|bb7c11384a32c409341fdb0d16d715b7959a0290|master
-ixemul|https://github.com/AmigaPorts/ixemul|f0dd997994263c6ac783b563222a9f53a00c013c|master
 lha|https://github.com/AmigaPorts/lha|979815dc8699a9c5018de067946737c83ec6f697|master
 libdebug|https://github.com/AmigaPorts/libdebug|76c7dbfeaac79516117dc810e3ba9b34d5f54a69|master
-libnix|https://github.com/AmigaPorts/libnix|df91c92564490bae1a5abd9e302f466aa7684bac|master
-newlib-cygwin|https://github.com/AmigaPorts/newlib-cygwin|e07bea74897b6ee7b645602d66fcff6c6792d1a9|amiga
-sfdc|https://github.com/AmigaPorts/sfdc|4e7afc044c1ff129574fcf3b839c3351edcfe2fb|master
+libnix|https://github.com/AmigaPorts/libnix|00e31461cf7242c03723ad21fd24d65d660c1896|master
+newlib-cygwin|https://github.com/AmigaPorts/newlib-cygwin|25f097be1aa733c34afbf6e3c862ba7db6362c4d|amiga
+sfdc|https://github.com/AmigaPorts/sfdc|4c670c89a1e56708371b5e863421b10302a2e2c1|master
 vasm|https://github.com/AmigaPorts/vasm|de93f7dd067001532cff663730133601edb274cb|master
-vbcc|https://github.com/AmigaPorts/vbcc|55a487d500dccccad806cf3916e90bcd95189ec9|master
+vbcc|https://github.com/AmigaPorts/vbcc|8a1ea8062b7ab1301d3a2822ef4188b917fa57f5|vbcc-20260112
 vlink|https://github.com/AmigaPorts/vlink|ce46ccfda0e30eda5b12b9a5d0259d8eaefdefe9|master
-aros-stuff|https://github.com/AmigaPorts/aros-stuff|9e09fb0f9f5150058c788fb42787927907b28a46|master
+aros-stuff|https://github.com/AmigaPorts/aros-stuff|2cb0958d9b1d3642132e8c63d73028438c45c265|master
 "
 
-# The compiler commit is also present in the upstream fork network.
-# shellcheck disable=SC2034 # Resolved dynamically as MIRROR_<module>.
-MIRROR_gcc="https://github.com/AmigaPorts/gcc"
+# Optional per-module fallback remotes, resolved dynamically as
+# MIRROR_<module>.  None is needed while every pin is on AmigaPorts.
 
 # NDK 3.2: the exact archive in codewiz's pinned default-archives table.
 PIN_NDK_URL="https://aminet.net/dev/misc/NDK3.2.lha"

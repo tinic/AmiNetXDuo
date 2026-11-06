@@ -916,10 +916,12 @@ def main():
     # The three bugs are newlib's crt0.c.  A toolchain that also ships ixemul
     # has ixemul's own crt0.o beside it, a different runtime with no
     # ____start/exit pair; it is not this script's subject and must not fail
-    # the gate as "not understood".
-    found = sorted(p for p in root.rglob("crt0.o") if "ixemul" not in p.parts)
+    # the gate as "not understood".  AmigaPorts installs it as newlib-crt0.o
+    # from 16.2-rc22 (newlib-cygwin 16731e6837), crt0.o before that.
+    found = sorted(p for name in ("crt0.o", "newlib-crt0.o")
+                   for p in root.rglob(name) if "ixemul" not in p.parts)
     if not found:
-        sys.stderr.write(f"fix-toolchain-crt0: no crt0.o under {root}\n")
+        sys.stderr.write(f"fix-toolchain-crt0: no crt0.o or newlib-crt0.o under {root}\n")
         return 1
 
     objdump = find_objdump(root, found[0])

@@ -63,7 +63,6 @@ extern int __real_open(const char *path, int flags, ...);
 extern int __real_read(int fd, void *buf, size_t len);
 extern int __real_write(int fd, const void *buf, size_t len);
 extern int __real_close(int fd);
-extern int __real_fstat(int fd, struct stat *st);
 
 struct scp_fd
 {
@@ -310,7 +309,7 @@ int __wrap_fstat(int fd, struct stat *st)
         *st = dir->st;
         return 0;
     }
-    return __real_fstat(fd, st);
+    return amiga_fstat(fd, st);
 }
 
 extern __typeof__(read) __wrap_read;
@@ -777,14 +776,16 @@ pid_t waitpid(pid_t pid, int *status, int options)
     return SCP_CHILD_PID;
 }
 
-void (*signal(int sig, void (*handler)(int)))(int)
+extern __typeof__(signal) __wrap_signal;
+void (*__wrap_signal(int sig, void (*handler)(int)))(int)
 {
     (void)sig;
     (void)handler;
     return SIG_DFL;
 }
 
-int kill(pid_t pid, int sig)
+extern __typeof__(kill) __wrap_kill;
+int __wrap_kill(pid_t pid, int sig)
 {
     if (pid == SCP_CHILD_PID && scp_child.active && !scp_child.done
         && scp_child.process != NULL)

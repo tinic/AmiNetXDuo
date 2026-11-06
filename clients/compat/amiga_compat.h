@@ -34,6 +34,10 @@ extern "C" {
    to the parameter list. */
 struct timespec;
 
+/* fstat() for a client: each link routes fstat here through --wrap. */
+struct stat;
+int amiga_fstat(int fd, struct stat *st);
+
 /* Collapse ":/" to ":", see amiga_posix.c.  Returns its argument unchanged
    when there is nothing to fix, and otherwise a pointer to a static buffer,
    so the result is only valid until the next call. */
