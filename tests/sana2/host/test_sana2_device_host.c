@@ -1761,7 +1761,8 @@ static void case_stats_request(void)
 /* genet.device takes 8000 000B on an S2_ONLINE that follows an S2_OFFLINE
    (sana2_device.c, ami_sana2_keeps_online), so it is never sent one: a link
    cycle on it is one S2_ONLINE at the start and one at the return, and the
-   close sends none either.  Any other name still gets the offline. */
+   close sends none either.  Any other name still gets the offline,
+   prism2.device included. */
 static void case_keeps_online(void)
 {
     AmiSana2If *iface;
@@ -1791,6 +1792,25 @@ static void case_keeps_online(void)
     h_check(h_tear_down(iface), "the genet interface closes");
     h_check(h_dev.offline_cmds == 0, "still no S2_OFFLINE at the close");
 
+    /* prism2.device: Offline masks the card's interrupts, so it must reach
+       the driver (#455). */
+    h_device_reset();
+    h_config();
+    strcpy(h_cfg.device, "DEVS:Networks/prism2.device");
+
+    iface = ami_sana2_open(&h_cfg, &err);
+    h_check(iface != NULL, "prism2.device opens");
+    if (iface == NULL)
+        return;
+
+    h_check(iface->keep_online == FALSE, "and is not marked to stay online");
+    h_check(ami_sana2_online(iface) == 0, "it goes online");
+    h_check(ami_sana2_offline(iface) == 0, "taking it offline succeeds");
+    h_check(h_dev.offline_cmds == 1, "with one S2_OFFLINE");
+    h_check(ami_sana2_online(iface) == 0, "it comes back online");
+    h_check(h_dev.online_cmds == 2, "with a second S2_ONLINE");
+    h_check(h_tear_down(iface), "the prism2 interface closes");
+
     h_check(ami_sana2_keeps_online("a2065.device") == FALSE,
             "an a2065.device is not kept online");
     h_check(ami_sana2_keeps_online("genet.device") == TRUE,
@@ -1807,13 +1827,11 @@ static void case_keeps_online(void)
     h_check(ami_sana2_keeps_online("anxgenet.device") == FALSE &&
             ami_sana2_keeps_online("DEVS:Networks/xgenet.device") == FALSE,
             "a different name ending in genet.device is not");
-    /* prism2.device spins in our task on the S2_ONLINE after an
-       S2_OFFLINE while WirelessManager holds the unit. */
-    h_check(ami_sana2_keeps_online("prism2.device") == TRUE &&
-            ami_sana2_keeps_online("DEVS:Networks/Prism2.device") == TRUE,
-            "prism2.device is kept online too");
-    h_check(ami_sana2_keeps_online("anxprism2.device") == FALSE,
-            "a different name ending in prism2.device is not");
+    /* prism2.device takes S2_OFFLINE: its card must stop interrupting
+       before WHDLoad starts (#455). */
+    h_check(ami_sana2_keeps_online("prism2.device") == FALSE &&
+            ami_sana2_keeps_online("DEVS:Networks/Prism2.device") == FALSE,
+            "prism2.device is not kept online");
     h_check(ami_sana2_keeps_online("genet.device/") == FALSE &&
             ami_sana2_keeps_online(NULL) == FALSE,
             "nor a directory or no name");

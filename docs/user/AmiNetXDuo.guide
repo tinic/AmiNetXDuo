@@ -1615,6 +1615,22 @@
   @{"ping cannot send the request" link T_OFFLINE} is a different
   fault.
 
+  @{b}WHDLoad@{ub}
+
+  A network card that is online raises interrupts that a program
+  started by WHDLoad does not answer. The program then stops, often
+  with a blank screen. Offline stops the interrupts of the card. Put
+  Offline in the script that the WHDLoad option ExecuteStartup runs,
+  and Online in the script that ExecuteCleanup runs. Do not start
+  Offline with Run: the card must be offline before WHDLoad starts the
+  program.
+
+      ; S:WHDLoad-Startup
+      Offline DEVS:Networks/prism2.device 0
+
+      ; S:WHDLoad-Cleanup
+      Run >NIL: Online DEVS:Networks/prism2.device 0
+
 @endnode
 
 
