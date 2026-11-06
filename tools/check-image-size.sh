@@ -137,7 +137,8 @@ BUDGETS=(
     # 386,156.
     # An out-of-service unit probed once a second and the link marked up
     # when it takes reads again (#457): +208, 386,156 -> 386,364.
-    "default:src/bsdsocket/bsdsocket.library:386364"
+    # Opener code called with a6 clobbered (foreign_call.h): +8, 386,364 -> 386,372.
+    "default:src/bsdsocket/bsdsocket.library:386372"
     # 41,412 after stateless receive-checksum verification was added to the
     # EL3 and word/long NE2000 direct paths, 2026-09-15.  43,620 with
     # ANXD_CMD_RX_BATCH in the shell (claim, completion, staging copy, the
@@ -150,7 +151,8 @@ BUDGETS=(
     # 46,016 with the transmit staging at tx_phase and the long-window
     # lead-in word (payload copy in phase on ne2000, el3 and lance).
     # Combined with #438 on main: +16, 46,016 -> 46,032.
-    "default:src/netdev/anxnet.device:46032"
+    # Opener code called with a6 clobbered (foreign_call.h): +8, 46,032 -> 46,040.
+    "default:src/netdev/anxnet.device:46040"
     # 21,724 at the split; 23,032 with the original receive offload (IPv4 and
     # IPv6 verification plus the former driver-side CONTINUES mark); 24,440 in
     # the former batched-reply experiment, plus the held pass and reset
@@ -175,7 +177,8 @@ BUDGETS=(
     # The transmit staging phase and the shared bus lead-in: +84,
     # 29,772 -> 29,856.
     # Measured after the merge: +8, 29,856 -> 29,864.
-    "default:src/netdev/anxgenet.device:29864"
+    # Opener code called with a6 clobbered (foreign_call.h): +8, 29,864 -> 29,872.
+    "default:src/netdev/anxgenet.device:29872"
     "default:src/wifipi/anxwifipi.device:56000"
     # +832 bytes for Roadshow's native users/groups ReadArgs syntax, strict
     # /N validation and bounded member-vector sizing: existing UID/GID maps
@@ -247,16 +250,19 @@ BUDGETS=(
     # 258,152 -> 259,752.
     # An out-of-service unit probed back into service (#457): +268,
     # 259,752 -> 260,020.
-    "minimal:src/bsdsocket/bsdsocket.library:260020"
+    # Opener code called with a6 clobbered (foreign_call.h): +8, 260,020 -> 260,028.
+    "minimal:src/bsdsocket/bsdsocket.library:260028"
     # Combined with #438 on main: +16, 46,016 -> 46,032.
-    "minimal:src/netdev/anxnet.device:46032"
+    # Opener code called with a6 clobbered (foreign_call.h): +8, 46,032 -> 46,040.
+    "minimal:src/netdev/anxnet.device:46040"
     # 29,088 on e806188f after the audited device fixes.
     # Batched transmit adds 632, 29,120 -> 29,752, approved by turo 2026-10-29.
     # The queue limit and its stops in ami_sana2_get_stats(): +8, -> 29,760.
     # The aligned direct-receive link header copy: +12, -> 29,772.
     # The transmit staging phase and the bus lead-in: +84, -> 29,856.
     # Measured after the merge: +8, 29,856 -> 29,864.
-    "minimal:src/netdev/anxgenet.device:29864"
+    # Opener code called with a6 clobbered (foreign_call.h): +8, 29,864 -> 29,872.
+    "minimal:src/netdev/anxgenet.device:29872"
     "minimal:src/wifipi/anxwifipi.device:56000"
     # 10,172 on e806188f after the audited parser fixes.
     "minimal:src/usergroup/usergroup.library:10240"
@@ -288,7 +294,8 @@ BUDGETS=(
     # AMINETXDUO_PTP (#437).
     # 212,176 with DESTINATION6 in the interface file keywords (#437).
     # 212,448 with an out-of-service unit probed back into service (#457).
-    "micro:src/bsdsocket/bsdsocket.library:212448"
+    # Opener code called with a6 clobbered (foreign_call.h): +4, 212,448 -> 212,452.
+    "micro:src/bsdsocket/bsdsocket.library:212452"
     "micro:src/netdev/anxnet.device:46000"
     "micro:src/netdev/anxgenet.device:29120"
     "micro:src/wifipi/anxwifipi.device:56000"
