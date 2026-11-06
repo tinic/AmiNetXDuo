@@ -855,6 +855,8 @@ typedef struct NetStatusOpener
 #define NETEVENT_OFFLINE_SKIPPED 21 /* S2_OFFLINE not issued: already offline */
 #define NETEVENT_OFFLINE_FAILED 22  /* the device refused S2_OFFLINE;
                                        value = the SANA-II wire error        */
+#define NETEVENT_BACK_IN_SERVICE 23 /* the device took reads again after
+                                       OUT_OF_SERVICE; the link is marked up */
 
 /* --- teardown ----------------------------------------------------------- */
 #define NETEVENT_IFACE_RETAINED 30  /* value = NETEVENT_HELD_*               */

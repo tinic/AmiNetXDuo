@@ -135,9 +135,11 @@ BUDGETS=(
     # A TCP socket readable only when recv() can return data (nx_ready.h):
     # the head's READY mark tested, a 32-bit constant: +8, 386,148 ->
     # 386,156.
-    # The receive server and the RX_POLL reply kept (#9): +1,292,
-    # 386,156 -> 387,448.
-    "default:src/bsdsocket/bsdsocket.library:387448"
+    # An out-of-service unit probed once a second and the link marked up
+    # when it takes reads again (#457): +208, 386,156 -> 386,364.
+    # The receive server, its per-tick slice and the RX_POLL reply kept
+    # (#9): +1,592, 386,364 -> 387,956.
+    "default:src/bsdsocket/bsdsocket.library:387956"
     # 41,412 after stateless receive-checksum verification was added to the
     # EL3 and word/long NE2000 direct paths, 2026-09-15.  43,620 with
     # ANXD_CMD_RX_BATCH in the shell (claim, completion, staging copy, the
@@ -245,9 +247,11 @@ BUDGETS=(
     # A refused read retires its ring (#437): +32, 258,120 -> 258,152.
     # /31-/32 broadcast (netxduo #43) and AMINETXDUO_PTP (#437): +1,600,
     # 258,152 -> 259,752.
-    # The receive server and the RX_POLL reply kept (#9): +1,112,
-    # 259,752 -> 260,864.
-    "minimal:src/bsdsocket/bsdsocket.library:260864"
+    # An out-of-service unit probed back into service (#457): +268,
+    # 259,752 -> 260,020.
+    # The receive server, its per-tick slice and the RX_POLL reply kept
+    # (#9): +1,388, 260,020 -> 261,408.
+    "minimal:src/bsdsocket/bsdsocket.library:261408"
     # Combined with #438 on main: +16, 46,016 -> 46,032.
     "minimal:src/netdev/anxnet.device:46032"
     # 29,088 on e806188f after the audited device fixes.
@@ -287,8 +291,10 @@ BUDGETS=(
     # 212,048 with the /31-/32 broadcast fix (netxduo #43) and
     # AMINETXDUO_PTP (#437).
     # 212,176 with DESTINATION6 in the interface file keywords (#437).
-    # 213,440 with the receive server and the RX_POLL reply kept (#9).
-    "micro:src/bsdsocket/bsdsocket.library:213440"
+    # 212,448 with an out-of-service unit probed back into service (#457).
+    # 213,948 with the receive server, its per-tick slice and the RX_POLL
+    # reply kept (#9).
+    "micro:src/bsdsocket/bsdsocket.library:213948"
     "micro:src/netdev/anxnet.device:46000"
     "micro:src/netdev/anxgenet.device:29120"
     "micro:src/wifipi/anxwifipi.device:56000"
