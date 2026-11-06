@@ -7,6 +7,8 @@ are history.
 
 ## Unreleased
 
+- Programs at normal priority, such as audio players, keep running
+  without dropouts during a sustained download.
 - AddNetInterface waits for a Wi-Fi card such as prism2.device to join
   its network before it attaches the interface, so the network starts at
   boot without WaitForLink; the wait shares the command's TIMEOUT.
