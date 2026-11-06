@@ -87,6 +87,9 @@ static const ToolEventRow tool_event_rows[] =
     { NETEVENT_OFFLINE_FAILED,
       "the device refused S2_OFFLINE",
       "wire error" },
+    { NETEVENT_BACK_IN_SERVICE,
+      "the device is back in service and the link was marked up",
+      NULL },
 
     { NETEVENT_IFACE_RETAINED,
       "interface kept: device holds requests",

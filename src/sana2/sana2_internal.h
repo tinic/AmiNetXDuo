@@ -1183,6 +1183,11 @@ struct AmiSana2If
     /* AMI_LINK_DETACH_BEGIN has run: the removal owns the teardown, and the
        driver entry leaves the device alone.  Never cleared. */
     BOOL                detaching;
+    /* A read came back S2ERR_OUTOFSERVICE and the link is marked down for it,
+       not by the stack.  ami_sana2_rx_resume() probes once a second from
+       oos_retry_at; ami_sana2_online() and the probe clear it. */
+    BOOL                out_of_service;
+    ULONG               oos_retry_at;
     /* A status query wants the device-derived counters of now: it sets
        stats_want and wakes the reader (ami_sana2_stats_request()), the reader
        runs the two device commands and bumps stats_epoch.  Never on the
@@ -1433,6 +1438,8 @@ UWORD ami_sana2_rx_drain_batch(AmiSana2Reader *rd, AmiRxBatch *bt);
 VOID  ami_sana2_rx_abort_outstanding(AmiSana2Reader *rd);
 VOID  ami_sana2_rx_flush(AmiSana2Reader *rd);
 UWORD ami_sana2_rx_post(AmiSana2Rx *rx);
+VOID  ami_sana2_rx_out_of_service(AmiSana2If *iface);
+VOID  ami_sana2_rx_resume(AmiSana2Reader *rd);
 #endif
 
 /* sana2_tx.c */
