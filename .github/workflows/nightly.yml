@@ -108,10 +108,26 @@ jobs:
               awk '/^## Unreleased/{p=1; next} /^## /{if (p) exit} p'
           } > "$notes"
 
-          gh release delete nightly --yes --cleanup-tag 2>/dev/null || true
-          gh release create nightly \
-             --target "$sha" \
-             --prerelease --latest=false \
-             --title "AmiNetXDuo nightly $day ($short)" \
-             --notes-file "$notes" \
-             "build/candidate/$name"
+          # Edited in place, not recreated: only publishing emails watchers.
+          title="AmiNetXDuo nightly $day ($short)"
+          if gh release view nightly >/dev/null 2>&1; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/nightly" \
+               -f sha="$sha" -F force=true >/dev/null
+            gh release edit nightly \
+               --target "$sha" \
+               --prerelease --latest=false \
+               --title "$title" \
+               --notes-file "$notes"
+            gh release upload nightly "build/candidate/$name" --clobber
+            gh release view nightly --json assets --jq ".assets[].name" |
+            while read -r old; do
+              [ "$old" = "$name" ] || gh release delete-asset nightly "$old" --yes
+            done
+          else
+            gh release create nightly \
+               --target "$sha" \
+               --prerelease --latest=false \
+               --title "$title" \
+               --notes-file "$notes" \
+               "build/candidate/$name"
+          fi

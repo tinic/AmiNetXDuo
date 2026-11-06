@@ -12,6 +12,7 @@
 
 #include "aminetxduo/version.h"
 #include "aminetxduo/ptp.h"
+#include "aminetxduo/foreign_call.h"
 
 #ifdef AMINETXDUO_BPF
 #include "aminetxduo/bpf.h"
@@ -37,16 +38,6 @@
  * store the code, or Signal()/PutMsg() a task.  A change made outside any
  * bracket calls the hook at once.
  */
-typedef LONG (*BsdErrorHookFn)(register struct Hook *hook __asm("a0"),
-                               register APTR reserved __asm("a2"),
-                               register struct ErrorHookMsg *ehm __asm("a1"));
-
-typedef union BsdErrorHookEntry
-{
-    ULONG          (*behe_Raw)(VOID);
-    BsdErrorHookFn   behe_Fn;
-} BsdErrorHookEntry;
-
 #define BSD_ERRPEND_ERRNO   0x01
 #define BSD_ERRPEND_HERRNO  0x02
 
@@ -58,7 +49,6 @@ static VOID bsd_error_hook_call(struct AmiSocketBase *base, ULONG action,
 {
     struct Hook        *hook = base->sb_ErrorHook;
     struct ErrorHookMsg ehm;
-    BsdErrorHookEntry   entry;
 
     if (hook == NULL || hook->h_Entry == NULL)
         return;
@@ -67,8 +57,7 @@ static VOID bsd_error_hook_call(struct AmiSocketBase *base, ULONG action,
     ehm.ehm_Action = action;
     ehm.ehm_Code   = code;
 
-    entry.behe_Raw = hook->h_Entry;
-    (VOID)entry.behe_Fn(hook, NULL, &ehm);
+    (VOID)ami_call_hook(hook, NULL, &ehm);
 }
 
 static VOID bsd_error_hook(struct AmiSocketBase *base, ULONG action, LONG code)

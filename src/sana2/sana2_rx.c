@@ -1914,7 +1914,43 @@ BOOL ami_sana2_rx_refused(AmiSana2Rx *rx, UBYTE error)
     return TRUE;
 }
 
-static UWORD ami_sana2_rx_drain(AmiSana2Reader *rd, UWORD budget)
+/*
+ * RX_POLL promises a quick answer. A device that queues it instead loses the
+ * optimization, but still owns the request until its reply is collected. Do
+ * not WaitIO with the ThreadX baton held: this path is also suitable for a
+ * caller doing optional receive work, which must never wait for device I/O.
+ */
+AMI_SANA2_BATCH_LINKAGE VOID ami_sana2_rx_poll(AmiSana2Reader *rd)
+{
+    if (!rd->iface->rx_poll_ok || rd->stop || rd->poll_pending)
+        return;
+
+    rd->poll.ios2_Req.io_Flags = IOF_QUICK;
+    rd->poll.ios2_Req.io_Error = 0;
+    rd->poll_pending = TRUE;
+    BeginIO((struct IORequest *)&rd->poll);
+    if ((rd->poll.ios2_Req.io_Flags & IOF_QUICK) != 0)
+    {
+        rd->poll_pending = FALSE;
+        if (rd->poll.ios2_Req.io_Error == 0)
+            return;
+    }
+    rd->iface->rx_poll_ok = FALSE;
+}
+
+/* The poll has no AmiRxSlot owner after its request. Test the message's
+   identity before reading anything beyond that request, including at stop.
+   A quick refusal never queues a reply and clears pending in the sender. */
+static BOOL ami_sana2_rx_poll_reply(AmiSana2Reader *rd, struct Message *msg)
+{
+    if (msg != &rd->poll.ios2_Req.io_Message)
+        return FALSE;
+
+    rd->poll_pending = FALSE;
+    return TRUE;
+}
+
+AMI_SANA2_BATCH_LINKAGE UWORD ami_sana2_rx_drain(AmiSana2Reader *rd, UWORD budget)
 {
     AmiSana2If     *iface = rd->iface;
     NX_IP          *ip = iface->ip;
@@ -2051,8 +2087,8 @@ static UWORD ami_sana2_rx_drain(AmiSana2Reader *rd, UWORD budget)
     {
         /* The reply message is the slot: ios2_Req.io_Message is its first
            member's first member.  The slot names its ring. */
-        AmiRxSlot  *slot = (AmiRxSlot *)msg;
-        AmiSana2Rx *rx   = slot->owner;
+        AmiRxSlot  *slot;
+        AmiSana2Rx *rx;
         /*
          * THE BYTE IS TESTED, THE SIGN EXTENSION IS NOT ON THIS PATH.  It was
          * `LONG err = (LONG)(BYTE)...` before the branch, and the drain loop
@@ -2061,7 +2097,16 @@ static UWORD ami_sana2_rx_drain(AmiSana2Reader *rd, UWORD budget)
          * The widening still happens where io_Error is compared against the
          * negative Exec codes, which is what it is for.
          */
-        UBYTE      raw  = slot->req.ios2_Req.io_Error;
+        UBYTE      raw;
+
+        /* At most one: an asynchronous poll disables further polls. It is
+           control traffic, not a received frame in this pass's budget. */
+        if (ami_sana2_rx_poll_reply(rd, msg))
+            continue;
+
+        slot = (AmiRxSlot *)msg;
+        rx   = slot->owner;
+        raw  = slot->req.ios2_Req.io_Error;
 
         /* A batch reply: its frames are complete whatever io_Error says,
            so they are delivered first; the error then means what it means
@@ -2226,7 +2271,12 @@ static UWORD ami_sana2_rx_reap(AmiSana2Reader *rd, UWORD tries)
 
         while ((msg = GetMsg(rd->port)) != NULL)
         {
-            AmiRxSlot *slot = (AmiRxSlot *)msg;
+            AmiRxSlot *slot;
+
+            if (ami_sana2_rx_poll_reply(rd, msg))
+                continue;
+
+            slot = (AmiRxSlot *)msg;
 
 #ifdef AMINETXDUO_RX_BATCH
             if (slot->req.ios2_Req.io_Command == ANXD_CMD_RX_BATCH)
@@ -2248,7 +2298,7 @@ static UWORD ami_sana2_rx_reap(AmiSana2Reader *rd, UWORD tries)
 #endif
         }
 
-        outstanding = 0;
+        outstanding = (UWORD)(rd->poll_pending ? 1 : 0);
         for (r = 0; r < (UWORD)AMI_SANA2_RX_READERS; r++)
         {
             const AmiSana2Rx *rx = &rd->iface->rx[r];
@@ -2308,6 +2358,9 @@ ami_sana2_rx_abort_outstanding(AmiSana2Reader *rd)
 {
     UWORD r, i;
 
+    if (rd->poll_pending)
+        AbortIO((struct IORequest *)&rd->poll);
+
     for (r = 0; r < (UWORD)AMI_SANA2_RX_READERS; r++)
     {
         AmiSana2Rx *rx = &rd->iface->rx[r];
@@ -2332,7 +2385,7 @@ ami_sana2_rx_abort_outstanding(AmiSana2Reader *rd)
     }
 }
 
-static VOID ami_sana2_rx_teardown(AmiSana2Reader *rd)
+AMI_SANA2_BATCH_LINKAGE VOID ami_sana2_rx_teardown(AmiSana2Reader *rd)
 {
     UWORD outstanding;
     UWORD r, i;
@@ -2343,7 +2396,7 @@ static VOID ami_sana2_rx_teardown(AmiSana2Reader *rd)
 
     if (outstanding != 0)
     {
-        AMI_WARN("sana2: %ld read(s) survived AbortIO; trying CMD_FLUSH",
+        AMI_WARN("sana2: %ld request(s) survived AbortIO; trying CMD_FLUSH",
                  (long)outstanding);
         ami_sana2_rx_flush(rd);
         outstanding = ami_sana2_rx_reap(rd, AMI_SANA2_RX_REAP_TRIES);
@@ -2355,7 +2408,7 @@ static VOID ami_sana2_rx_teardown(AmiSana2Reader *rd)
     {
         /* Nothing below this line can run: each of those is a pointer the
            device still holds. */
-        AMI_ERROR("sana2: %ld read(s) still owned by the device. The "
+        AMI_ERROR("sana2: %ld request(s) still owned by the device. The "
                   "reader leaks. A free here corrupts memory",
                   (long)outstanding);
         return;
@@ -2522,9 +2575,12 @@ static VOID ami_sana2_rx_thread(ULONG argument)
     rd->running = TRUE;
     tx_semaphore_put(&rd->ready);
 
+    ami_sana2_server_bind(rd);
+
     while (!rd->stop)
     {
         UWORD live = 0;
+        UWORD took;
 
         /*
          * At the top of the loop, not after the Wait(): the pool-empty path
@@ -2605,6 +2661,7 @@ static VOID ami_sana2_rx_thread(ULONG argument)
             if (iface->out_of_service)
                 ami_sana2_rx_resume(rd);
             tx_thread_sleep(2);
+            ami_sana2_server_run(rd);
             continue;
         }
 
@@ -2637,6 +2694,7 @@ static VOID ami_sana2_rx_thread(ULONG argument)
         if (ami_sana2_rx_should_block(rd, AMI_SANA2_RX_RUN_MAX))
         {
             ami_sana2_block_enter();
+            ami_sana2_server_settle(rd);
             Wait(rd->wake_mask | rd->reap_mask | rd->ack_mask);
 #ifdef AMINETXDUO_RXPROBE
             {
@@ -2656,9 +2714,10 @@ static VOID ami_sana2_rx_thread(ULONG argument)
 #else
             ami_sana2_block_leave();
 #endif
+            ami_sana2_server_run(rd);
         }
 
-        (VOID)ami_sana2_rx_drain(rd, (UWORD)AMI_SANA2_RX_RUN_MAX);
+        took = ami_sana2_rx_drain(rd, (UWORD)AMI_SANA2_RX_RUN_MAX);
 
         /*
          * THE POLL, AFTER THE DRAIN AND BEFORE THE SLEEP.  Every slot this
@@ -2667,23 +2726,26 @@ static VOID ami_sana2_rx_thread(ULONG argument)
          * reader was behind a burst) can deliver them now; they arrive as
          * completions on this port and the loop goes round again without
          * blocking.  A driver that does not know the command says so once,
-         * IOERR_NOCMD, and is not asked again.  Quick on our device; a
-         * device that queues it instead replies here, and the reply is taken
-         * back before the drain can mistake it for a slot.  Once per pass
+         * IOERR_NOCMD, and is not asked again. Quick on our device; a
+         * device that queues it instead loses the optimization, and the
+         * drain or teardown collects its reply by identity. Once per pass
          * for the unit, not once per ring: the command is the unit's.
          */
-        if (iface->rx_poll_ok && !rd->stop)
+        ami_sana2_rx_poll(rd);
+
+        /*
+         * The receive server's budget is spent with frames still waiting:
+         * stand aside at the program priority through a baton release, so
+         * the band's other threads can run, and carry on at that priority
+         * until the tick refills it (sana2_server.c).
+         */
+        if (ami_sana2_server_spent(rd, took) &&
+            !ami_sana2_rx_should_block(rd, AMI_SANA2_RX_RUN_MAX))
         {
-            rd->poll.ios2_Req.io_Flags = IOF_QUICK;
-            rd->poll.ios2_Req.io_Error = 0;
-            BeginIO((struct IORequest *)&rd->poll);
-            if ((rd->poll.ios2_Req.io_Flags & IOF_QUICK) == 0)
-                (VOID)WaitIO((struct IORequest *)&rd->poll);
-            /* Any refusal ends the polling: IOERR_NOCMD from a device that
-               does not know the command, S2ERR_NOT_SUPPORTED from a unit
-               that holds nothing for a late read and has nothing to say. */
-            if (rd->poll.ios2_Req.io_Error != 0)
-                iface->rx_poll_ok = FALSE;
+            ami_sana2_block_enter();
+            ami_sana2_server_settle(rd);
+            ami_sana2_block_leave();
+            ami_sana2_server_run(rd);
         }
 
 #ifdef AMINETXDUO_RXPROBE
@@ -2693,6 +2755,8 @@ static VOID ami_sana2_rx_thread(ULONG argument)
             ami_sana2_refresh_stats(iface);
 #endif
     }
+
+    ami_sana2_server_unbind(rd);
 
     /* Held acknowledgments go before the transmit side is unbound. */
     ami_sana2_ack_reader_stop(rd);
@@ -3114,6 +3178,7 @@ LONG ami_sana2_rx_start(AmiSana2If *iface)
            signalled on a bit it does not hold. */
         rd->wake_mask   = 0;
         rd->orphans     = 0;
+        rd->poll_pending = FALSE;
         rd->joined      = FALSE;
         rd->zombie      = FALSE;
 
@@ -3311,7 +3376,7 @@ VOID ami_sana2_rx_stop(AmiSana2If *iface)
          */
         if (rd->orphans != 0)
         {
-            AMI_ERROR("sana2: reader left %ld read(s) with the "
+            AMI_ERROR("sana2: reader left %ld request(s) with the "
                       "device. Its thread and stack leak. The reply "
                       "port they will complete through signals that Task",
                       (long)rd->orphans);
