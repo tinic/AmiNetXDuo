@@ -2517,6 +2517,7 @@ static VOID ami_sana2_rx_thread(ULONG argument)
     while (!rd->stop)
     {
         UWORD live = 0;
+        UWORD took;
 
         /*
          * At the top of the loop, not after the Wait(): the pool-empty path
@@ -2651,7 +2652,7 @@ static VOID ami_sana2_rx_thread(ULONG argument)
             ami_sana2_server_run(rd);
         }
 
-        (VOID)ami_sana2_rx_drain(rd, (UWORD)AMI_SANA2_RX_RUN_MAX);
+        took = ami_sana2_rx_drain(rd, (UWORD)AMI_SANA2_RX_RUN_MAX);
 
         /*
          * THE POLL, AFTER THE DRAIN AND BEFORE THE SLEEP.  Every slot this
@@ -2673,7 +2674,7 @@ static VOID ami_sana2_rx_thread(ULONG argument)
          * the band's other threads can run, and carry on at that priority
          * until the tick refills it (sana2_server.c).
          */
-        if (ami_sana2_server_spent(rd) &&
+        if (ami_sana2_server_spent(rd, took) &&
             !ami_sana2_rx_should_block(rd, AMI_SANA2_RX_RUN_MAX))
         {
             ami_sana2_block_enter();

@@ -413,7 +413,7 @@ VOID ami_sana2_ack_reader_stop(AmiSana2Reader *rd)  { (VOID)rd; }
 VOID ami_sana2_server_bind(AmiSana2Reader *rd)    { (VOID)rd; }
 VOID ami_sana2_server_unbind(AmiSana2Reader *rd)  { (VOID)rd; }
 VOID ami_sana2_server_run(AmiSana2Reader *rd)     { (VOID)rd; }
-BOOL ami_sana2_server_spent(AmiSana2Reader *rd)   { (VOID)rd; return FALSE; }
+BOOL ami_sana2_server_spent(AmiSana2Reader *rd, UWORD took) { (VOID)rd; (VOID)took; return FALSE; }
 VOID ami_sana2_server_settle(AmiSana2Reader *rd)  { (VOID)rd; }
 /* The capacity the reader asks again for once a second (sana2_device.c),
    and the ThreadX clock that paces it: the reader's loop is not driven

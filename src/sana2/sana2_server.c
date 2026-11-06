@@ -9,25 +9,33 @@
  * program while a priority-1 Task is ready: Workbench, a file manager and an
  * audio decoder stop for as long as the transfer lasts.
  *
- * SO: a deferrable server.  The readers together hold the band priority for
- * about AMI_SANA2_RX_SERVER_SHARE of the ticks they want it.  Past that they
- * run at AMI_EXEC_PROGRAM_PRIORITY and share the CPU with the programs,
- * round robin, until the budget has refilled.  An idle machine loses
- * nothing: a reader alone at priority 0 still has the CPU to itself, and a
- * consumer that blocks gives it back.
+ * SO: a deferrable server.  While programs wait, the readers together hold
+ * the band priority for about AMI_SANA2_RX_SERVER_SHARE /
+ * AMI_SANA2_RX_SERVER_COST of what they drain, and run at
+ * AMI_EXEC_PROGRAM_PRIORITY for the rest, sharing the CPU with the programs
+ * round robin.  An idle machine loses nothing: a reader alone at priority 0
+ * still has the CPU to itself, and a consumer that blocks gives it back.
  *
  * THE CHARGE IS SAMPLED, NOT TIMED.  Every ThreadX tick the tick task, which
  * preempts the band, looks at the bound readers: one that is ready (not
  * waiting) while a program that does not use the stack is ready at 0 too
  * wanted the CPU through that tick against it, and costs
  * AMI_SANA2_RX_SERVER_COST credits; each tick refills
- * AMI_SANA2_RX_SERVER_SHARE, up to AMI_SANA2_RX_SERVER_CAP.  Below zero the
- * level drops.  A transfer with nobody else waiting is never lowered: the
- * sender or receiver at 0 is what the reader works for.  A reader preempted
- * by a driver above the band counts as wanting the CPU, so a machine whose
- * USB or audio drivers run high lowers it sooner.  Reading a clock in the
- * reader instead cost the A1200 7-9% of its receive and send rate: an
- * E-Clock read is CIA bus cycles, once per pass.
+ * AMI_SANA2_RX_SERVER_SHARE, up to AMI_SANA2_RX_SERVER_CAP.  A transfer with
+ * nobody else waiting is never lowered: the sender or receiver at 0 is what
+ * the reader works for.  A reader preempted by a driver above the band
+ * counts as wanting the CPU, so a machine whose USB or audio drivers run high
+ * lowers it sooner.  Reading a clock in the reader instead cost the A1200
+ * 7-9% of its receive and send rate: an E-Clock read is CIA bus cycles, once
+ * per pass.
+ *
+ * BELOW ZERO, A SLICE PER TICK.  A whole tick at the band priority is 20 ms,
+ * and a decoder on the A1200 that waits that long behind a reader drops
+ * audio (#9).  Each tick gives the readers SHARE/COST of the frames they
+ * drained in the tick before, at the band priority, and they drop to 0 once
+ * it is used: frames counted per pass, no clock.  The credit stays below zero
+ * while a program keeps waiting, floored at -COST, and climbs back within a
+ * few ticks of it leaving.
  *
  * THE LEVEL CHANGES AT SAFE POINTS.  The tick raises a lowered reader; a
  * reader lowers itself, at its baton release before it waits, or after a
@@ -60,6 +68,11 @@ static struct
     UWORD           bound;
     LONG            credit;
     volatile BOOL   low;            /* readers settle at priority 0        */
+    BOOL            throttled;      /* credit spent: a slice per tick      */
+    ULONG           frames;         /* drained, every reader, any priority */
+    ULONG           frames_tick;    /* `frames` at the last tick           */
+    ULONG           slice;          /* frames at the band priority a tick  */
+    ULONG           used;           /* of the slice, since the last tick   */
     TX_TIMER        refill;
 } ami_rx_server;
 
@@ -70,11 +83,7 @@ static BOOL ami_sana2_server_ours(const struct Task *task)
                   task->tc_Node.ln_Pri == (BYTE)AMI_EXEC_PROGRAM_PRIORITY);
 }
 
-/*
- * Every tick, from the tick task inside its Forbid() (TX_TIMER_PROCESS_IN_ISR).
- * Only a tick spent at the band priority is charged: at 0 a reader takes
- * nothing Exec does not round robin to it.
- */
+/* Is this Task a bound reader?  Forbid() held. */
 static BOOL ami_sana2_server_bound(const struct Task *task)
 {
     struct MinNode *n;
@@ -124,10 +133,16 @@ static BOOL ami_sana2_server_victim(VOID)
     return FALSE;
 }
 
+/*
+ * Every tick, from the tick task inside its Forbid() (TX_TIMER_PROCESS_IN_ISR):
+ * charge, refill, and the next slice; a reader lowered by a spent slice goes
+ * back up.
+ */
 static VOID ami_sana2_server_refill(ULONG unused)
 {
     struct MinNode *n;
     BOOL            ready = FALSE;
+    ULONG           total;
 
     (VOID)unused;
 
@@ -139,17 +154,27 @@ static VOID ami_sana2_server_refill(ULONG unused)
             ready = TRUE;
     }
 
-    if (ready && !ami_rx_server.low && ami_sana2_server_victim())
+    if (ready && ami_sana2_server_victim())
         ami_rx_server.credit -= (LONG)AMI_SANA2_RX_SERVER_COST;
     ami_rx_server.credit += (LONG)AMI_SANA2_RX_SERVER_SHARE;
     if (ami_rx_server.credit > (LONG)AMI_SANA2_RX_SERVER_CAP)
         ami_rx_server.credit = (LONG)AMI_SANA2_RX_SERVER_CAP;
+    if (ami_rx_server.credit < -(LONG)AMI_SANA2_RX_SERVER_COST)
+        ami_rx_server.credit = -(LONG)AMI_SANA2_RX_SERVER_COST;
 
-    if (ami_rx_server.credit < 0)
+    total = ami_rx_server.frames - ami_rx_server.frames_tick;
+    ami_rx_server.frames_tick = ami_rx_server.frames;
+    ami_rx_server.throttled = (BOOL)(ami_rx_server.credit < 0);
+    if (ami_rx_server.throttled)
     {
-        ami_rx_server.low = TRUE;
+        ami_rx_server.slice = total / (ULONG)AMI_SANA2_RX_SERVER_COST *
+                              (ULONG)AMI_SANA2_RX_SERVER_SHARE;
+        if (ami_rx_server.slice < (ULONG)AMI_SANA2_RX_RUN_MAX)
+            ami_rx_server.slice = (ULONG)AMI_SANA2_RX_RUN_MAX;
+        ami_rx_server.used = 0;
     }
-    else if (ami_rx_server.low)
+
+    if (ami_rx_server.low)
     {
         ami_rx_server.low = FALSE;
         for (n = ami_rx_server.readers.mlh_Head; n->mln_Succ != NULL;
@@ -183,6 +208,8 @@ VOID ami_sana2_server_bind(AmiSana2Reader *rd)
             (struct MinNode *)&ami_rx_server.readers.mlh_Head;
         ami_rx_server.credit = (LONG)AMI_SANA2_RX_SERVER_CAP;
         ami_rx_server.low    = FALSE;
+        ami_rx_server.throttled = FALSE;
+        ami_rx_server.frames = ami_rx_server.frames_tick = 0;
         if (tx_timer_create(&ami_rx_server.refill,
                             (CHAR *)"AmiNetXDuo rx server",
                             ami_sana2_server_refill, 0, 1, 1,
@@ -240,16 +267,28 @@ VOID ami_sana2_server_run(AmiSana2Reader *rd)
 }
 
 /*
- * After a pass, baton held: TRUE when the budget is spent and this reader
- * still runs at the band priority, so the caller should stand aside
- * (ami_sana2_server_settle()) rather than start another pass.
+ * After a pass that drained `took` frames, baton held: TRUE when the slice
+ * is spent and this reader still runs at the band priority, so the caller
+ * should stand aside (ami_sana2_server_settle()) rather than start another
+ * pass.  The readers count, the tick reads `frames` and resets `used`.
  */
-BOOL ami_sana2_server_spent(AmiSana2Reader *rd)
+BOOL ami_sana2_server_spent(AmiSana2Reader *rd, UWORD took)
 {
     struct Task *task = rd->served.task;
+    BOOL         band;
 
-    return (BOOL)(task != NULL && ami_rx_server.low &&
-                  task->tc_Node.ln_Pri == (BYTE)TX_AMIGA_TASK_PRIORITY);
+    if (task == NULL)
+        return FALSE;
+
+    band = (BOOL)(task->tc_Node.ln_Pri == (BYTE)TX_AMIGA_TASK_PRIORITY);
+    ami_rx_server.frames += took;
+    if (ami_rx_server.throttled && band)
+    {
+        ami_rx_server.used += took;
+        if (ami_rx_server.used >= ami_rx_server.slice)
+            ami_rx_server.low = TRUE;
+    }
+    return (BOOL)(band && ami_rx_server.low);
 }
 
 /*

@@ -309,10 +309,12 @@ UINT ami_sana2_gso_max_segs(NX_INTERFACE *interface_ptr);
 /*
  * The receive server's budget, in credits per ThreadX tick (sana2_server.c):
  * a tick in which a reader at the band priority is ready costs COST, every
- * tick refills SHARE, and the bucket holds CAP.  3 of 10 holds the band
- * priority for about 30% of a busy reader's ticks, the share the A1200 needed
- * to keep its read rate with a priority-0 decoder fed (#353); CAP lets a
- * burst of four busy ticks through before the level drops.
+ * tick refills SHARE, and the bucket holds CAP.  Below zero 3 of 10 holds
+ * the band priority for about 30% of what the readers drain, in a slice at
+ * the start of each tick, the share the A1200 needed to keep its read rate
+ * with a priority-0 decoder fed (#353, #9).  A receive with nobody waiting is
+ * not charged, so its rate does not depend on the share.  CAP lets a burst
+ * of four busy ticks through before the slices start.
  */
 #ifndef AMI_SANA2_RX_SERVER_SHARE
 #define AMI_SANA2_RX_SERVER_SHARE   3
@@ -1480,7 +1482,7 @@ VOID  ami_sana2_rx_teardown(AmiSana2Reader *rd);
 VOID  ami_sana2_server_bind(AmiSana2Reader *rd);
 VOID  ami_sana2_server_unbind(AmiSana2Reader *rd);
 VOID  ami_sana2_server_run(AmiSana2Reader *rd);
-BOOL  ami_sana2_server_spent(AmiSana2Reader *rd);
+BOOL  ami_sana2_server_spent(AmiSana2Reader *rd, UWORD took);
 VOID  ami_sana2_server_settle(AmiSana2Reader *rd);
 
 /* sana2_tx.c */
