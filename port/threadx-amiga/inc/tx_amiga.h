@@ -197,6 +197,12 @@ ULONG   tx_amiga_adopt_slots(VOID);
 ULONG   tx_amiga_adopt_reserve(VOID);
 ULONG   tx_amiga_adopt_slots_free(VOID);
 
+/* TX_TRUE if `task` holds a published slot: it calls the stack and keeps its
+   thread, inside a call or cached between calls.  Forbid() held; nothing of
+   `task` is read, so it may be any pointer.  */
+struct Task;
+UINT    tx_amiga_adopt_task_known_locked(struct Task *task);
+
 /* Give back every slot whose claimer was removed between taking it and
    creating the TX_THREAD in it -- the one dead-adopter residue the baton
    reclaim cannot see, because there is no thread to ask about.  Removed means
