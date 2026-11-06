@@ -7,6 +7,8 @@ are history.
 
 ## Unreleased
 
+- Offline takes a prism2.device card offline and stops its
+  interrupts, as programs started by WHDLoad need.
 - Programs at normal priority, such as audio players, keep running
   without dropouts during a sustained download.
 - AddNetInterface waits for a Wi-Fi card such as prism2.device to join
