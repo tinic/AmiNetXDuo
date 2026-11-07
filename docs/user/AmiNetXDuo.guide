@@ -1382,10 +1382,15 @@
              wait ends when that interface's lease is BOUND and its route
              and name-server options have been installed, not merely when
              some address appears. An interface with its address in its
-             file does not wait. For a Wi-Fi card that reports its link,
-             such as prism2.device 2.9, the interface is attached once the
-             card has joined its network; that wait comes out of the same
-             TIMEOUT.
+             file does not wait for one. For a Wi-Fi card that reports its
+             link, such as prism2.device 2.9, the interface is attached once
+             the card has joined its network; that wait comes out of the
+             same TIMEOUT. While a WirelessManager runs for the interface's
+             card, or S:Network-Startup has just started one, the card is
+             opened only after WirelessManager has opened it, for an
+             interface with a fixed address too. That wait also comes out
+             of TIMEOUT. No Wait or WaitForLink is needed between the two
+             lines.
 
   @{b}Example@{ub}
 
