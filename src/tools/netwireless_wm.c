@@ -24,13 +24,14 @@ static int nw_lower(int c)
     return (c >= 'A' && c <= 'Z') ? c - 'A' + 'a' : c;
 }
 
-/* The Shell number running WirelessManager, or 0.  Call under Forbid(). */
-static ULONG nw_wm_cli(char *path, ULONG cap)
+/* The first Shell number from `from` on running WirelessManager, or 0.
+   Call under Forbid(). */
+static ULONG nw_wm_cli_from(ULONG from, char *path, ULONG cap)
 {
     static const char name[] = NW_WM_NAME;
     ULONG n, max = MaxCli();
 
-    for (n = 1; n <= max; n++)
+    for (n = from; n <= max; n++)
     {
         struct Process *p = FindCliProc(n);
         struct CommandLineInterface *cli;
@@ -57,6 +58,35 @@ static ULONG nw_wm_cli(char *path, ULONG cap)
         return n;
     }
     return 0;
+}
+
+static ULONG nw_wm_cli(char *path, ULONG cap)
+{
+    return nw_wm_cli_from(1, path, cap);
+}
+
+ULONG nw_wm_args(ULONG from, char *args, ULONG cap)
+{
+    ULONG n;
+
+    if (cap == 0)
+        return 0;
+    args[0] = '\0';
+    Forbid();
+    n = nw_wm_cli_from(from, NULL, 0);
+    if (n != 0)
+    {
+        struct Process *p = FindCliProc(n);
+        const char     *a = (const char *)p->pr_Arguments;
+        ULONG           i = 0;
+
+        if (a != NULL)
+            for (; i + 1 < cap && a[i] != '\0'; i++)
+                args[i] = a[i];
+        args[i] = '\0';
+    }
+    Permit();
+    return n;
 }
 
 BOOL nw_wm_running(char *path, ULONG cap)

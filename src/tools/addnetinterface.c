@@ -1118,16 +1118,20 @@ static int addif_main(int argc, char **argv)
                 LONG      add_err;
                 AddifLink link = { NULL, NULL, FALSE };
 
-                /* A Wi-Fi card joins first, then the interface asks for its
-                   address (addiflink.h): the wait comes out of the same
+                /* Not while a WirelessManager is opening the unit; then a
+                   Wi-Fi card joins first, and the interface asks for its
+                   address (addiflink.h).  The waits come out of the same
                    allowance as DHCP's. */
-                if (where == -1 && ifc.up && ifc.iptype == AMI_IPTYPE_DHCP &&
-                    allowance != 0)
+                if (where == -1 && ifc.up)
                 {
                     ToolWait joined;
 
-                    tool_wait_init(&joined, allowance);
-                    (VOID)addif_link_wait(&link, &ifc, &joined);
+                    tool_wait_init(&joined,
+                                   allowance != 0 ? allowance : timeout);
+                    addif_open_gate(&ifc, &joined);
+                    if (!joined.broken && ifc.iptype == AMI_IPTYPE_DHCP &&
+                        allowance != 0)
+                        (VOID)addif_link_wait(&link, &ifc, &joined);
                     spent = joined.elapsed;
                     if (joined.broken)
                     {

@@ -39,13 +39,64 @@ VOID addif_link_close(AddifLink *link)
     link->open = FALSE;
 }
 
-/* A WirelessManager that runs, or one S:Network-Startup has just Run. */
-static BOOL addif_link_supplicant(ULONG elapsed)
+/* A WirelessManager running for `device`. */
+static BOOL addif_wm_for(const char *device)
 {
-    if (nw_wm_running(NULL, 0))
+    static char args[256];
+    ULONG       n = 0;
+
+    while ((n = nw_wm_args(n + 1, args, (ULONG)sizeof(args))) != 0)
+        if (addif_args_name(args, device))
+            return TRUE;
+    return FALSE;
+}
+
+/* One for `device`, or about to be: S:Network-Startup Runs it one line
+   before AddNetInterface. */
+static BOOL addif_gate_supplicant(const char *device, ULONG elapsed)
+{
+    if (addif_wm_for(device))
         return TRUE;
-    return (BOOL)(elapsed < ADDIF_WM_GRACE && !nw_wm_marked_off() &&
+    return (BOOL)(elapsed < ADDIF_WM_GRACE && addif_wifi_driver(device) &&
+                  !nw_wm_marked_off() &&
                   tool_exists("ENV:Sys/Wireless.prefs"));
+}
+
+/* The driver's unit process (named after the device), and an opener. */
+static VOID addif_unit_state(const char *device, BOOL *unit, BOOL *opened)
+{
+    const char     *base = tool_basename(device);
+    struct Library *dev;
+
+    Forbid();
+    *unit  = (BOOL)(FindTask((CONST_STRPTR)base) != NULL);
+    dev    = (struct Library *)FindName(&SysBase->DeviceList,
+                                        (CONST_STRPTR)base);
+    *opened = (BOOL)(dev != NULL && dev->lib_OpenCnt != 0);
+    Permit();
+}
+
+VOID addif_open_gate(const AmiIfConfig *ifc, ToolWait *wait)
+{
+    ULONG held   = 0;
+    BOOL  waited = FALSE;
+
+    for (;;)
+    {
+        BOOL unit, opened;
+
+        addif_unit_state(ifc->device, &unit, &opened);
+        if (addif_open_now(addif_gate_supplicant(ifc->device, wait->elapsed),
+                           unit, held))
+            break;
+        held   = opened ? held + 1 : 0;
+        waited = TRUE;
+        if (!tool_wait_second(wait))
+            return;
+    }
+    /* The unit process exists just before its creation has returned. */
+    if (waited)
+        (VOID)tool_wait_second(wait);
 }
 
 BOOL addif_link_wait(AddifLink *link, const AmiIfConfig *ifc, ToolWait *wait)
@@ -87,7 +138,7 @@ BOOL addif_link_wait(AddifLink *link, const AmiIfConfig *ifc, ToolWait *wait)
         verdict = addif_link_verdict(
             (long)link->req->ios2_Req.io_Error,
             (unsigned long)link->req->ios2_WireError,
-            addif_link_supplicant(wait->elapsed));
+            addif_gate_supplicant(ifc->device, wait->elapsed));
 
         if (verdict == ADDIF_LINK_UP)
             return TRUE;
