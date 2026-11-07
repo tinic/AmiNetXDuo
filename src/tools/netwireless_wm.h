@@ -15,6 +15,10 @@
 /* TRUE when it is running; path gets the command as it was started. */
 BOOL nw_wm_running(char *path, ULONG cap);
 
+/* The next WirelessManager from Shell number `from` on: its Shell number,
+   or 0, and its arguments, as far as `cap` holds them. */
+ULONG nw_wm_args(ULONG from, char *args, ULONG cap);
+
 /* Ctrl-C, again every 2.5 seconds, until it has gone; FALSE after ten
    seconds with it still there. */
 BOOL nw_wm_stop(VOID);

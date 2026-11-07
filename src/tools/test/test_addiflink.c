@@ -54,6 +54,37 @@ int main(void)
     CHECK(addif_link_driver("") == 0);
     CHECK(addif_link_driver(0) == 0);
 
+    /* The open gate: at once with no supplicant; otherwise once the unit
+       process exists, or the device has held an opener for the settle. */
+    CHECK(addif_open_now(0, 0, 0) == 1);
+    CHECK(addif_open_now(1, 1, 0) == 1);
+    CHECK(addif_open_now(1, 0, 0) == 0);
+    CHECK(addif_open_now(1, 0, ADDIF_OPEN_SETTLE - 1) == 0);
+    CHECK(addif_open_now(1, 0, ADDIF_OPEN_SETTLE) == 1);
+
+    /* Wi-Fi drivers S:Network-Startup starts a WirelessManager for. */
+    CHECK(addif_wifi_driver("DEVS:Networks/prism2.device") == 1);
+    CHECK(addif_wifi_driver("anxwifipi.device") == 1);
+    CHECK(addif_wifi_driver("WiFiPi.device") == 1);
+    CHECK(addif_wifi_driver("genet.device") == 0);
+    CHECK(addif_wifi_driver(0) == 0);
+
+    /* Which WirelessManager is the device's: its arguments name it. */
+    CHECK(addif_args_name("DEVICE=DEVS:Networks/prism2.device UNIT=0\n",
+                          "DEVS:Networks/prism2.device") == 1);
+    CHECK(addif_args_name("DEVICE=prism2.device UNIT=0",
+                          "AmiNetXDuo:Devs/Networks/Prism2.device") == 1);
+    CHECK(addif_args_name("DEVICE=\"DEVS:Networks/prism2.device\" UNIT=0",
+                          "prism2.device") == 1);
+    CHECK(addif_args_name("DEVICE=DEVS:Networks/anxwifipi.device UNIT=0\n",
+                          "DEVS:Networks/prism2.device") == 0);
+    CHECK(addif_args_name("DEVICE=DEVS:Networks/anxwifipi.device UNIT=0\n",
+                          "wifipi.device") == 0);
+    CHECK(addif_args_name("DEVICE=xprism2.device", "prism2.device") == 0);
+    CHECK(addif_args_name("DEVICE=prism2.device.old", "prism2.device") == 0);
+    CHECK(addif_args_name("", "prism2.device") == 0);
+    CHECK(addif_args_name(0, "prism2.device") == 0);
+
     printf("addiflink: %d checks, %d failure(s)\n", checks, failures);
     return failures != 0;
 }
