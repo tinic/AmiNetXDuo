@@ -1,5 +1,5 @@
 offset	lvo	aminet_callers	our_tool_mentions
--30	socket	739	129
+-30	socket	739	134
 -36	bind	327	10
 -42	listen	249	21
 -48	accept	245	40
