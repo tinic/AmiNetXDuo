@@ -20,6 +20,10 @@
 
 #include <exec/types.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define SR_UNAVAILABLE  "unavailable"
 #define SR_INVALID      "invalid"
 
@@ -126,5 +130,60 @@ ULONG sr_interface_text(SrOut *o, const char *ifname, char *text,
  *  -1  a code this build does not know; print SR_UNAVAILABLE for it
  */
 LONG sr_anxdiag_value_class(UWORD code);
+
+/* ------------------------------------------------------ tasks, sockets --- */
+
+/*
+ * One Exec task as ShowTasks DETAIL prints it, from shelltools' TaskRow
+ * (statusreport_tasks.cpp copies it here).  The process arguments are left
+ * out: a command line can carry a password, and no row admits one.
+ */
+typedef struct SrTask
+{
+    ULONG       address;
+    LONG        cli;
+    LONG        priority;
+    const char *state;          /* shelltools::task_state()                 */
+    BOOL        process;
+    ULONG       flags;
+    ULONG       sig_alloc;
+    ULONG       sig_wait;
+    ULONG       sig_recvd;
+    ULONG       stack_lower;
+    ULONG       stack_upper;
+    ULONG       stack_pointer;
+    LONG        process_stack;
+    ULONG       process_flags;
+    const char *name;
+    const char *command;        /* "" when none                             */
+} SrTask;
+
+/* task.<index>.* */
+VOID sr_task(SrOut *o, ULONG index, const SrTask *t);
+
+/* Every task, task.count and task.truncated first.  statusreport_tasks.cpp. */
+VOID sr_tasks(SrOut *o);
+
+/* One row of the table `netstat ALL` prints (tool_sockets()). */
+typedef struct SrSocket
+{
+    BOOL        tcp;
+    const char *state;          /* tool_tcp_state_name(); unused for UDP    */
+    UWORD       local_port;
+    UWORD       peer_port;
+    ULONG       peer_address;   /* host order; the second class             */
+    ULONG       queued;         /* UDP receive queue                        */
+    ULONG       stalled_ms;
+    ULONG       retransmits;
+    ULONG       rto_ms;
+    ULONG       user_timeout_ms;
+} SrSocket;
+
+/* socket.<index>.* */
+VOID sr_socket(SrOut *o, ULONG index, const SrSocket *s);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* AMINETXDUO_STATUSREPORT_TEXT_H */

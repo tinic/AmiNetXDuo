@@ -30,6 +30,7 @@
  */
 
 #include "tool_passive.h"
+#include "tools_nx.h"
 
 #include <stddef.h>
 
@@ -619,6 +620,36 @@ static VOID sr_live(struct Library *base)
         sr_str(&sr_out, "health", NULL);
 }
 
+/* The table `netstat ALL` prints, through the same tool_sockets(). */
+static ToolSockInfo sr_sock[TOOL_MAX_SOCK];
+
+static VOID sr_sockets(struct Library *base)
+{
+    BOOL  truncated;
+    UWORD n = tool_sockets(base, sr_sock, &truncated);
+    UWORD i;
+
+    sr_ulong(&sr_out, "socket.count", n);
+    sr_yesno(&sr_out, "socket.truncated", truncated);
+    for (i = 0; i < n; i++)
+    {
+        const ToolSockInfo *si = &sr_sock[i];
+        static SrSocket     s;  /* static: main()'s frame has a budget */
+
+        s.tcp             = si->is_tcp;
+        s.state           = tool_tcp_state_name(si->state);
+        s.local_port      = si->local_port;
+        s.peer_port       = si->peer_port;
+        s.peer_address    = si->peer_address;
+        s.queued          = si->queued;
+        s.stalled_ms      = si->stalled_ms;
+        s.retransmits     = si->retransmits;
+        s.rto_ms          = si->rto_ms;
+        s.user_timeout_ms = si->user_timeout_ms;
+        sr_socket(&sr_out, i, &s);
+    }
+}
+
 static VOID sr_stack(VOID)
 {
     struct Library *base;
@@ -675,11 +706,13 @@ static VOID sr_stack(VOID)
         sr_str(&sr_out, "dhcp", NULL);
         sr_str(&sr_out, "stats", NULL);
         sr_str(&sr_out, "health", NULL);
+        sr_str(&sr_out, "socket.count", NULL);
         return;
     }
 
     sr_str(&sr_out, "stack.status", "queried");
     sr_live(base);
+    sr_sockets(base);
     tool_netstatus_close(base);
 }
 
@@ -1024,6 +1057,10 @@ int main(int argc, char **argv)
     sr_str(&sr_out, "report.file", sr_file != 0 ? path : "none");
 
     sr_system();
+
+    /* Before the stack is opened, so the list is the machine as it was. */
+    if (!sr_stop())
+        sr_tasks(&sr_out);
 
     sr_library("bsdsocket.library", TRUE);
     sr_library("usergroup.library", FALSE);

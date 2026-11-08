@@ -2307,12 +2307,16 @@
 
       report.*   this command and the options it was given
       system.*   Kickstart, Workbench, processor, FPU, free memory
+      task.*     each Exec task and process, with the fields that
+                 ShowTasks DETAIL prints except the arguments
       library.*  bsdsocket.library, usergroup.library, tls.library
       stack.*    whether the stack runs, and its totals
       live.*     each interface of the running stack, with its counters
       dhcp.*     the lease state of each interface
       stats.*    the IP, TCP, UDP, ICMP and ARP counters
       health.*   the stack's timer, memory and buffer counters
+      socket.*   each socket of the running stack, as netstat ALL
+                 lists it
       config.*   each file in DEVS:NetInterfaces
       device.*   each anx driver in memory and each driver an interface
                  names; for anxnet.device and anxgenet.device also the
@@ -2340,7 +2344,8 @@
   Addresses, station addresses and host names are printed only with
   ADDRESSES: ADDRESS, NETMASK, GATEWAY, ADDRESS6, GATEWAY6,
   HARDWAREADDRESS, NAMESERVER, ID and DOMAIN from the files, and the
-  addresses, leases, gateway and host name of the running stack.
+  addresses, leases, gateway, host name and socket peers of the
+  running stack.
   Without it, a probe-record step that holds station-address bytes
   shows "withheld" as its value.
 
