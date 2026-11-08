@@ -1849,7 +1849,8 @@ post:
                                             (iface->tx_quick_ok ? IOF_QUICK : 0));
     slot->req.ios2_Req.io_Error   = 0;
     slot->req.ios2_WireError      = 0;
-    slot->req.ios2_PacketType     = (ULONG)ether_type;
+    slot->req.ios2_PacketType     = (ether_type == AMI_ETHERTYPE_IPV4)
+                                        ? iface->ip_type : (ULONG)ether_type;
     slot->req.ios2_DataLength     = length;
     slot->req.ios2_Data           = slot;
 

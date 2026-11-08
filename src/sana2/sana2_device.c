@@ -1339,6 +1339,8 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
     /* IPREQUESTS, ARPREQUESTS, WRITEREQUESTS.  Here, before anything can
        send: the probe writes further down claim from tx[] up to tx_slots. */
     iface->rx_want_ip  = (UWORD)cfg->ip_requests;
+    iface->ip_type     = (cfg->ip_packet_type != 0UL) ? cfg->ip_packet_type
+                                                      : AMI_ETHERTYPE_IPV4;
     iface->rx_want_arp = (UWORD)cfg->arp_requests;
     iface->tx_slots    = (UWORD)AMI_SANA2_TX_SLOTS;
     if (cfg->write_requests != 0 &&

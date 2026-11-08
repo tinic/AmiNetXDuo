@@ -1051,15 +1051,11 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                 break;
 
             case IF_KEY_IPTYPE:
-                /* Numeric SANA-II packet types are accepted for file
-                   compatibility but ignored; alphabetic is the address mode. */
+                /* A number is the SANA-II packet type of IPv4 (AmiTCP,
+                   Roadshow); a word is the address mode. */
                 if (ami_cfg_parse_ulong(value, &n))
                 {
-                    AMI_DEBUG("config: %s: numeric IPTYPE %lu ignored",
-                              out->name, (unsigned long)n);
-                    ami_cfg_problem_code(lineno, AMI_CFG_PROBLEM_NOTE,
-                                         AMI_CFG_SAYS_NUMERIC_IPTYPE_IGNORED,
-                                         AMI_CFG_ADVICE_IPTYPE_IS_EITHER_A);
+                    out->ip_packet_type = n;
                 }
                 else if (lookup_iptype(value, &type))
                 {

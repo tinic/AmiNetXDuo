@@ -1113,6 +1113,9 @@ struct AmiSana2If
      */
     ULONG               rx_dst_off;     /* 0 raw, AMI_ETH_HEADER_SIZE cooked */
     UBYTE               rx_io_flags;    /* SANA2IOF_RAW, or 0                */
+    /* The SANA-II packet type IPv4 reads and writes carry: IPTYPE=, else
+       2048.  Frames of this type reach the stack as 0x0800. */
+    ULONG               ip_type;
 
     /* Hardware facts from S2_DEVICEQUERY / S2_GETSTATIONADDRESS. */
     UCHAR               mac[AMI_ETH_ADDR_SIZE];

@@ -37,7 +37,7 @@ static const char *const ami_cfg_advice_text[] =
     "expected a.b.c.d",
     "MTU is bytes, normally 1500; default from driver",
     "CONFIGURE is DHCP, STATIC, AUTO or NONE; STATIC assumed",
-    "IPTYPE is DHCP, STATIC, AUTO or NONE; numeric types ignored",
+    "IPTYPE is DHCP, STATIC, AUTO, NONE or a SANA-II packet type",
     "MDNS is YES or NO; NO assumed",
     "DOWNGOESOFFLINE is YES or NO; NO assumed",
     "REQUIRESINITDELAY is YES or NO; NO assumed",
