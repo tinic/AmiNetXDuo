@@ -239,36 +239,16 @@ int tooltz_posix_west(const char *tz, unsigned long utc_secs,
     if (*p != ',' && *p != '\0' && !tz_hms(&p, 24L, &dst))
         return 0;
 
-    if (*p == ',')
+    if (*p == '\0')
     {
-        p++;
-        if (!tz_rule(&p, &start) || *p++ != ',' || !tz_rule(&p, &end) ||
-            *p != '\0')
-            return 0;
+        /* No rules: SetDST names the DST zone only while it is in effect
+           and rewrites TZONE at each changeover. */
+        *seconds_west = dst;
+        return 1;
     }
-    else if (*p == '\0')
-    {
-        if (std >= -7200L && std <= 3600L)
-        {
-            /* EU: last Sunday of March and October, 01:00 UTC. */
-            start.kind = 'M'; start.a = 3;  start.b = 5; start.c = 0;
-            end.kind   = 'M'; end.a   = 10; end.b   = 5; end.c   = 0;
-            start.time = 3600L - std;
-            end.time   = 3600L - dst;
-        }
-        else
-        {
-            /* US: second Sunday of March, first of November, 02:00. */
-            start.kind = 'M'; start.a = 3;  start.b = 2; start.c = 0;
-            end.kind   = 'M'; end.a   = 11; end.b   = 1; end.c   = 0;
-            start.time = 2L * 3600L;
-            end.time   = 2L * 3600L;
-        }
-    }
-    else
-    {
+    if (*p++ != ',' || !tz_rule(&p, &start) || *p++ != ',' ||
+        !tz_rule(&p, &end) || *p != '\0')
         return 0;
-    }
 
     /* The year by standard local time; a few hours either side of New
        Year changes nothing, the rules are months away from it. */

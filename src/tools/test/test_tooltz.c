@@ -50,37 +50,38 @@ int main(void)
     CHECK(tooltz_local_secs(0xffffff00UL, -60) == 0xffffff00UL);
 
     /* ENV:TZONE.  Amiga-epoch instants: 2026-07-01 12:00 UTC (summer),
-       2026-01-15 12:00 UTC (winter), and both sides of the EU changeovers
-       of 2026 (29 March and 25 October, 01:00 UTC). */
+       2026-01-15 12:00 UTC (winter), 2026-11-07 12:00 UTC (#475), and both
+       sides of the EU changeovers of 2026 (29 March and 25 October, 01:00
+       UTC). */
     {
         long w = 12345;
         const unsigned long jul  = 1530446400UL;
         const unsigned long jan  = 1516017600UL;
         const unsigned long mar1 = 1522285200UL;   /* 2026-03-29 01:00 UTC */
         const unsigned long oct1 = 1540429200UL;   /* 2026-10-25 01:00 UTC */
+        const unsigned long nov  = 1541592000UL;   /* 2026-11-07 12:00 UTC */
 
+        /* No rules: SetDST writes the DST name only while it is in
+           effect, so the DST offset holds in any month. */
         CHECK(tooltz_posix_west("GMT0BST", jul, &w) && w == -3600);
-        CHECK(tooltz_posix_west("GMT0BST", jan, &w) && w == 0);
-        CHECK(tooltz_posix_west("GMT0BST", mar1 - 1UL, &w) && w == 0);
-        CHECK(tooltz_posix_west("GMT0BST", mar1, &w) && w == -3600);
-        CHECK(tooltz_posix_west("GMT0BST", oct1 - 1UL, &w) && w == -3600);
-        CHECK(tooltz_posix_west("GMT0BST", oct1, &w) && w == 0);
+        CHECK(tooltz_posix_west("GMT0BST", jan, &w) && w == -3600);
         CHECK(tooltz_posix_west("CET-1CEST", jul, &w) && w == -7200);
-        CHECK(tooltz_posix_west("CET-1CEST", mar1 - 1UL, &w) && w == -3600);
-        CHECK(tooltz_posix_west("CET-1CEST", mar1, &w) && w == -7200);
+        CHECK(tooltz_posix_west("CET-1CEST", jan, &w) && w == -7200);
+        CHECK(tooltz_posix_west("EST-10EST", nov, &w) && w == -11 * 3600);
+        CHECK(tooltz_posix_west("EST-10", nov, &w) && w == -10 * 3600);
         CHECK(tooltz_posix_west("CET-1CEST,M3.5.0/2,M10.5.0/3", jul, &w)
+              && w == -7200);
+        CHECK(tooltz_posix_west("CET-1CEST,M3.5.0/2,M10.5.0/3", mar1 - 1UL,
+                                &w) && w == -3600);
+        CHECK(tooltz_posix_west("CET-1CEST,M3.5.0/2,M10.5.0/3", mar1, &w)
               && w == -7200);
         CHECK(tooltz_posix_west("CET-1CEST,M3.5.0/2,M10.5.0/3", oct1, &w)
               && w == -3600);
         CHECK(tooltz_posix_west("CET-1CEST,M3.5.0/2,M10.5.0/3", oct1 - 1UL,
                                 &w) && w == -7200);
-        /* US default rule: 2026-03-08 and 2026-11-01. */
         CHECK(tooltz_posix_west("EST5EDT", jul, &w) && w == 4 * 3600);
-        CHECK(tooltz_posix_west("EST5EDT", jan, &w) && w == 5 * 3600);
-        CHECK(tooltz_posix_west("EST5EDT", 1520406000UL, &w)  /* 03-07 07:00Z */
-              && w == 5 * 3600);
-        CHECK(tooltz_posix_west("EST5EDT", 1520492400UL, &w)  /* 03-08 07:00Z */
-              && w == 4 * 3600);
+        CHECK(tooltz_posix_west("EST5EDT", jan, &w) && w == 4 * 3600);
+        CHECK(tooltz_posix_west("EST4EDT3", jan, &w) && w == 3 * 3600);
         /* Southern hemisphere: summer spans New Year. */
         CHECK(tooltz_posix_west("AEST-10AEDT,M10.1.0,M4.1.0/3", jan, &w)
               && w == -11 * 3600);
