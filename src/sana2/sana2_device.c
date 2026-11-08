@@ -1681,10 +1681,12 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
 #ifdef AMINETXDUO_PTP
     /* Never raw: a cooked read or write is the bare IP datagram, which is
        all a point-to-point link carries.  The peer is the file's until a
-       command names another. */
+       command names another.  A link has one other end, so a file with no
+       DESTINATION names it as GATEWAY: an AmiTCP or Roadshow SLIP file. */
     iface->ptp      = ami_sana2_ptp_wire(iface->hw_type, iface->addr_bytes,
                                          cfg->point_to_point);
-    iface->ptp_peer = cfg->destination;
+    iface->ptp_peer = (cfg->destination != 0UL) ? cfg->destination
+                                                : cfg->gateway;
     if (iface->ptp)
         AMI_INFO("sana2: %s unit %ld is point-to-point",
                  iface->device, (long)iface->unit);

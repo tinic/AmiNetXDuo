@@ -2691,6 +2691,38 @@ static void case_point_to_point(void)
         (VOID)ami_sana2_close(iface);
     }
 
+    /* A SLIP file with no DESTINATION: the gateway is the other end. */
+    h_device_reset();
+    h_dev.hw_type = S2WireType_SLIP;
+    h_config();
+    h_cfg.gateway = 0xC0A8F001UL;                       /* 192.168.240.1 */
+    iface = ami_sana2_open(&h_cfg, &err);
+    h_check(iface != NULL && ami_sana2_ptp_peer(iface) == 0xC0A8F001UL,
+            "SLIP with no DESTINATION: the peer is GATEWAY");
+    if (iface != NULL)
+        (VOID)ami_sana2_close(iface);
+
+    h_device_reset();
+    h_dev.hw_type = S2WireType_SLIP;
+    h_config();
+    h_cfg.gateway     = 0xC0A8F001UL;
+    h_cfg.destination = 0x0A080001UL;
+    iface = ami_sana2_open(&h_cfg, &err);
+    h_check(iface != NULL && ami_sana2_ptp_peer(iface) == 0x0A080001UL,
+            "DESTINATION wins over GATEWAY");
+    if (iface != NULL)
+        (VOID)ami_sana2_close(iface);
+
+    h_device_reset();
+    h_dev.addr_bits = 48;
+    h_config();
+    h_cfg.gateway = 0xC0A8F001UL;
+    iface = ami_sana2_open(&h_cfg, &err);
+    h_check(iface != NULL && ami_sana2_ptp_peer(iface) == 0UL,
+            "Ethernet takes no peer from GATEWAY");
+    if (iface != NULL)
+        (VOID)ami_sana2_close(iface);
+
     h_check(ami_sana2_ptp(NULL) == NX_FALSE && ami_sana2_ptp_peer(NULL) == 0UL,
             "no interface is no link");
 }
