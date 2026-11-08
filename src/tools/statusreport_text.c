@@ -765,3 +765,62 @@ LONG sr_anxdiag_value_class(UWORD code)
     }
     return -1;
 }
+
+/* ------------------------------------------------------ tasks, sockets --- */
+
+VOID sr_task(SrOut *o, ULONG index, const SrTask *t)
+{
+    /* Static: inlined into the command, it would land in main()'s frame,
+       which tools/check-stack-frames.sh holds to a budget. */
+    static char k[SR_KEY_MAX];
+
+#define SR_T(field) sr_key_index(k, sizeof(k), "task", index, field)
+    SR_T("name");          sr_str(o, k, t->name);
+    if (t->command != NULL && t->command[0] != '\0')
+    {
+        SR_T("command");   sr_str(o, k, t->command);
+    }
+    SR_T("type");          sr_str(o, k, t->process ? "process" : "task");
+    SR_T("address");       sr_hex(o, k, t->address);
+    SR_T("cli");           sr_long(o, k, t->cli);
+    SR_T("priority");      sr_long(o, k, t->priority);
+    SR_T("state");         sr_str(o, k, t->state);
+    SR_T("sig_alloc");     sr_hex(o, k, t->sig_alloc);
+    SR_T("sig_wait");      sr_hex(o, k, t->sig_wait);
+    SR_T("sig_recvd");     sr_hex(o, k, t->sig_recvd);
+    SR_T("flags");         sr_hex(o, k, t->flags);
+    SR_T("stack_lower");   sr_hex(o, k, t->stack_lower);
+    SR_T("stack_upper");   sr_hex(o, k, t->stack_upper);
+    SR_T("saved_sp");      sr_hex(o, k, t->stack_pointer);
+    if (t->process)
+    {
+        SR_T("process_stack"); sr_long(o, k, t->process_stack);
+        SR_T("process_flags"); sr_hex(o, k, t->process_flags);
+    }
+#undef SR_T
+}
+
+VOID sr_socket(SrOut *o, ULONG index, const SrSocket *s)
+{
+    static char k[SR_KEY_MAX];  /* as sr_task() */
+
+#define SR_S(field) sr_key_index(k, sizeof(k), "socket", index, field)
+    SR_S("proto");         sr_str(o, k, s->tcp ? "tcp" : "udp");
+    SR_S("local_port");    sr_ulong(o, k, s->local_port);
+    if (!s->tcp)
+    {
+        SR_S("queued");    sr_ulong(o, k, s->queued);
+        return;
+    }
+    SR_S("state");         sr_str(o, k, s->state);
+    SR_S("peer_port");     sr_ulong(o, k, s->peer_port);
+    if (s->peer_address != 0UL)
+    {
+        SR_S("peer_address"); sr_addr_ipv4(o, k, s->peer_address);
+    }
+    SR_S("stalled_ms");    sr_ulong(o, k, s->stalled_ms);
+    SR_S("retransmits");   sr_ulong(o, k, s->retransmits);
+    SR_S("rto_ms");        sr_ulong(o, k, s->rto_ms);
+    SR_S("user_timeout_ms"); sr_ulong(o, k, s->user_timeout_ms);
+#undef SR_S
+}

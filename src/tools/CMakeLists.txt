@@ -159,7 +159,7 @@ function(aminetxduo_add_tool target output)
     if(TOOL_NX)
         # tool_nx.c adopts the calling Process as a TX_THREAD and reads the
         # SANA-II counters out of nx_interface_additional_link_info.
-        target_sources(${target} PRIVATE tool_nx.c)
+        target_sources(${target} PRIVATE tool_nx.c tool_sockets.c)
         target_link_libraries(${target} PRIVATE
             aminetxduo_sana2 aminetxduo_config threadx_port netxduo_port)
     else()
@@ -255,9 +255,33 @@ aminetxduo_add_tool(tool_checknetdevice CheckNetDevice
 # its path for the tokenizer the stack parses interface files with, so the
 # allowlist sees the keys the parser sees.
 aminetxduo_add_tool(tool_statusreport CreateAmiNetXDuoStatusReport
-    SOURCES statusreport.c statusreport_text.c tool_passive.c)
+    SOURCES statusreport.c statusreport_text.c tool_passive.c tool_sockets.c)
 target_include_directories(tool_statusreport PRIVATE
     "${CMAKE_SOURCE_DIR}/src/config")
+
+# The task list is ShowTasks' own snapshot, task_snapshot.cpp from
+# third_party/shelltools, linked rather than restated.  C++ for those two
+# files only, with the C files' CPU and register convention (they call each
+# other), no exceptions, no RTTI, and linked as C so that no libstdc++ is
+# pulled in: an unresolved C++ runtime symbol fails the link.
+if(CMAKE_CROSSCOMPILING)
+    enable_language(CXX)
+    set(_sr_cxx_sources
+        statusreport_tasks.cpp
+        "${CMAKE_SOURCE_DIR}/third_party/shelltools/src/task_snapshot.cpp")
+    target_sources(tool_statusreport PRIVATE ${_sr_cxx_sources})
+    target_include_directories(tool_statusreport PRIVATE
+        "${CMAKE_SOURCE_DIR}/third_party/shelltools/src")
+    set(_sr_cxx_options ${AMIGA_ARCH_FLAGS} -fomit-frame-pointer
+        -fno-strict-aliasing -Os -std=c++23 -fno-exceptions -fno-rtti
+        -fno-threadsafe-statics)
+    if(AMINETXDUO_REGPARM GREATER 0)
+        list(APPEND _sr_cxx_options "-mregparm=${AMINETXDUO_REGPARM}")
+    endif()
+    set_source_files_properties(${_sr_cxx_sources} TARGET_DIRECTORY tool_statusreport
+        PROPERTIES COMPILE_OPTIONS "${_sr_cxx_options}")
+    set_target_properties(tool_statusreport PROPERTIES LINKER_LANGUAGE C)
+endif()
 
 # El3Diag dumps the live registers of a 3c589 in the PCMCIA slot: active
 # transceiver, the card's own link-beat detect, and the receive FIFO status.

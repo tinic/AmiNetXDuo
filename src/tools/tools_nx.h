@@ -508,8 +508,15 @@ VOID tool_print_routes(const ToolRoutes *routes, const AmiConfig *cfg,
 /* The configured name of an nx_ip_interface[] slot, or "?". */
 const char *tool_iface_name(const AmiConfig *cfg, UWORD index);
 
-/* TCP state number -> the name netstat prints. */
+/* TCP state number -> the name netstat prints.  tool_sockets.c. */
 const char *tool_tcp_state_name(UINT state);
+
+/*
+ * The socket table through an open base, into sock[TOOL_MAX_SOCK]; the
+ * rows filled.  *truncated when the stack has more than fit.  tool_sockets.c,
+ * which links without tool_nx.c.
+ */
+UWORD tool_sockets(struct Library *base, ToolSockInfo *sock, BOOL *truncated);
 
 #ifdef __cplusplus
 }

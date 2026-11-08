@@ -335,7 +335,9 @@ static const char *const forbidden[] = {
 
 static const char *const command_files[] = {
     "src/tools/statusreport.c", "src/tools/statusreport_text.c",
-    "src/tools/tool_passive.c", NULL
+    "src/tools/tool_passive.c", "src/tools/tool_sockets.c",
+    "src/tools/statusreport_tasks.cpp",
+    "third_party/shelltools/src/task_snapshot.cpp", NULL
 };
 
 static char *read_code(const char *rel)
@@ -492,6 +494,61 @@ static void check_tee(void)
           "NOFILE: the console alone, and never a failure");
 }
 
+/* ------------------------------------------------------ tasks, sockets --- */
+
+/* The ShowTasks DETAIL fields as task.N rows, and netstat ALL's table as
+   socket.N rows with the peer address in the second class (#383). */
+static void check_tasks_sockets(void)
+{
+    SrTask   t;
+    SrSocket s;
+    SrOut    o;
+
+    memset(&t, 0, sizeof(t));
+    t.address = 0x70675608UL; t.cli = 0; t.priority = 1; t.state = "WAIT";
+    t.process = TRUE; t.sig_alloc = 0xfc00ffffUL; t.sig_wait = 0x04000000UL;
+    t.stack_lower = 0x72c2f020UL; t.stack_upper = 0x72c6f020UL;
+    t.stack_pointer = 0x72c6ef00UL; t.process_stack = 16384;
+    t.name = "IBrowseNetwork"; t.command = "";
+    o = sink(0);
+    sr_task(&o, 7, &t);
+    CHECK(has("task.7.name=IBrowseNetwork\n") && has("task.7.type=process\n") &&
+          has("task.7.address=$70675608\n") && has("task.7.priority=1\n") &&
+          has("task.7.state=WAIT\n") && has("task.7.sig_alloc=$fc00ffff\n") &&
+          has("task.7.sig_wait=$04000000\n") && has("task.7.sig_recvd=$00000000\n") &&
+          has("task.7.saved_sp=$72c6ef00\n") && has("task.7.process_stack=16384\n"),
+          "a task as ShowTasks DETAIL has it: %s", out);
+    CHECK(!has("task.7.command="), "no command line when there is none: %s", out);
+
+    t.process = FALSE; t.command = "IBrowse";
+    o = sink(0);
+    sr_task(&o, 0, &t);
+    CHECK(has("task.0.type=task\n") && has("task.0.command=IBrowse\n") &&
+          !has("process_stack"), "a task has no process fields: %s", out);
+
+    memset(&s, 0, sizeof(s));
+    s.tcp = TRUE; s.state = "CLOSE_WAIT"; s.local_port = 49157;
+    s.peer_port = 443; s.peer_address = 0x5e8a1d03UL; s.retransmits = 2;
+    o = sink(0);
+    sr_socket(&o, 1, &s);
+    CHECK(has("socket.1.proto=tcp\n") && has("socket.1.state=CLOSE_WAIT\n") &&
+          has("socket.1.local_port=49157\n") && has("socket.1.peer_port=443\n") &&
+          has("socket.1.retransmits=2\n"), "a TCP row: %s", out);
+    CHECK(!has("peer_address") && !has("94.138."),
+          "no peer address without ADDRESSES: %s", out);
+
+    o = sink(1);
+    sr_socket(&o, 1, &s);
+    CHECK(has("socket.1.peer_address=94.138.29.3\n"),
+          "the peer address with ADDRESSES: %s", out);
+
+    s.tcp = FALSE; s.local_port = 5353; s.queued = 3;
+    o = sink(1);
+    sr_socket(&o, 2, &s);
+    CHECK(strcmp(out, "socket.2.proto=udp\nsocket.2.local_port=5353\n"
+                      "socket.2.queued=3\n") == 0, "a UDP row: '%s'", out);
+}
+
 /* ------------------------------------------------------------------ main --- */
 
 /* The DHCP REQUEST checkpoints and the resident library's build (#306). */
@@ -554,6 +611,7 @@ int main(int argc, char **argv)
         check_decoding();
         check_tee();
         check_checkpoints();
+        check_tasks_sockets();
     }
     if (group == NULL || strcmp(group, "passive") == 0)
         check_passive();
