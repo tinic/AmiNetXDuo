@@ -7,6 +7,9 @@ are history.
 
 ## Unreleased
 
+- A SLIP or PPP interface whose file names the other end as GATEWAY, with no
+  DESTINATION, gets its default route through it, as AmiTCP and Roadshow files
+  expect.
 - AddNetInterface no longer races WirelessManager for the card when both
   start at boot, so the Wi-Fi network comes up every time.
 - Offline takes a prism2.device card offline and stops its
