@@ -1103,7 +1103,8 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(test_addiflink PRIVATE -Wall -Wextra)
     add_test(NAME addif_link COMMAND test_addiflink)
 
-    # Online/Offline: a driver name without UNIT finds its only interface (F-172).
+    # Online/Offline: a driver name without UNIT finds its only interface (F-172),
+    # and Offline is done only once the device is offline too (STATE=DOWN).
     add_executable(test_onoffpick test/test_onoffpick.c)
     target_include_directories(test_onoffpick PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
     target_compile_options(test_onoffpick PRIVATE -Wall -Wextra)

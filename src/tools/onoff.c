@@ -292,16 +292,20 @@ static BOOL linked_address6(UWORD index, char *text, ULONG text_len)
 
 /*
  * The NX interface index of `name` in the running stack, -1 when it is not
- * listed, or -2 when the stack would not say (F-173). *online is set when the
+ * listed, or -2 when the stack would not say (F-173). *online, and *device
+ * (the SANA-II device's own online state) when asked for, are set when the
  * answer is found.
  */
-static LONG live_index(struct Library *base, const char *name, BOOL *online)
+static LONG live_index(struct Library *base, const char *name, BOOL *online,
+                       BOOL *device)
 {
     LONG n;
     LONG i;
 
     if (online != NULL)
         *online = FALSE;
+    if (device != NULL)
+        *device = FALSE;
 
     n = tool_netstatus_query(base, NETSTATUS_INTERFACES, &onoff_ifaces,
                              sizeof(onoff_ifaces), sizeof(NetStatusInterface));
@@ -326,6 +330,8 @@ static LONG live_index(struct Library *base, const char *name, BOOL *online)
          */
         if (online != NULL)
             *online = (nsi->nsi_Flags & NETSTATUS_IF_LINKUP) ? TRUE : FALSE;
+        if (device != NULL)
+            *device = (nsi->nsi_Flags & NETSTATUS_IF_ONLINE) ? TRUE : FALSE;
 
         return (LONG)nsi->nsi_Index;
     }
@@ -348,7 +354,7 @@ static LONG wait_for_live_state(struct Library *base, const char *name,
     for (;;)
     {
         BOOL now = FALSE;
-        LONG where = live_index(base, name, &now);
+        LONG where = live_index(base, name, &now, NULL);
 
         if (where < 0)
             return where;
@@ -413,6 +419,7 @@ static LONG switch_live(const char *name, const AmiIfConfig *ifc, BOOL up,
     struct Library  *base;
     NetStatusControl ctl;
     BOOL             online = FALSE;
+    BOOL             device = FALSE;
     BOOL             broken = FALSE;
     LONG             index;
     LONG             reached;
@@ -430,7 +437,7 @@ static LONG switch_live(const char *name, const AmiIfConfig *ifc, BOOL up,
         return RETURN_FAIL;
     }
 
-    index = live_index(base, name, &online);
+    index = live_index(base, name, &online, &device);
 
     /* Defined but never attached (the stack starts only the interfaces it
        is told to): Online attaches the definition, as AddNetInterface does. */
@@ -448,7 +455,7 @@ static LONG switch_live(const char *name, const AmiIfConfig *ifc, BOOL up,
             return RETURN_FAIL;
         }
         err   = 0;
-        index = live_index(base, name, &online);
+        index = live_index(base, name, &online, &device);
     }
 
     if (index < 0)
@@ -462,8 +469,8 @@ static LONG switch_live(const char *name, const AmiIfConfig *ifc, BOOL up,
         return RETURN_ERROR;
     }
 
-    if (online == up && (!up || ifc == NULL ||
-                         ifc->iptype != AMI_IPTYPE_DHCP))
+    if (onoff_already(up, online, device) &&
+        (!up || ifc == NULL || ifc->iptype != AMI_IPTYPE_DHCP))
     {
         tool_printf("%s: already %s\n", (LONG)name,
                     (LONG)(up ? "online" : "offline"));
@@ -472,7 +479,7 @@ static LONG switch_live(const char *name, const AmiIfConfig *ifc, BOOL up,
         return RETURN_OK;
     }
 
-    if (online != up)
+    if (!onoff_already(up, online, device))
     {
         for (i = 0; i < (ULONG)(sizeof(ctl) / sizeof(ULONG)); i++)
             ((ULONG *)&ctl)[i] = 0;
