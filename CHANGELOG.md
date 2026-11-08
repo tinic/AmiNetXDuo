@@ -7,6 +7,8 @@ are history.
 
 ## Unreleased
 
+- CreateAmiNetXDuoStatusReport also lists the running tasks and the open
+  connections, so one report shows what a stalled program waits on.
 - A SLIP or PPP interface whose file names the other end as GATEWAY, with no
   DESTINATION, gets its default route through it, as AmiTCP and Roadshow files
   expect.
