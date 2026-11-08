@@ -7,6 +7,7 @@
 #include "sana2_internal.h"
 
 #include "aminetxduo/netstack.h"
+#include "aminetxduo/ptp.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -185,6 +186,16 @@ VOID ami_sana2_tx_reap(AmiSana2If *iface)
     (VOID)iface;
     h_note("tx_reap");
 }
+
+#ifdef AMINETXDUO_PTP
+static int h_kicks;
+
+VOID ami_sana2_ptp_addr_kick(AmiSana2If *iface)
+{
+    (VOID)iface;
+    h_kicks++;
+}
+#endif
 
 static BOOL h_refresh_updates;
 
@@ -663,6 +674,43 @@ static void test_ether_type(void)
 }
 
 #ifdef AMINETXDUO_PTP
+/* A file with no ADDRESS: every enable asks the device for its station
+   address, once a tick, until it has one; a disable stops asking. */
+static void test_ptp_address_from_the_link(void)
+{
+    printf("sana2: a point-to-point link with no ADDRESS asks for one\n");
+
+    fixture_init(4);
+    iface.ptp = TRUE;
+    ami_sana2_attach(&iface, &ip, 0);
+    h_kicks = 0;
+    drive(NX_LINK_ENABLE);
+    ami_sana2_ptp_addr_tick();
+    h_check(iface.ptp_addr_left == 0U && h_kicks == 0,
+            "ptp: a file with an ADDRESS asks nothing");
+    ami_sana2_unbind(&iface);
+
+    fixture_init(4);
+    iface.ptp = TRUE;
+    iface.ptp_addr_dyn = TRUE;
+    ami_sana2_attach(&iface, &ip, 0);
+    h_kicks = 0;
+    drive(NX_LINK_ENABLE);
+    h_check(iface.ptp_addr_left == (UWORD)AMI_SANA2_PTP_ADDR_POLLS,
+            "ptp: an enable arms the polls");
+    ami_sana2_ptp_addr_tick();
+    h_check(h_kicks == 1, "ptp: the tick has the reader ask");
+    drive(NX_LINK_DISABLE);
+    ami_sana2_ptp_addr_tick();
+    h_check(iface.ptp_addr_left == 0U && h_kicks == 1,
+            "ptp: a disable stops asking");
+    drive(NX_LINK_ENABLE);
+    h_check(iface.ptp_addr_left == (UWORD)AMI_SANA2_PTP_ADDR_POLLS,
+            "ptp: and the next enable asks again");
+    ami_sana2_unbind(&iface);
+    interface_obj.nx_interface_additional_link_info = NULL;
+}
+
 /* A point-to-point link gets no ARP or RARP: a gratuitous ARP after an
    address change is sent on every interface, and vpn.device refuses the
    type.  The packet is released; IPv4 still goes out. */
@@ -1482,6 +1530,7 @@ int main(void)
 #ifdef AMINETXDUO_PTP
     test_ptp_drops_arp();
     test_ptp_sends_ipv6();
+    test_ptp_address_from_the_link();
 #endif
     test_send_without_a_packet();
     test_send_status_is_passed_up();

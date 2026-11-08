@@ -724,6 +724,23 @@ static BOOL running_is_up(struct Library *base, UWORD index)
     return TRUE;
 }
 
+/* Whether the attached interface at `index` is a point-to-point link. */
+static BOOL running_is_ptp(struct Library *base, UWORD index)
+{
+    LONG n;
+    LONG i;
+
+    n = tool_netstatus_query(base, NETSTATUS_INTERFACES, &addif_ifaces,
+                             sizeof(addif_ifaces), sizeof(NetStatusInterface));
+    for (i = 0; i < n && i < (LONG)NX_MAX_PHYSICAL_INTERFACES; i++)
+    {
+        if (addif_ifaces.e[i].nsi_Index == index)
+            return (addif_ifaces.e[i].nsi_Flags & NETSTATUS_IF_PTP)
+                       ? TRUE : FALSE;
+    }
+    return FALSE;
+}
+
 static LONG add_to_running_stack(struct Library *base, const char *name,
                                  const char *spec)
 {
@@ -1099,6 +1116,7 @@ static int addif_main(int argc, char **argv)
             char  text6[AMI_CFG_IP6_STRLEN];
             LONG  where;
             BOOL  left_down = FALSE;
+            BOOL  from_link = FALSE;
             ULONG spent = 0;
 
             name = tool_basename((const char *)names[n]);
@@ -1221,13 +1239,21 @@ static int addif_main(int argc, char **argv)
 
             text6[0] = '\0';
 
+            /* A point-to-point file with no ADDRESS: the link brings the
+               address (IPCP), and it is waited for as a lease is. */
+            from_link = (BOOL)(!left_down && addr == 0 && where >= 0 &&
+                               ifc.iptype == AMI_IPTYPE_STATIC &&
+                               ifc.address == 0 &&
+                               running_is_ptp(base, (UWORD)where));
+
             if (left_down)
                 addr = 0;
             else if (ifc.iptype == AMI_IPTYPE_DHCP || addr == 0)
                 (VOID)wait_for_running_ready(base, name, &ifc,
                                              allowance > spent + 1UL
                                                  ? allowance - spent : 1UL,
-                                             !needs_async_address(&ifc),
+                                             !needs_async_address(&ifc) &&
+                                                 !from_link,
                                              &addr, text6, sizeof(text6),
                                              &broken);
             else if (where >= 0)
@@ -1270,6 +1296,8 @@ static int addif_main(int argc, char **argv)
 
                     if (ifc.iptype == AMI_IPTYPE_DHCP)
                         tool_explain_dhcp_waiting(name, timeout);
+                    else if (from_link)
+                        tool_explain_link_address_waiting(name, timeout);
                 }
 
                 if (rc == RETURN_OK)

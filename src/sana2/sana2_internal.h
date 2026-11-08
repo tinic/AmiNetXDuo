@@ -1188,6 +1188,13 @@ struct AmiSana2If
     BOOL                ptp;
     ULONG               ptp_peer;
     ULONG               ptp_routed;
+    /* A file with no ADDRESS: the address is the device's station address
+       once the link has one (ppp.device: after IPCP).  ptp_addr_left is the
+       polls still to make, one a second, re-armed by every link enable;
+       ptp_addr_ask is the tick's request to the reader. */
+    BOOL                ptp_addr_dyn;
+    volatile BOOL       ptp_addr_ask;
+    UWORD               ptp_addr_left;
 #endif
 
     BOOL                online;
@@ -1414,6 +1421,14 @@ VOID ami_sana2_block_leave(VOID);
 VOID ami_sana2_port_init(struct MsgPort *port, struct Task *task, BYTE sigbit,
                          UBYTE flags);
 LONG ami_sana2_command(AmiSana2If *iface, struct IOSana2Req *req, UWORD command);
+#ifdef AMINETXDUO_PTP
+/* Seconds a link enable keeps asking for the station address. */
+#ifndef AMI_SANA2_PTP_ADDR_POLLS
+#define AMI_SANA2_PTP_ADDR_POLLS    120U
+#endif
+VOID ami_sana2_ptp_addr_poll(AmiSana2If *iface);
+VOID ami_sana2_ptp_addr_kick(AmiSana2If *iface);
+#endif
 LONG ami_sana2_online(AmiSana2If *iface);
 BOOL ami_sana2_keeps_online(const char *device);
 LONG ami_sana2_offline(AmiSana2If *iface);

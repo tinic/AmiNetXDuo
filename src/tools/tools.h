@@ -194,6 +194,8 @@ ULONG tool_list_dir(const char *path, char names[][TOOL_NAME_LEN], ULONG max,
  * cached.
  */
 ULONG             tool_scan_devices(VOID);
+/* A driver known by name to be Ethernet: of the list, all but SLIP and PPP. */
+BOOL              tool_device_known_ethernet(const char *device);
 const ToolDevice *tool_scan_device(ULONG index);
 
 /*
@@ -249,6 +251,7 @@ VOID tool_probe_sana2_codes(LONG *error, LONG *wire);
 VOID tool_explain_no_interfaces(VOID);                /* nothing configured  */
 VOID tool_explain_dhcp(const char *name);             /* nobody answered     */
 VOID tool_explain_dhcp_waiting(const char *name, ULONG seconds); /* wait ran out */
+VOID tool_explain_link_address_waiting(const char *name, ULONG seconds);
 VOID tool_explain_resolve(const char *name, LONG err); /* a lookup failed    */
 VOID tool_explain_no_stack(VOID);                     /* nothing is running  */
 

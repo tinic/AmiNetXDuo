@@ -192,6 +192,7 @@ IF_NUMBERS(IF_NUMBER_HINT)
     X(linkstatuscommand, IGNORED) \
     X(nameserver, IGNORED) \
     X(domain, IGNORED) \
+    X(interface, IGNORED) \
     IF_PTP_KEYWORDS(X)
 
 typedef struct IfKeywordNames
@@ -1332,6 +1333,13 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
     out->configured = TRUE;
 
     return AMI_CFG_OK;
+}
+
+BOOL ami_config_iface_ptp_shape(const AmiIfConfig *cfg)
+{
+    return (BOOL)(cfg != NULL && cfg->iptype == AMI_IPTYPE_STATIC &&
+                  cfg->address != 0UL && cfg->netmask == 0xFFFFFFFFUL &&
+                  cfg->gateway != 0UL && cfg->gateway != cfg->address);
 }
 
 BOOL ami_config_iface_wants_ipv4(const AmiIfConfig *cfg)

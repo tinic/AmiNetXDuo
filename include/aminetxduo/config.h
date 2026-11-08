@@ -343,6 +343,9 @@ typedef struct AmiIfConfig {
  * have and can be reached on.
  */
 BOOL ami_config_iface_wants_ipv4(const AmiIfConfig *cfg);
+/* An AmiTCP-style SLIP or PPP file: ADDRESS/32 and a GATEWAY that is the
+   only other address there can be, the peer. */
+BOOL ami_config_iface_ptp_shape(const AmiIfConfig *cfg);
 BOOL ami_config_iface_wants_ipv6(const AmiIfConfig *cfg);
 
 /*

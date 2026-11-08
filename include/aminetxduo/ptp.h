@@ -34,6 +34,23 @@ VOID  ami_sana2_set_ptp_peer(AmiSana2If *iface, ULONG peer);
 ULONG ami_sana2_ptp_routed(const AmiSana2If *iface);
 VOID  ami_sana2_set_ptp_routed(AmiSana2If *iface, ULONG peer);
 
+/*
+ * A file with no ADDRESS takes the device's station address once the link
+ * has one.  The tick asks (ami_sana2_ptp_addr_tick(), interrupt level), the
+ * reader polls, and the hook gets the address and the device's DstAddr.
+ */
+VOID  ami_sana2_ptp_addr_tick(VOID);
+VOID  ami_sana2_set_ptp_addr_hook(VOID (*hook)(AmiSana2If *, ULONG, ULONG));
+
+/*
+ * Whether station address `src` is one to take on an interface at
+ * `current` whose peer is `peer` (0: none named).  *peer_out is a peer to
+ * record, else 0: DstAddr, where ppp.device puts the IPCP peer, but only
+ * when neither DESTINATION nor GATEWAY named one, and never 0 or `src`.
+ */
+UINT  ami_ptp_station_offer(ULONG current, ULONG peer, ULONG src, ULONG dst,
+                            ULONG *peer_out);
+
 /* The peer of a point-to-point interface, 0 for any other interface. */
 ULONG ami_ptp_peer_of(const NX_INTERFACE *ifp);
 

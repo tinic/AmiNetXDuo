@@ -28,5 +28,6 @@ shared-type include/aminetxduo/compat.h AmiLogLineFn src/common/ami_diag.c, set 
 shared-type include/aminetxduo/compat.h fn src/common/ami_diag.c, set and called in each image
 shared-type include/aminetxduo/config.h AmiCfgReporter src/config, passed by a caller in the same image
 shared-type include/aminetxduo/config.h reporter src/config, passed by a caller in the same image
+shared-type include/aminetxduo/ptp.h hook src/sana2 and src/netstack, bsdsocket.library only
 shared-type include/aminetxduo/netstack.h AmiNetGiveUpFn src/netstack and src/bsdsocket, bsdsocket.library only
 shared-type include/aminetxduo/netstack.h give_up bsdsocket.library only

@@ -266,6 +266,50 @@ int main(void)
     (VOID)_nx_ip_static_route_delete(&h_ip, H_VPN_PEER, 0xFFFFFFFFUL);
     h_vpn.routed = 0UL;
 
+    /* A file with no ADDRESS: the station address once the link has one,
+       as ppp.device answers S2_GETSTATIONADDRESS after IPCP. */
+    {
+        ULONG peer = 1UL;
+
+        h_check(!ami_ptp_station_offer(0UL, 0UL, 0UL, H_VPN_PEER, &peer) &&
+                peer == 0UL,
+                "no station address yet is nothing to take");
+        h_check(ami_ptp_station_offer(0UL, H_VPN_PEER, H_VPN_ADDR,
+                                      H_VPN_PEER2, &peer) &&
+                peer == 0UL,
+                "the first address is taken, and a named peer is kept");
+        h_check(ami_ptp_station_offer(0UL, 0UL, H_VPN_ADDR, H_VPN_PEER,
+                                      &peer) &&
+                peer == H_VPN_PEER,
+                "with no peer named, the device's DstAddr is the peer");
+        h_check(ami_ptp_station_offer(0UL, 0UL, H_VPN_ADDR, H_VPN_ADDR,
+                                      &peer) &&
+                peer == 0UL,
+                "a DstAddr equal to the address is not a peer");
+        h_check(!ami_ptp_station_offer(H_VPN_ADDR, H_VPN_PEER, H_VPN_ADDR,
+                                       H_VPN_PEER, &peer) &&
+                peer == 0UL,
+                "the same address again changes nothing");
+        h_check(ami_ptp_station_offer(H_VPN_ADDR, H_VPN_PEER, H_VPN_ADDR2,
+                                      0UL, &peer) &&
+                peer == 0UL,
+                "a new link with a new address is taken");
+
+        /* Taken: the interface gets it /32, and the host route follows. */
+        h_vpn.peer = H_VPN_PEER;
+        h_interface_set(1, 0UL, 0xFFFFFFFFUL, &h_vpn);
+        ami_ptp_peer_route(&h_ip, 1);
+        h_check(h_ip.nx_ip_routing_table_entry_count == 0,
+                "no address, no host route");
+        h_interface_set(1, H_VPN_ADDR, 0xFFFFFFFFUL, &h_vpn);
+        ami_ptp_peer_route(&h_ip, 1);
+        h_check(h_route_to(H_VPN_PEER, 0xFFFFFFFFUL, H_VPN_ADDR) &&
+                h_route(H_VPN_PEER, &next_hop) == vpn,
+                "once the address is taken the peer is routed");
+        (VOID)_nx_ip_static_route_delete(&h_ip, H_VPN_PEER, 0xFFFFFFFFUL);
+        h_vpn.routed = 0UL;
+    }
+
     /* An Ethernet interface is left alone. */
     ami_ptp_peer_route(&h_ip, 0);
     h_check(h_ip.nx_ip_routing_table_entry_count == 0,

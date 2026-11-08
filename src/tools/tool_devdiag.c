@@ -55,6 +55,29 @@ static ToolDevice diag_found[TOOL_MAX_DEVICES];
 static UWORD      diag_found_count;
 static BOOL       diag_scanned;
 
+BOOL tool_device_known_ethernet(const char *device)
+{
+    const char *base = device;
+    const char *p;
+    UWORD       i;
+
+    if (device == NULL)
+        return FALSE;
+    for (p = device; *p != '\0'; p++)
+        if (*p == ':' || *p == '/')
+            base = p + 1;
+
+    if (tool_stricmp(base, "slip.device") == 0 ||
+        tool_stricmp(base, "ppp.device") == 0)
+        return FALSE;
+
+    for (i = 0; diag_known_devices[i] != NULL; i++)
+        if (tool_stricmp(base, diag_known_devices[i]) == 0)
+            return TRUE;
+
+    return FALSE;
+}
+
 static BOOL diag_already_found(const char *name)
 {
     UWORD i;

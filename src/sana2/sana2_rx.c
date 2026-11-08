@@ -2629,6 +2629,15 @@ static VOID ami_sana2_rx_thread(ULONG argument)
             iface->stats_epoch++;
         }
 
+#ifdef AMINETXDUO_PTP
+        /* The tick's request for the station address, as for the stats. */
+        if (iface->ptp_addr_ask)
+        {
+            iface->ptp_addr_ask = FALSE;
+            ami_sana2_ptp_addr_poll(iface);
+        }
+#endif
+
         /*
          * The device's capacity can change while it is online (anxs2ext.h,
          * ANXD_CMD_RX_CAPACITY).  Asked again here, at most once a second

@@ -543,6 +543,13 @@ VOID tool_explain_dhcp_waiting(const char *name, ULONG seconds)
                 (LONG)tool_name, (LONG)name, (LONG)seconds);
 }
 
+/* The point-to-point twin: a PPP link gets its address from the peer. */
+VOID tool_explain_link_address_waiting(const char *name, ULONG seconds)
+{
+    tool_printf("%s: %s: no address from the link after %lu s; still asking\n",
+                (LONG)tool_name, (LONG)name, (LONG)seconds);
+}
+
 VOID tool_explain_resolve(const char *name, LONG err)
 {
     const char *why;

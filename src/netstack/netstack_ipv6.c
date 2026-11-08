@@ -260,6 +260,14 @@ static VOID ami_ns6_configure_interface(AmiNetStack *ns, UWORD i)
        netstack_ptp6.c has the why. */
     if (ptp)
     {
+        /* Nothing asked for IPv6 on the link: no link-local either.  A PPP
+           or SLIP peer refuses IPV6CP. */
+        if (cfg->address6_count == 0 && !cfg->have_destination6)
+        {
+            AMI_INFO("netstack: %s: point-to-point, no ADDRESS6, IPv6 not "
+                     "started", cfg->name);
+            return;
+        }
         if (cfg->have_destination6)
             ami_ptp_ipv6_peer_set((UINT)i, cfg->destination6);
         status = ami_ptp_ipv6_start(&ns->ns_Ip, (UINT)i);

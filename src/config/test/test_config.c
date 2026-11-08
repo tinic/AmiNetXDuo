@@ -1371,6 +1371,60 @@ static void test_problem_reporter(void)
     CHECK(seen_count == 0);
 }
 
+static void test_amitcp_interface_keyword_is_silent(void)
+{
+    AmiIfConfig iface;
+    char *buf;
+
+    printf("interface: AmiTCP's interface= is read and says nothing\n");
+
+    seen_count = 0;
+    ami_config_set_reporter(collect, NULL);
+    buf = dup_text("interface=slip\ndevice=slip.device\n"
+                   "address=192.168.240.2\n");
+    CHECK(ami_cfg_parse_interface("slip0", buf, &iface) == AMI_CFG_OK);
+    free(buf);
+    ami_config_set_reporter(NULL, NULL);
+
+    CHECK(seen_count == 0);
+    CHECK_STR(iface.name, "slip0");
+    CHECK_STR(iface.device, "slip.device");
+}
+
+static void test_ptp_shape(void)
+{
+    AmiIfConfig iface;
+    char *buf;
+
+    printf("interface: a /32 with GATEWAY is the point-to-point shape\n");
+
+    /* AmiTCP_NG issue 10, the SLIP file. */
+    buf = dup_text("device=slip.device\naddress=192.168.240.2\n"
+                   "netmask=255.255.255.255\ngateway=192.168.240.1\n");
+    CHECK(ami_cfg_parse_interface("slip0", buf, &iface) == AMI_CFG_OK);
+    free(buf);
+    CHECK(ami_config_iface_ptp_shape(&iface));
+
+    buf = dup_text("device=a2065.device\naddress=192.168.1.5\n"
+                   "netmask=255.255.255.0\ngateway=192.168.1.1\n");
+    CHECK(ami_cfg_parse_interface("eth0", buf, &iface) == AMI_CFG_OK);
+    free(buf);
+    CHECK(!ami_config_iface_ptp_shape(&iface));
+
+    buf = dup_text("device=slip.device\naddress=192.168.240.2\n"
+                   "netmask=255.255.255.255\n");
+    CHECK(ami_cfg_parse_interface("slip0", buf, &iface) == AMI_CFG_OK);
+    free(buf);
+    CHECK(!ami_config_iface_ptp_shape(&iface));
+
+    buf = dup_text("device=ppp.device\nnetmask=255.255.255.255\n"
+                   "gateway=192.168.241.1\n");
+    CHECK(ami_cfg_parse_interface("ppp0", buf, &iface) == AMI_CFG_OK);
+    free(buf);
+    CHECK(!ami_config_iface_ptp_shape(&iface));
+    CHECK(!ami_config_iface_ptp_shape(NULL));
+}
+
 static void test_numeric_iptype_is_the_packet_type(void)
 {
     AmiIfConfig iface;
@@ -5191,6 +5245,8 @@ int main(int argc, char **argv)
     test_problem_reporter();
     test_interface_mode_aliases();
     test_numeric_iptype_is_the_packet_type();
+    test_amitcp_interface_keyword_is_silent();
+    test_ptp_shape();
     test_inert_keywords_are_notes();
 #ifdef AMINETXDUO_PTP
     test_interface_point_to_point();
