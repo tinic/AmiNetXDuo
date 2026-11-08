@@ -35,4 +35,15 @@ static inline int onoff_pick(int had_unit, unsigned long want,
     return matches;
 }
 
+/*
+ * Whether the interface is already where Online (`up`) or Offline asked for
+ * it.  `linkup` is the stack's link, `device` the SANA-II device's online
+ * state.  Offline is done only when the device is offline as well: STATE=DOWN
+ * and SM_Down leave the link down and the device online, still receiving.
+ */
+static inline int onoff_already(int up, int linkup, int device)
+{
+    return up ? linkup : (!linkup && !device);
+}
+
 #endif

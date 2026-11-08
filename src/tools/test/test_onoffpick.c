@@ -40,6 +40,18 @@ int main(void)
         CHECK(onoff_pick(0, 0, 0, 0, &pick) == 0 && pick == -1);
     }
 
+    /* Offline: STATE=DOWN leaves the device online, so it is not done. */
+    CHECK(!onoff_already(0, 0, 1));
+    CHECK(!onoff_already(0, 1, 1));
+    CHECK(!onoff_already(0, 1, 0));
+    CHECK(onoff_already(0, 0, 0));
+
+    /* Online: the stack's link decides, as before. */
+    CHECK(onoff_already(1, 1, 1));
+    CHECK(onoff_already(1, 1, 0));
+    CHECK(!onoff_already(1, 0, 1));
+    CHECK(!onoff_already(1, 0, 0));
+
     printf("onoffpick: %d checks, %d failure(s)\n", checks, failures);
     return failures != 0;
 }
