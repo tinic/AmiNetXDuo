@@ -255,7 +255,11 @@ function(_aminetxduo_warnings_apply_dir dir)
             if(_s MATCHES "\\$<")
                 continue()
             endif()
-            if(_s MATCHES "/third_party/")
+            # Classified by the path inside the tree: a checkout that sits
+            # under a directory named src/ made every test "shipping".
+            file(RELATIVE_PATH _r "${CMAKE_SOURCE_DIR}" "${_s}")
+            set(_r "/${_r}")
+            if(_r MATCHES "/third_party/")
                 continue()
             endif()
             # tests/atf/ holds FreeBSD's tests/sys/netinet sources byte for
@@ -266,8 +270,8 @@ function(_aminetxduo_warnings_apply_dir dir)
             # beside it, so the exemption names the files that are OURS
             # instead of guessing from a filename prefix.  The shim is atf-c.h,
             # atf-prelude.h and atf_main.c, and it is not exempt.
-            if(_s MATCHES "/tests/atf/"
-               AND NOT _s MATCHES "/tests/atf/(atf-c\\.h|atf-prelude\\.h|atf_main\\.c)$")
+            if(_r MATCHES "/tests/atf/"
+               AND NOT _r MATCHES "/tests/atf/(atf-c\\.h|atf-prelude\\.h|atf_main\\.c)$")
                 continue()
             endif()
             list(APPEND _ours "${_s}")
@@ -275,8 +279,8 @@ function(_aminetxduo_warnings_apply_dir dir)
             # Forbid(), Disable(), AddSemaphore() -- and there is no header
             # those could be declared in that is not a forgery of exec.library.
             # They live under src/ but they do not ship.
-            if((_s MATCHES "/src/" OR _s MATCHES "/port/")
-               AND NOT _s MATCHES "/test/")
+            if((_r MATCHES "/src/" OR _r MATCHES "/port/")
+               AND NOT _r MATCHES "/test/")
                 list(APPEND _shipping "${_s}")
             else()
                 list(APPEND _nonshipping "${_s}")
