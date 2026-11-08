@@ -7,6 +7,8 @@ are history.
 
 ## Unreleased
 
+- AddNetInterface no longer races WirelessManager for the card when both
+  start at boot, so the Wi-Fi network comes up every time.
 - Offline takes a prism2.device card offline and stops its
   interrupts, as programs started by WHDLoad need.
 - Programs at normal priority, such as audio players, keep running
