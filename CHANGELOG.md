@@ -7,6 +7,12 @@ are history.
 
 ## Unreleased
 
+- ppp.device works: a numeric IPTYPE sets the packet type IPv4 travels as
+  (ppp.device needs IPTYPE=33), and a point-to-point interface without
+  ADDRESS takes the address the link agrees once it is up.
+- The AmiTCP keyword INTERFACE in an interface file is accepted without a
+  warning, and CheckNetConfig accepts a /32 SLIP file whose GATEWAY is the
+  other end.
 - CreateAmiNetXDuoStatusReport also lists the running tasks and the open
   connections, so one report shows what a stalled program waits on.
 - A SLIP or PPP interface whose file names the other end as GATEWAY, with no
