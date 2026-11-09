@@ -578,10 +578,14 @@
   DeleteNetRoute DST=0.0.0.0 removes the default route.
 
   Without DESTINATION, GATEWAY names the other end, as in an AmiTCP
-  or Roadshow SLIP file. Without ADDRESS, the interface takes the
-  address the driver reports once the link is up, as ppp.device does
-  after it has agreed one with the other end. AddNetInterface waits
-  for that address within its TIMEOUT and fails if none arrives.
+  or Roadshow SLIP file. Without GATEWAY, the default route goes
+  through the other end of the link. Without ADDRESS, the interface
+  takes the address the driver reports once the link is up, as
+  ppp.device does after it has agreed one with the other end, and
+  then takes over the default route, as Roadshow's ppp_dialer does;
+  PRIORITY still ranks it. AddNetInterface waits for that address
+  within its TIMEOUT and returns 5 (WARN) if none arrives. An address
+  agreed again while the link stays online replaces the old one.
 
   With ADDRESS6 and DESTINATION6, a point-to-point link carries IPv6 as
   well. The link gets a random link-local address and sends no neighbour
@@ -3258,10 +3262,9 @@
        Definitions not named to AddNetInterface or Online remain inert. An
        AddNetInterface beyond the profile's limit is refused with the names
        holding the slots; RemoveNetInterface frees one.
-    o  @{b}Only Ethernet-style SANA-II drivers have been tested.@{ub} A
-       point-to-point driver such as ppp.device or slip.device is not
-       refused, but none has been tested, so a modem or DSL connection
-       is unsupported for now.
+    o  @{b}Of the point-to-point drivers, only ppp.device 1.45 and
+       slip.device 38.1 have been tested.@{ub} Other PPP, SLIP or PLIP
+       drivers are not refused.
     o  @{b}MTU= cannot exceed what the driver reports.@{ub} It is clamped
        downwards, and refused under 68 bytes.
     o  @{b}No multicast routing, and no source filtering.@{ub} Joining a group
