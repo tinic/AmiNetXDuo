@@ -1340,11 +1340,12 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
 }
 
 #ifdef AMINETXDUO_PTP
-/* The drivers whose wire type is PPP, SLIP or CSLIP: AmiTCP's, Holger
-   Kruse's and Roadshow's. */
+/* The drivers whose wire type is PPP, SLIP, CSLIP or PLIP: AmiTCP's,
+   Holger Kruse's, Roadshow's, and the plip.device and magplip.device PLIP
+   drivers. */
 static const char ami_cfg_ptp_drivers[] =
     "ppp.device\0ppp-serial.device\0ppp-ethernet.device\0slip.device\0"
-    "cslip.device\0";
+    "cslip.device\0plip.device\0magplip.device\0";
 
 BOOL ami_config_iface_ptp_driver(const AmiIfConfig *cfg)
 {

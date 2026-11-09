@@ -1477,6 +1477,14 @@ static void test_interface_address_from_link(void)
     CHECK(ami_cfg_parse_interface("ppp1", buf, &iface) == AMI_CFG_OK);
     free(buf);
     CHECK(ami_config_iface_addr_from_link(&iface));
+    buf = dup_text("device=DEVS:Networks/magplip.device\n");
+    CHECK(ami_cfg_parse_interface("plip0", buf, &iface) == AMI_CFG_OK);
+    free(buf);
+    CHECK(ami_config_iface_addr_from_link(&iface));
+    buf = dup_text("device=plip.device\n");
+    CHECK(ami_cfg_parse_interface("plip1", buf, &iface) == AMI_CFG_OK);
+    free(buf);
+    CHECK(ami_config_iface_addr_from_link(&iface));
     buf = dup_text("device=vpn.device\npointtopoint=yes\n");
     CHECK(ami_cfg_parse_interface("ptp0", buf, &iface) == AMI_CFG_OK);
     free(buf);
