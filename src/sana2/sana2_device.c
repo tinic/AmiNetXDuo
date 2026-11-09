@@ -1339,6 +1339,8 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
     /* IPREQUESTS, ARPREQUESTS, WRITEREQUESTS.  Here, before anything can
        send: the probe writes further down claim from tx[] up to tx_slots. */
     iface->rx_want_ip  = (UWORD)cfg->ip_requests;
+    iface->ip_type     = (cfg->ip_packet_type != 0UL) ? cfg->ip_packet_type
+                                                      : AMI_ETHERTYPE_IPV4;
     iface->rx_want_arp = (UWORD)cfg->arp_requests;
     iface->tx_slots    = (UWORD)AMI_SANA2_TX_SLOTS;
     if (cfg->write_requests != 0 &&
@@ -1687,6 +1689,9 @@ AmiSana2If *ami_sana2_open(const AmiIfConfig *cfg, LONG *err)
                                          cfg->point_to_point);
     iface->ptp_peer = (cfg->destination != 0UL) ? cfg->destination
                                                 : cfg->gateway;
+    iface->ptp_addr_dyn = (BOOL)(iface->ptp &&
+                                 cfg->iptype == AMI_IPTYPE_STATIC &&
+                                 cfg->address == 0UL);
     if (iface->ptp)
         AMI_INFO("sana2: %s unit %ld is point-to-point",
                  iface->device, (long)iface->unit);
@@ -2094,5 +2099,66 @@ VOID ami_sana2_set_ptp_routed(AmiSana2If *iface, ULONG peer)
 {
     if (iface != NULL)
         iface->ptp_routed = peer;
+}
+
+static VOID (*ami_sana2_ptp_addr_hook)(AmiSana2If *, ULONG, ULONG);
+
+VOID ami_sana2_set_ptp_addr_hook(VOID (*hook)(AmiSana2If *, ULONG, ULONG))
+{
+    ami_sana2_ptp_addr_hook = hook;
+}
+
+static ULONG ami_sana2_be32(const UBYTE *p)
+{
+    return ((ULONG)p[0] << 24) | ((ULONG)p[1] << 16) |
+           ((ULONG)p[2] << 8) | (ULONG)p[3];
+}
+
+/* The tick's half, at interrupt level: the reader asks, as for the stats. */
+VOID ami_sana2_ptp_addr_kick(AmiSana2If *iface)
+{
+    AmiSana2Reader *rd = &iface->reader;
+
+    if (!rd->running || rd->stop || rd->task == NULL || rd->wake_mask == 0)
+        return;
+
+    iface->ptp_addr_ask = TRUE;
+    Signal(rd->task, rd->wake_mask);
+}
+
+/*
+ * The reader thread, once a second while ptp_addr_left lasts: the station
+ * address in SrcAddr, the peer in DstAddr for a device that puts it there.
+ * S2_ONLINE returns before a PPP link has its address, so this asks until it
+ * has one.
+ */
+VOID ami_sana2_ptp_addr_poll(AmiSana2If *iface)
+{
+    struct IOSana2Req req;
+    VOID            (*hook)(AmiSana2If *, ULONG, ULONG);
+    ULONG             local;
+
+    if (iface->ptp_addr_left == 0U)
+        return;
+    iface->ptp_addr_left--;
+
+    req = iface->templ;
+    if (ami_sana2_command(iface, &req, S2_GETSTATIONADDRESS) != 0)
+        return;
+
+    local = ami_sana2_be32(req.ios2_SrcAddr);
+    if (local == 0UL)
+    {
+        if (iface->ptp_addr_left == 0U)
+            AMI_WARN("sana2: %s unit %ld: the link gave no address in %lu s",
+                     iface->device, (long)iface->unit,
+                     (unsigned long)AMI_SANA2_PTP_ADDR_POLLS);
+        return;
+    }
+
+    iface->ptp_addr_left = 0U;
+    hook = ami_sana2_ptp_addr_hook;
+    if (hook != NULL)
+        hook(iface, local, ami_sana2_be32(req.ios2_DstAddr));
 }
 #endif /* AMINETXDUO_PTP */

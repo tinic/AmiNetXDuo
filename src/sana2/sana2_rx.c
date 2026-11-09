@@ -1644,6 +1644,7 @@ static BOOL ami_sana2_rx_settle(AmiSana2Rx *rx, AmiRxSlot *slot,
     AmiSana2If *iface  = rx->iface;
     NX_PACKET  *packet = slot->packet;
     ULONG       length = slot->req.ios2_DataLength;
+    ULONG       type;
     UCHAR      *eth;
 
     /* The device reports the frame length in the request; the copy hook
@@ -1685,8 +1686,11 @@ static BOOL ami_sana2_rx_settle(AmiSana2Rx *rx, AmiRxSlot *slot,
             for (i = 0; i < 12; i++)
                 eth[i] = 0;
         }
-        eth[12] = (UCHAR)(slot->req.ios2_PacketType >> 8);
-        eth[13] = (UCHAR)(slot->req.ios2_PacketType);
+        type = slot->req.ios2_PacketType;
+        if (type == iface->ip_type)
+            type = AMI_ETHERTYPE_IPV4;
+        eth[12] = (UCHAR)(type >> 8);
+        eth[13] = (UCHAR)(type);
     }
 
     /* The fourteen bytes are in front of the payload in cooked mode whether
@@ -2625,6 +2629,15 @@ static VOID ami_sana2_rx_thread(ULONG argument)
             iface->stats_epoch++;
         }
 
+#ifdef AMINETXDUO_PTP
+        /* The tick's request for the station address, as for the stats. */
+        if (iface->ptp_addr_ask)
+        {
+            iface->ptp_addr_ask = FALSE;
+            ami_sana2_ptp_addr_poll(iface);
+        }
+#endif
+
         /*
          * The device's capacity can change while it is online (anxs2ext.h,
          * ANXD_CMD_RX_CAPACITY).  Asked again here, at most once a second
@@ -3110,7 +3123,8 @@ LONG ami_sana2_rx_start(AmiSana2If *iface)
 
         rx->iface       = iface;
         rx->reader      = &iface->reader;
-        rx->packet_type = ami_sana2_rx_types[i];
+        rx->packet_type = (ami_sana2_rx_types[i] == AMI_ETHERTYPE_IPV4)
+                              ? iface->ip_type : ami_sana2_rx_types[i];
         rx->refused     = FALSE;
         if (ami_sana2_rx_types[i] == AMI_ETHERTYPE_IPV4)
             rx->depth = depths.ipv4;

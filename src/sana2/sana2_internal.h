@@ -1113,6 +1113,9 @@ struct AmiSana2If
      */
     ULONG               rx_dst_off;     /* 0 raw, AMI_ETH_HEADER_SIZE cooked */
     UBYTE               rx_io_flags;    /* SANA2IOF_RAW, or 0                */
+    /* The SANA-II packet type IPv4 reads and writes carry: IPTYPE=, else
+       2048.  Frames of this type reach the stack as 0x0800. */
+    ULONG               ip_type;
 
     /* Hardware facts from S2_DEVICEQUERY / S2_GETSTATIONADDRESS. */
     UCHAR               mac[AMI_ETH_ADDR_SIZE];
@@ -1185,6 +1188,13 @@ struct AmiSana2If
     BOOL                ptp;
     ULONG               ptp_peer;
     ULONG               ptp_routed;
+    /* A file with no ADDRESS: the address is the device's station address
+       once the link has one (ppp.device: after IPCP).  ptp_addr_left is the
+       polls still to make, one a second, re-armed by every link enable;
+       ptp_addr_ask is the tick's request to the reader. */
+    BOOL                ptp_addr_dyn;
+    volatile BOOL       ptp_addr_ask;
+    UWORD               ptp_addr_left;
 #endif
 
     BOOL                online;
@@ -1411,6 +1421,14 @@ VOID ami_sana2_block_leave(VOID);
 VOID ami_sana2_port_init(struct MsgPort *port, struct Task *task, BYTE sigbit,
                          UBYTE flags);
 LONG ami_sana2_command(AmiSana2If *iface, struct IOSana2Req *req, UWORD command);
+#ifdef AMINETXDUO_PTP
+/* Seconds a link enable keeps asking for the station address. */
+#ifndef AMI_SANA2_PTP_ADDR_POLLS
+#define AMI_SANA2_PTP_ADDR_POLLS    120U
+#endif
+VOID ami_sana2_ptp_addr_poll(AmiSana2If *iface);
+VOID ami_sana2_ptp_addr_kick(AmiSana2If *iface);
+#endif
 LONG ami_sana2_online(AmiSana2If *iface);
 BOOL ami_sana2_keeps_online(const char *device);
 LONG ami_sana2_offline(AmiSana2If *iface);

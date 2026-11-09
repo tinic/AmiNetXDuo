@@ -1038,6 +1038,7 @@ static void test_interface_static(void)
     CHECK_IP(iface.netmask, 255, 255, 255, 0);
     CHECK_IP(iface.gateway, 192, 168, 1, 1);
     CHECK(iface.mtu == 1500);
+    CHECK(iface.ip_packet_type == 2048UL);
     CHECK(iface.ip_requests == 16);
     CHECK(iface.arp_requests == 3);
     CHECK(iface.write_requests == 6);
@@ -1370,28 +1371,83 @@ static void test_problem_reporter(void)
     CHECK(seen_count == 0);
 }
 
-static void test_numeric_iptype_is_reported_inert(void)
+static void test_amitcp_interface_keyword_is_silent(void)
 {
     AmiIfConfig iface;
     char *buf;
 
-    printf("interface: numeric IPTYPE is accepted but inert\n");
+    printf("interface: AmiTCP's interface= is read and says nothing\n");
 
     seen_count = 0;
     ami_config_set_reporter(collect, NULL);
-    buf = dup_text("DEVICE=a2065.device\nCONFIGURE=DHCP\nIPTYPE=2048\n");
+    buf = dup_text("interface=slip\ndevice=slip.device\n"
+                   "address=192.168.240.2\n");
+    CHECK(ami_cfg_parse_interface("slip0", buf, &iface) == AMI_CFG_OK);
+    free(buf);
+    ami_config_set_reporter(NULL, NULL);
+
+    CHECK(seen_count == 0);
+    CHECK_STR(iface.name, "slip0");
+    CHECK_STR(iface.device, "slip.device");
+}
+
+static void test_ptp_shape(void)
+{
+    AmiIfConfig iface;
+    char *buf;
+
+    printf("interface: a /32 with GATEWAY is the point-to-point shape\n");
+
+    /* AmiTCP_NG issue 10, the SLIP file. */
+    buf = dup_text("device=slip.device\naddress=192.168.240.2\n"
+                   "netmask=255.255.255.255\ngateway=192.168.240.1\n");
+    CHECK(ami_cfg_parse_interface("slip0", buf, &iface) == AMI_CFG_OK);
+    free(buf);
+    CHECK(ami_config_iface_ptp_shape(&iface));
+
+    buf = dup_text("device=a2065.device\naddress=192.168.1.5\n"
+                   "netmask=255.255.255.0\ngateway=192.168.1.1\n");
     CHECK(ami_cfg_parse_interface("eth0", buf, &iface) == AMI_CFG_OK);
+    free(buf);
+    CHECK(!ami_config_iface_ptp_shape(&iface));
+
+    buf = dup_text("device=slip.device\naddress=192.168.240.2\n"
+                   "netmask=255.255.255.255\n");
+    CHECK(ami_cfg_parse_interface("slip0", buf, &iface) == AMI_CFG_OK);
+    free(buf);
+    CHECK(!ami_config_iface_ptp_shape(&iface));
+
+    buf = dup_text("device=ppp.device\nnetmask=255.255.255.255\n"
+                   "gateway=192.168.241.1\n");
+    CHECK(ami_cfg_parse_interface("ppp0", buf, &iface) == AMI_CFG_OK);
+    free(buf);
+    CHECK(!ami_config_iface_ptp_shape(&iface));
+    CHECK(!ami_config_iface_ptp_shape(NULL));
+}
+
+static void test_numeric_iptype_is_the_packet_type(void)
+{
+    AmiIfConfig iface;
+    char *buf;
+
+    printf("interface: numeric IPTYPE is the IPv4 packet type\n");
+
+    /* ppp.device 1.45: IPv4 travels as SANA-II packet type 33. */
+    seen_count = 0;
+    ami_config_set_reporter(collect, NULL);
+    buf = dup_text("DEVICE=ppp.device\nCONFIGURE=DHCP\nIPTYPE=33\n");
+    CHECK(ami_cfg_parse_interface("ppp0", buf, &iface) == AMI_CFG_OK);
     free(buf);
     ami_config_set_reporter(NULL, NULL);
 
     CHECK(iface.iptype == AMI_IPTYPE_DHCP);
-    CHECK(seen_count == 1);
-    CHECK(seen[0].line == 3);
-    CHECK(seen[0].severity == AMI_CFG_PROBLEM_NOTE);
-    CHECK(strstr(seen[0].text, "numeric IPTYPE") != NULL);
-    CHECK(strstr(seen[0].text, "ignored") != NULL);
-    CHECK(strstr(ami_cfg_advice(AMI_CFG_ADVICE_IPTYPE_IS_EITHER_A),
-                 "ignored") != NULL);
+    CHECK(iface.ip_packet_type == 33UL);
+    CHECK(seen_count == 0);
+
+    buf = dup_text("DEVICE=a2065.device\n");
+    CHECK(ami_cfg_parse_interface("eth0", buf, &iface) == AMI_CFG_OK);
+    free(buf);
+    CHECK(iface.ip_packet_type == 0UL);
 }
 
 #ifdef AMINETXDUO_PTP
@@ -5188,7 +5244,9 @@ int main(int argc, char **argv)
     test_interface_keyword_aliases();
     test_problem_reporter();
     test_interface_mode_aliases();
-    test_numeric_iptype_is_reported_inert();
+    test_numeric_iptype_is_the_packet_type();
+    test_amitcp_interface_keyword_is_silent();
+    test_ptp_shape();
     test_inert_keywords_are_notes();
 #ifdef AMINETXDUO_PTP
     test_interface_point_to_point();

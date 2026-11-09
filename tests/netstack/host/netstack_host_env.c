@@ -1748,4 +1748,19 @@ VOID ami_sana2_set_ptp_routed(AmiSana2If *iface, ULONG peer)
     (VOID)iface;
     (VOID)peer;
 }
+
+VOID ami_sana2_set_ptp_peer(AmiSana2If *iface, ULONG peer)
+{
+    (VOID)iface;
+    (VOID)peer;
+}
+
+VOID ami_sana2_ptp_addr_tick(VOID)
+{
+}
+
+VOID ami_sana2_set_ptp_addr_hook(VOID (*hook)(AmiSana2If *, ULONG, ULONG))
+{
+    (VOID)hook;
+}
 #endif

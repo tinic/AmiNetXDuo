@@ -303,6 +303,9 @@ typedef struct AmiIfConfig {
     BOOL        have_gateway6;
     /* LINKSPEED=10 limits advertised modes; 0 (AUTO) keeps driver defaults. */
     ULONG       link_speed;
+    /* IPTYPE=<number>: the SANA-II packet type IPv4 travels as; 0 = 2048.
+       ppp.device 1.45 takes 33. */
+    ULONG       ip_packet_type;
 #ifdef AMINETXDUO_PTP
     /*
      * POINTTOPOINT= and DESTINATION=.  Roadshow decides point-to-point from
@@ -340,6 +343,9 @@ typedef struct AmiIfConfig {
  * have and can be reached on.
  */
 BOOL ami_config_iface_wants_ipv4(const AmiIfConfig *cfg);
+/* An AmiTCP-style SLIP or PPP file: ADDRESS/32 and a GATEWAY that is the
+   only other address there can be, the peer. */
+BOOL ami_config_iface_ptp_shape(const AmiIfConfig *cfg);
 BOOL ami_config_iface_wants_ipv6(const AmiIfConfig *cfg);
 
 /*

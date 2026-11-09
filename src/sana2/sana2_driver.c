@@ -14,6 +14,7 @@
 
 #include "aminetxduo/netstack.h"
 #include "aminetxduo/nxstatus.h"
+#include "aminetxduo/ptp.h"
 
 #include <proto/exec.h>
 
@@ -97,6 +98,26 @@ LONG ami_sana2_attach(AmiSana2If *iface, NX_IP *ip, UINT index)
  * for the division is to stop the LAST interface up from over-committing a
  * pool the earlier ones are already drawing on.
  */
+#ifdef AMINETXDUO_PTP
+/*
+ * The one-second tick, at interrupt level inside Forbid(), so the table
+ * cannot change under it: every point-to-point interface still waiting for
+ * its station address has its reader ask (ami_sana2_ptp_addr_poll()).
+ */
+VOID ami_sana2_ptp_addr_tick(VOID)
+{
+    UWORD i;
+
+    for (i = 0; i < AMI_CFG_MAX_ATTACHED; i++)
+    {
+        AmiSana2If *iface = ami_sana2_bindings[i].iface;
+
+        if (iface != NULL && iface->ptp_addr_left != 0U)
+            ami_sana2_ptp_addr_kick(iface);
+    }
+}
+#endif
+
 UWORD ami_sana2_bound_count(VOID)
 {
     UWORD count = 0;
@@ -616,11 +637,20 @@ static VOID __attribute__((noinline, cold)) ami_sana2_driver_command(
         iface->admin_up = TRUE;
         ami_sana2_gso_advertise(iface, interface_ptr, TRUE);
         ami_sana2_refresh_stats(iface);
+#ifdef AMINETXDUO_PTP
+        /* Asked again after every enable: a new link can bring a new
+           address. */
+        if (iface->ptp_addr_dyn)
+            iface->ptp_addr_left = (UWORD)AMI_SANA2_PTP_ADDR_POLLS;
+#endif
         break;
 
     case NX_LINK_DISABLE:
         interface_ptr->nx_interface_link_up = NX_FALSE;
         iface->admin_up = FALSE;
+#ifdef AMINETXDUO_PTP
+        iface->ptp_addr_left = 0U;
+#endif
         ami_sana2_gso_advertise(iface, interface_ptr, FALSE);
         ami_sana2_rx_stop(iface);
         ami_sana2_tx_drain(iface);

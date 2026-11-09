@@ -230,6 +230,16 @@ static BOOL same_network(ULONG a, ULONG b, ULONG mask)
     return (BOOL)((a & mask) == (b & mask));
 }
 
+#ifdef AMINETXDUO_PTP
+/* A /32 whose GATEWAY is the one other address: the AmiTCP SLIP or PPP
+   file, point-to-point, unless the driver is Ethernet. */
+static BOOL ptp_by_shape(const AmiIfConfig *ifc)
+{
+    return (BOOL)(ami_config_iface_ptp_shape(ifc) &&
+                  !tool_device_known_ethernet(ifc->device));
+}
+#endif
+
 /*
  * The first static interface whose network `addr` is on, or -1. DHCP
  * interfaces have no address until the lease arrives, so they are skipped.
@@ -250,6 +260,8 @@ static LONG network_holding(const AmiConfig *cfg, ULONG addr)
 #ifdef AMINETXDUO_PTP
         /* The peer of a point-to-point link is reached through it. */
         if (ifc->destination != 0 && ifc->destination == addr)
+            return (LONG)i;
+        if (ptp_by_shape(ifc) && ifc->gateway == addr)
             return (LONG)i;
 #endif
     }
@@ -418,7 +430,8 @@ static VOID check_addressing(const char *path, const AmiIfConfig *ifc)
 #ifdef AMINETXDUO_PTP
     /* A point-to-point link has no network beyond its two ends: /32 is
        what it is meant to have, and the peer is DESTINATION. */
-    if (ifc->destination != 0 || ifc->point_to_point == AMI_CFG_PTP_YES)
+    if (ifc->destination != 0 || ifc->point_to_point == AMI_CFG_PTP_YES ||
+        ptp_by_shape(ifc))
         return;
 #endif
 

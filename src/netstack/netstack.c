@@ -86,7 +86,64 @@ static VOID ami_ns_second_expired(ULONG id)
        reclaim above has nothing to ask about. */
     tx_amiga_adopt_sweep_unpublished();
     ami_second_notify();
+#ifdef AMINETXDUO_PTP
+    ami_sana2_ptp_addr_tick();
+#endif
 }
+
+#ifdef AMINETXDUO_PTP
+/*
+ * A point-to-point file with no ADDRESS: the station address its device
+ * reports once the link has one, on that interface's reader.  It gets what
+ * an ADDRESS line gets: the address /32, the host route to the peer, and the
+ * default gateway when GATEWAY names the peer.
+ */
+static VOID ami_ns_ptp_station(AmiSana2If *sana, ULONG local, ULONG dst)
+{
+    AmiNetStack *ns = ami_ns;
+    ULONG        peer;
+    UWORD        i;
+    UINT         status;
+
+    if (ns == NULL || !ns->ns_IpCreated)
+        return;
+
+    for (i = 0; i < ns->ns_IfaceCount; i++)
+        if (ns->ns_Iface[i] == sana)
+            break;
+    if (i >= ns->ns_IfaceCount)
+        return;
+
+    if (!ami_ptp_station_offer(
+            ns->ns_Ip.nx_ip_interface[i].nx_interface_ip_address,
+            ami_sana2_ptp_peer(sana), local, dst, &peer))
+        return;
+    if (peer != 0UL)
+        ami_sana2_set_ptp_peer(sana, peer);
+
+    status = nx_ip_interface_address_set(
+        &ns->ns_Ip, (UINT)i, local,
+        ami_ns_static_netmask_ptp(ns->ns_Config.interfaces[i].netmask,
+                                  NX_TRUE));
+    if (status != NX_SUCCESS)
+    {
+        ami_event(NETEVENT_ADDR_REFUSED, i, (ULONG)status);
+        AMI_ERROR("netstack: %s did not take the link's address (%ld)",
+                  ns->ns_Config.interfaces[i].name, (long)status);
+        return;
+    }
+
+    ami_ptp_peer_route(&ns->ns_Ip, (UINT)i);
+    ami_ns_gateway_reconcile(ns, AMI_NS_GATEWAY_NO_IFACE,
+                             "a point-to-point address");
+    AMI_INFO("netstack: %s: address %lu.%lu.%lu.%lu from the link",
+             ns->ns_Config.interfaces[i].name,
+             (unsigned long)((local >> 24) & 0xFFUL),
+             (unsigned long)((local >> 16) & 0xFFUL),
+             (unsigned long)((local >> 8) & 0xFFUL),
+             (unsigned long)(local & 0xFFUL));
+}
+#endif
 
 /*
  * Every TCP socket still created on `ip`, to NX_TCP_CLOSED and off its port so
@@ -1975,6 +2032,9 @@ static LONG ami_ns_bring_up(BOOL loopback_only)
     netstack_pool_sample();
     ami_netstack_health_publish();
     ami_sana2_set_open_hooks(ami_ns_port_suspend, ami_ns_port_resume);
+#ifdef AMINETXDUO_PTP
+    ami_sana2_set_ptp_addr_hook(ami_ns_ptp_station);
+#endif
 
     if (status != AMI_NET_OK)
     {
@@ -2085,6 +2145,9 @@ LONG netstack_shutdown(VOID)
 
     /* The hooks point at the port that is about to be freed, so they go first. */
     ami_sana2_set_open_hooks(NULL, NULL);
+#ifdef AMINETXDUO_PTP
+    ami_sana2_set_ptp_addr_hook(NULL);
+#endif
 
     /* Waits for the ARexx host, which may itself be waiting for the baton. */
     ami_netstack_baton_release();
