@@ -1314,6 +1314,10 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
                         out->iptype == AMI_IPTYPE_LINKLOCAL ||
                         (out->iptype == AMI_IPTYPE_STATIC &&
                          out->address != 0));
+#ifdef AMINETXDUO_PTP
+        if (ami_config_iface_addr_from_link(out))
+            v4_plan = TRUE;
+#endif
         BOOL v6_plan = FALSE;
 
 #ifdef AMINETXDUO_IPV6
@@ -1334,6 +1338,45 @@ LONG ami_cfg_parse_interface(const char *name, char *buf, AmiIfConfig *out)
 
     return AMI_CFG_OK;
 }
+
+#ifdef AMINETXDUO_PTP
+/* The drivers whose wire type is PPP, SLIP or CSLIP: AmiTCP's, Holger
+   Kruse's and Roadshow's. */
+static const char ami_cfg_ptp_drivers[] =
+    "ppp.device\0ppp-serial.device\0ppp-ethernet.device\0slip.device\0"
+    "cslip.device\0";
+
+BOOL ami_config_iface_ptp_driver(const AmiIfConfig *cfg)
+{
+    const char *base;
+    const char *p;
+
+    if (cfg == NULL)
+        return FALSE;
+    if (cfg->point_to_point == AMI_CFG_PTP_YES)
+        return TRUE;
+
+    base = cfg->device;
+    for (p = cfg->device; *p != '\0'; p++)
+        if (*p == ':' || *p == '/')
+            base = p + 1;
+
+    for (p = ami_cfg_ptp_drivers; *p != '\0'; )
+    {
+        if (ami_cfg_stricmp(base, p) == 0)
+            return TRUE;
+        while (*p++ != '\0')
+            ;
+    }
+    return FALSE;
+}
+
+BOOL ami_config_iface_addr_from_link(const AmiIfConfig *cfg)
+{
+    return (BOOL)(cfg != NULL && cfg->iptype == AMI_IPTYPE_STATIC &&
+                  cfg->address == 0UL && ami_config_iface_ptp_driver(cfg));
+}
+#endif
 
 BOOL ami_config_iface_ptp_shape(const AmiIfConfig *cfg)
 {

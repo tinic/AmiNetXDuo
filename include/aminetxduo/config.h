@@ -346,6 +346,14 @@ BOOL ami_config_iface_wants_ipv4(const AmiIfConfig *cfg);
 /* An AmiTCP-style SLIP or PPP file: ADDRESS/32 and a GATEWAY that is the
    only other address there can be, the peer. */
 BOOL ami_config_iface_ptp_shape(const AmiIfConfig *cfg);
+#ifdef AMINETXDUO_PTP
+/* A driver the stack takes as point-to-point (ami_sana2_ptp_wire()), as a
+   file can tell: POINTTOPOINT=YES, or a PPP, SLIP or CSLIP driver by name. */
+BOOL ami_config_iface_ptp_driver(const AmiIfConfig *cfg);
+/* Such a file with no ADDRESS and no CONFIGURE: the link brings the address
+   (ppp.device: IPCP), as sana2's ptp_addr_dyn. */
+BOOL ami_config_iface_addr_from_link(const AmiIfConfig *cfg);
+#endif
 BOOL ami_config_iface_wants_ipv6(const AmiIfConfig *cfg);
 
 /*

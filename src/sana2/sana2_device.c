@@ -2127,16 +2127,80 @@ VOID ami_sana2_ptp_addr_kick(AmiSana2If *iface)
 }
 
 /*
+ * ppp.device 1.45 posts S2EVENT_OFFLINE when IPCP goes down, a renegotiation
+ * included, and nothing when it is back: it rewrites ENV:ppp<n>IPLocal and
+ * takes writes again.  So once the link has an address one S2EVENT_OFFLINE
+ * request stays out, and its reply starts the polls again.  A device without
+ * S2_ONEVENT refuses it once and is not asked again.
+ */
+static VOID ami_sana2_ptp_event_post(AmiSana2If *iface)
+{
+    AmiSana2Reader    *rd = &iface->reader;
+    struct IOSana2Req *ev = &iface->ptp_ev;
+
+    if (iface->ptp_ev_pending || iface->ptp_ev_refused || rd->port == NULL)
+        return;
+
+    ami_sana2_port_init(&iface->ptp_ev_port, rd->task,
+                        (BYTE)rd->port->mp_SigBit, PA_SIGNAL);
+    *ev = iface->templ;
+    ev->ios2_Req.io_Message.mn_Node.ln_Type = NT_MESSAGE;
+    ev->ios2_Req.io_Message.mn_ReplyPort    = &iface->ptp_ev_port;
+    ev->ios2_Req.io_Message.mn_Length = (UWORD)sizeof(struct IOSana2Req);
+    ev->ios2_Req.io_Command = S2_ONEVENT;
+    ev->ios2_Req.io_Flags   = 0;
+    ev->ios2_WireError      = S2EVENT_OFFLINE;
+    iface->ptp_ev_pending   = TRUE;
+    BeginIO((struct IORequest *)ev);
+}
+
+/* At reader teardown: the request must not outlive the reader's port. */
+VOID ami_sana2_ptp_event_stop(AmiSana2If *iface)
+{
+    if (!iface->ptp_ev_pending)
+        return;
+    if (CheckIO((struct IORequest *)&iface->ptp_ev) == NULL)
+        AbortIO((struct IORequest *)&iface->ptp_ev);
+    (VOID)WaitIO((struct IORequest *)&iface->ptp_ev);
+    iface->ptp_ev_pending = FALSE;
+}
+
+/* Whether the event is back, for the tick at interrupt level. */
+BOOL ami_sana2_ptp_event_back(const AmiSana2If *iface)
+{
+    return (BOOL)(iface->ptp_ev_pending &&
+                  iface->ptp_ev.ios2_Req.io_Message.mn_Node.ln_Type ==
+                      NT_REPLYMSG);
+}
+
+/*
  * The reader thread, once a second while ptp_addr_left lasts: the station
  * address in SrcAddr, the peer in DstAddr for a device that puts it there.
  * S2_ONLINE returns before a PPP link has its address, so this asks until it
- * has one.
+ * has one; after S2EVENT_OFFLINE, until the addresses differ or a frame
+ * shows the link up on the old ones (ami_ptp_poll_verdict()).
  */
 VOID ami_sana2_ptp_addr_poll(AmiSana2If *iface)
 {
     struct IOSana2Req req;
     VOID            (*hook)(AmiSana2If *, ULONG, ULONG);
     ULONG             local;
+    ULONG             dst;
+    UINT              verdict;
+
+    if (ami_sana2_ptp_event_back(iface))
+    {
+        (VOID)WaitIO((struct IORequest *)&iface->ptp_ev);
+        iface->ptp_ev_pending = FALSE;
+        if (iface->ptp_ev.ios2_Req.io_Error != 0)
+            iface->ptp_ev_refused = TRUE;
+        else if ((iface->ptp_ev.ios2_WireError & S2EVENT_OFFLINE) != 0UL)
+        {
+            iface->ptp_renew     = TRUE;
+            iface->ptp_rx_mark   = iface->stats.rx_bytes;
+            iface->ptp_addr_left = (UWORD)AMI_SANA2_PTP_ADDR_POLLS;
+        }
+    }
 
     if (iface->ptp_addr_left == 0U)
         return;
@@ -2146,19 +2210,35 @@ VOID ami_sana2_ptp_addr_poll(AmiSana2If *iface)
     if (ami_sana2_command(iface, &req, S2_GETSTATIONADDRESS) != 0)
         return;
 
-    local = ami_sana2_be32(req.ios2_SrcAddr);
-    if (local == 0UL)
+    local   = ami_sana2_be32(req.ios2_SrcAddr);
+    dst     = ami_sana2_be32(req.ios2_DstAddr);
+    verdict = ami_ptp_poll_verdict(iface->ptp_renew, local, dst,
+                                   iface->ptp_had_local, iface->ptp_had_dst,
+                                   (BOOL)(iface->stats.rx_bytes !=
+                                          iface->ptp_rx_mark));
+    if (verdict == AMI_PTP_POLL_AGAIN)
     {
-        if (iface->ptp_addr_left == 0U)
+        if (iface->ptp_addr_left != 0U)
+            return;
+        if (!iface->ptp_renew)
+        {
             AMI_WARN("sana2: %s unit %ld: the link gave no address in %lu s",
                      iface->device, (long)iface->unit,
                      (unsigned long)AMI_SANA2_PTP_ADDR_POLLS);
-        return;
+            return;
+        }
     }
 
     iface->ptp_addr_left = 0U;
-    hook = ami_sana2_ptp_addr_hook;
-    if (hook != NULL)
-        hook(iface, local, ami_sana2_be32(req.ios2_DstAddr));
+    iface->ptp_renew     = FALSE;
+    if (verdict == AMI_PTP_POLL_TAKE)
+    {
+        iface->ptp_had_local = local;
+        iface->ptp_had_dst   = dst;
+        hook = ami_sana2_ptp_addr_hook;
+        if (hook != NULL)
+            hook(iface, local, dst);
+    }
+    ami_sana2_ptp_event_post(iface);
 }
 #endif /* AMINETXDUO_PTP */

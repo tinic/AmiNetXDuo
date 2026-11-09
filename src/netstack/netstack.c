@@ -94,16 +94,19 @@ static VOID ami_ns_second_expired(ULONG id)
 #ifdef AMINETXDUO_PTP
 /*
  * A point-to-point file with no ADDRESS: the station address its device
- * reports once the link has one, on that interface's reader.  It gets what
- * an ADDRESS line gets: the address /32, the host route to the peer, and the
- * default gateway when GATEWAY names the peer.
+ * reports once the link has one, and again after IPCP renegotiates, on that
+ * interface's reader.  It gets what an ADDRESS line gets: the address /32,
+ * the host route to the peer, and the default gateway.  With no GATEWAY the
+ * default goes through the peer and this link takes it over, as Roadshow's
+ * ppp_dialer replaces the default route once connected.
  */
 static VOID ami_ns_ptp_station(AmiSana2If *sana, ULONG local, ULONG dst)
 {
-    AmiNetStack *ns = ami_ns;
-    ULONG        peer;
-    UWORD        i;
-    UINT         status;
+    AmiNetStack       *ns = ami_ns;
+    const AmiIfConfig *cfg;
+    ULONG              peer;
+    UWORD              i;
+    UINT               status;
 
     if (ns == NULL || !ns->ns_IpCreated)
         return;
@@ -114,8 +117,10 @@ static VOID ami_ns_ptp_station(AmiSana2If *sana, ULONG local, ULONG dst)
     if (i >= ns->ns_IfaceCount)
         return;
 
+    cfg = &ns->ns_Config.interfaces[i];
     if (!ami_ptp_station_offer(
             ns->ns_Ip.nx_ip_interface[i].nx_interface_ip_address,
+            (cfg->destination != 0UL) ? cfg->destination : cfg->gateway,
             ami_sana2_ptp_peer(sana), local, dst, &peer))
         return;
     if (peer != 0UL)
@@ -123,21 +128,22 @@ static VOID ami_ns_ptp_station(AmiSana2If *sana, ULONG local, ULONG dst)
 
     status = nx_ip_interface_address_set(
         &ns->ns_Ip, (UINT)i, local,
-        ami_ns_static_netmask_ptp(ns->ns_Config.interfaces[i].netmask,
-                                  NX_TRUE));
+        ami_ns_static_netmask_ptp(cfg->netmask, NX_TRUE));
     if (status != NX_SUCCESS)
     {
         ami_event(NETEVENT_ADDR_REFUSED, i, (ULONG)status);
         AMI_ERROR("netstack: %s did not take the link's address (%ld)",
-                  ns->ns_Config.interfaces[i].name, (long)status);
+                  cfg->name, (long)status);
         return;
     }
 
+    if (cfg->gateway == 0UL)
+        ns->ns_GatewayPrimary = i;
     ami_ptp_peer_route(&ns->ns_Ip, (UINT)i);
     ami_ns_gateway_reconcile(ns, AMI_NS_GATEWAY_NO_IFACE,
                              "a point-to-point address");
     AMI_INFO("netstack: %s: address %lu.%lu.%lu.%lu from the link",
-             ns->ns_Config.interfaces[i].name,
+             cfg->name,
              (unsigned long)((local >> 24) & 0xFFUL),
              (unsigned long)((local >> 16) & 0xFFUL),
              (unsigned long)((local >> 8) & 0xFFUL),

@@ -255,7 +255,9 @@ BUDGETS=(
     # The receive server, its per-tick slice and the RX_POLL reply kept
     # (#9): +1,388, 260,020 -> 261,408.
     # Opener code called with a6 clobbered (foreign_call.h): +20, 261,408 -> 261,428.
-    "minimal:src/bsdsocket/bsdsocket.library:261428"
+    # Point-to-point default route and IPCP renegotiation (#483): +120,
+    # 261,428 -> 261,548.
+    "minimal:src/bsdsocket/bsdsocket.library:261548"
     # Combined with #438 on main: +16, 46,016 -> 46,032.
     # Opener code called with a6 clobbered (foreign_call.h): +12, 46,032 -> 46,044.
     "minimal:src/netdev/anxnet.device:46044"
@@ -301,7 +303,9 @@ BUDGETS=(
     # 213,948 with the receive server, its per-tick slice and the RX_POLL
     # reply kept (#9).
     # Opener code called with a6 clobbered (foreign_call.h): +16, 213,948 -> 213,964.
-    "micro:src/bsdsocket/bsdsocket.library:213964"
+    # Point-to-point default route and IPCP renegotiation (#483): +44,
+    # 213,964 -> 214,008.
+    "micro:src/bsdsocket/bsdsocket.library:214008"
     "micro:src/netdev/anxnet.device:46000"
     "micro:src/netdev/anxgenet.device:29120"
     "micro:src/wifipi/anxwifipi.device:56000"

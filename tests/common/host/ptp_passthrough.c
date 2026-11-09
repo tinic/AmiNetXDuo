@@ -36,6 +36,13 @@ VOID ami_ptp_peer_route(NX_IP *ip, UINT index)
     (void)index;
 }
 
+ULONG ami_ptp_default_hop(ULONG gateway, ULONG peer, ULONG local)
+{
+    (void)peer;
+    (void)local;
+    return gateway;
+}
+
 UINT ami_sana2_ptp(const AmiSana2If *iface)
 {
     (void)iface;

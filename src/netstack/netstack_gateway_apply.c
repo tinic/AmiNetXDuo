@@ -25,6 +25,13 @@ static ULONG ami_ns_gateway_of(AmiNetStack *ns, UWORD index)
         return ns->ns_DhcpGateway[index];
 #endif
 
+#ifdef AMINETXDUO_PTP
+    if (ami_sana2_ptp(ns->ns_Iface[index]))
+        return ami_ptp_default_hop(
+            cfg->gateway, ami_sana2_ptp_peer(ns->ns_Iface[index]),
+            ns->ns_Ip.nx_ip_interface[index].nx_interface_ip_address);
+#endif
+
     return cfg->gateway;
 }
 

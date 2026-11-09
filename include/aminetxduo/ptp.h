@@ -44,12 +44,40 @@ VOID  ami_sana2_set_ptp_addr_hook(VOID (*hook)(AmiSana2If *, ULONG, ULONG));
 
 /*
  * Whether station address `src` is one to take on an interface at
- * `current` whose peer is `peer` (0: none named).  *peer_out is a peer to
- * record, else 0: DstAddr, where ppp.device puts the IPCP peer, but only
- * when neither DESTINATION nor GATEWAY named one, and never 0 or `src`.
+ * `current` whose file named peer `named` (0: none) and whose link gave
+ * `learned` before.  *peer_out is a peer to record, else 0: DstAddr, where
+ * ppp.device puts the IPCP peer, but only when neither DESTINATION nor
+ * GATEWAY named one, and never 0 or `src`.
  */
-UINT  ami_ptp_station_offer(ULONG current, ULONG peer, ULONG src, ULONG dst,
-                            ULONG *peer_out);
+UINT  ami_ptp_station_offer(ULONG current, ULONG named, ULONG learned,
+                            ULONG src, ULONG dst, ULONG *peer_out);
+
+/*
+ * One station-address poll.  `renew`: after S2EVENT_OFFLINE, when the link
+ * may come back with other addresses; `had_*` are the last taken, `rx_moved`
+ * whether a frame arrived since the event (IPCP is up again).
+ */
+#define AMI_PTP_POLL_AGAIN  0U      /* nothing yet, ask next second  */
+#define AMI_PTP_POLL_TAKE   1U      /* hand it to the stack          */
+#define AMI_PTP_POLL_KEEP   2U      /* back up, the same addresses   */
+
+static inline UINT ami_ptp_poll_verdict(UINT renew, ULONG local, ULONG dst,
+                                        ULONG had_local, ULONG had_dst,
+                                        UINT rx_moved)
+{
+    if (local == 0UL)
+        return AMI_PTP_POLL_AGAIN;
+    if (!renew || local != had_local || (dst != 0UL && dst != had_dst))
+        return AMI_PTP_POLL_TAKE;
+    return rx_moved ? AMI_PTP_POLL_KEEP : AMI_PTP_POLL_AGAIN;
+}
+
+/*
+ * The automatic default gateway of a point-to-point interface: GATEWAY,
+ * else the peer, else the interface's own address (the link itself), as
+ * Roadshow's ppp_dialer routes default through the peer.  0: none.
+ */
+ULONG ami_ptp_default_hop(ULONG gateway, ULONG peer, ULONG local);
 
 /* The peer of a point-to-point interface, 0 for any other interface. */
 ULONG ami_ptp_peer_of(const NX_INTERFACE *ifp);

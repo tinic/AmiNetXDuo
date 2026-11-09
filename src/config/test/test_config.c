@@ -1452,6 +1452,61 @@ static void test_numeric_iptype_is_the_packet_type(void)
 
 #ifdef AMINETXDUO_PTP
 /*
+ * A PPP file with no ADDRESS: the link brings it, so "no address" is not a
+ * finding.  The test's dyn file (ppp-e2e/run-ppp.sh dyn) as it ships.
+ */
+static void test_interface_address_from_link(void)
+{
+    AmiIfConfig iface;
+    char       *buf;
+
+    printf("interface: a PPP file with no ADDRESS takes the link's\n");
+
+    seen_count = 0;
+    ami_config_set_reporter(collect, NULL);
+    buf = dup_text("device=ppp.device\nunit=0\nnameserver=192.168.1.1\n"
+                   "iptype=33\n");
+    CHECK(ami_cfg_parse_interface("ppp0", buf, &iface) == AMI_CFG_OK);
+    free(buf);
+    CHECK(seen_count == 0);
+    CHECK(ami_config_iface_ptp_driver(&iface));
+    CHECK(ami_config_iface_addr_from_link(&iface));
+
+    /* The name is the file part, in any case; POINTTOPOINT=YES is one too. */
+    buf = dup_text("device=DEVS:Networks/PPP-Serial.device\n");
+    CHECK(ami_cfg_parse_interface("ppp1", buf, &iface) == AMI_CFG_OK);
+    free(buf);
+    CHECK(ami_config_iface_addr_from_link(&iface));
+    buf = dup_text("device=vpn.device\npointtopoint=yes\n");
+    CHECK(ami_cfg_parse_interface("ptp0", buf, &iface) == AMI_CFG_OK);
+    free(buf);
+    CHECK(seen_count == 0);
+    CHECK(ami_config_iface_addr_from_link(&iface));
+
+    /* An ADDRESS is its own; DHCP is not the link's. */
+    buf = dup_text("device=ppp.device\naddress=192.168.241.2\n");
+    CHECK(ami_cfg_parse_interface("ppp0", buf, &iface) == AMI_CFG_OK);
+    free(buf);
+    CHECK(ami_config_iface_ptp_driver(&iface));
+    CHECK(!ami_config_iface_addr_from_link(&iface));
+    buf = dup_text("device=ppp.device\nconfigure=dhcp\n");
+    CHECK(ami_cfg_parse_interface("ppp0", buf, &iface) == AMI_CFG_OK);
+    free(buf);
+    CHECK(!ami_config_iface_addr_from_link(&iface));
+    CHECK(seen_count == 0);
+
+    /* Ethernet with nothing is still nothing. */
+    buf = dup_text("device=a2065.device\n");
+    CHECK(ami_cfg_parse_interface("eth0", buf, &iface) == AMI_CFG_OK);
+    free(buf);
+    ami_config_set_reporter(NULL, NULL);
+    CHECK(!ami_config_iface_ptp_driver(&iface));
+    CHECK(!ami_config_iface_addr_from_link(&iface));
+    CHECK(seen_count == 1);
+    CHECK(seen[0].severity == AMI_CFG_PROBLEM_ERROR);
+}
+
+/*
  * POINTTOPOINT and DESTINATION.  The first file is the ptp0 that ships with
  * the OpenVPN port's vpn.device (BETA2-AMITCP-NG/NetInterfaces/ptp0), byte
  * for byte, AmiTCP's POINTOPOINT spelling included.
@@ -5250,6 +5305,7 @@ int main(int argc, char **argv)
     test_inert_keywords_are_notes();
 #ifdef AMINETXDUO_PTP
     test_interface_point_to_point();
+    test_interface_address_from_link();
 #endif
     test_request_counts_have_ceilings();
     test_interface_tcp_ack_max();
