@@ -13,7 +13,7 @@ are history.
 - A new address agreed while a PPP link stays online is picked up.
 - AddNetInterface waits for a PPP link's address within TIMEOUT on every path
   and returns 5 if none arrives; CheckNetConfig no longer warns about a PPP
-  file without ADDRESS.
+  or PLIP file without ADDRESS.
 - ppp.device works: a numeric IPTYPE sets the packet type IPv4 travels as
   (ppp.device needs IPTYPE=33), and a point-to-point interface without
   ADDRESS takes the address the link agrees once it is up.
