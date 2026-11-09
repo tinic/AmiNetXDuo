@@ -1048,6 +1048,11 @@ static int addif_main(int argc, char **argv)
 
         if (needs_async_address(&ifc))
             dynamic = TRUE;
+#ifdef AMINETXDUO_PTP
+        /* No ADDRESS: a point-to-point link may bring one (from_link). */
+        if (ifc.iptype == AMI_IPTYPE_STATIC && ifc.address == 0)
+            dynamic = TRUE;
+#endif
     }
 
     if (!quiet)
@@ -1378,9 +1383,17 @@ static int addif_main(int argc, char **argv)
             char  live6[AMI_CFG_IP6_STRLEN];
             ULONG live_addr = 0;
             ULONG live_mask = 0;
-            BOOL  no_wait = (ifc.iptype == AMI_IPTYPE_STATIC ||
-                             ifc.iptype == AMI_IPTYPE_NONE);
+            BOOL  from_link = FALSE;
+            BOOL  no_wait;
             NX_IP *ip;
+
+#ifdef AMINETXDUO_PTP
+            /* The library path's from_link, from the file: the link brings
+               the address, waited for as a lease is. */
+            from_link = ami_config_iface_addr_from_link(&ifc);
+#endif
+            no_wait = (BOOL)((ifc.iptype == AMI_IPTYPE_STATIC ||
+                              ifc.iptype == AMI_IPTYPE_NONE) && !from_link);
 
             (VOID)wait_for_interface_ready(index, &ifc,
                                            no_wait ? 0UL : timeout, no_wait,
@@ -1437,6 +1450,8 @@ static int addif_main(int argc, char **argv)
 
                 if (ifc.iptype == AMI_IPTYPE_DHCP)
                     tool_explain_dhcp_waiting(name, timeout);
+                else if (from_link)
+                    tool_explain_link_address_waiting(name, timeout);
             }
             else
             {

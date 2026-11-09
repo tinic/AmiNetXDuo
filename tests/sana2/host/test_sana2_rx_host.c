@@ -419,6 +419,7 @@ LONG ami_sana2_offline(AmiSana2If *iface) { (VOID)iface; return 0; }
 VOID ami_sana2_refresh_stats(AmiSana2If *iface) { (VOID)iface; }
 #ifdef AMINETXDUO_PTP
 VOID ami_sana2_ptp_addr_poll(AmiSana2If *iface) { (VOID)iface; }
+VOID ami_sana2_ptp_event_stop(AmiSana2If *iface) { (VOID)iface; }
 #endif
 /* ACKPACE's reader duty is sana2_ackpace.c's, tested on its own. */
 VOID ami_sana2_ack_reader_start(AmiSana2Reader *rd) { rd->ack_mask = 0; }

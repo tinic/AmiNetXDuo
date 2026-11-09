@@ -195,6 +195,14 @@ VOID ami_sana2_ptp_addr_kick(AmiSana2If *iface)
     (VOID)iface;
     h_kicks++;
 }
+
+static BOOL h_event_back;
+
+BOOL ami_sana2_ptp_event_back(const AmiSana2If *iface)
+{
+    (VOID)iface;
+    return h_event_back;
+}
 #endif
 
 static BOOL h_refresh_updates;
@@ -704,9 +712,22 @@ static void test_ptp_address_from_the_link(void)
     ami_sana2_ptp_addr_tick();
     h_check(iface.ptp_addr_left == 0U && h_kicks == 1,
             "ptp: a disable stops asking");
+    iface.ptp_renew = TRUE;
     drive(NX_LINK_ENABLE);
-    h_check(iface.ptp_addr_left == (UWORD)AMI_SANA2_PTP_ADDR_POLLS,
-            "ptp: and the next enable asks again");
+    h_check(iface.ptp_addr_left == (UWORD)AMI_SANA2_PTP_ADDR_POLLS &&
+            !iface.ptp_renew,
+            "ptp: and the next enable asks again, as for a new link");
+
+    /* S2EVENT_OFFLINE back (IPCP renegotiating): the tick wakes the reader
+       with no polls left; nothing back, nothing asked. */
+    iface.ptp_addr_left = 0U;
+    h_kicks = 0;
+    ami_sana2_ptp_addr_tick();
+    h_check(h_kicks == 0, "ptp: an address held and no event asks nothing");
+    h_event_back = TRUE;
+    ami_sana2_ptp_addr_tick();
+    h_event_back = FALSE;
+    h_check(h_kicks == 1, "ptp: the event's reply has the reader ask");
     ami_sana2_unbind(&iface);
     interface_obj.nx_interface_additional_link_info = NULL;
 }

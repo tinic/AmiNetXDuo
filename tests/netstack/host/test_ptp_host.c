@@ -271,29 +271,89 @@ int main(void)
     {
         ULONG peer = 1UL;
 
-        h_check(!ami_ptp_station_offer(0UL, 0UL, 0UL, H_VPN_PEER, &peer) &&
+        h_check(!ami_ptp_station_offer(0UL, 0UL, 0UL, 0UL, H_VPN_PEER,
+                                       &peer) &&
                 peer == 0UL,
                 "no station address yet is nothing to take");
-        h_check(ami_ptp_station_offer(0UL, H_VPN_PEER, H_VPN_ADDR,
-                                      H_VPN_PEER2, &peer) &&
+        h_check(ami_ptp_station_offer(0UL, H_VPN_PEER, H_VPN_PEER,
+                                      H_VPN_ADDR, H_VPN_PEER2, &peer) &&
                 peer == 0UL,
                 "the first address is taken, and a named peer is kept");
-        h_check(ami_ptp_station_offer(0UL, 0UL, H_VPN_ADDR, H_VPN_PEER,
+        h_check(ami_ptp_station_offer(0UL, 0UL, 0UL, H_VPN_ADDR, H_VPN_PEER,
                                       &peer) &&
                 peer == H_VPN_PEER,
                 "with no peer named, the device's DstAddr is the peer");
-        h_check(ami_ptp_station_offer(0UL, 0UL, H_VPN_ADDR, H_VPN_ADDR,
+        h_check(ami_ptp_station_offer(0UL, 0UL, 0UL, H_VPN_ADDR, H_VPN_ADDR,
                                       &peer) &&
                 peer == 0UL,
                 "a DstAddr equal to the address is not a peer");
-        h_check(!ami_ptp_station_offer(H_VPN_ADDR, H_VPN_PEER, H_VPN_ADDR,
-                                       H_VPN_PEER, &peer) &&
+        h_check(!ami_ptp_station_offer(H_VPN_ADDR, H_VPN_PEER, H_VPN_PEER,
+                                       H_VPN_ADDR, H_VPN_PEER, &peer) &&
                 peer == 0UL,
                 "the same address again changes nothing");
-        h_check(ami_ptp_station_offer(H_VPN_ADDR, H_VPN_PEER, H_VPN_ADDR2,
-                                      0UL, &peer) &&
+        h_check(ami_ptp_station_offer(H_VPN_ADDR, H_VPN_PEER, H_VPN_PEER,
+                                      H_VPN_ADDR2, 0UL, &peer) &&
                 peer == 0UL,
                 "a new link with a new address is taken");
+        h_check(!ami_ptp_station_offer(H_VPN_ADDR, 0UL, H_VPN_PEER,
+                                       H_VPN_ADDR, H_VPN_PEER, &peer),
+                "the same address and learned peer again change nothing");
+        h_check(ami_ptp_station_offer(H_VPN_ADDR, 0UL, H_VPN_PEER,
+                                      H_VPN_ADDR, H_VPN_PEER2, &peer) &&
+                peer == H_VPN_PEER2,
+                "IPCP again with a new peer: the learned one is replaced");
+        h_check(!ami_ptp_station_offer(H_VPN_ADDR, H_VPN_PEER, H_VPN_PEER,
+                                       H_VPN_ADDR, H_VPN_PEER2, &peer) &&
+                peer == 0UL,
+                "a named peer is not replaced by the link's");
+    }
+
+    /* The polls after the link enable and after S2EVENT_OFFLINE. */
+    {
+        h_check(ami_ptp_poll_verdict(NX_FALSE, 0UL, 0UL, 0UL, 0UL, NX_FALSE) ==
+                    AMI_PTP_POLL_AGAIN,
+                "poll: no address yet asks again");
+        h_check(ami_ptp_poll_verdict(NX_FALSE, H_VPN_ADDR, H_VPN_PEER,
+                                     H_VPN_ADDR, H_VPN_PEER, NX_TRUE) ==
+                    AMI_PTP_POLL_TAKE,
+                "poll: after an enable the first address is taken");
+        h_check(ami_ptp_poll_verdict(NX_TRUE, H_VPN_ADDR, H_VPN_PEER,
+                                     H_VPN_ADDR, H_VPN_PEER, NX_FALSE) ==
+                    AMI_PTP_POLL_AGAIN,
+                "poll: renegotiating, the old address is not the answer");
+        h_check(ami_ptp_poll_verdict(NX_TRUE, H_VPN_ADDR2, H_VPN_PEER,
+                                     H_VPN_ADDR, H_VPN_PEER, NX_FALSE) ==
+                    AMI_PTP_POLL_TAKE,
+                "poll: renegotiated, a new local address is taken");
+        h_check(ami_ptp_poll_verdict(NX_TRUE, H_VPN_ADDR, H_VPN_PEER2,
+                                     H_VPN_ADDR, H_VPN_PEER, NX_FALSE) ==
+                    AMI_PTP_POLL_TAKE,
+                "poll: renegotiated, a new peer is taken");
+        h_check(ami_ptp_poll_verdict(NX_TRUE, H_VPN_ADDR, 0UL,
+                                     H_VPN_ADDR, H_VPN_PEER, NX_FALSE) ==
+                    AMI_PTP_POLL_AGAIN,
+                "poll: no DstAddr is not a new peer");
+        h_check(ami_ptp_poll_verdict(NX_TRUE, H_VPN_ADDR, H_VPN_PEER,
+                                     H_VPN_ADDR, H_VPN_PEER, NX_TRUE) ==
+                    AMI_PTP_POLL_KEEP,
+                "poll: frames again on the old addresses end the polls");
+    }
+
+    /* The automatic default through a point-to-point link. */
+    {
+        h_check(ami_ptp_default_hop(H_VPN_PEER2, H_VPN_PEER, H_VPN_ADDR) ==
+                    H_VPN_PEER2,
+                "default: GATEWAY wins");
+        h_check(ami_ptp_default_hop(0UL, H_VPN_PEER, H_VPN_ADDR) ==
+                    H_VPN_PEER,
+                "default: no GATEWAY, through the peer");
+        h_check(ami_ptp_default_hop(0UL, 0UL, H_VPN_ADDR) == H_VPN_ADDR,
+                "default: no peer known, through the link itself");
+        h_check(ami_ptp_default_hop(0UL, 0UL, 0UL) == 0UL,
+                "default: no address yet, none");
+    }
+
+    {
 
         /* Taken: the interface gets it /32, and the host route follows. */
         h_vpn.peer = H_VPN_PEER;

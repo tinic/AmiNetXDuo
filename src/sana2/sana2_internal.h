@@ -1195,6 +1195,18 @@ struct AmiSana2If
     BOOL                ptp_addr_dyn;
     volatile BOOL       ptp_addr_ask;
     UWORD               ptp_addr_left;
+    /* After S2EVENT_OFFLINE (ppp.device: IPCP down, a renegotiation too) the
+       polls look for addresses other than ptp_had_*, and stop at the first
+       frame received once rx_bytes passes ptp_rx_mark.  ptp_ev is the one
+       S2_ONEVENT out; its port shares the reader's signal, for WaitIO(). */
+    BOOL                ptp_renew;
+    BOOL                ptp_ev_pending;
+    BOOL                ptp_ev_refused;
+    ULONG               ptp_had_local;
+    ULONG               ptp_had_dst;
+    ULONG               ptp_rx_mark;
+    struct IOSana2Req   ptp_ev;
+    struct MsgPort      ptp_ev_port;
 #endif
 
     BOOL                online;
@@ -1428,6 +1440,8 @@ LONG ami_sana2_command(AmiSana2If *iface, struct IOSana2Req *req, UWORD command)
 #endif
 VOID ami_sana2_ptp_addr_poll(AmiSana2If *iface);
 VOID ami_sana2_ptp_addr_kick(AmiSana2If *iface);
+VOID ami_sana2_ptp_event_stop(AmiSana2If *iface);
+BOOL ami_sana2_ptp_event_back(const AmiSana2If *iface);
 #endif
 LONG ami_sana2_online(AmiSana2If *iface);
 BOOL ami_sana2_keeps_online(const char *device);

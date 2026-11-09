@@ -238,6 +238,19 @@ static BOOL ptp_by_shape(const AmiIfConfig *ifc)
     return (BOOL)(ami_config_iface_ptp_shape(ifc) &&
                   !tool_device_known_ethernet(ifc->device));
 }
+
+/* A point-to-point link with no GATEWAY routes the default through its
+   peer (netstack_gateway_apply.c, ami_ns_gateway_of()). */
+static BOOL any_ptp_default(const AmiConfig *cfg)
+{
+    UWORD i;
+
+    for (i = 0; i < cfg->interface_count; i++)
+        if (cfg->interfaces[i].gateway == 0 &&
+            ami_config_iface_ptp_driver(&cfg->interfaces[i]))
+            return TRUE;
+    return FALSE;
+}
 #endif
 
 /*
@@ -482,6 +495,10 @@ static VOID check_gateway(const AmiConfig *cfg)
         if (any_dhcp_v4(cfg) || cfg->interface_count == 0 ||
             !any_static_address(cfg))
             return;
+#ifdef AMINETXDUO_PTP
+        if (any_ptp_default(cfg))
+            return;
+#endif
 
         finding("DEVS:Internet/routes", 0, AMI_CFG_PROBLEM_WARN);
         note("no default route");

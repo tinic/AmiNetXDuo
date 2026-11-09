@@ -39,18 +39,26 @@ ULONG ami_ptp_peer_of(const NX_INTERFACE *ifp)
     return (sana != NULL) ? ami_sana2_ptp_peer(sana) : 0UL;
 }
 
-UINT ami_ptp_station_offer(ULONG current, ULONG peer, ULONG src, ULONG dst,
-                           ULONG *peer_out)
+UINT ami_ptp_station_offer(ULONG current, ULONG named, ULONG learned,
+                           ULONG src, ULONG dst, ULONG *peer_out)
 {
     *peer_out = 0UL;
     if (src == 0UL)
         return NX_FALSE;
 
     /* ppp.device answers DstAddr with the peer IPCP gave it. */
-    if (peer == 0UL && dst != 0UL && dst != src)
+    if (named == 0UL && dst != 0UL && dst != src)
         *peer_out = dst;
 
-    return (src != current || *peer_out != 0UL) ? NX_TRUE : NX_FALSE;
+    return (src != current ||
+            (*peer_out != 0UL && *peer_out != learned)) ? NX_TRUE : NX_FALSE;
+}
+
+ULONG ami_ptp_default_hop(ULONG gateway, ULONG peer, ULONG local)
+{
+    if (gateway != 0UL)
+        return gateway;
+    return (peer != 0UL) ? peer : local;
 }
 
 ULONG ami_ptp_next_hop(NX_IP *ip, ULONG gateway)

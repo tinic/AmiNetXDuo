@@ -2394,6 +2394,9 @@ AMI_SANA2_BATCH_LINKAGE VOID ami_sana2_rx_teardown(AmiSana2Reader *rd)
     UWORD outstanding;
     UWORD r, i;
 
+#ifdef AMINETXDUO_PTP
+    ami_sana2_ptp_event_stop(rd->iface);
+#endif
     ami_sana2_rx_abort_outstanding(rd);
 
     outstanding = ami_sana2_rx_reap(rd, AMI_SANA2_RX_REAP_TRIES);

@@ -112,7 +112,8 @@ VOID ami_sana2_ptp_addr_tick(VOID)
     {
         AmiSana2If *iface = ami_sana2_bindings[i].iface;
 
-        if (iface != NULL && iface->ptp_addr_left != 0U)
+        if (iface != NULL &&
+            (iface->ptp_addr_left != 0U || ami_sana2_ptp_event_back(iface)))
             ami_sana2_ptp_addr_kick(iface);
     }
 }
@@ -641,7 +642,10 @@ static VOID __attribute__((noinline, cold)) ami_sana2_driver_command(
         /* Asked again after every enable: a new link can bring a new
            address. */
         if (iface->ptp_addr_dyn)
+        {
+            iface->ptp_renew     = FALSE;
             iface->ptp_addr_left = (UWORD)AMI_SANA2_PTP_ADDR_POLLS;
+        }
 #endif
         break;
 
