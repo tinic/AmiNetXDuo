@@ -7,6 +7,13 @@ are history.
 
 ## Unreleased
 
+- A PPP or SLIP interface without GATEWAY gets its default route through the
+  other end, and a PPP interface without ADDRESS takes over the default route
+  once the link agrees an address, as Roadshow's ppp_dialer does.
+- A new address agreed while a PPP link stays online is picked up.
+- AddNetInterface waits for a PPP link's address within TIMEOUT on every path
+  and returns 5 if none arrives; CheckNetConfig no longer warns about a PPP
+  file without ADDRESS.
 - ppp.device works: a numeric IPTYPE sets the packet type IPv4 travels as
   (ppp.device needs IPTYPE=33), and a point-to-point interface without
   ADDRESS takes the address the link agrees once it is up.
