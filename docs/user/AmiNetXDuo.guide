@@ -391,8 +391,9 @@
              everything else. See
              @{"Being found by name" link DNSSD}.
 
-  @{b}IPTYPE@{ub}     A @{b}number@{ub} here is the SANA-II packet type, which is
-             what Roadshow means by IPTYPE, and AmiNetXDuo ignores it.
+  @{b}IPTYPE@{ub}     A @{b}number@{ub} here is the SANA-II packet type that IPv4
+             travels as, which is what Roadshow means by IPTYPE.
+             Without it the type is 2048. ppp.device needs IPTYPE=33.
              A @{b}word@{ub} here (IPTYPE=DHCP) is the AmiTCP way of writing
              CONFIGURE, and is accepted. In a new file, use CONFIGURE.
 
@@ -575,6 +576,12 @@
   255.255.255.255. ConfigureNetInterface DESTINATION= changes the other
   end, AddNetRoute DEFAULT=<peer> sends all traffic through the link, and
   DeleteNetRoute DST=0.0.0.0 removes the default route.
+
+  Without DESTINATION, GATEWAY names the other end, as in an AmiTCP
+  or Roadshow SLIP file. Without ADDRESS, the interface takes the
+  address the driver reports once the link is up, as ppp.device does
+  after it has agreed one with the other end. AddNetInterface waits
+  for that address within its TIMEOUT and fails if none arrives.
 
   With ADDRESS6 and DESTINATION6, a point-to-point link carries IPv6 as
   well. The link gets a random link-local address and sends no neighbour
