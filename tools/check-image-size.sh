@@ -257,7 +257,8 @@ BUDGETS=(
     # Opener code called with a6 clobbered (foreign_call.h): +20, 261,408 -> 261,428.
     # Point-to-point default route and IPCP renegotiation (#483): +120,
     # 261,428 -> 261,548.
-    "minimal:src/bsdsocket/bsdsocket.library:261548"
+    # PLIP driver names (#485): +28, 261,548 -> 261,576.
+    "minimal:src/bsdsocket/bsdsocket.library:261576"
     # Combined with #438 on main: +16, 46,016 -> 46,032.
     # Opener code called with a6 clobbered (foreign_call.h): +12, 46,032 -> 46,044.
     "minimal:src/netdev/anxnet.device:46044"
@@ -305,7 +306,8 @@ BUDGETS=(
     # Opener code called with a6 clobbered (foreign_call.h): +16, 213,948 -> 213,964.
     # Point-to-point default route and IPCP renegotiation (#483): +44,
     # 213,964 -> 214,008.
-    "micro:src/bsdsocket/bsdsocket.library:214008"
+    # PLIP driver names (#485): +24, 214,008 -> 214,032.
+    "micro:src/bsdsocket/bsdsocket.library:214032"
     "micro:src/netdev/anxnet.device:46000"
     "micro:src/netdev/anxgenet.device:29120"
     "micro:src/wifipi/anxwifipi.device:56000"
