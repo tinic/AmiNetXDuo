@@ -21,6 +21,20 @@ shelltools::TaskSnapshot sr_snapshot;
 
 extern "C" VOID sr_tasks(SrOut *o) {
     shelltools::capture_tasks(sr_snapshot);
+
+    // The code a return address can point into, and the library's part of it
+    // as module.<n>.* rows.  A process started with NP_Entry runs its parent's
+    // code, which is in the table under the parent's name.
+    sr_code_begin();
+    for (unsigned i = 0; i < sr_snapshot.count; ++i) {
+        const shelltools::TaskRow &row = sr_snapshot.rows[i];
+        if (row.type == NT_PROCESS) {
+            sr_code_add_process(row.address,
+                                row.command.front() != '\0' ? row.command.data() : row.name.data());
+        }
+    }
+    sr_code_modules(o);
+
     sr_ulong(o, "task.count", sr_snapshot.count);
     sr_yesno(o, "task.truncated", sr_snapshot.truncated ? TRUE : FALSE);
     for (unsigned i = 0; i < sr_snapshot.count; ++i) {
@@ -43,5 +57,6 @@ extern "C" VOID sr_tasks(SrOut *o) {
         t.name = row.name.data();
         t.command = row.command.data();
         sr_task(o, i, &t);
+        sr_code_task_frames(o, i, row.address);
     }
 }

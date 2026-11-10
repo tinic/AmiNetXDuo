@@ -255,7 +255,8 @@ aminetxduo_add_tool(tool_checknetdevice CheckNetDevice
 # its path for the tokenizer the stack parses interface files with, so the
 # allowlist sees the keys the parser sees.
 aminetxduo_add_tool(tool_statusreport CreateAmiNetXDuoStatusReport
-    SOURCES statusreport.c statusreport_text.c tool_passive.c tool_sockets.c)
+    SOURCES statusreport.c statusreport_text.c statusreport_frames.c
+            tool_passive.c tool_sockets.c)
 target_include_directories(tool_statusreport PRIVATE
     "${CMAKE_SOURCE_DIR}/src/config")
 
