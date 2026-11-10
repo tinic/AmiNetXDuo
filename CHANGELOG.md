@@ -22,6 +22,8 @@ are history.
   other end.
 - CreateAmiNetXDuoStatusReport also lists the running tasks and the open
   connections, so one report shows what a stalled program waits on.
+- CreateAmiNetXDuoStatusReport shows, for each waiting program, the calls it
+  is waiting in, the programs using the network, and who holds the stack.
 - A SLIP or PPP interface whose file names the other end as GATEWAY, with no
   DESTINATION, gets its default route through it, as AmiTCP and Roadshow files
   expect.
