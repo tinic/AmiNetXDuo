@@ -824,3 +824,277 @@ VOID sr_socket(SrOut *o, ULONG index, const SrSocket *s)
     SR_S("user_timeout_ms"); sr_ulong(o, k, s->user_timeout_ms);
 #undef SR_S
 }
+
+VOID sr_opener(SrOut *o, ULONG index, const SrOpener *op)
+{
+    static char k[SR_KEY_MAX];  /* as sr_task() */
+
+#define SR_O(field) sr_key_index(k, sizeof(k), "opener", index, field)
+    SR_O("task");          sr_hex(o, k, op->task);
+    SR_O("name");          sr_str(o, k, op->name);
+    SR_O("sockets");       sr_ulong(o, k, op->sockets);
+    SR_O("break_mask");    sr_hex(o, k, op->break_mask);
+    SR_O("flags");         sr_hex(o, k, op->flags);
+#undef SR_O
+}
+
+/* ------------------------------------------------------ return addresses --- */
+
+VOID sr_ranges_init(SrRanges *t, SrPeek peek, APTR user)
+{
+    t->peek  = peek;
+    t->user  = user;
+    t->count = 0;
+    t->low   = 0xffffffffUL;
+    t->high  = 0;
+}
+
+static const SrRange *sr_range_of(const SrRanges *t, ULONG address)
+{
+    ULONG i;
+
+    if (address < t->low || address >= t->high)
+        return NULL;
+
+    for (i = 0; i < t->count; i++)
+    {
+        if (address - t->r[i].start < t->r[i].size)
+            return &t->r[i];
+    }
+    return NULL;
+}
+
+ULONG sr_ranges_add(SrRanges *t, const char *name, BOOL library, ULONG seglist)
+{
+    ULONG hunk  = 0;
+    ULONG added = 0;
+
+    while (seglist != 0 && hunk < SR_HUNKS_MAX && t->count < SR_RANGES_MAX)
+    {
+        ULONG    seg;
+        ULONG    size;
+        ULONG    next;
+        SrRange *r;
+
+        /* A BPTR is an address / 4: one with either top bit set is not one. */
+        if (seglist > 0x3fffffffUL || t->peek == NULL)
+            break;
+        seg = seglist << 2;
+        if (seg < 8UL ||
+            !t->peek(t->user, seg - 4UL, &size) ||
+            !t->peek(t->user, seg, &next))
+            break;
+        if (size < 8UL || size > SR_HUNK_BYTES_MAX ||
+            seg + 4UL + (size - 8UL) < seg)
+            break;
+        if (hunk == 0 && sr_range_of(t, seg + 4UL) != NULL)
+            break;
+
+        /* An empty hunk keeps its index and has nothing to point into. */
+        if (size > 8UL)
+        {
+            r = &t->r[t->count++];
+            r->start   = seg + 4UL;
+            r->size    = size - 8UL;
+            r->name    = name;
+            r->hunk    = (UWORD)hunk;
+            r->library = (UWORD)(library ? 1 : 0);
+            if (r->start < t->low)
+                t->low = r->start;
+            if (r->start + r->size > t->high)
+                t->high = r->start + r->size;
+            added++;
+        }
+
+        hunk++;
+        seglist = next;
+    }
+
+    return added;
+}
+
+VOID sr_modules(SrOut *o, const SrRanges *t)
+{
+    static char k[SR_KEY_MAX];  /* as sr_task() */
+    ULONG       n = 0;
+    ULONG       i;
+
+    for (i = 0; i < t->count; i++)
+    {
+        if (t->r[i].library)
+            n++;
+    }
+    sr_ulong(o, "module.count", n);
+
+    n = 0;
+    for (i = 0; i < t->count; i++)
+    {
+        const SrRange *r = &t->r[i];
+
+        if (!r->library)
+            continue;
+#define SR_M(field) sr_key_index(k, sizeof(k), "module", n, field)
+        SR_M("name");      sr_str(o, k, r->name);
+        SR_M("hunk");      sr_ulong(o, k, r->hunk);
+        SR_M("start");     sr_hex(o, k, r->start);
+        SR_M("size");      sr_ulong(o, k, r->size);
+#undef SR_M
+        n++;
+    }
+}
+
+/* The file part of `text` in printable ASCII, with nothing a frame is
+   punctuated by. */
+static VOID sr_module_name(char *dst, ULONG dstlen, const char *text)
+{
+    const char *p;
+    ULONG       n = 0;
+
+    if (text == NULL)
+        text = "";
+    for (p = text; *p != '\0'; p++)
+    {
+        if ((*p == '/' || *p == ':') && p[1] != '\0')
+            text = p + 1;
+    }
+    for (; *text != '\0' && n + 1UL < dstlen; text++)
+    {
+        char c = *text;
+
+        dst[n++] = (c <= ' ' || c > '~' || sr_in(c, "=:+/$")) ? '_' : c;
+    }
+    if (n == 0 && dstlen > 1UL)
+        dst[n++] = '_';
+    dst[n] = '\0';
+}
+
+#define SR_CANDIDATES_MAX   64
+
+typedef struct SrFrame
+{
+    const SrRange *range;
+    ULONG          offset;
+    WORD           lvo;         /* 0: not through jsr d(a6)                  */
+    UWORD          called;      /* a jsr or bsr ends just before it          */
+} SrFrame;
+
+/* Whether the instruction that ends at `offset` in `r` is a call, and the
+   displacement when it is jsr d16(a6). */
+static VOID sr_frame_call(const SrRanges *t, SrFrame *f)
+{
+    ULONG at = f->range->start + f->offset;
+    ULONG v;
+    UWORD w;
+
+    f->lvo    = 0;
+    f->called = 0;
+
+    if (t->peek == NULL)
+        return;
+
+    if (f->offset >= 4UL && t->peek(t->user, at - 4UL, &v))
+    {
+        w = (UWORD)(v >> 16);
+        if (w == 0x4eaeU)
+            f->lvo = (WORD)(UWORD)(v & 0xffffUL);
+        /* jsr d16(An), d8(An,Xn), abs.w, d16(pc), d8(pc,Xn); bsr.w */
+        if ((w >= 0x4ea8U && w <= 0x4ebbU && w != 0x4eb9U) || w == 0x6100U)
+            f->called = 1;
+
+        /* jsr (An); bsr.s */
+        w = (UWORD)(v & 0xffffUL);
+        if ((w & 0xfff8U) == 0x4e90U ||
+            ((w & 0xff00U) == 0x6100U && (w & 0xffU) != 0 && (w & 0xffU) != 0xffU))
+            f->called = 1;
+    }
+
+    /* jsr abs.l; bsr.l */
+    if (f->offset >= 6UL && t->peek(t->user, at - 6UL, &v))
+    {
+        w = (UWORD)(v >> 16);
+        if (w == 0x4eb9U || w == 0x61ffU)
+            f->called = 1;
+    }
+}
+
+#define SR_FRAME_TEXT   (SR_MODULE_LEN + 32)    /* "name:127+$00000000/lvo-32768 " */
+
+BOOL sr_task_frames(SrOut *o, ULONG index, const SrRanges *t,
+                    const UBYTE *stack, ULONG bytes)
+{
+    static SrFrame f[SR_CANDIDATES_MAX];
+    static char    line[SR_KEY_MAX + SR_FRAMES_MAX * SR_FRAME_TEXT + 4];
+    static char    name[SR_MODULE_LEN];
+    ULONG          count = 0;
+    ULONG          shown = 0;
+    ULONG          off;
+    ULONG          i;
+    ULONG          spare;
+    BOOL           library = FALSE;
+
+    if (o == NULL || o->write == NULL || t == NULL || stack == NULL)
+        return FALSE;
+
+    for (off = 0; off + 4UL <= bytes && count < SR_CANDIDATES_MAX; off += 2UL)
+    {
+        const UBYTE   *p = stack + off;
+        ULONG          v = ((ULONG)p[0] << 24) | ((ULONG)p[1] << 16) |
+                           ((ULONG)p[2] << 8) | (ULONG)p[3];
+        const SrRange *r;
+
+        if ((v & 1UL) != 0 || (r = sr_range_of(t, v)) == NULL)
+            continue;
+
+        f[count].range  = r;
+        f[count].offset = v - r->start;
+        sr_frame_call(t, &f[count]);
+        count++;
+        off += 2UL;             /* the longword is used up */
+    }
+
+    /* How many candidates no call comes before may still be printed. */
+    spare = SR_FRAMES_MAX;
+    for (i = 0; i < count && spare > 0; i++)
+    {
+        if (f[i].called)
+            spare--;
+    }
+
+    sr_key_index(line, SR_KEY_MAX, "task", index, "frames");
+    sr_cat(line, sizeof(line), "=");
+
+    for (i = 0; i < count && shown < SR_FRAMES_MAX; i++)
+    {
+        if (!f[i].called)
+        {
+            if (spare == 0)
+                continue;
+            spare--;
+        }
+
+        if (shown > 0)
+            sr_cat(line, sizeof(line), " ");
+        sr_module_name(name, sizeof(name), f[i].range->name);
+        sr_cat(line, sizeof(line), name);
+        sr_cat(line, sizeof(line), ":");
+        sr_cat_ulong(line, sizeof(line), f[i].range->hunk);
+        sr_cat(line, sizeof(line), "+");
+        sr_cat_hex(line, sizeof(line), f[i].offset);
+        if (f[i].lvo != 0)
+        {
+            sr_cat(line, sizeof(line), "/lvo");
+            sr_cat_long(line, sizeof(line), (LONG)f[i].lvo);
+        }
+        if (f[i].range->library)
+            library = TRUE;
+        shown++;
+    }
+
+    if (!library)
+        return FALSE;
+
+    sr_cat(line, sizeof(line), "\n");
+    o->write(o->user, line);
+    o->lines++;
+    return TRUE;
+}

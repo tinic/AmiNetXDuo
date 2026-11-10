@@ -13,6 +13,9 @@
  *                         FindSemaphore(), all under Forbid()
  *   published records     the anx drivers' probe records and the stack's
  *                         event ring, through tool_passive.c
+ *   seglists and stacks   bsdsocket.library's and each process's hunks, and
+ *                         a copy of each waiting task's saved stack, in
+ *                         statusreport_frames.c
  *   the running stack     NetStackQuery(), through a bsdsocket.library that
  *                         is already resident, ours, and has its stack up --
  *                         tool_netstatus_open_resident(), never the opener
@@ -331,6 +334,8 @@ static VOID sr_fields(const char *prefix, const SrField *f, const APTR rec)
     }
 }
 
+#define SR_MAX_OPENERS  48
+
 /* One buffer for every query, one query at a time.  Static: a Shell gives a
    command 4096 bytes of stack. */
 static union
@@ -340,6 +345,7 @@ static union
     struct { NetStatusHeader h; NetStatusDhcp      e[NX_MAX_PHYSICAL_INTERFACES]; } dhcp;
     struct { NetStatusHeader h; NetStatusStats     e;    } stats;
     struct { NetStatusHeader h; NetStatusHealth    e;    } health;
+    struct { NetStatusHeader h; NetStatusOpener    e[SR_MAX_OPENERS]; } openers;
 } sr_q;
 
 /* The live interfaces' names by index, for the DHCP rows, which carry only
@@ -406,8 +412,10 @@ static const char *sr_dhcp_state(UWORD state)
 
 static VOID sr_live(struct Library *base)
 {
+    /* Static, the three below as well: out of line, this frame is under
+       main()'s on the deepest path tools/check-stack-frames.sh measures. */
     static char host[NETSTATUS_HOSTNAME_LEN];
-    char        part[NETSTATUS_NAME_LEN + 8];
+    static char part[NETSTATUS_NAME_LEN + 8];
     LONG        n;
     LONG        i;
 
@@ -457,9 +465,9 @@ static VOID sr_live(struct Library *base)
         for (i = 0; i < n && i < (LONG)NX_MAX_PHYSICAL_INTERFACES; i++)
         {
             const NetStatusInterface *e = &sr_q.ifs.e[i];
-            char   name[NETSTATUS_NAME_LEN + 1];
+            static char name[NETSTATUS_NAME_LEN + 1];
             static char device[NETSTATUS_FILE_LEN];  /* 4 KB Shell stack */
-            char   prefix[NETSTATUS_NAME_LEN + 8];
+            static char prefix[NETSTATUS_NAME_LEN + 8];
 
             tool_copy_string(name, sizeof(name), e->nsi_Name);
             (VOID)tool_if_device(device, sizeof(device), e);
@@ -515,7 +523,7 @@ static VOID sr_live(struct Library *base)
         for (i = 0; i < n && i < (LONG)NX_MAX_PHYSICAL_INTERFACES; i++)
         {
             const NetStatusDhcp *d = &sr_q.dhcp.e[i];
-            char   prefix[NETSTATUS_NAME_LEN + 8];
+            static char prefix[NETSTATUS_NAME_LEN + 8];
 
             if (d->nsd_Index < NX_MAX_PHYSICAL_INTERFACES &&
                 sr_live_name[d->nsd_Index][0] != '\0')
@@ -650,6 +658,41 @@ static VOID sr_sockets(struct Library *base)
     }
 }
 
+/* Who has the library open: opener.<n>.task is a task.<n>.address. */
+static VOID sr_openers(struct Library *base)
+{
+    static char     name[NETSTATUS_NAME_LEN + 1];
+    static SrOpener op;         /* static: as sr_sockets() */
+    LONG            n;
+    LONG            i;
+
+    n = tool_netstatus_query(base, NETSTATUS_OPENERS, &sr_q.openers,
+                             sizeof(sr_q.openers), sizeof(NetStatusOpener));
+    if (n < 0)
+    {
+        sr_str(&sr_out, "opener.count", NULL);
+        return;
+    }
+    if (n > (LONG)SR_MAX_OPENERS)
+        n = (LONG)SR_MAX_OPENERS;
+
+    sr_ulong(&sr_out, "opener.count", (ULONG)n);
+    sr_yesno(&sr_out, "opener.truncated",
+             (LONG)sr_q.openers.h.nsh_Available > n);
+    for (i = 0; i < n; i++)
+    {
+        const NetStatusOpener *e = &sr_q.openers.e[i];
+
+        tool_copy_string(name, sizeof(name), e->nso_Name);
+        op.task       = e->nso_Task;
+        op.name       = name;
+        op.sockets    = e->nso_Sockets;
+        op.break_mask = e->nso_BreakMask;
+        op.flags      = e->nso_Flags;
+        sr_opener(&sr_out, (ULONG)i, &op);
+    }
+}
+
 static VOID sr_stack(VOID)
 {
     struct Library *base;
@@ -707,12 +750,14 @@ static VOID sr_stack(VOID)
         sr_str(&sr_out, "stats", NULL);
         sr_str(&sr_out, "health", NULL);
         sr_str(&sr_out, "socket.count", NULL);
+        sr_str(&sr_out, "opener.count", NULL);
         return;
     }
 
     sr_str(&sr_out, "stack.status", "queried");
     sr_live(base);
     sr_sockets(base);
+    sr_openers(base);
     tool_netstatus_close(base);
 }
 
@@ -1060,7 +1105,10 @@ int main(int argc, char **argv)
 
     /* Before the stack is opened, so the list is the machine as it was. */
     if (!sr_stop())
+    {
         sr_tasks(&sr_out);
+        sr_locks(&sr_out);
+    }
 
     sr_library("bsdsocket.library", TRUE);
     sr_library("usergroup.library", FALSE);

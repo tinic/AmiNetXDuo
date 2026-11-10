@@ -336,7 +336,7 @@ static const char *const forbidden[] = {
 static const char *const command_files[] = {
     "src/tools/statusreport.c", "src/tools/statusreport_text.c",
     "src/tools/tool_passive.c", "src/tools/tool_sockets.c",
-    "src/tools/statusreport_tasks.cpp",
+    "src/tools/statusreport_tasks.cpp", "src/tools/statusreport_frames.c",
     "third_party/shelltools/src/task_snapshot.cpp", NULL
 };
 
@@ -549,6 +549,258 @@ static void check_tasks_sockets(void)
                       "socket.2.queued=3\n") == 0, "a UDP row: '%s'", out);
 }
 
+/* ------------------------------------------------------ return addresses --- */
+
+/* A stretch of big-endian guest memory for sr_ranges_add() and the call
+   decoding to read; anything outside it must not be read. */
+#define FAKE_BASE   0x00400000UL
+#define FAKE_SIZE   0x1000UL
+
+static UBYTE fake_mem[FAKE_SIZE];
+static int   fake_peeks;
+static int   fake_refused;
+
+static void put32(UBYTE *p, ULONG v)
+{
+    p[0] = (UBYTE)(v >> 24); p[1] = (UBYTE)(v >> 16);
+    p[2] = (UBYTE)(v >> 8);  p[3] = (UBYTE)v;
+}
+
+static void poke(ULONG address, ULONG v)
+{
+    put32(fake_mem + (address - FAKE_BASE), v);
+}
+
+static BOOL fake_peek(APTR user, ULONG address, ULONG *value)
+{
+    const UBYTE *p;
+
+    (void)user;
+    fake_peeks++;
+    if ((address & 1UL) != 0 || address < FAKE_BASE ||
+        address - FAKE_BASE > FAKE_SIZE - 4UL) {
+        fake_refused++;
+        return FALSE;
+    }
+    p = fake_mem + (address - FAKE_BASE);
+    *value = ((ULONG)p[0] << 24) | ((ULONG)p[1] << 16) |
+             ((ULONG)p[2] << 8) | (ULONG)p[3];
+    return TRUE;
+}
+
+/* One segment as LoadSeg() leaves it: the allocation's size, the next BPTR. */
+static void fake_segment(ULONG seg, ULONG contents, ULONG next)
+{
+    poke(seg - 4UL, contents + 8UL);
+    poke(seg, next >> 2);
+}
+
+#define LIB_SEG0    0x00400100UL    /* 0x100 bytes of contents */
+#define LIB_SEG1    0x00400300UL    /* 0x40 */
+#define APP_SEG0    0x00400500UL    /* 0x200 */
+
+static SrRanges ranges;
+
+static void fake_modules(void)
+{
+    memset(fake_mem, 0, sizeof(fake_mem));
+    fake_segment(LIB_SEG0, 0x100UL, LIB_SEG1);
+    fake_segment(LIB_SEG1, 0x40UL, 0);
+    fake_segment(APP_SEG0, 0x200UL, 0);
+
+    /* jsr abs.l ends at library hunk 0 + $20, jsr -126(a6) at the program's
+       hunk 0 + $40, and bsr.s at + $50. */
+    poke(LIB_SEG0 + 4UL + 0x20UL - 6UL, 0x4eb90040UL);
+    poke(APP_SEG0 + 4UL + 0x40UL - 4UL, 0x4eaeff82UL);
+    poke(APP_SEG0 + 4UL + 0x50UL - 4UL, 0x4e71610aUL);
+
+    sr_ranges_init(&ranges, fake_peek, NULL);
+    CHECK(sr_ranges_add(&ranges, "bsdsocket", TRUE, LIB_SEG0 >> 2) == 2,
+          "the library's two hunks");
+    CHECK(sr_ranges_add(&ranges, "Work:Web/I Brow=se", FALSE, APP_SEG0 >> 2) == 1,
+          "the program's one hunk");
+}
+
+static int count_of(const char *text, char c)
+{
+    int n = 0;
+
+    for (; *text != '\0'; text++)
+        n += (*text == c);
+    return n;
+}
+
+static void check_frames(void)
+{
+    static UBYTE stack[SR_STACK_BYTES];
+    SrOut        o;
+    ULONG        n;
+    ULONG        i;
+
+    fake_modules();
+
+    o = sink(0);
+    sr_modules(&o, &ranges);
+    CHECK(strcmp(out, "module.count=2\n"
+                      "module.0.name=bsdsocket\nmodule.0.hunk=0\n"
+                      "module.0.start=$00400104\nmodule.0.size=256\n"
+                      "module.1.name=bsdsocket\nmodule.1.hunk=1\n"
+                      "module.1.start=$00400304\nmodule.1.size=64\n") == 0,
+          "the library's hunks and nobody else's: '%s'", out);
+
+    /* ---- one line, deepest first, at any even offset */
+    memset(stack, 0, sizeof(stack));
+    n = 0;
+    put32(stack + n, 0x00000003UL);              n += 4;
+    put32(stack + n, LIB_SEG0 + 4UL + 0x20UL);   n += 4;
+    put32(stack + n, 0x12345678UL);              n += 4;
+    put32(stack + n, LIB_SEG0 + 4UL + 0x21UL);   n += 4;   /* odd */
+    put32(stack + n, LIB_SEG1 + 4UL + 0x10UL);   n += 4;
+    put32(stack + n, LIB_SEG1 + 4UL + 0x40UL);   n += 4;   /* one past the end */
+    n += 2;                                                /* a saved SR */
+    put32(stack + n, APP_SEG0 + 4UL + 0x40UL);   n += 4;
+    put32(stack + n, APP_SEG0 + 4UL + 0x50UL);   n += 4;
+
+    o = sink(0);
+    CHECK(sr_task_frames(&o, 12, &ranges, stack, n) &&
+          strcmp(out, "task.12.frames=bsdsocket:0+$00000020 "
+                      "bsdsocket:1+$00000010 I_Brow_se:0+$00000040/lvo-126 "
+                      "I_Brow_se:0+$00000050\n") == 0 && o.lines == 1,
+          "module:hunk+$offset, the vector of a jsr d(a6): '%s'", out);
+
+    /* the last longword is cut short by the stack's upper bound */
+    o = sink(0);
+    CHECK(sr_task_frames(&o, 12, &ranges, stack, n - 2) &&
+          !has("00000050"), "nothing is read past the copy: '%s'", out);
+
+    /* ---- no frame in the library, no line */
+    o = sink(0);
+    CHECK(!sr_task_frames(&o, 3, &ranges, stack + 26, n - 26) &&
+          out[0] == '\0' && o.lines == 0,
+          "a task that is not in the library prints nothing: '%s'", out);
+    o = sink(0);
+    CHECK(!sr_task_frames(&o, 3, &ranges, stack, 0) && out[0] == '\0',
+          "an empty stack prints nothing");
+
+    /* ---- code is read only inside a range */
+    fake_refused = 0;
+    memset(stack, 0, sizeof(stack));
+    put32(stack, LIB_SEG0 + 4UL);                /* offset 0: nothing before */
+    put32(stack + 4, LIB_SEG0 + 4UL + 2UL);
+    o = sink(0);
+    fake_peeks = 0;
+    CHECK(sr_task_frames(&o, 0, &ranges, stack, 8) && fake_peeks == 0 &&
+          strcmp(out, "task.0.frames=bsdsocket:0+$00000000 "
+                      "bsdsocket:0+$00000002\n") == 0,
+          "no read before the start of a hunk: %d peeks, '%s'", fake_peeks, out);
+
+    /* ---- SR_FRAMES_MAX at most */
+    memset(stack, 0, sizeof(stack));
+    for (i = 0; i < 20; i++)
+        put32(stack + i * 4, LIB_SEG0 + 4UL + 0x80UL + i * 2UL);
+    o = sink(0);
+    CHECK(sr_task_frames(&o, 1, &ranges, stack, 80) &&
+          count_of(out, ' ') == SR_FRAMES_MAX - 1 &&
+          has("=bsdsocket:0+$00000080 ") && has(" bsdsocket:0+$0000009e\n") &&
+          !has("000000a0"), "the first sixteen of twenty: '%s'", out);
+
+    /* a frame a call comes before is not crowded out by ones none does */
+    put32(stack + 80, APP_SEG0 + 4UL + 0x40UL);
+    o = sink(0);
+    CHECK(sr_task_frames(&o, 1, &ranges, stack, 84) &&
+          count_of(out, ' ') == SR_FRAMES_MAX - 1 &&
+          has(" bsdsocket:0+$0000009c I_Brow_se:0+$00000040/lvo-126\n"),
+          "the call site survives the cut: '%s'", out);
+
+    /* a whole stack of candidates neither overruns nor prints a long line */
+    for (i = 0; i < SR_STACK_BYTES / 4; i++)
+        put32(stack + i * 4, LIB_SEG0 + 4UL + 0x20UL);
+    o = sink(0);
+    CHECK(sr_task_frames(&o, 95, &ranges, stack, SR_STACK_BYTES) &&
+          count_of(out, ' ') == SR_FRAMES_MAX - 1 && count_of(out, '\n') == 1,
+          "sixteen of 256: '%s'", out);
+}
+
+static void check_seglists(void)
+{
+    static SrRanges t;
+
+    fake_modules();
+
+    /* the same seglist again, as every process of one program has it */
+    CHECK(sr_ranges_add(&ranges, "again", FALSE, APP_SEG0 >> 2) == 0 &&
+          ranges.count == 3, "a seglist already in the table adds nothing");
+
+    sr_ranges_init(&t, fake_peek, NULL);
+    CHECK(sr_ranges_add(&t, "x", FALSE, 0) == 0, "no seglist");
+    CHECK(sr_ranges_add(&t, "x", FALSE, 0x40000001UL) == 0 &&
+          sr_ranges_add(&t, "x", FALSE, 0xffffffffUL) == 0,
+          "a BPTR with a top bit set is not followed");
+    CHECK(sr_ranges_add(&t, "x", FALSE, 1) == 0, "nor one below any segment");
+    CHECK(sr_ranges_add(&t, "x", FALSE, 0x00500000UL >> 2) == 0,
+          "nor one into memory that must not be read");
+
+    /* a size no allocation has */
+    poke(APP_SEG0 - 4UL, 4UL);
+    CHECK(sr_ranges_add(&t, "x", FALSE, APP_SEG0 >> 2) == 0, "size 4");
+    poke(APP_SEG0 - 4UL, SR_HUNK_BYTES_MAX + 4UL);
+    CHECK(sr_ranges_add(&t, "x", FALSE, APP_SEG0 >> 2) == 0, "size 16 MB + 4");
+    poke(APP_SEG0 - 4UL, 0xfffffff0UL);
+    CHECK(sr_ranges_add(&t, "x", FALSE, APP_SEG0 >> 2) == 0 && t.count == 0,
+          "size -16");
+
+    /* the first hunk is good and its link is not: the walk ends there */
+    fake_segment(APP_SEG0, 0x200UL, 0);
+    poke(LIB_SEG0, 0x00123456UL);
+    CHECK(sr_ranges_add(&t, "x", FALSE, LIB_SEG0 >> 2) == 1 && t.count == 1 &&
+          t.r[0].start == LIB_SEG0 + 4UL && t.r[0].size == 0x100UL,
+          "a corrupt link ends the walk after the hunks before it");
+
+    /* a seglist that links to itself */
+    sr_ranges_init(&t, fake_peek, NULL);
+    poke(APP_SEG0, APP_SEG0 >> 2);
+    CHECK(sr_ranges_add(&t, "x", FALSE, APP_SEG0 >> 2) == SR_HUNKS_MAX &&
+          t.r[SR_HUNKS_MAX - 1].hunk == SR_HUNKS_MAX - 1,
+          "a loop stops at the hunk cap");
+
+    /* and the table itself is a cap */
+    sr_ranges_init(&t, fake_peek, NULL);
+    poke(LIB_SEG1, LIB_SEG1 >> 2);
+    t.count = SR_RANGES_MAX - 3;
+    CHECK(sr_ranges_add(&t, "y", FALSE, LIB_SEG1 >> 2) == 3 &&
+          t.count == SR_RANGES_MAX, "a full table takes no more");
+    CHECK(sr_ranges_add(&t, "z", FALSE, LIB_SEG0 >> 2) == 0 &&
+          t.count == SR_RANGES_MAX, "nor does a later seglist");
+
+    /* an empty hunk keeps its index */
+    sr_ranges_init(&t, fake_peek, NULL);
+    fake_segment(LIB_SEG0, 0, LIB_SEG1);
+    fake_segment(LIB_SEG1, 0x40UL, 0);
+    CHECK(sr_ranges_add(&t, "x", FALSE, LIB_SEG0 >> 2) == 1 && t.r[0].hunk == 1,
+          "an empty hunk is counted and not listed");
+}
+
+static void check_openers(void)
+{
+    SrOpener op;
+    SrTask   t;
+    SrOut    o;
+
+    op.task = 0x70675608UL; op.name = "IBrowseNetwork"; op.sockets = 2;
+    op.break_mask = 0x00001000UL; op.flags = 0x0002UL;
+    o = sink(0);
+    sr_opener(&o, 3, &op);
+    CHECK(strcmp(out, "opener.3.task=$70675608\nopener.3.name=IBrowseNetwork\n"
+                      "opener.3.sockets=2\nopener.3.break_mask=$00001000\n"
+                      "opener.3.flags=$00000002\n") == 0, "an opener: '%s'", out);
+
+    /* opener.N.task is task.N.address, digit for digit */
+    memset(&t, 0, sizeof(t));
+    t.address = op.task; t.state = "WAIT"; t.name = "IBrowseNetwork"; t.command = "";
+    sr_task(&o, 7, &t);
+    CHECK(has("task.7.address=$70675608\n"), "the two join: %s", out);
+}
+
 /* ------------------------------------------------------------------ main --- */
 
 /* The DHCP REQUEST checkpoints and the resident library's build (#306). */
@@ -612,6 +864,9 @@ int main(int argc, char **argv)
         check_tee();
         check_checkpoints();
         check_tasks_sockets();
+        check_frames();
+        check_seglists();
+        check_openers();
     }
     if (group == NULL || strcmp(group, "passive") == 0)
         check_passive();
