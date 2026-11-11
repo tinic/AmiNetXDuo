@@ -28,6 +28,8 @@ are history.
   published.
 - NetEnv also publishes each interface's hardware address, SANA-II driver,
   unit and driver version.
+- A PCMCIA card's reset wait no longer ends early when the claim is
+  interrupted while the delay clock is measured.
 - A SLIP or PPP interface whose file names the other end as GATEWAY, with no
   DESTINATION, gets its default route through it, as AmiTCP and Roadshow files
   expect.
