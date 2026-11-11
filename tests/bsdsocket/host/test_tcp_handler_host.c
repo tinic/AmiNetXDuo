@@ -91,6 +91,7 @@ static struct
 
     /* Processes */
     BOOL            createproc_fails;
+    void          (*on_create)(VOID);   /* runs as the new process would    */
     unsigned        procs;
     APTR            last_entry;
     const char     *last_proc_name;
@@ -333,6 +334,9 @@ struct Process *CreateNewProc(const struct TagItem *tags)
 
     h.procs++;
     memset(&session, 0, sizeof(session));
+
+    if (h.on_create != NULL)
+        h.on_create();
 
     return &session;
 }
@@ -1142,8 +1146,9 @@ static void t_publish_refusals(void)
     CHECK(h.ports_deleted == 1, "the port is deleted");
     CHECK(tcp_node == NULL && tcp_ctrl_port == NULL, "and both forgotten");
 
-    /* A publish that fails must leave tcp_started clear, or the handler can
-       never be started again. */
+    /* A handler that fails to publish tells its parent and leaves
+       tcp_started set: no other opener may start one until the parent is
+       finished with tcp_boot. */
     h_reset();
     h_pool_used = 0;
     h_script_reset();
@@ -1154,8 +1159,8 @@ static void t_publish_refusals(void)
 
     CHECK(h_boot.tb_Ok == FALSE, "the parent is told the publish failed");
     CHECK(h.signals == 1, "and told, rather than left waiting");
-    CHECK(tcp_started == FALSE,
-          "a handler that never published does not stay marked started");
+    CHECK(tcp_started == TRUE,
+          "and leaves tcp_started to the parent, which is still waiting");
 }
 
 static void t_ctrl_find(void)
@@ -1592,6 +1597,45 @@ static void t_handle_misc_packets(void)
 
 /* ------------------------------------------------------------- start ----- */
 
+/* The first opener's handler fails to publish (#383).  Until that opener has
+   run again, a second opener must not get past tcp_started, or the first one
+   clears the second one's boot record. */
+static BOOL h_started_after_handler;
+
+static void h_handler_fails(VOID)
+{
+    h.name_taken = TRUE;
+    tcp_ctrl_main();
+    h_started_after_handler = tcp_started;
+}
+
+static void t_start_publish_fails(void)
+{
+    printf("TCP: a start whose handler cannot publish\n");
+
+    h_reset();
+    h_pool_used = 0;
+    h_script_reset();
+    h_started_after_handler = FALSE;
+    h.on_create = h_handler_fails;
+
+    bsd_tcp_handler_start(&h_base);
+
+    CHECK(h.signals == 1 && h.wait_result == h.wait_mask,
+          "the opener is woken by its handler");
+    CHECK(h_started_after_handler == TRUE,
+          "no second opener can start a handler while the first one waits");
+    CHECK(tcp_boot == NULL && tcp_started == FALSE,
+          "the opener clears both, so the next open tries again");
+}
+
+/* A handler that publishes TCP: and tells its parent so. */
+static void h_handler_up(VOID)
+{
+    tcp_boot->tb_Ok = TRUE;
+    Signal(tcp_boot->tb_Parent, tcp_boot->tb_SigMask);
+}
+
 static void t_start(void)
 {
     printf("TCP: bsd_tcp_handler_start()\n");
@@ -1607,6 +1651,7 @@ static void t_start(void)
 
     /* Switched on. */
     h_reset();
+    h.on_create = h_handler_up;
     bsd_tcp_handler_start(&h_base);
 
     CHECK(h.procs == 1, "TCP=ON starts the control process");
@@ -1683,6 +1728,7 @@ int main(void)
     t_wait_char_negative();
     t_handle_misc_packets();
     t_start();
+    t_start_publish_fails();
 
     printf("\n%lu checks, %lu failures\n", h_checks, h_failures);
 

@@ -846,14 +846,20 @@ static VOID tcp_ctrl_main(VOID)
     BOOL running = TRUE;
     BOOL ok      = tcp_ctrl_publish();
 
+    /* A parent of higher priority runs as soon as it is signalled, and may
+       close and expunge the library before this process has left it; as in
+       ACTION_DIE, a failed start stays in Forbid() until it has ended. */
+    if (!ok)
+        Forbid();
+
     tcp_boot->tb_Ok = ok;
     Signal(tcp_boot->tb_Parent, tcp_boot->tb_SigMask);
 
+    /* On a failure the parent clears tcp_started, once it is finished with
+       tcp_boot: cleared here, the next opener could set tcp_boot before the
+       parent runs again, and the parent would clear that record (#383). */
     if (!ok)
-    {
-        tcp_started = FALSE;
         return;
-    }
 
     AMI_INFO("TCP: handler ready");
 
@@ -1052,7 +1058,13 @@ VOID bsd_tcp_handler_start(struct AmiSocketBase *master)
     FreeSignal(sig);
 
     if (!boot.tb_Ok)
+    {
         AMI_WARN("TCP: device not available");
+
+        ObtainSemaphore(&master->sb_Lock);
+        tcp_started = FALSE;
+        ReleaseSemaphore(&master->sb_Lock);
+    }
 }
 
 BOOL bsd_tcp_handler_alive(VOID)
