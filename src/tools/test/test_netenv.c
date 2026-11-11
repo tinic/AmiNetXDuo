@@ -209,6 +209,12 @@ int main(void)
     value("ANXD/IF/eth0/DEVICE","anxnet.device");value("ANXD/IF/eth0/UNIT","2");
     value("ANXD/IF/wifi0/DEVICE","anxwifipi.device");value("ANXD/IF/wifi0/UNIT","0");
     value("ANXD/IF/wifi0/MAC","00:00:00:00:00:00");
+    value("ANXD/IF/eth0/VERSION",NULL);
+    strcpy(s.iface[1].version,"anxnet.device 1.0 (11.11.2026)");build();
+    value("ANXD/IF/eth0/VERSION","anxnet.device 1.0 (11.11.2026)");
+    memset(s.iface[1].version,'v',sizeof(s.iface[1].version));
+    check(!ne_build(&s,&t),"unterminated version refused");
+    s.iface[1].version[0]=0;
     s.iface[1].has_mac=0;s.iface[1].device[0]=0;build();
     value("ANXD/IF/eth0/MAC",NULL);value("ANXD/IF/eth0/DEVICE",NULL);
     value("ANXD/IF/eth0/UNIT",NULL);
@@ -219,9 +225,11 @@ int main(void)
         s.iface[i]=s.iface[1];snprintf(s.iface[i].name,sizeof(s.iface[i].name),"if%u",i);
         s.iface[i].index=(uint16_t)(i+10);s.iface[i].has_mac=1;
         strcpy(s.iface[i].device,"a-device-name-of-31-characters.");
+        memset(s.iface[i].version,'v',sizeof(s.iface[i].version)-1);
+        s.iface[i].version[sizeof(s.iface[i].version)-1]=0;
     }
     s.routes=0;s.addresses6=0;
-    build();check(t.count==NE_IF_MAX*6+2,"every field of the most interfaces fits");
+    build();check(t.count==NE_IF_MAX*7+2,"every field of the most interfaces fits");
     setup();s.addresses6=NE_ADDR6_MAX;
     for(i=0;i<NE_ADDR6_MAX;i++) {
         s.addr6[i]=s.addr6[0];

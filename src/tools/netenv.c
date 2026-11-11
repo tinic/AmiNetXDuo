@@ -57,6 +57,25 @@ static void device_name(char out[32], const char *path, size_t cap)
     if (end - name < 32) memcpy(out, name, (size_t)(end - name) + 1);
 }
 
+/* The driver's lib_IdString, read as Version reads it: under Forbid(), from
+   the device list, without opening it.  The stack holds it open.  Control
+   characters (the trailing CR LF of most) end the copy. */
+static void device_version(char out[80], const char *device)
+{
+    const struct Library *lib;
+    const char *id;
+    unsigned n = 0;
+    out[0] = 0;
+    if (!device[0]) return;
+    Forbid();
+    lib = (const struct Library *)FindName(&SysBase->DeviceList, (STRPTR)device);
+    id = lib ? (const char *)lib->lib_IdString : NULL;
+    if (id && TypeOfMem((APTR)id))
+        while (n < 79 && (unsigned char)id[n] >= 32) { out[n] = id[n]; n++; }
+    Permit();
+    out[n] = 0;
+}
+
 static int scoped6(const ULONG a[4])
 {
     return (a[0] & 0xffc00000UL) == 0xfe800000UL;
@@ -106,6 +125,8 @@ static int collect(struct Library *base)
                 device_name(snapshot.iface[j].device, in->nsd_Device,
                             sizeof(in->nsd_Device));
     }
+    for (i = 0; i < (LONG)snapshot.interfaces; i++)
+        device_version(snapshot.iface[i].version, snapshot.iface[i].device);
     n = query(base, NETSTATUS_ROUTES, sizeof(answer.route), sizeof(NetStatusRoute));
     if (n < 0) return 0;
     for (i = 0; i < n; i++) {

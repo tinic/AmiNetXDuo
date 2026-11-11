@@ -185,6 +185,9 @@ int ne_build(const NeSnapshot *s, NeTable *out)
             if (!field(out, f->name, "DEVICE", f->device) ||
                 !field(out, f->name, "UNIT", unit)) return 0;
         }
+        if (!memchr(f->version, 0, sizeof(f->version))) return 0;
+        if (f->version[0] && !field(out, f->name, "VERSION", f->version))
+            return 0;
     }
     if (!add(out, "ANXD/INTERFACES", list)) return 0;
     for (i = 0; i < s->routes; i++) {

@@ -38,6 +38,7 @@ ANXD/IF/<name>/ADDR6          Space-separated IPv6 address/prefix entries
 ANXD/IF/<name>/MAC            Hardware address, such as 00:80:10:ab:cd:ef
 ANXD/IF/<name>/DEVICE         SANA-II driver file name, such as anxnet.device
 ANXD/IF/<name>/UNIT           SANA-II driver unit number
+ANXD/IF/<name>/VERSION        The driver's version string, as Version shows it
 ANXD/DEFAULT/INTERFACE        Interface carrying the IPv4 default route
 ANXD/DEFAULT/ADDRESS          Its IPv4 address
 ANXD/DEFAULT/NETMASK          Its IPv4 subnet mask
@@ -58,9 +59,10 @@ Names use letters, digits, underscore, hyphen and dot, up to 15 characters;
 unsafe or ambiguous names invalidate the snapshot rather than create paths.
 All exported variable names fit the older 31-character DOS limit.
 
-MAC, DEVICE and UNIT are present while the interface exists, also when
-it is DOWN. A point-to-point link has no MAC. The driver does not report
-the model, revision or firmware of the card.
+MAC, DEVICE, UNIT and VERSION are present while the interface exists,
+also when it is DOWN. A point-to-point link has no MAC. VERSION is the
+driver's own version, not the card's: the driver does not report the
+model, revision or firmware of the card.
 
 IPv6 ADDR6 includes ready preferred/valid addresses, not tentative or
 deprecated addresses. Each has its prefix length. Link-local addresses
