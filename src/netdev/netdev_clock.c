@@ -84,6 +84,18 @@ static ULONG ndc_field_lines;
  */
 #define NDC_FIELDS_WATCHED  4u
 
+/*
+ * How many whole lines to count spins over, keeping the longest.  Anything
+ * that holds the loop up -- an interrupt, a task switch, a host stall under
+ * emulation -- makes one line's count SHORT and never long: the beam moves on
+ * while nothing reads it.  One line counted once read 1 on the gayleratio
+ * cpu_multiplier=64 arm (2026-11-11) against 49 recorded, and a count that
+ * low shrinks ndc_cap() until it ends a wait early.  The longest of eight is a
+ * whole line when at least one of them ran undisturbed; stalls in all eight
+ * still count it short.  Eight is half a millisecond, once, on the claim path.
+ */
+#define NDC_LINES_WATCHED   8u
+
 #if NDC_HAVE_BEAM
 /*
  * How many lines a field has on this machine.  THE HIGHEST POSITION SEEN, NOT
@@ -123,14 +135,18 @@ static ULONG ndc_measure_field(VOID)
 /*
  * Measure once: does the beam move, how many iterations of a bare spin fit
  * between two of its transitions, and how long a line is on this machine.  The
- * middle number decides nothing; netdev_pcmcia.c publishes it as evidence.
+ * middle number sizes ndc_cap() and the spin floor of
+ * netdev_clock_floor_spins(), and netdev_pcmcia.c publishes it as evidence.
  */
 static VOID ndc_measure(VOID)
 {
 #if NDC_HAVE_BEAM
     ULONG spins;
+    ULONG count;
+    ULONG line;
     UWORD first;
     UWORD edge;
+    UWORD v = 0;
 
     ndc_state       = 2;
     ndc_spins_line  = 0;
@@ -149,20 +165,29 @@ static VOID ndc_measure(VOID)
     if (spins == 0u)
         return;                     /* no beam here: the counts are all there is */
 
-    /* One whole line, from the transition just found to the next one. */
+    /* Whole lines, each from one transition to the next, and the longest. */
     ndc_spins_line = 0;
-    for (spins = NDC_PROBE_SPINS; spins != 0u; spins--)
+    for (line = 0; line < (ULONG)NDC_LINES_WATCHED; line++)
     {
-        ndc_spins_line++;
-        if (ndc_vpos() != edge)
-            break;
-    }
+        count = 0;
+        for (spins = NDC_PROBE_SPINS; spins != 0u; spins--)
+        {
+            count++;
+            v = ndc_vpos();
+            if (v != edge)
+                break;
+        }
 
-    if (spins == 0u)
-    {
-        /* It moved once and then stopped.  Not a clock. */
-        ndc_spins_line = 0;
-        return;
+        if (spins == 0u)
+        {
+            /* It moved and then stopped.  Not a clock. */
+            ndc_spins_line = 0;
+            return;
+        }
+
+        if (count > ndc_spins_line)
+            ndc_spins_line = count;
+        edge = v;
     }
 
     /*

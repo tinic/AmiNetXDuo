@@ -53,8 +53,9 @@ BOOL netdev_wait_done(NetdevWait *w);
 
 /*
  * How many iterations of a bare spin fit in one raster line on this machine, or
- * 0 if there is no beam to measure against.  Decides nothing; published through
- * the probe record so CheckNetDevice can report how fast this CPU is.
+ * 0 if there is no beam to measure against.  It sizes the stopped-beam guard
+ * of a timed wait and netdev_clock_floor_spins(), and the probe record
+ * publishes it so CheckNetDevice can report how fast this CPU is.
  */
 ULONG netdev_clock_spins_per_line(VOID);
 
