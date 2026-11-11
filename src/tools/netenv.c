@@ -31,6 +31,7 @@ static union {
     struct { NetStatusHeader h; NetStatusAddress6 e[NE_ADDR6_MAX]; } addr6;
     struct { NetStatusHeader h; NetStatusRoute e[NE_ROUTE_MAX]; } route;
     struct { NetStatusHeader h; NetStatusRoute6 e[NE_ROUTE_MAX]; } route6;
+    struct { NetStatusHeader h; NetStatusIfDevice e[NE_IF_MAX]; } ifdev;
 } answer;
 
 static LONG query(struct Library *base, ULONG what, ULONG size, ULONG entry_size)
@@ -43,6 +44,17 @@ static LONG query(struct Library *base, ULONG what, ULONG size, ULONG entry_size
     if (count < 0 || h->nsh_Available != h->nsh_Count ||
         (ULONG)count > (size - sizeof(*h)) / entry_size) return -1;
     return count;
+}
+
+/* The file name of a device path, "" when it does not fit DEVICE. */
+static void device_name(char out[32], const char *path, size_t cap)
+{
+    const char *end = memchr(path, 0, cap), *p = end, *name;
+    out[0] = 0;
+    if (!end) return;
+    while (p > path && p[-1] != '/' && p[-1] != ':') p--;
+    name = p;
+    if (end - name < 32) memcpy(out, name, (size_t)(end - name) + 1);
 }
 
 static int scoped6(const ULONG a[4])
@@ -77,6 +89,22 @@ static int collect(struct Library *base)
                  (NETSTATUS_IF_LINKUP | NETSTATUS_IF_ONLINE);
         f->address = in->nsi_Address;
         f->mask = in->nsi_NetMask;
+        f->has_mac = !(in->nsi_Flags & NETSTATUS_IF_PTP);
+        memcpy(f->mac, in->nsi_HwAddress, sizeof(f->mac));
+        /* A full nsi_Device may be a path cut short: wait for the whole. */
+        if (memchr(in->nsi_Device, 0, sizeof(in->nsi_Device) - 1))
+            device_name(f->device, in->nsi_Device, sizeof(in->nsi_Device));
+        f->unit = in->nsi_Unit;
+    }
+    /* The whole device path; a library without the selector answers -1. */
+    n = query(base, NETSTATUS_IFDEVICES, sizeof(answer.ifdev), sizeof(NetStatusIfDevice));
+    for (i = 0; i < n; i++) {
+        const NetStatusIfDevice *in = &answer.ifdev.e[i];
+        unsigned j;
+        for (j = 0; j < snapshot.interfaces; j++)
+            if (snapshot.iface[j].index == in->nsd_Index && in->nsd_Device[0])
+                device_name(snapshot.iface[j].device, in->nsd_Device,
+                            sizeof(in->nsd_Device));
     }
     n = query(base, NETSTATUS_ROUTES, sizeof(answer.route), sizeof(NetStatusRoute));
     if (n < 0) return 0;

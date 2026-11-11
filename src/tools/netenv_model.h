@@ -7,8 +7,8 @@
 #define NE_IF_MAX 32
 #define NE_ADDR6_MAX 128
 #define NE_ROUTE_MAX 96
-#define NE_KEY_MAX (NE_IF_MAX * 4 + 9)
-#define NE_TEXT_MAX 12288
+#define NE_KEY_MAX (NE_IF_MAX * 7 + 9)
+#define NE_TEXT_MAX 16384
 #define NE_VALUE_MAX 8192
 
 typedef struct NeInterface {
@@ -16,6 +16,11 @@ typedef struct NeInterface {
     uint16_t index;
     int up;
     uint32_t address, mask;
+    /* What the interface runs on, published whether it is up or not. */
+    int has_mac;                /* not a point-to-point link            */
+    uint8_t mac[6];
+    char device[32];            /* the driver's file name, "" if unknown */
+    unsigned long unit;
 } NeInterface;
 typedef struct NeAddress6 {
     char text[48];

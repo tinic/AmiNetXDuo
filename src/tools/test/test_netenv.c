@@ -198,6 +198,30 @@ int main(void)
     check(!ne_build(&s,&t),"case-insensitive ENV name collision refused");
     setup();s.iface[0].up=0;s.iface[0].address=0;build();
     value("ANXD/IF/wifi0/ADDRESS",NULL);value("ANXD/IF/wifi0/STATE","DOWN");
+    /* The hardware an interface runs on (#488), whether it is up or not. */
+    value("ANXD/IF/eth0/MAC",NULL);value("ANXD/IF/eth0/DEVICE",NULL);
+    s.iface[1].has_mac=1;
+    memcpy(s.iface[1].mac,"\x00\x80\x10\xab\xcd\xef",6);
+    strcpy(s.iface[1].device,"anxnet.device");s.iface[1].unit=2;
+    strcpy(s.iface[0].device,"anxwifipi.device");s.iface[0].has_mac=1;
+    build();
+    value("ANXD/IF/eth0/MAC","00:80:10:ab:cd:ef");
+    value("ANXD/IF/eth0/DEVICE","anxnet.device");value("ANXD/IF/eth0/UNIT","2");
+    value("ANXD/IF/wifi0/DEVICE","anxwifipi.device");value("ANXD/IF/wifi0/UNIT","0");
+    value("ANXD/IF/wifi0/MAC","00:00:00:00:00:00");
+    s.iface[1].has_mac=0;s.iface[1].device[0]=0;build();
+    value("ANXD/IF/eth0/MAC",NULL);value("ANXD/IF/eth0/DEVICE",NULL);
+    value("ANXD/IF/eth0/UNIT",NULL);
+    memset(s.iface[1].device,'x',sizeof(s.iface[1].device));
+    check(!ne_build(&s,&t),"unterminated device name refused");
+    setup();s.interfaces=NE_IF_MAX;
+    for(i=0;i<NE_IF_MAX;i++){
+        s.iface[i]=s.iface[1];snprintf(s.iface[i].name,sizeof(s.iface[i].name),"if%u",i);
+        s.iface[i].index=(uint16_t)(i+10);s.iface[i].has_mac=1;
+        strcpy(s.iface[i].device,"a-device-name-of-31-characters.");
+    }
+    s.routes=0;s.addresses6=0;
+    build();check(t.count==NE_IF_MAX*6+2,"every field of the most interfaces fits");
     setup();s.addresses6=NE_ADDR6_MAX;
     for(i=0;i<NE_ADDR6_MAX;i++) {
         s.addr6[i]=s.addr6[0];
