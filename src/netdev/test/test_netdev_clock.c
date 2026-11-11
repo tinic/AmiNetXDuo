@@ -72,6 +72,11 @@ static ULONG mach_lines_per_field = 313;   /* a PAL field                     */
 static ULONG beam_reads;
 static int   beam_stuck;
 static UWORD beam_frozen;
+/* Hold the reader up once, right after the beam first moves, until one tick
+   before the next line: what an interrupt or a task switch does to it. */
+static int   beam_stall_once;
+static int   beam_moved;
+static UWORD beam_last;
 
 
 static ULONG mach_lines(void)
@@ -88,7 +93,18 @@ UWORD netdev_clock_test_vpos(VOID)
     if (beam_stuck)
         return beam_frozen;
 
-    return (UWORD)(mach_lines() % mach_lines_per_field);
+    if (beam_stall_once && beam_moved)
+    {
+        beam_stall_once = 0;
+        mach_ticks = (mach_lines() + 1u) * mach_ticks_per_line;
+    }
+    else if (beam_stall_once &&
+             (UWORD)(mach_lines() % mach_lines_per_field) != beam_last &&
+             beam_reads > 1u)
+        beam_moved = 1;
+    beam_last = (UWORD)(mach_lines() % mach_lines_per_field);
+
+    return beam_last;
 }
 
 static void machine(ULONG ticks_per_line, ULONG lines_per_field)
@@ -99,6 +115,9 @@ static void machine(ULONG ticks_per_line, ULONG lines_per_field)
     beam_reads           = 0;
     beam_stuck           = 0;
     beam_frozen          = 0;
+    beam_stall_once      = 0;
+    beam_moved           = 0;
+    beam_last            = 0;
     netdev_clock_test_forget();
 }
 
@@ -223,6 +242,17 @@ int main(void)
     expect("the field is the same behind an accelerator",
            netdev_clock_test_field(), 313);
     expect("and so is the price of a line", netdev_clock_us_per_line(), 63);
+
+    /* A reader held up right after the first transition counts that line
+       short.  Kept as the price of a line, it shrank the guard that ends a
+       wait until the wait ended early; the longest of several lines is the
+       line. */
+    machine(REFERENCE_TICKS_PER_LINE, 313);
+    beam_stall_once = 1;
+    expect_at_least("a stalled first line does not price the line",
+                    netdev_clock_spins_per_line(),
+                    REFERENCE_TICKS_PER_LINE - 2u);
+    expect("and the stall happened", (ULONG)beam_stall_once, 0);
 
     /* pc_settle()'s iteration floor comes from this measurement too.  It
        rises with CPU speed, instead of assuming every CPU performs four
