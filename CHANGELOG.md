@@ -24,6 +24,8 @@ are history.
   connections, so one report shows what a stalled program waits on.
 - CreateAmiNetXDuoStatusReport shows, for each waiting program, the calls it
   is waiting in, the programs using the network, and who holds the stack.
+- Programs no longer hang opening bsdsocket.library when TCP: cannot be
+  published.
 - A SLIP or PPP interface whose file names the other end as GATEWAY, with no
   DESTINATION, gets its default route through it, as AmiTCP and Roadshow files
   expect.
