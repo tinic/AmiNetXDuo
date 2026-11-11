@@ -46,7 +46,8 @@ static LONG query(struct Library *base, ULONG what, ULONG size, ULONG entry_size
     return count;
 }
 
-/* The file name of a device path, "" when it does not fit DEVICE. */
+/* The file name of a device path, "" when it does not fit DEVICE or has no
+   NUL within cap, which a path cut short to the field has not. */
 static void device_name(char out[32], const char *path, size_t cap)
 {
     const char *end = memchr(path, 0, cap), *p = end, *name;
@@ -59,7 +60,8 @@ static void device_name(char out[32], const char *path, size_t cap)
 
 /* The driver's lib_IdString, read as Version reads it: under Forbid(), from
    the device list, without opening it.  The stack holds it open.  Control
-   characters (the trailing CR LF of most) end the copy. */
+   characters (the trailing CR LF of most) end the copy.  No TypeOfMem():
+   a driver in ROM, such as UAE's uaenet.device, has its string there. */
 static void device_version(char out[80], const char *device)
 {
     const struct Library *lib;
@@ -70,7 +72,7 @@ static void device_version(char out[80], const char *device)
     Forbid();
     lib = (const struct Library *)FindName(&SysBase->DeviceList, (STRPTR)device);
     id = lib ? (const char *)lib->lib_IdString : NULL;
-    if (id && TypeOfMem((APTR)id))
+    if (id)
         while (n < 79 && (unsigned char)id[n] >= 32) { out[n] = id[n]; n++; }
     Permit();
     out[n] = 0;
@@ -123,7 +125,7 @@ static int collect(struct Library *base)
         for (j = 0; j < snapshot.interfaces; j++)
             if (snapshot.iface[j].index == in->nsd_Index && in->nsd_Device[0])
                 device_name(snapshot.iface[j].device, in->nsd_Device,
-                            sizeof(in->nsd_Device));
+                            sizeof(in->nsd_Device) - 1);
     }
     for (i = 0; i < (LONG)snapshot.interfaces; i++)
         device_version(snapshot.iface[i].version, snapshot.iface[i].device);
