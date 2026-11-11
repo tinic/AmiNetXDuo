@@ -846,6 +846,12 @@ static VOID tcp_ctrl_main(VOID)
     BOOL running = TRUE;
     BOOL ok      = tcp_ctrl_publish();
 
+    /* A parent of higher priority runs as soon as it is signalled, and may
+       close and expunge the library before this process has left it; as in
+       ACTION_DIE, a failed start stays in Forbid() until it has ended. */
+    if (!ok)
+        Forbid();
+
     tcp_boot->tb_Ok = ok;
     Signal(tcp_boot->tb_Parent, tcp_boot->tb_SigMask);
 
