@@ -7,8 +7,8 @@
 #define NE_IF_MAX 32
 #define NE_ADDR6_MAX 128
 #define NE_ROUTE_MAX 96
-#define NE_KEY_MAX (NE_IF_MAX * 4 + 9)
-#define NE_TEXT_MAX 12288
+#define NE_KEY_MAX (NE_IF_MAX * 8 + 9)
+#define NE_TEXT_MAX 20480
 #define NE_VALUE_MAX 8192
 
 typedef struct NeInterface {
@@ -16,6 +16,12 @@ typedef struct NeInterface {
     uint16_t index;
     int up;
     uint32_t address, mask;
+    /* What the interface runs on, published whether it is up or not. */
+    int has_mac;                /* not a point-to-point link            */
+    uint8_t mac[6];
+    char device[32];            /* the driver's file name, "" if unknown */
+    unsigned long unit;
+    char version[80];           /* the driver's lib_IdString, "" if none */
 } NeInterface;
 typedef struct NeAddress6 {
     char text[48];
@@ -56,6 +62,9 @@ int ne_name_valid(const char *name);
 int ne_build(const NeSnapshot *snapshot, NeTable *out);
 const char *ne_value(const NeTable *table, const char *name);
 int ne_own(NeOwned *owned, const char *name);
+/* Own every ANXD/IF/<name>/ key ne_build() can publish, for recovery after
+ * an abnormal end. 0 when the table is full. */
+int ne_own_interface(NeOwned *owned, const char *name);
 int ne_publish(NeOwned *owned, const NeTable *desired,
                NeRead read_value, NeWrite write_value, void *ctx);
 /* AmigaDOS IoErr() values for an ENV: object that is already gone. */

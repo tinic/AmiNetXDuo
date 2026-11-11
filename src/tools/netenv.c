@@ -31,6 +31,7 @@ static union {
     struct { NetStatusHeader h; NetStatusAddress6 e[NE_ADDR6_MAX]; } addr6;
     struct { NetStatusHeader h; NetStatusRoute e[NE_ROUTE_MAX]; } route;
     struct { NetStatusHeader h; NetStatusRoute6 e[NE_ROUTE_MAX]; } route6;
+    struct { NetStatusHeader h; NetStatusIfDevice e[NE_IF_MAX]; } ifdev;
 } answer;
 
 static LONG query(struct Library *base, ULONG what, ULONG size, ULONG entry_size)
@@ -43,6 +44,38 @@ static LONG query(struct Library *base, ULONG what, ULONG size, ULONG entry_size
     if (count < 0 || h->nsh_Available != h->nsh_Count ||
         (ULONG)count > (size - sizeof(*h)) / entry_size) return -1;
     return count;
+}
+
+/* The file name of a device path, "" when it does not fit DEVICE or has no
+   NUL within cap, which a path cut short to the field has not. */
+static void device_name(char out[32], const char *path, size_t cap)
+{
+    const char *end = memchr(path, 0, cap), *p = end, *name;
+    out[0] = 0;
+    if (!end) return;
+    while (p > path && p[-1] != '/' && p[-1] != ':') p--;
+    name = p;
+    if (end - name < 32) memcpy(out, name, (size_t)(end - name) + 1);
+}
+
+/* The driver's lib_IdString, read as Version reads it: under Forbid(), from
+   the device list, without opening it.  The stack holds it open.  Control
+   characters (the trailing CR LF of most) end the copy.  No TypeOfMem():
+   a driver in ROM, such as UAE's uaenet.device, has its string there. */
+static void device_version(char out[80], const char *device)
+{
+    const struct Library *lib;
+    const char *id;
+    unsigned n = 0;
+    out[0] = 0;
+    if (!device[0]) return;
+    Forbid();
+    lib = (const struct Library *)FindName(&SysBase->DeviceList, (STRPTR)device);
+    id = lib ? (const char *)lib->lib_IdString : NULL;
+    if (id)
+        while (n < 79 && (unsigned char)id[n] >= 32) { out[n] = id[n]; n++; }
+    Permit();
+    out[n] = 0;
 }
 
 static int scoped6(const ULONG a[4])
@@ -77,7 +110,25 @@ static int collect(struct Library *base)
                  (NETSTATUS_IF_LINKUP | NETSTATUS_IF_ONLINE);
         f->address = in->nsi_Address;
         f->mask = in->nsi_NetMask;
+        f->has_mac = !(in->nsi_Flags & NETSTATUS_IF_PTP);
+        memcpy(f->mac, in->nsi_HwAddress, sizeof(f->mac));
+        /* A full nsi_Device may be a path cut short: wait for the whole. */
+        if (memchr(in->nsi_Device, 0, sizeof(in->nsi_Device) - 1))
+            device_name(f->device, in->nsi_Device, sizeof(in->nsi_Device));
+        f->unit = in->nsi_Unit;
     }
+    /* The whole device path; a library without the selector answers -1. */
+    n = query(base, NETSTATUS_IFDEVICES, sizeof(answer.ifdev), sizeof(NetStatusIfDevice));
+    for (i = 0; i < n; i++) {
+        const NetStatusIfDevice *in = &answer.ifdev.e[i];
+        unsigned j;
+        for (j = 0; j < snapshot.interfaces; j++)
+            if (snapshot.iface[j].index == in->nsd_Index && in->nsd_Device[0])
+                device_name(snapshot.iface[j].device, in->nsd_Device,
+                            sizeof(in->nsd_Device) - 1);
+    }
+    for (i = 0; i < (LONG)snapshot.interfaces; i++)
+        device_version(snapshot.iface[i].version, snapshot.iface[i].device);
     n = query(base, NETSTATUS_ROUTES, sizeof(answer.route), sizeof(NetStatusRoute));
     if (n < 0) return 0;
     for (i = 0; i < n; i++) {
@@ -200,8 +251,7 @@ static void recover(void)
         "ANXD/DEFAULT/ADDRESS", "ANXD/DEFAULT/NETMASK", "ANXD/DEFAULT/GATEWAY",
         "ANXD/DEFAULT6/INTERFACE", "ANXD/DEFAULT6/GATEWAY"
     };
-    static const char *const fields[] = {"ADDRESS", "NETMASK", "STATE", "ADDR6"};
-    char list[NE_IF_MAX * 16], key[32], *name, *end;
+    char list[NE_IF_MAX * 16], *name, *end;
     struct FileInfoBlock *fib;
     BPTR directory;
     unsigned i;
@@ -212,12 +262,9 @@ static void recover(void)
         while (ExNext(directory, fib)) {
             const char *saved = (const char *)fib->fib_FileName;
             if (fib->fib_DirEntryType <= 0 || !ne_name_valid(saved)) continue;
-            for (i = 0; i < 4; i++) {
-                strcpy(key, "ANXD/IF/"); strcat(key, saved); strcat(key, "/"); strcat(key, fields[i]);
-                if (!ne_own(&owned, key)) {
-                    tool_error("too many old interface exports to recover");
-                    goto scan_done;
-                }
+            if (!ne_own_interface(&owned, saved)) {
+                tool_error("too many old interface exports to recover");
+                goto scan_done;
             }
         }
     }
@@ -230,10 +277,7 @@ scan_done:
         end = name;
         while (*end && *end != ' ') end++;
         if (*end) *end++ = 0;
-        if (ne_name_valid(name)) for (i = 0; i < 4; i++) {
-            strcpy(key, "ANXD/IF/"); strcat(key, name); strcat(key, "/"); strcat(key, fields[i]);
-            (void)ne_own(&owned, key);
-        }
+        if (ne_name_valid(name)) (void)ne_own_interface(&owned, name);
         name = end;
     }
 }

@@ -3931,7 +3931,9 @@
   WBStartup if wanted; installation does not start it. Stop or disable
   it through Commodities Exchange, or use Ctrl-C from its Shell.
 
-  Each interface has ANXD/IF/<name>/ADDRESS, NETMASK, STATE and ADDR6.
+  Each interface has ANXD/IF/<name>/ADDRESS, NETMASK, STATE and ADDR6,
+  and MAC, DEVICE, UNIT and VERSION for the hardware address, the
+  SANA-II driver and unit, and the driver's version string.
   ADDR6 lists ready IPv6 addresses with prefix lengths and link-local
   scopes. ANXD/DEFAULT contains the IPv4 default interface and gateway;
   ANXD/DEFAULT6 exists only for an unambiguous IPv6 default router.

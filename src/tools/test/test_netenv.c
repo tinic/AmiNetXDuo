@@ -198,6 +198,38 @@ int main(void)
     check(!ne_build(&s,&t),"case-insensitive ENV name collision refused");
     setup();s.iface[0].up=0;s.iface[0].address=0;build();
     value("ANXD/IF/wifi0/ADDRESS",NULL);value("ANXD/IF/wifi0/STATE","DOWN");
+    /* The hardware an interface runs on (#488), whether it is up or not. */
+    value("ANXD/IF/eth0/MAC",NULL);value("ANXD/IF/eth0/DEVICE",NULL);
+    s.iface[1].has_mac=1;
+    memcpy(s.iface[1].mac,"\x00\x80\x10\xab\xcd\xef",6);
+    strcpy(s.iface[1].device,"anxnet.device");s.iface[1].unit=2;
+    strcpy(s.iface[0].device,"anxwifipi.device");s.iface[0].has_mac=1;
+    build();
+    value("ANXD/IF/eth0/MAC","00:80:10:ab:cd:ef");
+    value("ANXD/IF/eth0/DEVICE","anxnet.device");value("ANXD/IF/eth0/UNIT","2");
+    value("ANXD/IF/wifi0/DEVICE","anxwifipi.device");value("ANXD/IF/wifi0/UNIT","0");
+    value("ANXD/IF/wifi0/MAC","00:00:00:00:00:00");
+    value("ANXD/IF/eth0/VERSION",NULL);
+    strcpy(s.iface[1].version,"anxnet.device 1.0 (11.11.2026)");build();
+    value("ANXD/IF/eth0/VERSION","anxnet.device 1.0 (11.11.2026)");
+    memset(s.iface[1].version,'v',sizeof(s.iface[1].version));
+    check(!ne_build(&s,&t),"unterminated version refused");
+    s.iface[1].version[0]=0;
+    s.iface[1].has_mac=0;s.iface[1].device[0]=0;build();
+    value("ANXD/IF/eth0/MAC",NULL);value("ANXD/IF/eth0/DEVICE",NULL);
+    value("ANXD/IF/eth0/UNIT",NULL);
+    memset(s.iface[1].device,'x',sizeof(s.iface[1].device));
+    check(!ne_build(&s,&t),"unterminated device name refused");
+    setup();s.interfaces=NE_IF_MAX;
+    for(i=0;i<NE_IF_MAX;i++){
+        s.iface[i]=s.iface[1];snprintf(s.iface[i].name,sizeof(s.iface[i].name),"if%u",i);
+        s.iface[i].index=(uint16_t)(i+10);s.iface[i].has_mac=1;
+        strcpy(s.iface[i].device,"a-device-name-of-31-characters.");
+        memset(s.iface[i].version,'v',sizeof(s.iface[i].version)-1);
+        s.iface[i].version[sizeof(s.iface[i].version)-1]=0;
+    }
+    s.routes=0;s.addresses6=0;
+    build();check(t.count==NE_IF_MAX*7+2,"every field of the most interfaces fits");
     setup();s.addresses6=NE_ADDR6_MAX;
     for(i=0;i<NE_ADDR6_MAX;i++) {
         s.addr6[i]=s.addr6[0];
@@ -205,6 +237,29 @@ int main(void)
     }
     build();check(strlen(ne_value(&t,"ANXD/IF/eth0/ADDR6"))>2000,
                   "complete large IPv6 list, no truncation");
+    /* Recovery owns every per-interface key, the hardware ones too: an
+       interface gone since an abnormal end leaves none of them behind. */
+    t.count=t.used=0;
+    check(write_env(NULL,"ANXD/IF/gone0/MAC","00:80:10:ab:cd:ef"),"old MAC");
+    check(write_env(NULL,"ANXD/IF/gone0/DEVICE","anxnet.device"),"old DEVICE");
+    check(write_env(NULL,"ANXD/IF/gone0/UNIT","0"),"old UNIT");
+    check(write_env(NULL,"ANXD/IF/gone0/VERSION","anxnet.device 1.0"),"old VERSION");
+    check(ne_own_interface(&owned,"gone0"),"recover an old interface");
+    publish();
+    check(!get("ANXD/IF/gone0/MAC")&&!get("ANXD/IF/gone0/DEVICE")&&
+          !get("ANXD/IF/gone0/UNIT")&&!get("ANXD/IF/gone0/VERSION"),
+          "its hardware keys are removed");
+    /* And for one still there, a field it no longer has goes too. */
+    setup();build();publish();
+    check(write_env(NULL,"ANXD/IF/eth0/VERSION","stale"),"stale VERSION of a live interface");
+    memset(&owned,0,sizeof(owned));
+    check(ne_own_interface(&owned,"eth0")&&ne_own_interface(&owned,"wifi0"),"recover live interfaces");
+    publish();check(!get("ANXD/IF/eth0/VERSION"),"absent field removed");
+    value("ANXD/IF/eth0/ADDRESS","192.168.1.2");check(get("ANXD/IF/eth0/ADDRESS")!=NULL,"present field kept");
+    memset(&owned,0,sizeof(owned));
+    for(i=0;i<NE_IF_MAX;i++){char n[16];snprintf(n,sizeof(n),"if%u",i);
+        check(ne_own_interface(&owned,n),"recovery fits the most interfaces");}
+    t.count=t.used=0;publish();
     t.count=t.used=0;
     check(ne_own(&owned,"ANXD/IF/old0/ADDRESS"),"recover previous instance key");
     check(write_env(NULL,"ANXD/IF/old0/ADDRESS","10.0.0.2"),"old ENV value");

@@ -34,6 +34,19 @@ static void ipv4(uint32_t address, char out[16])
     }
 }
 
+int ne_own(NeOwned *owned, const char *name);
+
+static void mac(const uint8_t m[6], char out[18])
+{
+    static const char hex[] = "0123456789abcdef";
+    unsigned i;
+    for (i = 0; i < 6; i++) {
+        out[i * 3] = hex[m[i] >> 4];
+        out[i * 3 + 1] = hex[m[i] & 15];
+        out[i * 3 + 2] = i < 5 ? ':' : 0;
+    }
+}
+
 static int same_name(const char *a, const char *b)
 {
     while (*a && *b) {
@@ -136,6 +149,7 @@ int ne_build(const NeSnapshot *s, NeTable *out)
     unsigned i, j;
     int ambiguous6 = 0, have4 = 0;
     char list[NE_IF_MAX * 16] = "", address[16], mask[16], gateway[80];
+    char hw[18], unit[11];
     out->count = out->used = 0;
     if (!s->state || s->interfaces > NE_IF_MAX || s->addresses6 > NE_ADDR6_MAX ||
         s->routes > NE_ROUTE_MAX || !add(out, "ANXD/STATE", s->state)) return 0;
@@ -163,6 +177,19 @@ int ne_build(const NeSnapshot *s, NeTable *out)
             if (!field(out, f->name, "ADDRESS", address) ||
                 !field(out, f->name, "NETMASK", mask)) return 0;
         }
+        if (f->has_mac) {
+            mac(f->mac, hw);
+            if (!field(out, f->name, "MAC", hw)) return 0;
+        }
+        if (!memchr(f->device, 0, sizeof(f->device))) return 0;
+        if (f->device[0]) {
+            number((unsigned)f->unit, unit);
+            if (!field(out, f->name, "DEVICE", f->device) ||
+                !field(out, f->name, "UNIT", unit)) return 0;
+        }
+        if (!memchr(f->version, 0, sizeof(f->version))) return 0;
+        if (f->version[0] && !field(out, f->name, "VERSION", f->version))
+            return 0;
     }
     if (!add(out, "ANXD/INTERFACES", list)) return 0;
     for (i = 0; i < s->routes; i++) {
@@ -192,6 +219,24 @@ int ne_build(const NeSnapshot *s, NeTable *out)
                                 !append(gateway, sizeof(gateway), f->name))) return 0;
         if (!add(out, "ANXD/DEFAULT6/INTERFACE", f->name) ||
             !add(out, "ANXD/DEFAULT6/GATEWAY", gateway)) return 0;
+    }
+    return 1;
+}
+
+/* Every per-interface key ne_build() publishes. */
+static const char *const if_fields[] = {
+    "ADDRESS", "NETMASK", "STATE", "ADDR6", "MAC", "DEVICE", "UNIT", "VERSION"
+};
+
+int ne_own_interface(NeOwned *owned, const char *name)
+{
+    unsigned i;
+    char key[32];
+    for (i = 0; i < sizeof(if_fields) / sizeof(if_fields[0]); i++) {
+        strcpy(key, "ANXD/IF/");
+        if (!append(key, sizeof(key), name) || !append(key, sizeof(key), "/") ||
+            !append(key, sizeof(key), if_fields[i]) || !ne_own(owned, key))
+            return 0;
     }
     return 1;
 }
