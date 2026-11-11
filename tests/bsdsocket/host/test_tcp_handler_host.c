@@ -91,6 +91,7 @@ static struct
 
     /* Processes */
     BOOL            createproc_fails;
+    void          (*on_create)(VOID);   /* runs as the new process would    */
     unsigned        procs;
     APTR            last_entry;
     const char     *last_proc_name;
@@ -333,6 +334,9 @@ struct Process *CreateNewProc(const struct TagItem *tags)
 
     h.procs++;
     memset(&session, 0, sizeof(session));
+
+    if (h.on_create != NULL)
+        h.on_create();
 
     return &session;
 }
@@ -1592,6 +1596,42 @@ static void t_handle_misc_packets(void)
 
 /* ------------------------------------------------------------- start ----- */
 
+/* The handler of the first opener fails to publish, signals it and clears
+   tcp_started; before the first opener runs again, a second one starts and
+   sets its own boot record (#383). */
+static TcpBoot h_boot_second;
+static TcpBoot *h_boot_after_handler;
+
+static void h_handler_fails_then_second_opener(VOID)
+{
+    h.name_taken = TRUE;
+    tcp_ctrl_main();
+    h_boot_after_handler = tcp_boot;
+
+    tcp_started = TRUE;
+    tcp_boot    = &h_boot_second;
+}
+
+static void t_start_second_opener(void)
+{
+    printf("TCP: a second opener between the handler and its parent\n");
+
+    h_reset();
+    h_pool_used = 0;
+    h_script_reset();
+    h_boot_after_handler = &h_boot_second;
+    h.on_create = h_handler_fails_then_second_opener;
+
+    bsd_tcp_handler_start(&h_base);
+
+    CHECK(h.signals == 1 && h.wait_result == h.wait_mask,
+          "the first opener is woken by its handler");
+    CHECK(h_boot_after_handler == NULL,
+          "the handler clears the boot record before the parent wakes");
+    CHECK(tcp_boot == &h_boot_second,
+          "and the first opener leaves the record of the second alone");
+}
+
 static void t_start(void)
 {
     printf("TCP: bsd_tcp_handler_start()\n");
@@ -1683,6 +1723,7 @@ int main(void)
     t_wait_char_negative();
     t_handle_misc_packets();
     t_start();
+    t_start_second_opener();
 
     printf("\n%lu checks, %lu failures\n", h_checks, h_failures);
 

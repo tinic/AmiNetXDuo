@@ -843,11 +843,16 @@ static BOOL tcp_ctrl_publish(VOID)
 
 static VOID tcp_ctrl_main(VOID)
 {
-    BOOL running = TRUE;
-    BOOL ok      = tcp_ctrl_publish();
+    BOOL     running = TRUE;
+    BOOL     ok      = tcp_ctrl_publish();
+    TcpBoot *boot    = tcp_boot;
 
-    tcp_boot->tb_Ok = ok;
-    Signal(tcp_boot->tb_Parent, tcp_boot->tb_SigMask);
+    /* The record is cleared here, before the parent wakes: once tcp_started
+       is clear below, the next opener can set its own record, and only this
+       handler knows that its own one is done with. */
+    tcp_boot      = NULL;
+    boot->tb_Ok   = ok;
+    Signal(boot->tb_Parent, boot->tb_SigMask);
 
     if (!ok)
     {
@@ -1048,7 +1053,6 @@ VOID bsd_tcp_handler_start(struct AmiSocketBase *master)
      * this function returns.
      */
     Wait(boot.tb_SigMask);
-    tcp_boot = NULL;
     FreeSignal(sig);
 
     if (!boot.tb_Ok)
