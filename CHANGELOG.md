@@ -26,6 +26,8 @@ are history.
   is waiting in, the programs using the network, and who holds the stack.
 - Programs no longer hang opening bsdsocket.library when TCP: cannot be
   published.
+- NetEnv also publishes each interface's hardware address, SANA-II driver,
+  unit and driver version.
 - A SLIP or PPP interface whose file names the other end as GATEWAY, with no
   DESTINATION, gets its default route through it, as AmiTCP and Roadshow files
   expect.
