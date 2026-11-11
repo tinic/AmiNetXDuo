@@ -237,6 +237,29 @@ int main(void)
     }
     build();check(strlen(ne_value(&t,"ANXD/IF/eth0/ADDR6"))>2000,
                   "complete large IPv6 list, no truncation");
+    /* Recovery owns every per-interface key, the hardware ones too: an
+       interface gone since an abnormal end leaves none of them behind. */
+    t.count=t.used=0;
+    check(write_env(NULL,"ANXD/IF/gone0/MAC","00:80:10:ab:cd:ef"),"old MAC");
+    check(write_env(NULL,"ANXD/IF/gone0/DEVICE","anxnet.device"),"old DEVICE");
+    check(write_env(NULL,"ANXD/IF/gone0/UNIT","0"),"old UNIT");
+    check(write_env(NULL,"ANXD/IF/gone0/VERSION","anxnet.device 1.0"),"old VERSION");
+    check(ne_own_interface(&owned,"gone0"),"recover an old interface");
+    publish();
+    check(!get("ANXD/IF/gone0/MAC")&&!get("ANXD/IF/gone0/DEVICE")&&
+          !get("ANXD/IF/gone0/UNIT")&&!get("ANXD/IF/gone0/VERSION"),
+          "its hardware keys are removed");
+    /* And for one still there, a field it no longer has goes too. */
+    setup();build();publish();
+    check(write_env(NULL,"ANXD/IF/eth0/VERSION","stale"),"stale VERSION of a live interface");
+    memset(&owned,0,sizeof(owned));
+    check(ne_own_interface(&owned,"eth0")&&ne_own_interface(&owned,"wifi0"),"recover live interfaces");
+    publish();check(!get("ANXD/IF/eth0/VERSION"),"absent field removed");
+    value("ANXD/IF/eth0/ADDRESS","192.168.1.2");check(get("ANXD/IF/eth0/ADDRESS")!=NULL,"present field kept");
+    memset(&owned,0,sizeof(owned));
+    for(i=0;i<NE_IF_MAX;i++){char n[16];snprintf(n,sizeof(n),"if%u",i);
+        check(ne_own_interface(&owned,n),"recovery fits the most interfaces");}
+    t.count=t.used=0;publish();
     t.count=t.used=0;
     check(ne_own(&owned,"ANXD/IF/old0/ADDRESS"),"recover previous instance key");
     check(write_env(NULL,"ANXD/IF/old0/ADDRESS","10.0.0.2"),"old ENV value");

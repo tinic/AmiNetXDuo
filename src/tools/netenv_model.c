@@ -34,6 +34,8 @@ static void ipv4(uint32_t address, char out[16])
     }
 }
 
+int ne_own(NeOwned *owned, const char *name);
+
 static void mac(const uint8_t m[6], char out[18])
 {
     static const char hex[] = "0123456789abcdef";
@@ -217,6 +219,24 @@ int ne_build(const NeSnapshot *s, NeTable *out)
                                 !append(gateway, sizeof(gateway), f->name))) return 0;
         if (!add(out, "ANXD/DEFAULT6/INTERFACE", f->name) ||
             !add(out, "ANXD/DEFAULT6/GATEWAY", gateway)) return 0;
+    }
+    return 1;
+}
+
+/* Every per-interface key ne_build() publishes. */
+static const char *const if_fields[] = {
+    "ADDRESS", "NETMASK", "STATE", "ADDR6", "MAC", "DEVICE", "UNIT", "VERSION"
+};
+
+int ne_own_interface(NeOwned *owned, const char *name)
+{
+    unsigned i;
+    char key[32];
+    for (i = 0; i < sizeof(if_fields) / sizeof(if_fields[0]); i++) {
+        strcpy(key, "ANXD/IF/");
+        if (!append(key, sizeof(key), name) || !append(key, sizeof(key), "/") ||
+            !append(key, sizeof(key), if_fields[i]) || !ne_own(owned, key))
+            return 0;
     }
     return 1;
 }

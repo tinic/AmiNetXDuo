@@ -62,6 +62,9 @@ int ne_name_valid(const char *name);
 int ne_build(const NeSnapshot *snapshot, NeTable *out);
 const char *ne_value(const NeTable *table, const char *name);
 int ne_own(NeOwned *owned, const char *name);
+/* Own every ANXD/IF/<name>/ key ne_build() can publish, for recovery after
+ * an abnormal end. 0 when the table is full. */
+int ne_own_interface(NeOwned *owned, const char *name);
 int ne_publish(NeOwned *owned, const NeTable *desired,
                NeRead read_value, NeWrite write_value, void *ctx);
 /* AmigaDOS IoErr() values for an ENV: object that is already gone. */

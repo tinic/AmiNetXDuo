@@ -251,8 +251,7 @@ static void recover(void)
         "ANXD/DEFAULT/ADDRESS", "ANXD/DEFAULT/NETMASK", "ANXD/DEFAULT/GATEWAY",
         "ANXD/DEFAULT6/INTERFACE", "ANXD/DEFAULT6/GATEWAY"
     };
-    static const char *const fields[] = {"ADDRESS", "NETMASK", "STATE", "ADDR6"};
-    char list[NE_IF_MAX * 16], key[32], *name, *end;
+    char list[NE_IF_MAX * 16], *name, *end;
     struct FileInfoBlock *fib;
     BPTR directory;
     unsigned i;
@@ -263,12 +262,9 @@ static void recover(void)
         while (ExNext(directory, fib)) {
             const char *saved = (const char *)fib->fib_FileName;
             if (fib->fib_DirEntryType <= 0 || !ne_name_valid(saved)) continue;
-            for (i = 0; i < 4; i++) {
-                strcpy(key, "ANXD/IF/"); strcat(key, saved); strcat(key, "/"); strcat(key, fields[i]);
-                if (!ne_own(&owned, key)) {
-                    tool_error("too many old interface exports to recover");
-                    goto scan_done;
-                }
+            if (!ne_own_interface(&owned, saved)) {
+                tool_error("too many old interface exports to recover");
+                goto scan_done;
             }
         }
     }
@@ -281,10 +277,7 @@ scan_done:
         end = name;
         while (*end && *end != ' ') end++;
         if (*end) *end++ = 0;
-        if (ne_name_valid(name)) for (i = 0; i < 4; i++) {
-            strcpy(key, "ANXD/IF/"); strcat(key, name); strcat(key, "/"); strcat(key, fields[i]);
-            (void)ne_own(&owned, key);
-        }
+        if (ne_name_valid(name)) (void)ne_own_interface(&owned, name);
         name = end;
     }
 }
