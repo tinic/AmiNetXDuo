@@ -90,8 +90,9 @@ static ULONG ndc_field_lines;
  * emulation -- makes one line's count SHORT and never long: the beam moves on
  * while nothing reads it.  One line counted once read 1 on the gayleratio
  * cpu_multiplier=64 arm (2026-11-11) against 49 recorded, and a count that
- * low shrinks ndc_cap() until it ends a wait early.  Eight is half a
- * millisecond, once, on the claim path.
+ * low shrinks ndc_cap() until it ends a wait early.  The longest of eight is a
+ * whole line when at least one of them ran undisturbed; stalls in all eight
+ * still count it short.  Eight is half a millisecond, once, on the claim path.
  */
 #define NDC_LINES_WATCHED   8u
 
