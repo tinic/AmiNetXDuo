@@ -134,7 +134,8 @@ static ULONG ndc_measure_field(VOID)
 /*
  * Measure once: does the beam move, how many iterations of a bare spin fit
  * between two of its transitions, and how long a line is on this machine.  The
- * middle number decides nothing; netdev_pcmcia.c publishes it as evidence.
+ * middle number sizes ndc_cap() and the spin floor of
+ * netdev_clock_floor_spins(), and netdev_pcmcia.c publishes it as evidence.
  */
 static VOID ndc_measure(VOID)
 {
