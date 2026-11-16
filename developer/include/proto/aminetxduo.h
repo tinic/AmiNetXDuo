@@ -1,4 +1,4 @@
-/* Automatically generated header (sfdc 1.13)! Do not edit! */
+/* Automatically generated header (sfdc 1.14)! Do not edit! */
 
 #ifndef PROTO_AMINETXDUO_H
 #define PROTO_AMINETXDUO_H
@@ -38,6 +38,8 @@
 #  else
 #   include <inline/aminetxduo.h>
 #  endif
+# elif defined(__VBCC__)
+#  include <inline/aminetxduo_protos.h>
 # else
 #  include <pragmas/aminetxduo_pragmas.h>
 # endif

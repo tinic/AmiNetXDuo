@@ -15,7 +15,7 @@ What is in here
 
   include/aminetxduo/     the types and the constants
   include/clib/           C prototypes
-  include/inline/         gcc inline macros
+  include/inline/         gcc inline macros; the _protos.h files are for vbcc
   include/pragmas/        SAS/C, DICE, StormC, Maxon, Aztec pragmas
   include/proto/          the one header to include; picks the two above
   include/lvo/            assembler EQUs

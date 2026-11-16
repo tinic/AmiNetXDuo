@@ -31,6 +31,10 @@ HUNK_DREL32, HUNK_DREL16, HUNK_DREL8 = 0x3F7, 0x3F8, 0x3F9
 HUNK_RELOC32SHORT, HUNK_RELRELOC32, HUNK_ABSRELOC16 = 0x3FC, 0x3FD, 0x3FE
 EXT_RELREF32 = 136
 EXT_COMMONS = (130, 137)
+# binutils 2.47 (AmigaPorts 16.2-rc25): a reference below the VBCC subtypes
+# can carry flag bits, 0x40 for a weak reference and 0x20 for a local one.
+# The field is the same width and is relocated the same way.
+EXT_FLAGS, EXT_FLAGS_END = 0x60, 208
 # Field width of every relocation the object can carry: those bytes are the
 # linker's to write, every other byte of an input code hunk must reach the
 # image unchanged.
@@ -154,6 +158,8 @@ def parse_units(data):
                 if ty < 128:
                     r.l()
                     continue
+                if ty < EXT_FLAGS_END:
+                    ty &= ~EXT_FLAGS
                 if ty in EXT_COMMONS:
                     r.l()
                 if ty not in EXT_WIDTH:

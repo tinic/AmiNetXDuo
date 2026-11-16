@@ -1,4 +1,4 @@
-/* Automatically generated header (sfdc 1.13)! Do not edit! */
+/* Automatically generated header (sfdc 1.14)! Do not edit! */
 
 #ifndef PROTO_TLS_H
 #define PROTO_TLS_H
@@ -38,6 +38,8 @@
 #  else
 #   include <inline/tls.h>
 #  endif
+# elif defined(__VBCC__)
+#  include <inline/tls_protos.h>
 # else
 #  include <pragmas/tls_pragmas.h>
 # endif
