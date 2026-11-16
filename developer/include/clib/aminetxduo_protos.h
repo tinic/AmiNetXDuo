@@ -1,4 +1,4 @@
-/* Automatically generated header (sfdc 1.13)! Do not edit! */
+/* Automatically generated header (sfdc 1.14)! Do not edit! */
 
 #ifndef CLIB_AMINETXDUO_PROTOS_H
 #define CLIB_AMINETXDUO_PROTOS_H

@@ -47,7 +47,7 @@ gen() {
     # gen <sfd> <mode> <dest root> <relative output path>
     local sfd="$1" mode="$2" out="$3$4"
     mkdir -p "$(dirname "$out")"
-    "$SFDC" --quiet --target=m68k-amigaos --mode="$mode" "$sfd" \
+    "$SFDC" --quiet --target="${GEN_TARGET:-m68k-amigaos}" --mode="$mode" "$sfd" \
         | sed '/^\*\*       All Rights Reserved$/d' > "$out"
 }
 
@@ -63,6 +63,10 @@ emit() {
     gen "$TLS_SFD" proto   "$1" /proto/tls.h
     gen "$TLS_SFD" pragmas "$1" /pragmas/tls_pragmas.h
     gen "$TLS_SFD" lvo     "$1" /lvo/tls_lib.i
+
+    # The vbcc inline headers: the proto headers of sfdc 1.14 include them.
+    GEN_TARGET=m68kvbcc-amigaos gen "$SFD"     macros "$1" /inline/aminetxduo_protos.h
+    GEN_TARGET=m68kvbcc-amigaos gen "$TLS_SFD" macros "$1" /inline/tls_protos.h
 }
 
 DEST="$ROOT/developer/include"

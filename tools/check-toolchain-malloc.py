@@ -37,20 +37,21 @@ EXPECTED_MALLOC_SHA256 = {
 }
 
 
-# AmigaPorts 16.2-rc22 (GCC bcd5f64e, newlib 7d0701e3): eight multilibs,
-# identical on Linux and macOS. The custom allocator is mallocr.cpp, unchanged
-# since newlib e07bea74; the bytes moved with the compiler. libc_a-malloc.o is
+# AmigaPorts 16.2-rc25 (newlib 5863aa0e): eight multilibs, identical on Linux
+# and macOS. The custom allocator is mallocr.cpp; 5863aa0e gave malloc() a
+# benaphore of the heap's own in place of a dummy mutex, so these bytes differ
+# from rc22 to rc24 in source, not only in the compiler. libc_a-malloc.o is
 # only a public wrapper around _malloc_r and must never stand in for the
 # allocator in this gate.
 AMIGAPORTS_MALLOC_SHA256 = {
-    "": "7db2a98c7522ea702ebf3d8487205cd95f2df89414c72039b0fbeef524799157",
-    "libb": "3c355e69fae379a1049025b4ce56abb71d448e490b0100e1fc8fc481a045b427",
-    "libb/libm020": "762830f381989ecd66b0f002e85f8e6f2e263cf6b33b6003903b1586b69d5f90",
-    "libb/libm020/libm881": "762830f381989ecd66b0f002e85f8e6f2e263cf6b33b6003903b1586b69d5f90",
-    "libb32/libm020": "4da57b82b6291627050b04ab73c35c019babba0357e9ef959f8b6cffc7c3bd33",
-    "libb32/libm020/libm881": "4da57b82b6291627050b04ab73c35c019babba0357e9ef959f8b6cffc7c3bd33",
-    "libm020": "c9559af1cbaf0ea6d82c0d83dec9f2b7c9e11b70319fbf8b721278297cd4acc1",
-    "libm020/libm881": "c9559af1cbaf0ea6d82c0d83dec9f2b7c9e11b70319fbf8b721278297cd4acc1",
+    "": "ac56c08a424dce74c6486d2c96dbc9f58c382e1a953ceb1ce06ef7d212cba3c5",
+    "libb": "aad9c851f01518fa658a754406005850636bd7a6d22513627b1f37947c2f91bf",
+    "libb/libm020": "ca781684cb04a7cc6041c8130ddfa5e226f82e472a7e8c5070b2221150b76e78",
+    "libb/libm020/libm881": "ca781684cb04a7cc6041c8130ddfa5e226f82e472a7e8c5070b2221150b76e78",
+    "libb32/libm020": "d965a090cabfedcfbbf459c8031396be12acbb3c3edc2ea56ea349dae11bfeb9",
+    "libb32/libm020/libm881": "d965a090cabfedcfbbf459c8031396be12acbb3c3edc2ea56ea349dae11bfeb9",
+    "libm020": "62c399918b1c2d4eb9622629d5a9741400987b7df98e44f11953d333cfc7645e",
+    "libm020/libm881": "62c399918b1c2d4eb9622629d5a9741400987b7df98e44f11953d333cfc7645e",
 }
 
 
