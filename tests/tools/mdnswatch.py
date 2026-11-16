@@ -57,6 +57,16 @@ def log_open(path):
     return open(path, "w", buffering=1)
 
 
+def label_text(raw):
+    """A label as text that keeps the log greppable.
+
+    Another machine's name can carry a NUL or a control byte, and one of
+    those makes grep call the whole log binary and print no line of it.
+    """
+    return "".join(c if c.isprintable() else "\\x%02x" % ord(c)
+                   for c in raw.decode("utf-8", "replace"))
+
+
 def parse_name(data, offset, depth=0):
     """Decode a DNS name. Returns (labels, next_offset)."""
     labels = []
@@ -74,7 +84,7 @@ def parse_name(data, offset, depth=0):
             labels.extend(more)
             return labels, offset + 2
         offset += 1
-        labels.append(data[offset:offset + n].decode("utf-8", "replace"))
+        labels.append(label_text(data[offset:offset + n]))
         offset += n
     return labels, offset
 
