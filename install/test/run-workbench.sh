@@ -4908,6 +4908,30 @@ fi
 # the documentation drawer, which holds the removed drawer install's Devs.
 STALE_ASSIGN=""
 [ "$STALE_DRAWER" != 1 ] || STALE_ASSIGN='Assign AmiNetXDuo: "SYS:AmiNetXDuo"'
+# The checks need a default route and a name server, and a boot can be past
+# S:Network-Startup without them: a DHCP server that offers an address another
+# machine answers for gets a DHCPDECLINE, the interface takes a link-local
+# address, and the client asks again after the 10 seconds RFC 2131 3.1 sets.
+# So the script waits as the Installer does, with GetNetStatus every 2 seconds
+# for at most 40, and writes down how many times it waited.  A stack that
+# GetNetStatus cannot ask (rc 10) ends the wait at once; what follows judges
+# the network either way.
+NET_READY=$(cat <<'READY'
+Set anxtries 0
+Lab AnxNetReady
+C:GetNetStatus CHECK=DEFAULTROUTE,RESOLVER QUIET
+If WARN
+  If NOT ERROR
+    If $anxtries LT 20 VAL
+      Set anxtries `Eval $anxtries + 1`
+      C:Wait 2
+      Skip AnxNetReady BACK
+    EndIf
+  EndIf
+EndIf
+Echo >>DH0:usercheck.txt "RESULT net-ready waits=$anxtries"
+READY
+)
 cat > "$HD/S/AmiNetXDuo-Check" <<EOF
 ; Written by install/test/run-workbench.sh.  Nothing here is installed
 ; by AmiNetXDuo, it is what a user would type.
@@ -4918,6 +4942,7 @@ $MANUAL_START
 Echo >DH0:usercheck.txt "=== 1. the installed network"
 C:Wait 5
 $STALE_ASSIGN
+$NET_READY
 C:ShowNetStatus >>DH0:usercheck.txt
 Echo >>DH0:usercheck.txt "RESULT network rc=\$RC"
 
