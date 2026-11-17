@@ -301,8 +301,9 @@ arm_wire_format() {
 
 HTTPD="$BUILD/src/tools/httpd"
 BSD="$BUILD/src/bsdsocket/bsdsocket.library"
+ADDIF="$BUILD/src/tools/AddNetInterface"
 
-for f in "$HTTPD" "$BSD"; do
+for f in "$HTTPD" "$BSD" "$ADDIF"; do
     [ -f "$f" ] || {
         say error "no $f"
         say hint "cmake --build $BUILD --parallel"
@@ -466,6 +467,8 @@ stage() {
 
     cp "$HTTPD" "$HD/C/httpd"
     chmod 755 "$HD/C/httpd"
+    cp "$ADDIF" "$HD/C/AddNetInterface"
+    chmod 755 "$HD/C/AddNetInterface"
 
     mkdir -p "$HD/Libs" "$HD/Devs/Networks" "$HD/Devs/NetInterfaces"
     cp "$BSD" "$HD/Libs/bsdsocket.library"
@@ -569,6 +572,7 @@ EOF
     fi
 
     cat >> "$HD/S/Startup-Sequence" <<EOF
+C:AddNetInterface >DH0:addnetif.txt DEVS:NetInterfaces/~(#?.info)
 Run >DH0:httpd.txt <NIL: C:httpd DH0:Public $PORT -C CONSOLEPAGE DH0:Console/console.html -v
 EOF
     [ "$ACTIVITY" = "scroll" ] && cat >> "$HD/S/Startup-Sequence" <<'EOF'

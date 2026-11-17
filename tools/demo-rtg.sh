@@ -54,14 +54,14 @@ done
 
 TOOLS="$BUILD/src/tools"
 HTTPD="$TOOLS/httpd"
+ADDIF="$TOOLS/AddNetInterface"
 BSD="$BUILD/src/bsdsocket/bsdsocket.library"
 SHELLPAGE="$ROOT/src/tools/web/shell.html"
 CONSOLEPAGE="$ROOT/src/tools/web/console.html"
-RTGSCREEN="${AMINETXDUO_RTGSCREEN:-$BUILD/tests/perf/rtgscreen}"
 A2065="${AMINETXDUO_A2065:-$HOME/amiga-assets/devs/a2065.device}"
 
-for f in "$HTTPD" "$BSD" "$SHELLPAGE" "$SHELLPAGE.gz" \
-         "$CONSOLEPAGE" "$CONSOLEPAGE.gz" "$RTGSCREEN" "$A2065"; do
+for f in "$HTTPD" "$BSD" "$ADDIF" "$SHELLPAGE" "$SHELLPAGE.gz" \
+         "$CONSOLEPAGE" "$CONSOLEPAGE.gz" "$A2065"; do
     [ -f "$f" ] || { say error "missing $f"; exit 2; }
 done
 for f in Libs/Picasso96API.library Libs/Picasso96/rtg.library \
@@ -169,6 +169,7 @@ cp -R "$WB/." "$HD/"
 mkdir -p "$HD/Libs" "$HD/Devs/Networks" "$HD/Devs/NetInterfaces" \
          "$HD/Devs/Internet" "$HD/Devs/Monitors"
 cp "$BSD" "$HD/Libs/bsdsocket.library"
+cp "$ADDIF" "$HD/C/AddNetInterface"; chmod 755 "$HD/C/AddNetInterface"
 cp "$A2065" "$HD/Devs/Networks/a2065.device"
 [ -f "$BUILD/src/tlslib/tls.library" ] && cp "$BUILD/src/tlslib/tls.library" "$HD/Libs/"
 for m in mathieeedoubbas mathieeedoubtrans; do
@@ -190,7 +191,6 @@ for t in "$TOOLS"/*; do
     esac
     cp -f "$t" "$HD/C/" 2>/dev/null || true
 done
-cp -f "$RTGSCREEN" "$HD/C/rtgscreen"
 
 DEMO_SSH="${AMINETXDUO_DEMO_SSH:-}"
 if [ -z "$DEMO_SSH" ]; then
@@ -266,6 +266,7 @@ cat >> "$HD/S/Startup-Sequence" <<EOF
 
 FailAt 9999
 C:Wait 6
+C:AddNetInterface >NIL: DEVS:NetInterfaces/~(#?.info) QUIET
 Run >NIL: <NIL: C:httpd DH0:Public $PORT -T PAGE=DH0:shell.html -C CONSOLEPAGE=DH0:Console/console.html
 C:Wait 3
 EndCLI >NIL:
@@ -358,9 +359,8 @@ say window_expires "$(date -u -d "+$WINDOW seconds" '+%Y-%m-%dT%H:%M:%SZ')"
 # how playhouse3 filled once already.  So the MAC is read off the WIRE instead,
 # by its Commodore OUI, which is the same fact from the other end.
 #
-# There is nothing to see until httpd runs: bsdsocket.library configures the
-# interface when the first program opens it, so a guest that is booting is a
-# guest that is silent.
+# There is nothing to see until AddNetInterface runs just before httpd, so a
+# guest that is booting is a guest that is silent.
 GUESTMAC=""
 for _ in $(seq 1 "$BOOT_MAX"); do
     sleep 1
