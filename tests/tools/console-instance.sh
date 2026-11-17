@@ -145,7 +145,8 @@ rig_claim_drive "$HD" "console-instance in $RUN" "$BACKEND" 0 || {
 
 HTTPD="$BUILD/src/tools/httpd"
 BSD="$BUILD/src/bsdsocket/bsdsocket.library"
-for f in "$HTTPD" "$BSD"; do
+ADDIF="$BUILD/src/tools/AddNetInterface"
+for f in "$HTTPD" "$BSD" "$ADDIF"; do
     [ -f "$f" ] || { say error "no $f"; say hint "cmake --build $BUILD --parallel"; say RESULT INFRA; exit 2; }
 done
 
@@ -181,6 +182,7 @@ rm -rf "$HD"
 mkdir -p "$HD/Public" "$HD/Console"
 cp -R "$WB/." "$HD/"
 cp "$HTTPD" "$HD/C/httpd"; chmod 755 "$HD/C/httpd"
+cp "$ADDIF" "$HD/C/AddNetInterface"; chmod 755 "$HD/C/AddNetInterface"
 mkdir -p "$HD/Libs" "$HD/Devs/Networks" "$HD/Devs/NetInterfaces"
 cp "$BSD" "$HD/Libs/bsdsocket.library"
 cp "$A2065" "$HD/Devs/Networks/a2065.device"
@@ -241,6 +243,7 @@ cat >> "$HD/S/Startup-Sequence" <<EOF
 
 FailAt 9999
 C:Wait 6
+C:AddNetInterface >NIL: DEVS:NetInterfaces/~(#?.info) QUIET
 Run >NIL: <NIL: C:Execute S:httpd-run
 EOF
 chmod 755 "$HD/S/Startup-Sequence"

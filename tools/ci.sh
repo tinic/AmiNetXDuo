@@ -3411,7 +3411,7 @@ stage_bridged() {
 stage_console() {
     hr "console screens (tier 2, needs a real link and a second host)"
 
-    local rc=0 bad=0
+    local rc=0 bad=0 ran=0
 
     if [ -z "${AMINETXDUO_CONSOLE_CLIENT:-}" ]; then
         skip "console: AMINETXDUO_CONSOLE_CLIENT is not set, so there is no" \
@@ -3439,16 +3439,18 @@ stage_console() {
             -c "$AMINETXDUO_CONSOLE_CLIENT" \
             -o "$BUILD/console-out-$cname" $cargs || rc=$?
         case "$rc" in
-            0) note "PASS  console $cname" ;;
+            0) note "PASS  console $cname"; ran=1 ;;
             2) skip "console $cname: an ingredient is missing on this machine" ;;
             *) fail "console $cname: the screen on the wire is not the screen\
  the guest opened, or the picture did not come back -- the key=value lines\
  above name the arm and the pixel report"
-               bad=1 ;;
+               bad=1; ran=1 ;;
         esac
     done
 
     [ "$bad" = 0 ] || return 1
+    # Every arm skipped is not a pass.
+    [ "$ran" = 1 ] || return "$NOTHING"
     return 0
 }
 
