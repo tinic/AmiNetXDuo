@@ -96,14 +96,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
         rel = "/".join(rest)
         root = os.path.realpath(self.root)
         path = os.path.realpath(os.path.join(root, *rest))
-        if not path.startswith(root + os.sep) or not os.path.isfile(path):
+        if not path.startswith(root + os.sep):
+            self.answer(404, b"no such file\n")
+            self.record(token, rel, 404, 0, 0)
+            return
+        if not os.path.isfile(path):
             self.answer(404, b"no such file\n")
             self.record(token, rel, 404, 0, 0)
             return
         size = os.path.getsize(path)
         limit = size
         if rest[2].endswith(".lha") and \
-                os.path.exists(os.path.join(self.root, rest[0], "DROP")):
+                os.path.exists(os.path.join(os.path.dirname(os.path.dirname(path)),
+                                            "DROP")):
             limit = size // 2
         self.send_response(200)
         self.send_header("Content-Type", "application/octet-stream")
