@@ -94,8 +94,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.record(token, "/".join(rest)[:80], 404, 0, 0)
             return
         rel = "/".join(rest)
-        path = os.path.join(self.root, *rest)
-        if not os.path.isfile(path):
+        root = os.path.realpath(self.root)
+        path = os.path.realpath(os.path.join(root, *rest))
+        if not path.startswith(root + os.sep) or not os.path.isfile(path):
             self.answer(404, b"no such file\n")
             self.record(token, rel, 404, 0, 0)
             return
