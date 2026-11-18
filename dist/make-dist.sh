@@ -82,7 +82,7 @@ CMDS=(AddNetInterface NetSetup NetPrefs NetMeter NetSwitch NetEnv NetWireless Ne
       whois httpd
       iperf
       CheckNetConfig CheckNetDevice CreateAmiNetXDuoStatusReport
-      GetNetStatus NetShutdown RemoveNetInterface
+      GetNetStatus NetShutdown SyncReboot RemoveNetInterface
       ConfigureNetInterface
       AddNetRoute DeleteNetRoute
       NetDevStats

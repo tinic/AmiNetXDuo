@@ -60,6 +60,11 @@ static char *field(char *s)
 
 static BOOL finished(VOID) { return (SetSignal(0UL, 0UL) & gone) != 0; }
 
+/* SyncReboot is in the inventory: its ColdReboot() returns here, so its cases
+ * end with a return code instead of restarting the guest mid-batch. */
+#define LVO_COLDREBOOT (-726)
+static VOID no_reboot(VOID) { }
+
 /* Budgets are elapsed E-clock time, not Delay() turns: a busy child stretches
  * turns. E-clock is monotonic (sntp may step the clock); the low word wraps
  * after over an hour, well past any budget. */
@@ -293,6 +298,7 @@ int main(int argc, char **argv)
     BPTR cases;
     BYTE bit;
     LONG rc = 0;
+    APTR cold;
     (VOID)argc; (VOID)argv;
     parent = FindTask(NULL);
     bit = AllocSignal(-1);
@@ -310,6 +316,7 @@ int main(int argc, char **argv)
         struct EClockVal ev;
         eclock_hz = ReadEClock(&ev);
     }
+    cold = SetFunction((struct Library *)SysBase, LVO_COLDREBOOT, (APTR)no_reboot);
     IntuitionBase = (struct IntuitionBase *)OpenLibrary((CONST_STRPTR)"intuition.library", 37);
     journal = Open((CONST_STRPTR)"DH0:cli-results.tsv", MODE_NEWFILE);
     cases = Open((CONST_STRPTR)"DH0:cli-cases.tsv", MODE_OLDFILE);
@@ -340,6 +347,7 @@ int main(int argc, char **argv)
     if (journal) Close(journal);
     if (IntuitionBase) CloseLibrary((struct Library *)IntuitionBase);
     if (close_port) DeleteMsgPort(close_port);
+    (VOID)SetFunction((struct Library *)SysBase, LVO_COLDREBOOT, cold);
     CloseDevice((struct IORequest *)&timer_io);
     SetTaskPri(parent, child_pri);
     FreeSignal(bit);
