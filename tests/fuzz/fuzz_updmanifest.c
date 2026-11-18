@@ -183,7 +183,12 @@ static unsigned long fz_end(char *out, unsigned long n)
         lines += (out[i] == '\n');
 
     if (n + 16UL < FZ_TEXT_MAX)
-        n += (unsigned long)snprintf(out + n, 16, "end=%lu\n", lines);
+    {
+        int w = snprintf(out + n, 16, "end=%lu\n", lines);
+
+        if (w > 0 && w < 16)
+            n += (unsigned long)w;
+    }
 
     return n;
 }
@@ -274,8 +279,13 @@ static int fz_seeds(void)
     /* The whole seed set, then every prefix of it. */
     for (i = 0; i < FZ_NLINES; i++)
     {
-        n += (unsigned long)snprintf(text + n, sizeof(text) - n, "%s\n",
-                                     fz_lines[i]);
+        unsigned long ln = strlen(fz_lines[i]);
+
+        if (n + ln + 1UL >= sizeof(text))
+            break;
+        memcpy(text + n, fz_lines[i], ln);
+        n += ln;
+        text[n++] = '\n';
     }
     n = fz_end(text, n);
 

@@ -551,7 +551,10 @@ host_test_targets() { # builddir
 #      entry and exit (x86_64 only).
 #      600 with addif_link (#457): AddNetInterface holds a Wi-Fi interface
 #      back until the card has joined (all hosts).
-HOST_TESTS_EXPECTED=600
+#      605 with updver_order, updmanifest_refusals, updsig_ed25519 and
+#      fuzz_updmanifest_{seeds,sweep} (#497): the updater's version order,
+#      manifest parser and signature check (all hosts).
+HOST_TESTS_EXPECTED=605
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,
