@@ -556,7 +556,10 @@ host_test_targets() { # builddir
 #      manifest parser and signature check (all hosts).
 #      606 with updcheck_verdict (#497): UpdateAmiNetXDuo CHECK's settings,
 #      flavour, URLs, date and verdict over signed manifests (all hosts).
-HOST_TESTS_EXPECTED=606
+#      608 with updinstall_select and updinstall_journal (#497):
+#      UpdateAmiNetXDuo INSTALL's receipt, three-way selection, container
+#      headers, journal, and the swap cut after every step (all hosts).
+HOST_TESTS_EXPECTED=608
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,

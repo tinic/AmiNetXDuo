@@ -192,7 +192,10 @@ BUDGETS=(
     # load it on every boot (BOOT, CONFIRM).  32,648 with CHECK (fetchcore,
     # the manifest parser, Ed25519, SHA-512) and one key, 2026-11-18.  With
     # no release key yet, LTO drops the check and it is 27,040.
-    "default:src/tools/UpdateAmiNetXDuo:34816"
+    # -> 51,464 the same day with INSTALL: SHA-256, the receipt selection,
+    # the container reader, the journal and the swap (updinstall.c); BSS
+    # 30,052 -> 38,624 (a 4 KB chunk buffer, the swap paths).
+    "default:src/tools/UpdateAmiNetXDuo:53248"
     # 225,876 -> 226,216 on 2026-09-17: the write queue behind the SANA-II
     # ring and its launcher (a round trip in flight for every card: A1200
     # sends 180 -> 275 Mbit/s on the LAN, 12 -> 198 over 26 ms), the 1 MB
@@ -326,8 +329,9 @@ BUDGETS=(
     "fat:src/wifipi/anxwifipi.device:71000"
     "fat:src/usergroup/usergroup.library:15360"
     "fat:src/tlslib/tls.library:244000"
-    # UpdateAmiNetXDuo in C/fat: 38,288 with CHECK and one key, 2026-11-18.
-    "fat:src/tools/UpdateAmiNetXDuo:40960"
+    # UpdateAmiNetXDuo in C/fat: 38,288 with CHECK and one key, 2026-11-18;
+    # 63,900 with INSTALL the same day.
+    "fat:src/tools/UpdateAmiNetXDuo:65536"
 )
 
 budgeted=0

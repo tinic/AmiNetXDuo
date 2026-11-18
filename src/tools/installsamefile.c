@@ -41,8 +41,22 @@
  * it set, RETURN_WARN when the record names none, RETURN_ERROR when the file
  * cannot be read.
  *
+ * RECEIPT: FIRST is the install receipt UpdateAmiNetXDuo INSTALL reads
+ * (src/tools/updinstall.h), SECOND triples of SOURCE DEST NAME.  A SOURCE
+ * drawer is each plain file in it but icons, at DEST/<file>, named
+ * NAME<file>; a SOURCE file is DEST itself, named NAME.  Every DEST holding
+ * the same bytes as its SOURCE -- the file this installation placed --
+ * gets a "<sha256> <name>" line, once per name, after the lines FIRST
+ * holds already; written to FIRST.tmp and renamed over FIRST.  RETURN_OK
+ * with the receipt written, RETURN_ERROR otherwise, and then FIRST is as it
+ * was.  The Installer deletes FIRST first and calls once per drawer, which
+ * keeps each command line short.
+ *
  * SPDX-License-Identifier: MIT
  */
+
+/* First, as tools.h has it: c68k_sha256.h's UINT and UCHAR. */
+#include "tx_api.h"
 
 #include <exec/types.h>
 #include <exec/memory.h>
@@ -58,13 +72,15 @@
 #include "aminetxduo/version.h"
 #include "aminetxduo/config.h"
 #include "devicehome.h"
+#include "c68k_sha256.h"
 
 const char *const tool_name = "InstallSameFile";
 
 static const char version_tag[] __attribute__((used)) =
     TOOL_VERSTAG("InstallSameFile");
 
-#define TEMPLATE "FIRST/A,SECOND/A/M,DEVICES/S,HOSTLINE/S,BYTES/S,MARK/S,DRAWER/S"
+#define TEMPLATE "FIRST/A,SECOND/A/M,DEVICES/S,HOSTLINE/S,BYTES/S,MARK/S,DRAWER/S," \
+                 "RECEIPT/S"
 
 /* An interface file is a few hundred bytes; the cap only bounds a stray. */
 #define DEVICES_FILE_MAX 65536L
@@ -79,6 +95,7 @@ enum
     ARG_BYTES,
     ARG_MARK,
     ARG_DRAWER,
+    ARG_RECEIPT,
     ARG_COUNT
 };
 
@@ -373,6 +390,192 @@ static LONG record_drawer(const char *file, const char *var)
     return rc;
 }
 
+/* ---- RECEIPT ---- */
+
+#define RECEIPT_MAX     (32L * 1024L)
+#define RECEIPT_PATH    256
+
+static char *rc_text;
+static LONG  rc_len;
+static char  rc_src[RECEIPT_PATH];
+static char  rc_dst[RECEIPT_PATH];
+static char  rc_name[RECEIPT_PATH];
+
+static int rc_lower(int c)
+{
+    return (c >= 'A' && c <= 'Z') ? c + ('a' - 'A') : c;
+}
+
+/* The receipt has a line for `name` already. */
+static int rc_listed(const char *name)
+{
+    LONG i = 0, n = (LONG)strlen(name);
+
+    while (i < rc_len)
+    {
+        LONG e = i, k;
+
+        while (e < rc_len && rc_text[e] != '\n')
+            e++;
+        if (e - i - 65 == n)
+        {
+            for (k = 0; k < n; k++)
+                if (rc_lower((unsigned char)rc_text[i + 65 + k]) !=
+                    rc_lower((unsigned char)name[k]))
+                    break;
+            if (k == n)
+                return 1;
+        }
+        i = e + 1;
+    }
+    return 0;
+}
+
+static int rc_hash(const char *path, UBYTE *sha)
+{
+    static UBYTE  buf[2048];
+    C68K_SHA256   ctx;
+    BPTR          fh = Open((CONST_STRPTR)path, MODE_OLDFILE);
+    LONG          n;
+
+    if (fh == 0)
+        return 0;
+    (VOID)c68k_sha256_initialize(&ctx, NX_CRYPTO_HASH_SHA256);
+    while ((n = Read(fh, buf, sizeof(buf))) > 0)
+        (VOID)c68k_sha256_update(&ctx, buf, (UINT)n);
+    Close(fh);
+    if (n < 0)
+        return 0;
+    (VOID)c68k_sha256_digest_calculate(&ctx, sha, NX_CRYPTO_HASH_SHA256);
+    return 1;
+}
+
+/* One line for DEST named NAME when its bytes are SOURCE's.  0 on an
+   error that must fail the receipt: no room, a placed file unreadable. */
+static int rc_add(const char *src, const char *dst, const char *name)
+{
+    static const char hex[] = "0123456789abcdef";
+    UBYTE sha[32];
+    LONG  n = (LONG)strlen(name), i;
+
+    if (same_bytes(src, dst) != RETURN_OK || rc_listed(name))
+        return 1;
+    if (!rc_hash(dst, sha) || rc_len + 66 + n > RECEIPT_MAX)
+        return 0;
+    for (i = 0; i < 32; i++)
+    {
+        rc_text[rc_len++] = hex[sha[i] >> 4];
+        rc_text[rc_len++] = hex[sha[i] & 15];
+    }
+    rc_text[rc_len++] = ' ';
+    memcpy(rc_text + rc_len, name, (size_t)n);
+    rc_len += n;
+    rc_text[rc_len++] = '\n';
+    return 1;
+}
+
+static int rc_join(char *out, const char *a, const char *b)
+{
+    size_t n = strlen(a);
+
+    if (n + strlen(b) + 2 > RECEIPT_PATH)
+        return 0;
+    strcpy(out, a);
+    if (n > 0 && a[n - 1] != ':' && a[n - 1] != '/')
+        strcat(out, "/");
+    strcat(out, b);
+    return 1;
+}
+
+static int rc_triple(const char *src, const char *dst, const char *name)
+{
+    struct FileInfoBlock *fib;
+    BPTR                  lock = Lock((CONST_STRPTR)src, ACCESS_READ);
+    int                   ok = 1;
+
+    if (lock == 0)
+        return 1;                       /* not in this archive            */
+    fib = (struct FileInfoBlock *)AllocDosObject(DOS_FIB, NULL);
+    if (fib == NULL || !Examine(lock, fib))
+        ok = 0;
+    else if (fib->fib_DirEntryType < 0)
+        ok = rc_add(src, dst, name);
+    else
+        while (ok && ExNext(lock, fib))
+        {
+            size_t fl = strlen((const char *)fib->fib_FileName);
+
+            if (fib->fib_DirEntryType >= 0 ||
+                (fl > 5 && strcmp((const char *)fib->fib_FileName + fl - 5, ".info") == 0))
+                continue;
+            if (strlen(name) + fl + 1 > RECEIPT_PATH ||
+                !rc_join(rc_src, src, (const char *)fib->fib_FileName) ||
+                !rc_join(rc_dst, dst, (const char *)fib->fib_FileName))
+            {
+                ok = 0;
+                break;
+            }
+            strcpy(rc_name, name);
+            strcat(rc_name, (const char *)fib->fib_FileName);
+            ok = rc_add(rc_src, rc_dst, rc_name);
+        }
+    if (fib != NULL)
+        FreeDosObject(DOS_FIB, fib);
+    UnLock(lock);
+    return ok;
+}
+
+static LONG write_receipt(const char *file, STRPTR *second)
+{
+    char  tmp[RECEIPT_PATH];
+    ULONG n = 0;
+    LONG  rc = RETURN_ERROR;
+    BPTR  fh;
+
+    while (second[n] != NULL)
+        n++;
+    if (n == 0 || n % 3 != 0 || strlen(file) + 5 > sizeof(tmp))
+        return RETURN_ERROR;
+    rc_text = (char *)AllocVec((ULONG)RECEIPT_MAX, MEMF_ANY);
+    if (rc_text == NULL)
+        return RETURN_ERROR;
+    rc_len = 0;
+    fh = Open((CONST_STRPTR)file, MODE_OLDFILE);
+    if (fh != 0)
+    {
+        rc_len = Read(fh, rc_text, RECEIPT_MAX);
+        Close(fh);
+        if (rc_len < 0 || rc_len >= RECEIPT_MAX ||
+            (rc_len > 0 && rc_text[rc_len - 1] != '\n'))
+        {
+            FreeVec(rc_text);
+            return RETURN_ERROR;
+        }
+    }
+    for (n = 0; second[n] != NULL; n += 3)
+        if (!rc_triple((const char *)second[n], (const char *)second[n + 1],
+                       (const char *)second[n + 2]))
+            break;
+    strcpy(tmp, file);
+    strcat(tmp, ".tmp");
+    if (second[n] == NULL && rc_len > 0 &&
+        (fh = Open((CONST_STRPTR)tmp, MODE_NEWFILE)) != 0)
+    {
+        LONG wrote = Write(fh, rc_text, rc_len);
+
+        if (Close(fh) && wrote == rc_len)
+        {
+            (VOID)DeleteFile((CONST_STRPTR)file);
+            if (Rename((CONST_STRPTR)tmp, (CONST_STRPTR)file))
+                rc = RETURN_OK;
+        }
+        if (rc != RETURN_OK)
+            (VOID)DeleteFile((CONST_STRPTR)tmp);
+    }
+    FreeVec(rc_text);
+    return rc;
+}
+
 int main(int argc, char **argv)
 {
     LONG           args[ARG_COUNT] = { 0 };
@@ -390,7 +593,9 @@ int main(int argc, char **argv)
         return RETURN_ERROR;
 
     second = (STRPTR *)args[ARG_SECOND];
-    if (args[ARG_DRAWER] != 0)
+    if (args[ARG_RECEIPT] != 0)
+        rc = write_receipt((const char *)args[ARG_FIRST], second);
+    else if (args[ARG_DRAWER] != 0)
         rc = (second[1] != NULL) ? RETURN_ERROR
                                  : record_drawer((const char *)args[ARG_FIRST],
                                                  (const char *)second[0]);

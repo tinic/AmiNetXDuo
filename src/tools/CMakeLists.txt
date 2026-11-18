@@ -219,8 +219,16 @@ aminetxduo_add_tool(tool_addnetinterface AddNetInterface
 # Installer can compare bytes but cannot ask whether two paths are the same
 # object; dos.library can.  The archive keeps this beside the Installer and
 # does not copy it into C:.
+# RECEIPT hashes what it lists with crypto68k's SHA-256, as
+# UpdateAmiNetXDuo INSTALL compares it.
 aminetxduo_add_tool(tool_installsamefile InstallSameFile
-    SOURCES installsamefile.c devicehome.c)
+    SOURCES installsamefile.c devicehome.c
+            "${CMAKE_SOURCE_DIR}/src/crypto68k/c68k_sha256.c")
+target_compile_definitions(tool_installsamefile PRIVATE NX_CRYPTO_STANDALONE_ENABLE)
+target_include_directories(tool_installsamefile PRIVATE
+    "${CMAKE_SOURCE_DIR}/include"
+    "${CMAKE_SOURCE_DIR}/src/crypto68k"
+    "${AMINETXDUO_NETXDUO}/crypto_libraries/inc")
 
 # The other Installer-only primitive: identify Emu68's supported on-board
 # network devices from its device tree without opening either device.
@@ -415,10 +423,13 @@ aminetxduo_add_tool(tool_fetch   fetch    SOURCES fetch.c fetchcore.c fetchurl.c
 # option and tools/check-release-candidate.sh refuses a candidate built with it.
 option(AMINETXDUO_UPDATE_TEST_KEY
     "UpdateAmiNetXDuo accepts only the committed TEST key (scenario tests)" OFF)
+# INSTALL hashes with crypto68k's SHA-256, the TLS record path's.
 aminetxduo_add_tool(tool_updateaminetxduo UpdateAmiNetXDuo RT
-    SOURCES updateaminetxduo.c updcheck.c updkeys.c updsig.c updmanifest.c updver.c
-            fetchcore.c fetchurl.c toolsock.c toolbudget.c
+    SOURCES updateaminetxduo.c updcheck.c updinstall.c updkeys.c updsig.c
+            updmanifest.c updver.c fetchcore.c fetchurl.c toolsock.c
+            toolbudget.c tool_reboot.c
             "${CMAKE_SOURCE_DIR}/src/crypto68k/c68k_25519.c"
+            "${CMAKE_SOURCE_DIR}/src/crypto68k/c68k_sha256.c"
             "${AMINETXDUO_NETXDUO}/crypto_libraries/src/nx_crypto_sha5.c")
 target_compile_definitions(tool_updateaminetxduo PRIVATE NX_CRYPTO_STANDALONE_ENABLE)
 target_include_directories(tool_updateaminetxduo PRIVATE
@@ -1194,7 +1205,16 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_definitions(test_updcheck PRIVATE
         NX_CRYPTO_STANDALONE_ENABLE)
 
-    foreach(_upd test_updver test_updmanifest test_updsig test_updcheck)
+    # INSTALL's decisions: the receipt, the three-way selection, the
+    # container headers, the journal, and the swap cut after every step.
+    add_executable(test_updinstall
+        test/test_updinstall.c
+        updinstall.c
+        updmanifest.c
+        updver.c)
+
+    foreach(_upd test_updver test_updmanifest test_updsig test_updcheck
+                 test_updinstall)
         target_include_directories(${_upd} PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}")
         target_compile_options(${_upd} PRIVATE -Wall -Wextra)
@@ -1439,6 +1459,8 @@ if(NOT CMAKE_CROSSCOMPILING)
     add_test(NAME updmanifest_refusals COMMAND test_updmanifest)
     add_test(NAME updsig_ed25519 COMMAND test_updsig)
     add_test(NAME updcheck_verdict COMMAND test_updcheck)
+    add_test(NAME updinstall_select COMMAND test_updinstall select)
+    add_test(NAME updinstall_journal COMMAND test_updinstall journal)
     add_test(NAME toolsock_connect_budget COMMAND test_toolbudget)
     add_test(NAME netprefs_preserves_text COMMAND test_netprefs_text)
     add_test(NAME devicehome_rewrites_only_ours COMMAND test_devicehome)

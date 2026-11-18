@@ -1,0 +1,263 @@
+/*
+ * updinstall, the decisions of `UpdateAmiNetXDuo INSTALL` that are not I/O:
+ * the receipt, where a manifest file lives on this machine, which files an
+ * update replaces, the container's member headers, the journal, and the
+ * swap itself over a set of file operations the caller supplies.
+ *
+ * Includes nothing of AmigaOS; compiled natively by
+ * src/tools/test/test_updinstall.c, which runs upd_forward() over an
+ * in-memory volume with a cut at every step.  The CLI contract it serves is
+ * the header of tests/updater/scenarios.tsv.
+ *
+ * THE RECEIPT, <DOCDIR>/Installed/Update/receipt
+ *
+ *   "<sha256> <amiga path>", LF, one line per file the installer (or a
+ *   confirmed update) placed: 64 lower-case hex digits, one space, the path
+ *   as the startup block names it -- LIBS:, DEVS:Networks/, C: and
+ *   DEVS:Internet/ for the system layout, AmiNetXDuo:Libs/, Devs/Networks/,
+ *   C/ and Devs/Internet/ for the drawer layout.  Written by
+ *   `InstallSameFile <receipt> ... RECEIPT`.
+ *
+ * FILE SELECTION, per file of the installed flavour in the new manifest
+ * (receipt hash R, disk hash D, new hash N):
+ *
+ *   not in the receipt      none: never added (an unselected card's driver)
+ *   in it, not on disk      missing deleted: the user removed it
+ *   D == N                  skip current
+ *   D == R                  replace ours
+ *   D differs from both and the AmiNetXDuo mark is in the file:
+ *       $VER newer than the update    skip newer: never a downgrade
+ *       otherwise                     replace otherbuild (its .old is kept)
+ *   no mark                 keep foreign: another vendor's file
+ *
+ * THE JOURNAL, <DOCDIR>/Installed/Update/journal, LF lines:
+ *
+ *   format=1
+ *   version=<new>  from=<installed>  flavour=<f>      one record each
+ *   file=<ours|otherbuild> <path>                     one per file replaced,
+ *                                                     the live file's full
+ *                                                     path, in swap order
+ *   ready                                             every <path>.new is
+ *                                                     whole and verified
+ *   aside <n>        file n's existing <path>.old goes to <prior>/<n>
+ *   done <n>         file n's <path>.new is live
+ *
+ *   Written as journal.tmp and renamed before the first .new; "ready" and
+ *   every line after it are appended.  A last line without its LF is a cut
+ *   mid-append and is ignored.  <n> counts the file= lines from 1.  <prior>
+ *   is the prior-old drawer beside the journal.
+ *
+ * RECOVERY from a journal (BOOT, PR 6):
+ *
+ *   no "ready"   undo: delete every <path>.new, then the journal.  No live
+ *                file was touched.
+ *   "ready"      forward: upd_forward() over the file= lines, with the
+ *                aside and done lines parsed, finishes every file from what
+ *                is on disk; each of its steps can be repeated.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#ifndef AMINETXDUO_UPDINSTALL_H
+#define AMINETXDUO_UPDINSTALL_H
+
+#include "updmanifest.h"
+
+#define UPD_RCPT_MAX        200     /* receipt lines                       */
+#define UPD_APATH_MAX       160     /* an Amiga path, with the NUL         */
+#define UPD_MARK            "AmiNetXDuo"
+#define UPD_SCAN_VER_MAX    48      /* what follows "$VER: ", kept         */
+
+/* ------------------------------------------------------------ receipt --- */
+
+typedef struct UpdRcpt
+{
+    const char    *path;                /* into the caller's text          */
+    unsigned short len;
+    unsigned char  sha256[32];
+} UpdRcpt;
+
+/* 1 and the lines in `out`, or 0 for a malformed or too long receipt.  An
+   empty receipt is malformed: it names nothing placed. */
+int upd_receipt_parse(const char *text, unsigned long len, UpdRcpt *out,
+                      unsigned int max, unsigned int *n);
+
+/* The index of `path` (`plen` bytes), names compared without case; -1. */
+int upd_receipt_find(const UpdRcpt *r, unsigned int n, const char *path,
+                     unsigned long plen);
+
+enum { UPD_LAYOUT_SYSTEM = 0, UPD_LAYOUT_DRAWER };
+
+/* Drawer when any line is under AmiNetXDuo:, system otherwise. */
+int upd_receipt_layout(const UpdRcpt *r, unsigned int n);
+
+/* A manifest file's path on this machine, as the receipt names it.  0 when
+   it does not fit. */
+int upd_dest(char *out, unsigned long outlen, int layout, unsigned int cls,
+             const char *path, unsigned long plen);
+
+/* ----------------------------------------------------------- selection --- */
+
+typedef enum UpdAct
+{
+    UPD_ACT_NONE = 0,       /* not ours to touch, not listed               */
+    UPD_ACT_REPLACE,
+    UPD_ACT_SKIP,
+    UPD_ACT_KEEP,
+    UPD_ACT_MISSING
+} UpdAct;
+
+typedef enum UpdWhy
+{
+    UPD_WHY_OURS = 0,
+    UPD_WHY_CURRENT,
+    UPD_WHY_OTHERBUILD,
+    UPD_WHY_NEWER,
+    UPD_WHY_FOREIGN,
+    UPD_WHY_DELETED,
+    UPD_WHY_COUNT
+} UpdWhy;
+
+/* What a pass over a disk file found: the mark, and the version after the
+   first "$VER: <name> ". */
+typedef struct UpdScan
+{
+    unsigned char mark;                 /* 1: UPD_MARK is in the file      */
+    unsigned char mpos;                 /* matched bytes of UPD_MARK       */
+    unsigned char vpos;                 /* matched bytes of "$VER: "       */
+    unsigned char vdone;                /* the $VER text is complete       */
+    unsigned char vlen;
+    char          ver[UPD_SCAN_VER_MAX];
+} UpdScan;
+
+void upd_scan_init(UpdScan *s);
+void upd_scan_feed(UpdScan *s, const unsigned char *d, unsigned long n);
+
+/* The version in the $VER string, or 0 when there is none that parses. */
+int upd_scan_version(const UpdScan *s, UpdVer *v);
+
+typedef struct UpdSelIn
+{
+    const unsigned char *receipt;       /* NULL: not in the receipt        */
+    const unsigned char *disk;          /* NULL: not on disk               */
+    const unsigned char *fresh;         /* the new manifest's hash         */
+    const UpdScan       *scan;          /* the disk file's, when on disk   */
+    const UpdVer        *update;        /* the update's version            */
+} UpdSelIn;
+
+void upd_select(const UpdSelIn *in, unsigned char *act, unsigned char *why);
+
+const char *upd_act_name(unsigned int a);   /* "replace" ...; NULL past    */
+const char *upd_why_name(unsigned int w);   /* "ours" ...                  */
+
+/* ----------------------------------------------------------- container --- */
+
+/*
+ * A member header of the stored container (dist/lhapack.py: header level
+ * 1, -lh0-, the directory in an extended header 0x02).  upd_lha_base()
+ * reads the base header, `n` bytes from its first; it needs the first byte
+ * alone to say how long it is.  Returns the base header's length (>= 24),
+ * 0 for the end of the archive, -1 for a header that is not one, or -2
+ * when `n` is short of the length (call again with that many).
+ */
+#define UPD_LHA_HEAD_MAX    257
+#define UPD_LHA_EXT_MAX     512     /* extended headers of one member      */
+
+typedef struct UpdLha
+{
+    unsigned long skip;                 /* extended headers + data         */
+    unsigned long size;                 /* data, stored as it is           */
+    unsigned int  ext_first;            /* size of the first extended one  */
+    char          name[UPD_PATH_MAX + 32];  /* directory/name, '/' between */
+    unsigned int  name_len;
+} UpdLha;
+
+long upd_lha_base(const unsigned char *h, unsigned long n, UpdLha *m);
+
+/* The extended headers, `n` bytes; the directory goes before the name.
+   1, or 0 for a malformed chain or a name that does not fit. */
+int upd_lha_ext(const unsigned char *e, unsigned long n, UpdLha *m);
+
+/* The manifest file a member name ("C/ping") is, or -1. */
+int upd_member_file(const char *name, unsigned long nlen,
+                    const UpdFile *files, unsigned int nfiles);
+
+/* FFS blocks a file of `size` bytes takes, counted as OFS (data blocks of
+   `bpb` - 24 bytes), its header and its extension blocks. */
+unsigned long upd_blocks(unsigned long size, unsigned long bpb);
+
+/* ------------------------------------------------------------- journal --- */
+
+typedef struct UpdJEntry
+{
+    const char    *path;                /* the live file's full path       */
+    unsigned short len;
+    unsigned char  why;                 /* UPD_WHY_OURS | _OTHERBUILD      */
+    unsigned char  aside;               /* an "aside <n>" line             */
+    unsigned char  done;                /* a "done <n>" line               */
+} UpdJEntry;
+
+typedef struct UpdJournal
+{
+    unsigned char ready;
+    unsigned char flavour;
+    UpdVer        version;
+    UpdVer        from;
+    unsigned int  nfiles;
+} UpdJournal;
+
+/* 1 and the journal, or 0 for one that is not one. */
+int upd_journal_parse(const char *text, unsigned long len, UpdJournal *j,
+                      UpdJEntry *e, unsigned int max);
+
+/* The file operations the swap runs on.  Every one returns 1 for done.
+   rename fails when `to` exists or the two are on different volumes;
+   remove of a name that is not there is done. */
+typedef struct UpdFsOps
+{
+    void *ctx;
+    int (*exists)(void *ctx, const char *path);
+    int (*rename)(void *ctx, const char *from, const char *to);
+    int (*remove)(void *ctx, const char *path);
+    int (*copy)(void *ctx, const char *from, const char *to);
+    int (*journal)(void *ctx, const char *line);    /* appends line + LF   */
+    int (*cut)(void *ctx);              /* a cut point; 0 stops the swap   */
+} UpdFsOps;
+
+/*
+ * The swap, and the forward recovery: per entry not done, in order --
+ *
+ *   an existing <path>.old to <prior>/<n> ("aside <n>" first; Rename, or a
+ *   copy to <prior>/<n>.tmp renamed to <prior>/<n> and the .old deleted)
+ *   <path> to <path>.old
+ *   <path>.new to <path>
+ *   "done <n>"
+ *
+ * each step taken only when the disk says it is still to do, and a cut
+ * point after each.  Returns 1 when every entry is done, 0 when an
+ * operation failed or a cut stopped it (*failed, if not NULL, is the
+ * entry), -1 for an entry whose live and .new files are both gone.
+ */
+int upd_forward(UpdJEntry *e, unsigned int n, const char *prior,
+                const UpdFsOps *ops, unsigned int *failed);
+
+/* The cut points upd_forward() passes for `n` entries of which `olds` have
+   a .old to move aside. */
+unsigned int upd_forward_steps(unsigned int n, unsigned int olds);
+
+/* ---------------------------------------------------------------- state --- */
+
+/*
+ * <DOCDIR>/Installed/Update/state with phase, version, boots and flavour
+ * set and every other line of `old` kept, into `out`.  The length, or 0
+ * when it does not fit.
+ */
+unsigned long upd_state_merge(const char *old, unsigned long oldlen,
+                              const char *phase, const char *version,
+                              unsigned long boots, const char *flavour,
+                              char *out, unsigned long outlen);
+
+/* Lower-case hex of 32 bytes into `out`, 65 bytes with the NUL. */
+void upd_hex32(const unsigned char *b, char *out);
+
+#endif /* AMINETXDUO_UPDINSTALL_H */
