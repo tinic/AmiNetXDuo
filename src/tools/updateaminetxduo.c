@@ -15,8 +15,8 @@
  *      5   update=available (and update=later with ANSWER=LATER)
  *     10   refused=<why>; nothing changed
  *
- * Every line also goes to AmiNetXDuo:Installed/Update/log, when that assign
- * exists.
+ * Every line also goes to AmiNetXDuo:Installed/Update/log, when that drawer
+ * exists: CHECK creates nothing.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -114,15 +114,13 @@ static VOID upd_log_write(const char *word)
     if (upd_said_len == 0)
         return;
 
-    /* No "insert volume AmiNetXDuo:" requester without the assign. */
+    /* No "insert volume AmiNetXDuo:" requester without the assign.  The
+       drawer is the installer's to make: CHECK creates nothing. */
     me->pr_WindowPtr = (APTR)-1L;
-    lock = Lock((CONST_STRPTR)"AmiNetXDuo:", SHARED_LOCK);
+    lock = Lock((CONST_STRPTR)UPD_LOG_DIR, SHARED_LOCK);
     if (lock != (BPTR)0)
     {
         UnLock(lock);
-        lock = CreateDir((CONST_STRPTR)UPD_LOG_DIR);
-        if (lock != (BPTR)0)
-            UnLock(lock);
 
         fh = Open((CONST_STRPTR)UPD_LOG_FILE, MODE_READWRITE);
         if (fh != (BPTR)0)

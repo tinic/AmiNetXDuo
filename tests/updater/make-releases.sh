@@ -66,6 +66,11 @@ MKV="$ROOT/tests/updater/mkvariant.py"
 MUM="$ROOT/tools/make-update-manifest.sh"
 [ -x "$MUM" ] || die "missing=$MUM"
 
+# Both builds' UpdateAmiNetXDuo trust the TEST key test-a and nothing else
+# (src/tools/updkeys.c), which is what the mirror trees are signed with.
+# tools/build-release.sh records it; check-release-candidate.sh refuses it.
+export AMINETXDUO_UPDATE_TEST_KEY=ON
+
 rm -rf "$OUT"
 mkdir -p "$OUT/keys" "$OUT/mirror"
 

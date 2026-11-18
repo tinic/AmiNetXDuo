@@ -121,7 +121,7 @@ S01-fat-system	3.1	system	fat	-	install;reboot	new,receipt,filesrec,nostaging	0	
 S01-fat-drawer	3.1	drawer	fat	-	install;reboot	new,receipt,filesrec,nostaging	0	update=installed version=@NEW;boot=trial boots=1;confirm=confirmed;state:phase=confirmed	-	good	container,none	6	expected-fail
 S01-swap	3.1	system	full	-	install	new,nostaging	0	update=installed version=@NEW;restart=needed;state:phase=trial	-	good	container	5	expected-fail
 S02-os32	3.2	system	full	-	install;reboot	new,receipt,filesrec,nostaging	0	update=installed version=@NEW;boot=trial boots=1;confirm=confirmed;state:phase=confirmed	-	good	container,none	6	expected-fail
-S03-current	3.1	system	full	-	check	unchanged	0	update=current version=@OLD	-	current	manifest	4	expected-fail
+S03-current	3.1	system	full	-	check	unchanged	0	update=current version=@OLD	-	current	manifest	4	pass
 S04-noreceipt	3.1	system	full	noreceipt	check	unchanged	10	refused=no_receipt	-	good	none	6	expected-fail
 S05-restart	3.1	system	full	auto=on,answer=INSTALL RESTART	startup;restart	new,receipt,filesrec,nostaging	-	ustartup:UpdateAmiNetXDuo CHECK QUIET;update=installed version=@NEW;confirm=confirmed;state:phase=confirmed	restart	good	container	7	expected-fail
 S10-auto-off	3.1	system	full	auto=off	startup	unchanged	-	ustartup:UpdateAmiNetXDuo CHECK QUIET;!update=available	-	good	none	7	expected-fail
@@ -135,17 +135,17 @@ S20-foreign	3.1	system	full	foreign=C/ping	install	new,keep=C/ping,nostaging	0	f
 S21-deleted	3.1	system	full	delete=C/ping	install	new,absent=C/ping,nostaging	0	file=missing deleted C:ping;update=installed version=@NEW	-	good	container	5	expected-fail
 S22-otherbuild	3.1	system	full	otherbuild=C/ping	install	new,old=C/ping,nostaging	0	file=replace otherbuild C:ping;update=installed version=@NEW	-	good	container	5	expected-fail
 S23-newer	3.1	system	full	newer=C/ping	install	new,keep=C/ping,nostaging	0	file=skip newer C:ping;update=installed version=@NEW	-	good	container	5	expected-fail
-S24-foreignstack	3.1	system	full	foreignstack	check	unchanged	0	update=foreign_stack	-	good	none	4	expected-fail
+S24-foreignstack	3.1	system	full	foreignstack	check	unchanged	0	update=foreign_stack	-	good	none	4	pass
 S25-protected	3.1	drawer@Upd	full	protect=C/ping	install	unchanged,nostaging	10	refused=protected AmiNetXDuo:C/ping	-	good	manifest	5	expected-fail
 S25-wpvolume	3.1	drawer@Upd	full	wpvolume	install	unchanged,nostaging	10	refused=writeprotected	-	good	manifest	5	expected-fail
 S26-foreignold	3.1	system	full	foreignold=Libs/bsdsocket.library	install;reboot	new,keep=Libs/bsdsocket.library.old,nostaging	0	update=installed version=@NEW;confirm=confirmed	-	good	container,none	6	expected-fail
-S30-badsig	3.1	system	full	-	check	unchanged	10	refused=signature	-	badsig	manifest	4	expected-fail
-S30-unknownkey	3.1	system	full	-	check	unchanged	10	refused=unknown_key	-	unknownkey	manifest	4	expected-fail
-S30-truncated	3.1	system	full	-	check	unchanged	10	refused=manifest	-	truncated	manifest	4	expected-fail
+S30-badsig	3.1	system	full	-	check	unchanged	10	refused=signature	-	badsig	manifest	4	pass
+S30-unknownkey	3.1	system	full	-	check	unchanged	10	refused=unknown_key	-	unknownkey	manifest	4	pass
+S30-truncated	3.1	system	full	-	check	unchanged	10	refused=manifest	-	truncated	manifest	4	pass
 S30-badcontainer	3.1	system	full	-	install	unchanged,nostaging	10	refused=container_hash	-	badcontainer	container	5	expected-fail
 S30-badmember	3.1	system	full	-	install	unchanged,nostaging	10	refused=member_hash	-	badmember	container	5	expected-fail
-S31-clock-sntp	3.1	system	full	clock=1978	check=later	unchanged	5	sntp=ok;update=available version=@NEW	offer	good	manifest	4	expected-fail
-S31-clock-nosntp	3.1	system	full	clock=1978,nosntp	check	unchanged	10	sntp=failed;refused=clock	-	good	none	4	expected-fail
+S31-clock-sntp	3.1	system	full	clock=1978	check=later	unchanged	5	sntp=ok;update=available version=@NEW	offer	good	manifest	4	pass
+S31-clock-nosntp	3.1	system	full	clock=1978,nosntp	check	unchanged	10	sntp=failed;refused=clock	-	good	none	4	pass
 S32-drop	3.1	system	full	-	install,check=later	unchanged,nostaging	10,5	refused=network;staging=removed	offer	drop	container	5	expected-fail
 S33-fullvolume	3.1	drawer@Upd	full	fullvolume	install	unchanged,nostaging	10	refused=space	-	good	manifest	5	expected-fail
 S40-cut	3.1	system	full	-	cut=each	atomic	-	boot=	-	good	-	6	expected-fail
