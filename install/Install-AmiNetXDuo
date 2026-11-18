@@ -4874,6 +4874,52 @@
 (set REC_FINAL 1)
 (P_write_record)
 
+; --- the install receipt UpdateAmiNetXDuo reads (#497) -------------------
+;
+; Installed/Update/receipt: "<sha256> <name>" for each library, driver and
+; command and the trust store this run placed, by the names the startup
+; block gives them (LIBS:, or AmiNetXDuo:Libs/ in the drawer layout).
+; InstallSameFile RECEIPT lists a file only where it holds the archive's
+; bytes, so a file this run kept is not claimed.  The updater replaces only
+; what the receipt lists; a receipt that could not be written whole is
+; deleted, and the updater then asks for this installer again.
+(procedure P_receipt
+  (if RCPT_OK
+    (if (<> 0 (run ("\"%s\" \"%s\" \"%s\" \"%s\" \"%s\" RECEIPT"
+                    S_SAMEFILE RCPT_F RCPT_SRC RCPT_DST RCPT_NAME)
+                   (prompt "Writing the install receipt")
+                   (help   H_BACKUP)))
+        (set RCPT_OK 0)))
+)
+(if (= @pretend 0)
+  (
+    (set D_UPDATE (tackon D_INSTALLED "Update"))
+    (set RCPT_F (tackon D_UPDATE "receipt"))
+    (makedir D_UPDATE (prompt ("Creating %s" D_UPDATE)) (help H_BACKUP))
+    (delete RCPT_F (optional "force" "nofail"))
+    (set RCPT_OK 1)
+    (set RCPT_PRE (if DRAWER_LAYOUT "AmiNetXDuo:" ""))
+    ; fat's commands first: C/fat's replace C/'s of the same name.
+    (if (= MINPICK 3)
+      (
+        (set RCPT_SRC S_CFAT) (set RCPT_DST D_C)
+        (set RCPT_NAME (if DRAWER_LAYOUT "AmiNetXDuo:C/" "C:")) (P_receipt)
+      ))
+    (set RCPT_SRC S_C) (set RCPT_DST D_C)
+    (set RCPT_NAME (if DRAWER_LAYOUT "AmiNetXDuo:C/" "C:")) (P_receipt)
+    (set RCPT_SRC S_LIBS) (set RCPT_DST D_LIBS)
+    (set RCPT_NAME (if DRAWER_LAYOUT "AmiNetXDuo:Libs/" "LIBS:")) (P_receipt)
+    (set RCPT_SRC (pathonly S_ANXNET)) (set RCPT_DST (tackon D_DEVS "Networks"))
+    (set RCPT_NAME (cat RCPT_PRE (if DRAWER_LAYOUT "Devs/Networks/" "DEVS:Networks/")))
+    (P_receipt)
+    (set RCPT_SRC (tackon (tackon S_DEVS "Internet") "certificates"))
+    (set RCPT_DST (tackon (tackon D_DEVS "Internet") "certificates"))
+    (set RCPT_NAME (cat RCPT_PRE (if DRAWER_LAYOUT "Devs/Internet/certificates"
+                                     "DEVS:Internet/certificates")))
+    (P_receipt)
+    (if (= RCPT_OK 0) (delete RCPT_F (optional "force" "nofail")))
+  ))
+
 (complete 100)
 
 ; ==========================================================================

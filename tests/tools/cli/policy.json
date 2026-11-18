@@ -133,6 +133,7 @@
       "FIRST": "RAM:cli-input",
       "HOSTLINE": true,
       "MARK": true,
+      "RECEIPT": true,
       "SECOND": "RAM:cli-input"
     }
   },
