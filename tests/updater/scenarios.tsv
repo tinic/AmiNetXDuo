@@ -1,0 +1,153 @@
+# The updater scenarios: one row, one emulator run, the outcome fixed here.
+#
+# Run by install/test/run-workbench.sh -Y <id|all> (the arm is
+# tests/updater/scenario-arm.sh), normally through tests/updater/run-scenarios.sh,
+# which builds the releases, starts the mirror and splits the rows by OS.
+# Fields are TAB-separated; "-" is empty.  A row passes when every check of
+# its files, rc, log, requester and mirror fields holds.
+#
+# THE CLI, which PRs 4-7 implement against.  ReadArgs template:
+#
+#   CHECK/S,INSTALL/S,BOOT/S,CONFIRM/S,QUIET/S,ANSWER/K,RESTART/S
+#
+#   UpdateAmiNetXDuo CHECK [QUIET] [ANSWER=INSTALL|LATER|SKIP]
+#       Fetch <MIRROR><channel>/update.manifest and .sig, verify, compare.
+#       An update offers the Install / Later / Skip this version requester;
+#       ANSWER= answers it without drawing it.  INSTALL then runs as below.
+#       QUIET is the startup line: no output, nothing when AUTO=OFF or when
+#       it already checked today, and it waits for the Workbench screen.
+#   UpdateAmiNetXDuo INSTALL [QUIET] [RESTART]
+#       CHECK, then PREPARE and SWAP with no requester.  Without RESTART it
+#       prints restart=needed and returns; RESTART reboots through
+#       tool_reboot() (never C:Reboot).
+#   UpdateAmiNetXDuo BOOT        startup line, before anything opens
+#                                bsdsocket.library: finish or undo a swap,
+#                                count trial boots, roll back after 2
+#   UpdateAmiNetXDuo CONFIRM     startup line, after Execute S:Network-Startup
+#
+#   rc  0 done, or nothing to do (current, AUTO=OFF, not due, skipped,
+#         another stack active, a requester answered Skip)
+#       5 an update is available and was not installed (Later, no answer)
+#      10 refused (every refused= key below); nothing changed
+#      20 failed after the first live file was touched
+#
+#   Every run writes its key=value lines to stdout (not with QUIET) and
+#   appends them to <DOCDIR>/Installed/Update/log.  The keys:
+#     update=current|available|installed|off|notdue|later|skipped|foreign_stack
+#            version=<v>          (installed adds replaced= kept= skipped= missing=)
+#     refused=signature|unknown_key|manifest|container_hash|member_hash|clock|
+#             network|space|protected|writeprotected|no_receipt [<amiga path>]
+#     file=replace|skip|keep|missing ours|current|otherbuild|newer|foreign|deleted <amiga path>
+#     requester=offer|restart|run_installer|clock_not_set|refused
+#     sntp=ok|failed   staging=removed   restart=needed
+#     boot=clean|forward|trial|rolledback|undone boots=<n> [version=<v>]
+#     confirm=confirmed|timeout
+#   State: <DOCDIR>/Installed/Update/state, key=value (phase= version=
+#   boots= flavour= last_check=<YYYY-MM-DD> skip=<v> later=<YYYY-MM-DD>).
+#   Receipt: <DOCDIR>/Installed/Update/receipt, "<sha256> <amiga path>" per file.
+#
+# SETTINGS: ENVARC:AmiNetXDuo/Update (ENV: at boot), key=value:
+#   AUTO=ON|OFF  CHANNEL=RELEASE|PRERELEASE
+#   MIRROR=<url ending in />   the folder holding release/ and prerelease/
+#
+# TEST HOOKS, honoured only by a build with AMINETXDUO_UPDATE_TEST_KEY=ON,
+# which knows exactly one key, test-a (tests/updater/test-only-update-key-a.pem):
+#   ENV:AmiNetXDuo/UpdateAnswer    INSTALL|LATER|SKIP [RESTART]: the answer
+#                                  a QUIET run's requesters get
+#   ENV:AmiNetXDuo/UpdateTestStop  "<prepare|swap|rollback> <n> <file>": at
+#                                  that phase's n-th cut point write
+#                                  "cut <n>" to <file> and Wait(0).  INSTALL
+#                                  prints steps.prepare=<n> steps.swap=<n>.
+#
+# FIELDS
+#   os         3.1 | 3.2
+#   layout     system | drawer | drawer@Upd (the drawer on its own FFS volume)
+#   flavour    full | minimal | micro | fat
+#   setup      comma list, applied before the action and each checked:
+#              foreign=<f>    our file replaced by bytes with no AmiNetXDuo mark
+#              otherbuild=<f> bytes with the mark and an older $VER
+#              newer=<f>      bytes with the mark and a newer $VER
+#              delete=<f>     our file removed
+#              protect=<f>    delete- and write-protected (on drawer@Upd:
+#                             a directory volume keeps no cleared d bit)
+#              foreignold=<f> a foreign <f>.old beside our <f>
+#              wpvolume       the drawer@Upd volume mounted read-only
+#              fullvolume     the drawer@Upd volume filled to 32 KB free
+#              foreignstack   a resident bsdsocket.library that is not ours,
+#                             no S:User-Startup
+#              clock=1978     the clock at 1-Jan-78 before S:User-Startup
+#              nosntp         C:sntp renamed away
+#              noreceipt      no receipt, no S:AmiNetXDuo-Install
+#              auto=on|off  channel=release|prerelease  answer=<UpdateAnswer>
+#              noprefs        the settings file left as the installer wrote it
+#              <f> is relative to the layout's drawers: C/ping, Libs/x.
+#   action     ";" between boots, "," between the words of one boot.
+#              Commands: check | check=install|later|skip | install |
+#              install+restart | startup (no command: the startup lines
+#              only) | cut=each (every cut point of prepare and swap, each
+#              followed by a recovery boot).  Every boot after the first
+#              starts with how it starts: reboot (a power cycle), reboot+1d
+#              (the clock one day on), restart (the guest reboots itself,
+#              same session) or reboot+cut=<phase>:<n> (UpdateTestStop set,
+#              the session ends at the cut).
+#   files      unchanged | new | old | atomic, plus modifiers:
+#              keep=<f> absent=<f> old=<f> (a .old with the bytes before)
+#              receipt (lists every placed file's new hash) filesrec
+#              (S:AmiNetXDuo-Files names every placed file) nostaging (no
+#              .new, no container left)
+#   rc         one per CLI word, comma list; - none
+#   log        ";" list: <prefix> a line starting so, in stdout or the log;
+#              !<prefix> no such line; state:<k=v> a state line;
+#              ustartup:<text> a S:User-Startup line; envarc:<k=v> a
+#              settings line.  @OLD and @NEW are the two versions.
+#   requester  a requester= key that must be logged; - none may be.  A
+#              run from the shell prints its refusals and draws nothing.
+#   tree       the mirror tree (tests/updater/make-releases.sh)
+#   mirror     per boot, comma list: none | manifest | container, @<channel>
+#              to name the folder; - not checked
+#   pr         the PR expected to make the row pass: 4 CHECK and integrity,
+#              5 PREPARE and SWAP, 6 BOOT, CONFIRM, installer and receipt,
+#              7 requester and prefs; harness = the harness cannot run it yet
+#   status     pass | expected-fail
+#
+id	os	layout	flavour	setup	action	files	rc	log	requester	tree	mirror	pr	status
+S01-full-system	3.1	system	full	-	install;reboot	new,receipt,filesrec,nostaging	0	update=installed version=@NEW;restart=needed;boot=trial boots=1;confirm=confirmed;state:phase=confirmed	-	good	container,none	6	expected-fail
+S01-full-drawer	3.1	drawer	full	-	install;reboot	new,receipt,filesrec,nostaging	0	update=installed version=@NEW;boot=trial boots=1;confirm=confirmed;state:phase=confirmed	-	good	container,none	6	expected-fail
+S01-minimal-system	3.1	system	minimal	-	install;reboot	new,receipt,filesrec,nostaging	0	update=installed version=@NEW;boot=trial boots=1;confirm=confirmed;state:phase=confirmed	-	good	container,none	6	expected-fail
+S01-minimal-drawer	3.1	drawer	minimal	-	install;reboot	new,receipt,filesrec,nostaging	0	update=installed version=@NEW;boot=trial boots=1;confirm=confirmed;state:phase=confirmed	-	good	container,none	6	expected-fail
+S01-micro-system	3.1	system	micro	-	install;reboot	new,receipt,filesrec,nostaging	0	update=installed version=@NEW;boot=trial boots=1;confirm=confirmed;state:phase=confirmed	-	good	container,none	6	expected-fail
+S01-micro-drawer	3.1	drawer	micro	-	install;reboot	new,receipt,filesrec,nostaging	0	update=installed version=@NEW;boot=trial boots=1;confirm=confirmed;state:phase=confirmed	-	good	container,none	6	expected-fail
+S01-fat-system	3.1	system	fat	-	install;reboot	new,receipt,filesrec,nostaging	0	update=installed version=@NEW;boot=trial boots=1;confirm=confirmed;state:phase=confirmed	-	good	container,none	6	expected-fail
+S01-fat-drawer	3.1	drawer	fat	-	install;reboot	new,receipt,filesrec,nostaging	0	update=installed version=@NEW;boot=trial boots=1;confirm=confirmed;state:phase=confirmed	-	good	container,none	6	expected-fail
+S01-swap	3.1	system	full	-	install	new,nostaging	0	update=installed version=@NEW;restart=needed;state:phase=trial	-	good	container	5	expected-fail
+S02-os32	3.2	system	full	-	install;reboot	new,receipt,filesrec,nostaging	0	update=installed version=@NEW;boot=trial boots=1;confirm=confirmed;state:phase=confirmed	-	good	container,none	6	expected-fail
+S03-current	3.1	system	full	-	check	unchanged	0	update=current version=@OLD	-	current	manifest	4	expected-fail
+S04-noreceipt	3.1	system	full	noreceipt	check	unchanged	10	refused=no_receipt	-	good	none	6	expected-fail
+S05-restart	3.1	system	full	auto=on,answer=INSTALL RESTART	startup;restart	new,receipt,filesrec,nostaging	-	ustartup:UpdateAmiNetXDuo CHECK QUIET;update=installed version=@NEW;confirm=confirmed;state:phase=confirmed	restart	good	container	7	expected-fail
+S10-auto-off	3.1	system	full	auto=off	startup	unchanged	-	ustartup:UpdateAmiNetXDuo CHECK QUIET;!update=available	-	good	none	7	expected-fail
+S11-daily	3.1	system	full	auto=on,answer=LATER	startup;reboot;reboot+1d	unchanged	-	ustartup:UpdateAmiNetXDuo CHECK QUIET;update=notdue;update=later version=@NEW	offer	good	manifest,none,manifest	7	expected-fail
+S12-later	3.1	system	full	auto=on,answer=LATER	startup;reboot+1d	unchanged	-	update=later version=@NEW;state:later=	offer	good	manifest,manifest	7	expected-fail
+S12-skip	3.1	system	full	auto=on,answer=SKIP	startup;reboot+1d	unchanged	-	update=skipped version=@NEW;state:skip=@NEW	offer	good	manifest,manifest	7	expected-fail
+S13-prerelease	3.1	system	full	channel=prerelease	check=later	unchanged	5	update=available version=@NEW;update=later version=@NEW	offer	good	manifest@prerelease	7	expected-fail
+S13-release	3.1	system	full	channel=release	check	unchanged	0	update=current;!update=available	-	good	manifest@release	7	expected-fail
+S14-installer	3.1	system	full	noprefs	startup	unchanged	-	envarc:AUTO=ON;ustartup:UpdateAmiNetXDuo BOOT;ustartup:UpdateAmiNetXDuo CONFIRM;ustartup:UpdateAmiNetXDuo CHECK QUIET	-	good	-	6	expected-fail
+S20-foreign	3.1	system	full	foreign=C/ping	install	new,keep=C/ping,nostaging	0	file=keep foreign C:ping;update=installed version=@NEW	-	good	container	5	expected-fail
+S21-deleted	3.1	system	full	delete=C/ping	install	new,absent=C/ping,nostaging	0	file=missing deleted C:ping;update=installed version=@NEW	-	good	container	5	expected-fail
+S22-otherbuild	3.1	system	full	otherbuild=C/ping	install	new,old=C/ping,nostaging	0	file=replace otherbuild C:ping;update=installed version=@NEW	-	good	container	5	expected-fail
+S23-newer	3.1	system	full	newer=C/ping	install	new,keep=C/ping,nostaging	0	file=skip newer C:ping;update=installed version=@NEW	-	good	container	5	expected-fail
+S24-foreignstack	3.1	system	full	foreignstack	check	unchanged	0	update=foreign_stack	-	good	none	4	expected-fail
+S25-protected	3.1	drawer@Upd	full	protect=C/ping	install	unchanged,nostaging	10	refused=protected AmiNetXDuo:C/ping	-	good	manifest	5	expected-fail
+S25-wpvolume	3.1	drawer@Upd	full	wpvolume	install	unchanged,nostaging	10	refused=writeprotected	-	good	manifest	5	expected-fail
+S26-foreignold	3.1	system	full	foreignold=Libs/bsdsocket.library	install;reboot	new,keep=Libs/bsdsocket.library.old,nostaging	0	update=installed version=@NEW;confirm=confirmed	-	good	container,none	6	expected-fail
+S30-badsig	3.1	system	full	-	check	unchanged	10	refused=signature	-	badsig	manifest	4	expected-fail
+S30-unknownkey	3.1	system	full	-	check	unchanged	10	refused=unknown_key	-	unknownkey	manifest	4	expected-fail
+S30-truncated	3.1	system	full	-	check	unchanged	10	refused=manifest	-	truncated	manifest	4	expected-fail
+S30-badcontainer	3.1	system	full	-	install	unchanged,nostaging	10	refused=container_hash	-	badcontainer	container	5	expected-fail
+S30-badmember	3.1	system	full	-	install	unchanged,nostaging	10	refused=member_hash	-	badmember	container	5	expected-fail
+S31-clock-sntp	3.1	system	full	clock=1978	check=later	unchanged	5	sntp=ok;update=available version=@NEW	offer	good	manifest	4	expected-fail
+S31-clock-nosntp	3.1	system	full	clock=1978,nosntp	check	unchanged	10	sntp=failed;refused=clock	-	good	none	4	expected-fail
+S32-drop	3.1	system	full	-	install,check=later	unchanged,nostaging	10,5	refused=network;staging=removed	offer	drop	container	5	expected-fail
+S33-fullvolume	3.1	drawer@Upd	full	fullvolume	install	unchanged,nostaging	10	refused=space	-	good	manifest	5	expected-fail
+S40-cut	3.1	system	full	-	cut=each	atomic	-	boot=	-	good	-	6	expected-fail
+S41-rollback	3.1	system	full	-	install;reboot;reboot;reboot,check	old,nostaging	0,0	boot=trial boots=1;boot=trial boots=2;boot=rolledback version=@NEW;update=skipped version=@NEW;state:phase=rolledback	-	broken	container,none,none,manifest	6	expected-fail
+S42-cut-rollback	3.1	system	full	-	install;reboot;reboot;reboot+cut=rollback:1;reboot	old,nostaging	0	boot=rolledback version=@NEW;state:phase=rolledback	-	broken	-	6	expected-fail
