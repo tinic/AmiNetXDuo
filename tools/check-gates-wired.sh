@@ -114,6 +114,7 @@ want hotpath-budget tools/ci.sh                      'check-hotpath-budget\.sh'
 # it went in wired to two of them -- and the slowest test in the tree, at
 # 16.15 s, was in one of the other two.
 want duration-ci    tools/ci.sh                      'check-test-duration\.sh'
+want update-manifest tools/build-release.sh          'make-update-manifest\.sh'
 
 # ------------------------------------------- and NO gate is unwired at all ---
 #
