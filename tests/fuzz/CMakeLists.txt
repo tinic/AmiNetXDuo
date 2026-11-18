@@ -149,6 +149,19 @@ target_include_directories(fuzz_httpframe PRIVATE
 target_compile_options(fuzz_httpframe PRIVATE -Wall -Wextra ${_fuzz_san})
 target_link_options(fuzz_httpframe PRIVATE ${_fuzz_san})
 
+# The update manifest and its signature file.  The signature file is parsed
+# before anything is verified, from whatever bytes the mirror sent.
+add_executable(fuzz_updmanifest
+    fuzz_updmanifest.c
+    "${CMAKE_SOURCE_DIR}/src/tools/updmanifest.c"
+    "${CMAKE_SOURCE_DIR}/src/tools/updver.c")
+
+target_include_directories(fuzz_updmanifest PRIVATE
+    "${CMAKE_SOURCE_DIR}/src/tools")
+
+target_compile_options(fuzz_updmanifest PRIVATE -Wall -Wextra ${_fuzz_san})
+target_link_options(fuzz_updmanifest PRIVATE ${_fuzz_san})
+
 
 # ---------------------------------------------------------------------------
 # The two parsers that read bytes off the network from whoever sent them.
@@ -726,6 +739,11 @@ add_test(NAME fuzz_httpframe_seeds
 add_test(NAME fuzz_httpframe_sweep
          COMMAND fuzz_httpframe -r 1 ${AMINETXDUO_FUZZ_CASES})
 
+add_test(NAME fuzz_updmanifest_seeds
+         COMMAND fuzz_updmanifest -s)
+add_test(NAME fuzz_updmanifest_sweep
+         COMMAND fuzz_updmanifest -r 1 ${AMINETXDUO_FUZZ_CASES})
+
 add_test(NAME fuzz_tls_record_seeds
          COMMAND fuzz_tls_record -s)
 add_test(NAME fuzz_tls_record_sweep
@@ -804,6 +822,6 @@ endif()
 # A soak set by AMINETXDUO_FUZZ_CASES needs longer than ctest's default.
 set_tests_properties(fuzz_config_sweep fuzz_dnssd_sweep fuzz_dns_sweep
                      fuzz_bpf_sweep fuzz_dhcp_sweep fuzz_usergroup_sweep
-                     fuzz_cis_sweep fuzz_httpframe_sweep
+                     fuzz_cis_sweep fuzz_httpframe_sweep fuzz_updmanifest_sweep
                      fuzz_tls_record_sweep fuzz_tls_x509_sweep
                      PROPERTIES TIMEOUT 1800)

@@ -1108,6 +1108,49 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(test_fetchurl PRIVATE -Wall -Wextra)
     set_target_properties(test_fetchurl PROPERTIES C_STANDARD 11)
 
+    # The updater's version order, manifest parser and signature check.
+    # Host-side because each one decides whether a machine installs
+    # something, and none of it shows a mistake on the wire.
+    add_executable(test_updver
+        test/test_updver.c
+        updver.c)
+
+    add_executable(test_updmanifest
+        test/test_updmanifest.c
+        updmanifest.c
+        updver.c)
+
+    # updsig.c binds NetX Duo's SHA-512 the way test_crypto68k_25519 does.
+    add_executable(test_updsig
+        test/test_updsig.c
+        updsig.c
+        updmanifest.c
+        updver.c
+        "${CMAKE_SOURCE_DIR}/src/crypto68k/c68k_25519.c"
+        "${AMINETXDUO_NETXDUO}/crypto_libraries/src/nx_crypto_sha5.c"
+        "${AMINETXDUO_NETXDUO}/crypto_libraries/src/nx_crypto_initialize.c")
+
+    target_include_directories(test_updsig PRIVATE
+        "${CMAKE_SOURCE_DIR}/tests/crypto68k/host/shim"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_SOURCE_DIR}/src/crypto68k"
+        "${AMINETXDUO_NETXDUO}/crypto_libraries/inc")
+
+    target_compile_definitions(test_updsig PRIVATE
+        NX_CRYPTO_STANDALONE_ENABLE)
+
+    # The same vendored cast as nx_crypto_sha1.c above, in SHA-512.
+    set_source_files_properties(
+        "${AMINETXDUO_NETXDUO}/crypto_libraries/src/nx_crypto_sha5.c"
+        PROPERTIES COMPILE_OPTIONS "-Wno-pointer-to-int-cast")
+
+    foreach(_upd test_updver test_updmanifest test_updsig)
+        target_include_directories(${_upd} PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}")
+        target_compile_options(${_upd} PRIVATE -Wall -Wextra)
+        set_target_properties(${_upd} PROPERTIES C_STANDARD 11)
+    endforeach()
+
     # The iperf 2 wire format.  Host-side because that is where the numbers
     # captured off iperf 2.2.1 can be asserted against the encoder, and
     # because unsigned long is 64 bits here and 32 on the target: the sign of
@@ -1342,6 +1385,9 @@ if(NOT CMAKE_CROSSCOMPILING)
     add_test(NAME httprequest_values COMMAND test_httprequest)
     add_test(NAME httpif_conditions COMMAND test_httpif)
     add_test(NAME fetchurl_rfc3986 COMMAND test_fetchurl)
+    add_test(NAME updver_order COMMAND test_updver)
+    add_test(NAME updmanifest_refusals COMMAND test_updmanifest)
+    add_test(NAME updsig_ed25519 COMMAND test_updsig)
     add_test(NAME toolsock_connect_budget COMMAND test_toolbudget)
     add_test(NAME netprefs_preserves_text COMMAND test_netprefs_text)
     add_test(NAME devicehome_rewrites_only_ours COMMAND test_devicehome)
