@@ -172,6 +172,7 @@ COMMAND_BUDGETS=(
     "ShowNetServices:1216"
     "ShowNetStatus:2752"
     "SyncReboot:192"
+    "UpdateAmiNetXDuo:448"
     "ToolsSmoke:1472"
     "arp:576"
     "fetch:3456"

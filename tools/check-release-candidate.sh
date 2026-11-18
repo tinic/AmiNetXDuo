@@ -16,7 +16,7 @@ manifest="$dir/release-candidate.txt"
 for key in source_sha version compound_version toolchain_sha archive archive_sha256 \
            update_manifest_sha256 update_full update_full_sha256 \
            update_fat update_fat_sha256 update_minimal update_minimal_sha256 \
-           update_micro update_micro_sha256; do
+           update_micro update_micro_sha256 update_test_key; do
     [ "$(grep -c "^$key=" "$manifest" || true)" = 1 ] || {
         echo "release_candidate=FAIL manifest_key=$key expected=exactly_once" >&2
         exit 1
@@ -25,6 +25,12 @@ done
 
 value() { sed -n "s/^$1=//p" "$manifest"; }
 got_sha=$(value source_sha)
+
+# A test-key build trusts a key whose private half is in the tree.
+[ "$(value update_test_key)" = OFF ] || {
+    echo "release_candidate=FAIL update_test_key=$(value update_test_key) wanted=OFF" >&2
+    exit 1
+}
 archive_name=$(value archive)
 want_hash=$(value archive_sha256)
 archive="$dir/$archive_name"
