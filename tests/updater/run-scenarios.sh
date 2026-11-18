@@ -90,7 +90,8 @@ ip -o route get "$PADDR" 2>/dev/null | grep -q "dev $IFACE " ||
     refuse "peer_not_on_segment:$PADDR"
 PDIR="ai/updscn-mirror-$RUN"
 PLOG="$PDIR/requests.log"
-KILLPAT="mirror.py --root $PDIR/"
+# [m]: the pattern must not match the ssh shell that runs pkill.
+KILLPAT="[m]irror.py --root $PDIR/"
 stop_mirror() {
     ssh -o BatchMode=yes "$PEER" "pkill -f '$KILLPAT' ; rm -rf '$PDIR'" \
         >/dev/null 2>&1 || true
