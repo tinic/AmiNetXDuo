@@ -14,6 +14,7 @@
 #                                 [-m core|driver|probe|minimal]
 #                                 [-C] [-M] [-V] [-I] [-z] [-W]
 #                                 [-s yes|invalid] [-O] [-n]
+#                                 [-Y SCENARIO[,SCENARIO...]|all]
 #                                 [-w join|keep|keepit|keepitlive|keepitfw|userstart|userwm|userwmold|prism2|prism2pi|prism2keep|cnetkeep]
 #                                 [-f roadshow-leave|roadshow-replace|
 #                                     amitcpng-leave|amitcpng-replace]
@@ -92,6 +93,12 @@
 # Emu68's own genet.device in DEVS:Networks: the interface must name it.
 # genet-old-bare is the same tree with no genet.device and no other driver:
 # the Installer must stop before writing anything.
+# -Y runs rows of tests/updater/scenarios.tsv instead of the install below:
+# -a is the old release, installed per layout and flavour the rows name, and
+# each row's setup, boots and checks follow (tests/updater/scenario-arm.sh,
+# sourced here because it uses this file's functions).  It prints
+# scenario=<id> result=PASS|FAIL|XFAIL|XPASS lines and exits 0 only with no
+# FAIL and no XPASS.  tests/updater/run-scenarios.sh is the usual caller.
 # -u runs the installed SYS:AmiNetXDuo/Uninstall-AmiNetXDuo after the
 # install, in the same boot: every product file must be as it was before the
 # install, .old files included, .new files aside.  A S:Network-Startup of
@@ -181,8 +188,9 @@ MDNS_OFF=0
 HAND_HOST=0
 PROBE_FAULT=""
 WIFI_MODE=""
+SCENARIO=""
 
-while getopts "b:a:l:p:N:t:T:kHSDgRUEBIMq:x:f:e:c:m:CVzWs:P:Ow:nuX:" opt; do
+while getopts "b:a:l:p:N:t:T:kHSDgRUEBIMq:x:f:e:c:m:CVzWs:P:Ow:nuX:Y:" opt; do
     case "$opt" in
         b) BUILD="$OPTARG" ;;
         a) ARCHIVE="$OPTARG" ;;
@@ -216,6 +224,7 @@ while getopts "b:a:l:p:N:t:T:kHSDgRUEBIMq:x:f:e:c:m:CVzWs:P:Ow:nuX:" opt; do
         s) SNTP_MODE="$OPTARG" ;;
         u) UNINSTALL=1; CONFIG_ONLY=1 ;;
         X) UNINSTALL_PREP="$OPTARG" ;;
+        Y) SCENARIO="$OPTARG" ;;
         O) MDNS_OFF=1 ;;
         n) HAND_HOST=1 ;;
         w) WIFI_MODE="$OPTARG"
@@ -232,6 +241,15 @@ while getopts "b:a:l:p:N:t:T:kHSDgRUEBIMq:x:f:e:c:m:CVzWs:P:Ow:nuX:" opt; do
            exit 2 ;;
     esac
 done
+
+# -Y installs per row; every other mode is a different install.
+if [ -n "$SCENARIO" ]; then
+    [ -n "$ARCHIVE" ] || { echo "-Y needs -a, the old release" >&2; exit 2; }
+    case "$TERMINAL$STATIC$DRAWER$RERUN$RECONFIGURE$UNINSTALL$CONFIG_ONLY${PICK:+p}${TRANSITION:+x}${FOREIGN_MODE:+f}${AMINETXDUO_PRIOR_ARCHIVE:+P}" in
+        0000000) ;;
+        *) echo "-Y takes no other install mode" >&2; exit 2 ;;
+    esac
+fi
 
 WBVER="${AMINETXDUO_WB:-3.1}"
 case "$WBVER" in
@@ -2316,6 +2334,8 @@ uaehf0=dir,rw,DH0:DH0:$HD,0
 uaehf1=dir,rw,Work:Work:$WORK,0
 serial_port=tcp://127.0.0.1:$port/wait
 EOF
+    # A caller's extra lines, such as a second hardfile (-Y's drawer volume).
+    [ -z "${BOOT_EXTRA_CFG:-}" ] || printf '%s\n' "$BOOT_EXTRA_CFG" >> "$cfg"
     # WinUAE's units: chip in 512 KB, slow ("trapdoor") in 256 KB.
     [ -z "$CHIPMEM_KB" ] || echo "chipmem_size=$((CHIPMEM_KB / 512))" >> "$cfg"
     [ -z "$SLOWMEM_KB" ] || echo "bogomem_size=$((SLOWMEM_KB / 256))" >> "$cfg"
@@ -2486,6 +2506,13 @@ startup_with() {
 }
 
 take_lock
+
+# -Y: the updater scenarios, with everything above staged.
+if [ -n "$SCENARIO" ]; then
+    # shellcheck source=../../tests/updater/scenario-arm.sh
+    . "$ROOT/tests/updater/scenario-arm.sh"
+    exit "$UPD_EXIT"
+fi
 
 # ------------------------------------------------ run 0, drawer only: refused --
 #
