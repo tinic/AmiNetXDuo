@@ -606,6 +606,20 @@ int main(int argc, char **argv)
         }
     }
 
+    if ((args[ARG_CHECK] != 0) + (args[ARG_INSTALL] != 0)
+        + (args[ARG_BOOT] != 0) + (args[ARG_CONFIRM] != 0) > 1)
+    {
+        tool_error("give one of CHECK, INSTALL, BOOT and CONFIRM");
+        FreeArgs(rda);
+        return RETURN_ERROR;
+    }
+    if (args[ARG_RESTART] != 0 && args[ARG_INSTALL] == 0)
+    {
+        tool_error("RESTART goes with INSTALL");
+        FreeArgs(rda);
+        return RETURN_ERROR;
+    }
+
     word = args[ARG_INSTALL] ? "INSTALL" : args[ARG_BOOT] ? "BOOT"
          : args[ARG_CONFIRM] ? "CONFIRM" : "CHECK";
     tool_copy_string(upd_run_args.word, sizeof(upd_run_args.word), word);
