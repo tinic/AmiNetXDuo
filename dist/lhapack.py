@@ -23,6 +23,9 @@ Usage:  lhapack.py <archive.lha> <basedir> [member ...]
 Members are paths relative to basedir; with none given, everything under
 basedir is archived.  Order is preserved, which matters only aesthetically.
 
+SOURCE_DATE_EPOCH, when set, is the time of every member, read as UTC, so
+the same files give the same bytes on any host and in any time zone.
+
 SPDX-License-Identifier: MIT
 """
 
@@ -47,11 +50,14 @@ def crc16(data):
 
 
 def dos_time(epoch):
-    t = time.localtime(epoch)
+    t = time.gmtime(epoch) if FIXED_TIME is not None else time.localtime(epoch)
     year = max(t.tm_year, 1980)
     return ((year - 1980) << 25 | t.tm_mon << 21 | t.tm_mday << 16 |
             t.tm_hour << 11 | t.tm_min << 5 | t.tm_sec // 2)
 
+
+_EPOCH = os.environ.get("SOURCE_DATE_EPOCH", "")
+FIXED_TIME = int(_EPOCH) if _EPOCH else None
 
 OS_ID_AMIGA = ord("A")
 
@@ -131,7 +137,8 @@ def main(argv):
         for name, path in walk(base, members):
             with open(path, "rb") as fh:
                 data = fh.read()
-            out.write(entry(name, data, os.path.getmtime(path)))
+            mtime = FIXED_TIME if FIXED_TIME is not None else os.path.getmtime(path)
+            out.write(entry(name, data, mtime))
             total += len(data)
             count += 1
         out.write(b"\0")           # end of archive

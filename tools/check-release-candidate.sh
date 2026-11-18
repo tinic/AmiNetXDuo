@@ -13,7 +13,10 @@ manifest="$dir/release-candidate.txt"
     exit 1
 }
 
-for key in source_sha version compound_version toolchain_sha archive archive_sha256; do
+for key in source_sha version compound_version toolchain_sha archive archive_sha256 \
+           update_manifest_sha256 update_full update_full_sha256 \
+           update_fat update_fat_sha256 update_minimal update_minimal_sha256 \
+           update_micro update_micro_sha256; do
     [ "$(grep -c "^$key=" "$manifest" || true)" = 1 ] || {
         echo "release_candidate=FAIL manifest_key=$key expected=exactly_once" >&2
         exit 1
@@ -45,14 +48,51 @@ esac
     exit 1
 }
 
-if command -v sha256sum >/dev/null 2>&1; then
-    got_hash=$(sha256sum "$archive" | cut -d' ' -f1)
-else
-    got_hash=$(shasum -a 256 "$archive" | cut -d' ' -f1)
-fi
+hash_file() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | cut -d' ' -f1
+    else
+        shasum -a 256 "$1" | cut -d' ' -f1
+    fi
+}
+got_hash=$(hash_file "$archive")
 [ "$got_hash" = "$want_hash" ] || {
     echo "release_candidate=FAIL archive_sha256=$got_hash wanted=$want_hash" >&2
     exit 1
 }
 
-echo "release_candidate=PASS source_sha=$got_sha archive=$archive_name sha256=$got_hash"
+# The update manifest and each container are bound by digest, and the
+# manifest's container= line names the same file, size and digest.
+update="$dir/update"
+umanifest="$update/update.manifest"
+[ -f "$umanifest" ] || {
+    echo "release_candidate=FAIL missing_update_manifest=$umanifest" >&2
+    exit 1
+}
+umanifest_hash=$(hash_file "$umanifest")
+[ "$umanifest_hash" = "$(value update_manifest_sha256)" ] || {
+    echo "release_candidate=FAIL update_manifest_sha256=$umanifest_hash" >&2
+    exit 1
+}
+for f in full fat minimal micro; do
+    c=$(value "update_$f")
+    case "$c" in
+        ''|.|..|*/*) echo "release_candidate=FAIL invalid_update_$f=$c" >&2; exit 1 ;;
+    esac
+    [ -f "$update/$c" ] || {
+        echo "release_candidate=FAIL missing_update_$f=$update/$c" >&2
+        exit 1
+    }
+    sum=$(hash_file "$update/$c")
+    [ "$sum" = "$(value "update_${f}_sha256")" ] || {
+        echo "release_candidate=FAIL update_${f}_sha256=$sum" >&2
+        exit 1
+    }
+    line="container=$f $(wc -c < "$update/$c" | tr -d ' ') $sum $c"
+    grep -qxF -- "$line" "$umanifest" || {
+        echo "release_candidate=FAIL update_manifest_container=$f" >&2
+        exit 1
+    }
+done
+
+echo "release_candidate=PASS source_sha=$got_sha archive=$archive_name sha256=$got_hash update_manifest_sha256=$umanifest_hash"
