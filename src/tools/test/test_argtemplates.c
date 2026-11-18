@@ -57,7 +57,8 @@ static const char *const commands[] = {
     "netcapture",
     "netstat", "nettrace", "nslookup", "onoff", "ping", "removenetinterface",
     "shownetservices",
-    "shownetstatus", "sntp", "telnet", "tftp", "traceroute", "whois",
+    "shownetstatus", "sntp", "syncreboot", "telnet", "tftp", "traceroute",
+    "whois",
 };
 
 #define COMMAND_COUNT ((int)(sizeof(commands) / sizeof(commands[0])))

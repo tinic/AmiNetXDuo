@@ -9,6 +9,7 @@
 #include "updsig.h"
 
 #include "nx_crypto_sha5.h"
+#include "aminetxduo/nxstatus.h"
 #include "c68k_25519.h"
 
 static void us_sha512(unsigned char out[64],
@@ -18,14 +19,20 @@ static void us_sha512(unsigned char out[64],
 {
     static NX_CRYPTO_SHA512 ctx;
 
-    _nx_crypto_sha512_initialize(&ctx, NX_CRYPTO_HASH_SHA512);
+    /* Each fails only on a NULL context, and ctx is static. */
+    AMI_NX_ONLY_SUCCESS(_nx_crypto_sha512_initialize(&ctx,
+                                                     NX_CRYPTO_HASH_SHA512));
     if (alen)
-        _nx_crypto_sha512_update(&ctx, (UCHAR *)a, (UINT)alen);
+        AMI_NX_ONLY_SUCCESS(_nx_crypto_sha512_update(&ctx, (UCHAR *)a,
+                                                     (UINT)alen));
     if (blen)
-        _nx_crypto_sha512_update(&ctx, (UCHAR *)b, (UINT)blen);
+        AMI_NX_ONLY_SUCCESS(_nx_crypto_sha512_update(&ctx, (UCHAR *)b,
+                                                     (UINT)blen));
     if (clen)
-        _nx_crypto_sha512_update(&ctx, (UCHAR *)c, (UINT)clen);
-    _nx_crypto_sha512_digest_calculate(&ctx, out, NX_CRYPTO_HASH_SHA512);
+        AMI_NX_ONLY_SUCCESS(_nx_crypto_sha512_update(&ctx, (UCHAR *)c,
+                                                     (UINT)clen));
+    AMI_NX_ONLY_SUCCESS(_nx_crypto_sha512_digest_calculate(&ctx, out,
+                                                     NX_CRYPTO_HASH_SHA512));
 }
 
 static int us_same(const char *a, const char *b)

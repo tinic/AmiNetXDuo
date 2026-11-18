@@ -355,6 +355,10 @@ aminetxduo_add_tool(tool_getnetstatus GetNetStatus NX SOURCES getnetstatus.c)
 # interfaces through NetStackControl(), exactly as Offline does.
 aminetxduo_add_tool(tool_netshutdown NetShutdown SOURCES netshutdown.c)
 
+# SyncReboot is the restart to use after disk writes: tool_reboot.c flushes
+# every volume first, which C:Reboot does not.  httpd's console reset shares it.
+aminetxduo_add_tool(tool_syncreboot SyncReboot SOURCES syncreboot.c tool_reboot.c)
+
 # RemoveNetInterface takes one interface out, where NetShutdown stops them all
 # and keeps them.  Config-only for the same reason: NetStackControl() again.
 aminetxduo_add_tool(tool_removenetinterface RemoveNetInterface
@@ -398,7 +402,7 @@ aminetxduo_add_tool(tool_arp     arp      NX SOURCES arp.c)
 # at run time, so ONE binary serves both -DAMINETXDUO_TLS=ON and OFF builds --
 # the https: path opens LIBS:tls.library and says something legible when there
 # is none.  Nothing here is conditional on the build option, deliberately.
-aminetxduo_add_tool(tool_fetch   fetch    SOURCES fetch.c fetchurl.c toolsock.c toolbudget.c)
+aminetxduo_add_tool(tool_fetch   fetch    SOURCES fetch.c fetchcore.c fetchurl.c toolsock.c toolbudget.c)
 
 # nc and telnet are config-only in the same sense as fetch, and share
 # toolsock.c: bsdsocket.library through its published vectors, including the
@@ -503,7 +507,7 @@ aminetxduo_add_tool(tool_httpd   httpd    SOURCES httpd.c httpdate.c tooltz.c ht
                                           httpframe.c httplock.c httphead.c httpstatus.c
                                           httpiperf.c
                                           httpxml.c httpws.c
-                                          httpsha1.c httpterm.c httpfb.c clipftxt.c
+                                          httpsha1.c httpterm.c httpfb.c clipftxt.c tool_reboot.c
                                           httprtg.c httpzz.c
                                           "${CMAKE_SOURCE_DIR}/src/common/textconv.c"
                                           "${CMAKE_SOURCE_DIR}/src/common/textconv_cs.c"
@@ -735,7 +739,7 @@ add_dependencies(tools
     tool_addnetinterface tool_installsamefile tool_installnetprobe tool_installwifi
     tool_checknetconfig tool_checknetdevice tool_statusreport tool_netdevstats
     tool_addnetroute tool_deletenetroute
-    tool_getnetstatus tool_netshutdown tool_removenetinterface
+    tool_getnetstatus tool_netshutdown tool_syncreboot tool_removenetinterface
     tool_configurenetinterface
     tool_netsetup tool_netprefs tool_netswitch tool_netmeter tool_netenv tool_netwireless tool_netwirelessprefs
     tool_online tool_offline tool_host tool_hostname

@@ -3,6 +3,7 @@
  */
 
 #include "tools.h"
+#include "tool_reboot.h"
 #include "toolsock.h"
 #include "httpws.h"
 #include "httpfb.h"
@@ -329,7 +330,7 @@ static ULONG           fb_gone_at;
 static ULONG           fb_gone_passes;
 
 /* A `reset` arrived and the machine goes as soon as the close frame telling
-   the viewer so has been handed to the socket.  See fb_reboot(). */
+   the viewer so has been handed to the socket.  See tool_reboot(). */
 static UBYTE           fb_reset;
 
 /* Set once a session when the console screen is on a ZZ9000 with the encode
@@ -2771,41 +2772,6 @@ BOOL http_fb_session_geometry(UWORD *w, UWORD *h, UWORD *depth)
     return TRUE;
 }
 
-/* ACTION_FLUSH to every mounted volume, and then the machine goes.  The ports
-   are collected under the DosList lock and the packets sent with it given
-   back: DoPkt() waits, and the handler can want the DosList to answer. */
-#define FB_FLUSH_MAX    16
-
-static VOID fb_reboot(VOID)
-{
-    struct MsgPort *ports[FB_FLUSH_MAX];
-    struct DosList *dl;
-    ULONG           n = 0;
-    ULONG           i;
-
-    dl = LockDosList(LDF_VOLUMES | LDF_READ);
-    if (dl != NULL)
-    {
-        while (n < (ULONG)FB_FLUSH_MAX &&
-               (dl = NextDosEntry(dl, LDF_VOLUMES | LDF_READ)) != NULL)
-        {
-            if (dl->dol_Task != NULL)
-                ports[n++] = dl->dol_Task;
-        }
-        UnLockDosList(LDF_VOLUMES | LDF_READ);
-    }
-
-    for (i = 0; i < n; i++)
-        (VOID)DoPkt(ports[i], ACTION_FLUSH, 0, 0, 0, 0, 0);
-
-    /* Half a second for the close frame and the FIN to leave.  The viewer is
-       told it is a reboot rather than left to call it a dropped connection,
-       and that only works if the bytes get out first. */
-    Delay(25);
-
-    ColdReboot();
-}
-
 VOID http_fb_stop(VOID)
 {
     /* Free the card's shared buffer and close zz9k.library, if the offload
@@ -2840,7 +2806,7 @@ VOID http_fb_stop(VOID)
     if (fb_reset)
     {
         fb_reset = 0;
-        fb_reboot();
+        tool_reboot();
     }
 }
 

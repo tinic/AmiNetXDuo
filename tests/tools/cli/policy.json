@@ -440,6 +440,14 @@
       "TASK": "FFFFFFFF"
     }
   },
+  "SyncReboot": {
+    "binary": "src/tools/SyncReboot",
+    "parser": "readargs",
+    "source": "src/tools/syncreboot.c",
+    "values": {
+      "QUIET": true
+    }
+  },
   "WatchTasks": {
     "base": {
       "COUNT": "1",
