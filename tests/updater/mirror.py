@@ -107,7 +107,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         size = os.path.getsize(path)
         limit = size
         if rest[2].endswith(".lha") and \
-                os.path.exists(os.path.join(self.root, rest[0], "DROP")):
+                os.path.exists(os.path.join(os.path.dirname(os.path.dirname(path)),
+                                            "DROP")):
             limit = size // 2
         self.send_response(200)
         self.send_header("Content-Type", "application/octet-stream")
