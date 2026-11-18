@@ -186,6 +186,23 @@ int upd_member_file(const char *name, unsigned long nlen,
    `bpb` - 24 bytes), its header and its extension blocks. */
 unsigned long upd_blocks(unsigned long size, unsigned long bpb);
 
+/* The container fetch, without its I/O.  Only a final 2xx opens the sink,
+   but an error status's body still reaches it: that body is neither
+   written nor counted. */
+enum { UPD_DL_OK = 0, UPD_DL_NETWORK, UPD_DL_SPACE, UPD_DL_LONG };
+
+/* A body chunk of `n` bytes after `total`: UPD_DL_OK to write it, or the
+   reason to stop -- UPD_DL_NETWORK for a sink not opened, UPD_DL_LONG
+   past the manifest's `size`. */
+int upd_dl_chunk(int opened, unsigned long total, unsigned long n,
+                 unsigned long size);
+
+/* What the fetch came to: `status` the final HTTP status, `whole` the
+   fetch returned RETURN_OK, `wfail` a write or the close failed.  The
+   status first: an error answer is UPD_DL_NETWORK whatever its body did. */
+int upd_dl_verdict(long status, int whole, int wfail, int toolong,
+                   unsigned long total, unsigned long size);
+
 /* ------------------------------------------------------------- journal --- */
 
 typedef struct UpdJEntry
@@ -245,6 +262,12 @@ int upd_forward(UpdJEntry *e, unsigned int n, const char *prior,
    a .old to move aside. */
 unsigned int upd_forward_steps(unsigned int n, unsigned int olds);
 
+/* 1 when the journal holds entry `i` (from 0) and upd_forward() names all
+   it needs -- <path>, .new, .old, <prior>/<n> and its .tmp -- within
+   UPD_APATH_MAX; 0 otherwise.  PREPARE asks it of every file before it
+   stages anything. */
+int upd_swap_fits(const UpdJEntry *e, unsigned int i, const char *prior);
+
 /* ---------------------------------------------------------------- state --- */
 
 /*
@@ -256,6 +279,12 @@ unsigned long upd_state_merge(const char *old, unsigned long oldlen,
                               const char *phase, const char *version,
                               unsigned long boots, const char *flavour,
                               char *out, unsigned long outlen);
+
+/* 1 when an installed update waits for CONFIRM: the trial file is there
+   (`trial`), or the state (`len` bytes, NULL for none) says phase=trial.
+   INSTALL then refuses before it removes anything: receipt-next is
+   CONFIRM's. */
+int upd_trial_active(int trial, const char *state, unsigned long len);
 
 /* Lower-case hex of 32 bytes into `out`, 65 bytes with the NUL. */
 void upd_hex32(const unsigned char *b, char *out);

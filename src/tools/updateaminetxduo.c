@@ -661,7 +661,9 @@ static VOID upd_cut(ULONG phase)
 /*
  * Leftovers of a run that stopped: a journal without "ready" is undone (its
  * .new files deleted), a container and the staged receipt removed.  A
- * journal with "ready" is a swap half done, which BOOT finishes: refused.
+ * journal with "ready" is a swap half done, which BOOT finishes, and a
+ * trial waits for CONFIRM, which needs receipt-next: both refused before
+ * anything is removed.
  */
 static LONG upd_clean_stale(VOID)
 {
@@ -670,6 +672,17 @@ static LONG upd_clean_stale(VOID)
     UBYTE                *t;
     ULONG                 len, i;
     BPTR                  dir;
+
+    upd_in_dir(upd_p1, "state");
+    t = upd_slurp(upd_p1, UPD_STATE_MAX, &len);
+    upd_in_dir(upd_p1, "trial");
+    i = (ULONG)upd_trial_active(upd_exists(upd_p1), (const char *)t,
+                                t != NULL ? len : 0);
+    if (t != NULL)
+        FreeVec(t);
+    if (i)
+        return refuse("pending", "an update is installed and not confirmed "
+                                 "yet: restart the Amiga");
 
     upd_in_dir(upd_p1, "journal");
     t = upd_slurp(upd_p1, 64UL * 1024UL, &len);
@@ -936,12 +949,18 @@ static BOOL us_write(APTR ctx, const UBYTE *d, LONG n)
 
     if (n <= 0)
         return TRUE;
-    if (s->total + (ULONG)n > s->size)
+    /* Not opened: an error status's body, which is no container. */
+    switch (upd_dl_chunk(s->fh != (BPTR)0, s->total, (ULONG)n, s->size))
     {
+    case UPD_DL_OK:
+        break;
+    case UPD_DL_LONG:
         s->toolong = TRUE;
         return FALSE;
+    default:
+        return FALSE;
     }
-    if (s->fh == (BPTR)0 || Write(s->fh, (APTR)d, n) != n)
+    if (Write(s->fh, (APTR)d, n) != n)
     {
         s->wfail = TRUE;
         return FALSE;
@@ -1022,13 +1041,19 @@ static LONG upd_download(UpdInst *in)
     if (s.fh != (BPTR)0 && !Close(s.fh))
         s.wfail = TRUE;
 
-    if (s.wfail)
+    switch (upd_dl_verdict(upd_fc.status, rc == RETURN_OK, s.wfail, s.toolong,
+                           s.total, s.size))
+    {
+    case UPD_DL_OK:
+        break;
+    case UPD_DL_SPACE:
         return refuse("space", "the container could not be written");
-    if (s.toolong)
+    case UPD_DL_LONG:
         return refuse("container_hash", "the container is longer than the "
                                         "manifest says");
-    if (rc != RETURN_OK || upd_fc.status != 200 || s.total < s.size)
+    default:
         return refuse("network", "the container did not arrive whole");
+    }
     (VOID)c68k_sha256_digest_calculate(&upd_sha, sha, NX_CRYPTO_HASH_SHA256);
     if (memcmp(sha, in->m->container_sha256, 32) != 0)
         return refuse("container_hash", "the container is not the one the "
@@ -1365,14 +1390,26 @@ static LONG upd_install(const char *mirror, const UpdWant *want,
         rc = refuse_at("writeprotected", upd_udir, NULL);
         goto out;
     }
-    for (i = 0; i < m->nfiles; i++)
+    for (i = 0, v = 0; i < m->nfiles; i++)
     {
-        UpdPick *p = &in.pick[i];
+        UpdPick  *p = &in.pick[i];
+        UpdJEntry je;
 
         if (p->act != UPD_ACT_REPLACE)
             continue;
         upd_dest(upd_p1, UPD_PATH, layout, files[i].cls, files[i].path,
                  files[i].path_len);
+        /* The physical path, which an assign can make longer than the
+           journal and the swap's names hold. */
+        je.path = p->real;
+        je.len  = (unsigned short)strlen(p->real);
+        upd_in_dir(upd_p2, "prior-old");
+        if (!upd_swap_fits(&je, (unsigned int)v++, upd_p2))
+        {
+            rc = refuse_at("protected", upd_p1, "its full path does not "
+                                                "fit the journal");
+            goto out;
+        }
         if (upd_vols[p->vol].state == ID_WRITE_PROTECTED)
         {
             rc = refuse_at("writeprotected", upd_p1, NULL);
