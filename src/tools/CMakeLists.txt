@@ -404,6 +404,35 @@ aminetxduo_add_tool(tool_arp     arp      NX SOURCES arp.c)
 # is none.  Nothing here is conditional on the build option, deliberately.
 aminetxduo_add_tool(tool_fetch   fetch    SOURCES fetch.c fetchcore.c fetchurl.c toolsock.c toolbudget.c)
 
+# UpdateAmiNetXDuo (#497) fetches the way fetch does, into memory, and checks
+# update.manifest's Ed25519 signature with src/crypto68k's portable C, which
+# runs on every CPU we ship.  Its SHA-512 is NetX Duo's in the standalone
+# mode httpd's SHA-1 below uses.
+#
+# AMINETXDUO_UPDATE_TEST_KEY=ON builds it knowing only the committed TEST key
+# (tests/updater/test-only-update-key-a.pem), which anyone can sign with: for
+# the scenario tests, never for a release.  tools/build-release.sh records the
+# option and tools/check-release-candidate.sh refuses a candidate built with it.
+option(AMINETXDUO_UPDATE_TEST_KEY
+    "UpdateAmiNetXDuo accepts only the committed TEST key (scenario tests)" OFF)
+aminetxduo_add_tool(tool_updateaminetxduo UpdateAmiNetXDuo RT
+    SOURCES updateaminetxduo.c updcheck.c updkeys.c updsig.c updmanifest.c updver.c
+            fetchcore.c fetchurl.c toolsock.c toolbudget.c
+            "${CMAKE_SOURCE_DIR}/src/crypto68k/c68k_25519.c"
+            "${AMINETXDUO_NETXDUO}/crypto_libraries/src/nx_crypto_sha5.c")
+target_compile_definitions(tool_updateaminetxduo PRIVATE NX_CRYPTO_STANDALONE_ENABLE)
+target_include_directories(tool_updateaminetxduo PRIVATE
+    "${CMAKE_SOURCE_DIR}/include"
+    "${CMAKE_SOURCE_DIR}/src/crypto68k"
+    "${AMINETXDUO_NETXDUO}/crypto_libraries/inc")
+if(AMINETXDUO_UPDATE_TEST_KEY)
+    target_compile_definitions(tool_updateaminetxduo PRIVATE UPD_TEST_KEY)
+endif()
+# The vendored cast the host test silences in SHA-512, for the same reason.
+set_source_files_properties(
+    "${AMINETXDUO_NETXDUO}/crypto_libraries/src/nx_crypto_sha5.c"
+    PROPERTIES COMPILE_OPTIONS "-Wno-pointer-to-int-cast")
+
 # nc and telnet are config-only in the same sense as fetch, and share
 # toolsock.c: bsdsocket.library through its published vectors, including the
 # bind/listen/accept half that no client-only command reaches.  Neither needs
@@ -743,7 +772,7 @@ add_dependencies(tools
     tool_configurenetinterface
     tool_netsetup tool_netprefs tool_netswitch tool_netmeter tool_netenv tool_netwireless tool_netwirelessprefs
     tool_online tool_offline tool_host tool_hostname
-    tool_fetch tool_nc tool_telnet tool_nettrace tool_netcapture
+    tool_fetch tool_updateaminetxduo tool_nc tool_telnet tool_nettrace tool_netcapture
     tool_traceroute tool_nslookup tool_arp
     tool_tftp tool_whois tool_httpd tool_iperf
     tool_sntp tool_shownetservices
@@ -1144,7 +1173,28 @@ if(NOT CMAKE_CROSSCOMPILING)
         "${AMINETXDUO_NETXDUO}/crypto_libraries/src/nx_crypto_sha5.c"
         PROPERTIES COMPILE_OPTIONS "-Wno-pointer-to-int-cast")
 
-    foreach(_upd test_updver test_updmanifest test_updsig)
+    # CHECK's decisions: the settings file, the flavour, the URLs, the date
+    # and the verdict over signed manifests.
+    add_executable(test_updcheck
+        test/test_updcheck.c
+        updcheck.c
+        updsig.c
+        updmanifest.c
+        updver.c
+        "${CMAKE_SOURCE_DIR}/src/crypto68k/c68k_25519.c"
+        "${AMINETXDUO_NETXDUO}/crypto_libraries/src/nx_crypto_sha5.c"
+        "${AMINETXDUO_NETXDUO}/crypto_libraries/src/nx_crypto_initialize.c")
+
+    target_include_directories(test_updcheck PRIVATE
+        "${CMAKE_SOURCE_DIR}/tests/crypto68k/host/shim"
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_SOURCE_DIR}/src/crypto68k"
+        "${AMINETXDUO_NETXDUO}/crypto_libraries/inc")
+
+    target_compile_definitions(test_updcheck PRIVATE
+        NX_CRYPTO_STANDALONE_ENABLE)
+
+    foreach(_upd test_updver test_updmanifest test_updsig test_updcheck)
         target_include_directories(${_upd} PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}")
         target_compile_options(${_upd} PRIVATE -Wall -Wextra)
@@ -1388,6 +1438,7 @@ if(NOT CMAKE_CROSSCOMPILING)
     add_test(NAME updver_order COMMAND test_updver)
     add_test(NAME updmanifest_refusals COMMAND test_updmanifest)
     add_test(NAME updsig_ed25519 COMMAND test_updsig)
+    add_test(NAME updcheck_verdict COMMAND test_updcheck)
     add_test(NAME toolsock_connect_budget COMMAND test_toolbudget)
     add_test(NAME netprefs_preserves_text COMMAND test_netprefs_text)
     add_test(NAME devicehome_rewrites_only_ours COMMAND test_devicehome)

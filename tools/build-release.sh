@@ -8,17 +8,29 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$ROOT"
 
-cmake --preset default -B build/release
+# AMINETXDUO_UPDATE_TEST_KEY=ON is for tests/updater/make-releases.sh only:
+# UpdateAmiNetXDuo then trusts the committed TEST key and nothing else.  It
+# is recorded in release-candidate.txt, and check-release-candidate.sh
+# refuses a candidate built with it.  Passed as OFF too, so that a cached ON
+# in a build directory does not survive into a release.
+UPDATE_TEST_KEY="${AMINETXDUO_UPDATE_TEST_KEY:-OFF}"
+case "$UPDATE_TEST_KEY" in
+    ON|OFF) ;;
+    *) echo "release_candidate=FAIL update_test_key=$UPDATE_TEST_KEY" >&2; exit 1 ;;
+esac
+KEY_OPT="-DAMINETXDUO_UPDATE_TEST_KEY=$UPDATE_TEST_KEY"
+
+cmake --preset default -B build/release "$KEY_OPT"
 cmake --build build/release --parallel --target release_payload
 
-cmake --preset minimal -B build/release-minimal
+cmake --preset minimal -B build/release-minimal "$KEY_OPT"
 cmake --build build/release-minimal --parallel --target release_libraries
 
-cmake --preset micro -B build/release-micro
+cmake --preset micro -B build/release-micro "$KEY_OPT"
 cmake --build build/release-micro --parallel --target release_libraries
 
 # fat carries its own drivers and commands, so the whole payload.
-cmake --preset fat -B build/release-fat
+cmake --preset fat -B build/release-fat "$KEY_OPT"
 cmake --build build/release-fat --parallel --target release_payload
 
 AMINETXDUO_CLIENT_ANY=1 AMIGA_CLIENT_ARCH=-m68000 \
@@ -103,6 +115,7 @@ manifest=build/dist/release-candidate.txt
         echo "flavour_$f=$(hash_file "build/dist/AmiNetXDuo/Flavours/$f")"
     done
     echo "update_manifest_sha256=$(hash_file build/dist/update/update.manifest)"
+    echo "update_test_key=$UPDATE_TEST_KEY"
     for f in full fat minimal micro; do
         c="AmiNetXDuo-$(tools/version.sh --product)-$f.update.lha"
         echo "update_$f=$c"

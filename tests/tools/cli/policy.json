@@ -448,6 +448,20 @@
       "QUIET": true
     }
   },
+  "UpdateAmiNetXDuo": {
+    "binary": "src/tools/UpdateAmiNetXDuo",
+    "parser": "readargs",
+    "source": "src/tools/updateaminetxduo.c",
+    "values": {
+      "ANSWER": "LATER",
+      "BOOT": true,
+      "CHECK": true,
+      "CONFIRM": true,
+      "INSTALL": true,
+      "QUIET": true,
+      "RESTART": true
+    }
+  },
   "WatchTasks": {
     "base": {
       "COUNT": "1",
