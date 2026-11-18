@@ -356,6 +356,7 @@ jobs:
             tools/check-gitlinks-selftest.sh \
             tools/check-release-candidate.sh \
             tools/build-release.sh \
+            tools/make-update-manifest.sh \
             tools/stage-developer.sh \
             tools/check-release-ready.sh \
             tools/upstream-drift.sh \
@@ -454,6 +455,7 @@ jobs:
           path: |
             build/dist/*.lha
             build/dist/release-candidate.txt
+            build/dist/update/
           if-no-files-found: error
           # Nightly installer E2E consumes this same candidate.  Keep enough
           # history for a quiet main branch without rebuilding on that runner.

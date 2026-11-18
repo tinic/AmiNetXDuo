@@ -74,6 +74,15 @@ archive=$(find build/dist -maxdepth 1 -type f -name 'AmiNetXDuo-*.lha' -print)
     exit 1
 }
 
+# The update containers and the unsigned update.manifest, in update/ so no
+# *.lha glob over the candidate picks a container for the archive.
+# AMINETXDUO_CERTIFICATES_PREV is the previous release's trust store (see the
+# script); without it, the pin this tree ships.
+SOURCE_DATE_EPOCH=$(git log -1 --format=%ct HEAD) \
+    tools/make-update-manifest.sh \
+        -p "${AMINETXDUO_CERTIFICATES_PREV:-third_party/cacert/certificates.sha256}" \
+        build/dist
+
 hash_file() {
     if command -v sha256sum >/dev/null 2>&1; then
         sha256sum "$1" | cut -d' ' -f1
@@ -92,6 +101,12 @@ manifest=build/dist/release-candidate.txt
     echo "archive_sha256=$(hash_file "$archive")"
     for f in full fat minimal micro; do
         echo "flavour_$f=$(hash_file "build/dist/AmiNetXDuo/Flavours/$f")"
+    done
+    echo "update_manifest_sha256=$(hash_file build/dist/update/update.manifest)"
+    for f in full fat minimal micro; do
+        c="AmiNetXDuo-$(tools/version.sh --product)-$f.update.lha"
+        echo "update_$f=$c"
+        echo "update_${f}_sha256=$(hash_file "build/dist/update/$c")"
     done
 } > "$manifest"
 
