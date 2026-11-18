@@ -252,8 +252,11 @@ static void test_records(void)
     }
 
     /* flavours and classes */
-    REFUSE(HEAD L_CFULL "container=nano 1 " H1 " a.lha\n", UPD_E_FLAVOUR);
-    REFUSE(HEAD L_CFULL "file=Full LIBS 1 " H1 " a\n", UPD_E_FLAVOUR);
+    /* Flavours this updater does not know are skipped, whatever follows. */
+    REFUSE(HEAD L_CFULL "container=nano 1 " H1 " a.lha\n", UPD_OK);
+    REFUSE(HEAD L_CFULL "file=Full LIBS 1 " H1 " a\n", UPD_OK);
+    REFUSE(HEAD L_CFULL "file=nano\n", UPD_OK);
+    REFUSE(HEAD L_CFULL "container=nano x y z ../:\n", UPD_OK);
     REFUSE(HEAD L_CFULL "file=full DEVS 1 " H1 " a\n", UPD_E_CLASS);
     REFUSE(HEAD L_CFULL "file=full libs 1 " H1 " a\n", UPD_E_CLASS);
     REFUSE(HEAD L_CFULL "file=full Networks 1 " H1 " a\n", UPD_E_CLASS);
@@ -283,6 +286,44 @@ static void test_records(void)
     REFUSE(L_FORMAT L_PRODUCT "version=1.0.0-rc05\n" L_CHANNEL L_CFULL,
            UPD_E_VERSION);
     REFUSE(L_FORMAT L_PRODUCT "version=\n" L_CHANNEL L_CFULL, UPD_E_VERSION);
+}
+
+/* A later release: a flavour and a class this updater does not know. */
+#define FUTURE                                                               \
+    HEAD L_CFULL L_CMICRO                                                    \
+    "container=minimal 2 " H1 " min.lha\n"                                   \
+    "container=fat 3 " H1 " fat.lha\n"                                       \
+    "container=future 4 " H1 " future.lha\n"                                 \
+    "file=future LIBS 1 " H1 " bsdsocket.library\n"                          \
+    "file=future SYS 1 " H1 " x\n"                                           \
+    "file=future some later shape\n"                                         \
+    L_F1 L_FM
+
+static void test_future(void)
+{
+    UpdWant      w = want_rc4();
+    unsigned int f;
+
+    for (f = 0; f < UPD_FLAVOUR_COUNT; f++)
+    {
+        w.flavour = (unsigned char)f;
+        if (parse_w(with_end(FUTURE), &w) != UPD_OK)
+        {
+            failures++;
+            printf("  FAIL future manifest refused for %s\n",
+                   upd_flavour_name(f));
+        }
+        checks++;
+    }
+
+    /* An unknown class: skipped in another flavour, refused in ours. */
+    w = want_rc4();
+    CHECK(parse_w(with_end(HEAD L_CFULL L_CMICRO
+                           "file=micro SYS 1 " H1 " x\n"), &w) == UPD_OK);
+    w.flavour = UPD_FLAVOUR_MICRO;
+    CHECK(parse_w(with_end(HEAD L_CFULL L_CMICRO
+                           "file=micro SYS 1 " H1 " x\n"), &w) ==
+          UPD_E_CLASS);
 }
 
 static void test_paths(void)
@@ -464,6 +505,7 @@ int main(void)
     test_truncated();
     test_lines();
     test_records();
+    test_future();
     test_paths();
     test_refusals();
     test_limits();

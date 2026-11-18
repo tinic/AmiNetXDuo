@@ -27,7 +27,6 @@ static const char *const um_results[UPD_RESULT_COUNT] = {
     "duplicate record",
     "required record missing",
     "record count wrong",
-    "unknown flavour",
     "unknown destination",
     "bad hex string",
     "bad number",
@@ -279,6 +278,21 @@ typedef struct UmState
     int            have_product;
 } UmState;
 
+/*
+ * The flavour a container= or file= line starts with, or -1 for one this
+ * updater does not know.  Such a line is skipped whole, whatever follows, so
+ * a later release can add a flavour.
+ */
+static int um_flavour(const char *v, unsigned long n)
+{
+    unsigned long i = 0;
+
+    while (i < n && v[i] != ' ')
+        i++;
+
+    return um_lookup(v, i, um_flavours, UPD_FLAVOUR_COUNT);
+}
+
 static UpdResult um_container(UmState *st, const char *v, unsigned long n)
 {
     UmField       f[4];
@@ -286,10 +300,10 @@ static UpdResult um_container(UmState *st, const char *v, unsigned long n)
     unsigned long size;
     unsigned char sha[32];
 
+    if ((fl = um_flavour(v, n)) < 0)
+        return UPD_OK;
     if (!um_fields(v, n, f, 4))
         return UPD_E_SYNTAX;
-    if ((fl = um_lookup(f[0].p, f[0].n, um_flavours, UPD_FLAVOUR_COUNT)) < 0)
-        return UPD_E_FLAVOUR;
     if (!um_number(&f[1], &size))
         return UPD_E_NUMBER;
     if (!um_hex(&f[2], sha, 32))
@@ -324,12 +338,14 @@ static UpdResult um_file(UmState *st, const char *v, unsigned long n)
     UpdFile      *e;
     unsigned int  i;
 
+    if ((fl = um_flavour(v, n)) < 0)
+        return UPD_OK;
     if (!um_fields(v, n, f, 5))
         return UPD_E_SYNTAX;
-    if ((fl = um_lookup(f[0].p, f[0].n, um_flavours, UPD_FLAVOUR_COUNT)) < 0)
-        return UPD_E_FLAVOUR;
+
+    /* A file this updater cannot place: fatal only in the installed one. */
     if ((cls = um_lookup(f[1].p, f[1].n, um_classes, UPD_CLASS_COUNT)) < 0)
-        return UPD_E_CLASS;
+        return (fl == st->want->flavour) ? UPD_E_CLASS : UPD_OK;
     if (!um_number(&f[2], &size))
         return UPD_E_NUMBER;
     if (!um_hex(&f[3], sha, 32))

@@ -43,6 +43,11 @@
  *   repeating a class and path (case-insensitively, as AmigaDOS compares
  *   names) of the installed flavour is a duplicate.  Nothing may follow end=.
  *
+ *   A container= or file= line whose flavour this updater does not know is
+ *   skipped whole, and so is a file= line of another flavour whose class it
+ *   does not know; a later release can add either.  An unknown class in the
+ *   installed flavour is refused: that file has nowhere to go.
+ *
  *   A shell writes it with printf and appends end= with
  *   `printf 'end=%s\n' "$(wc -l < update.manifest)"`.
  *
@@ -87,8 +92,7 @@ typedef enum UpdResult
     UPD_E_DUPLICATE,
     UPD_E_MISSING,          /* a required record is absent                 */
     UPD_E_COUNT,            /* end= disagrees with the lines before it     */
-    UPD_E_FLAVOUR,          /* an unknown flavour                          */
-    UPD_E_CLASS,            /* an unknown destination class                */
+    UPD_E_CLASS,            /* the installed flavour names an unknown class */
     UPD_E_HEX,
     UPD_E_NUMBER,
     UPD_E_PATH,             /* "..", ":", absolute, or too long            */
