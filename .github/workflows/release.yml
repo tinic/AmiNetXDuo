@@ -121,7 +121,11 @@ jobs:
           git fetch --force origin "+refs/tags/$tag:refs/tags/$tag"
           tools/release-notes.sh "$tag" > "$notes"
 
-          gh release create "$tag" \
+          # A tag with a prerelease part, such as v1.0.0-rc4, is a pre-release
+          # and never the latest release.
+          kind=--latest
+          case "$tag" in *-*) kind=--prerelease ;; esac
+          gh release create "$tag" "$kind" \
              --title "$(tools/version.sh --long)" \
              --notes-file "$notes" \
              build/candidate/*.lha
