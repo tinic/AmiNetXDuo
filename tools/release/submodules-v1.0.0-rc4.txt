@@ -1,0 +1,18 @@
+# Rc3 -> rc4 submodule review: netxduo +2, wifipi +2; no additions or removals.
+# bsdsocktest, dropbear, libcodesets, shelltools, threadx and zz9000-sdk did not move.
+# The named reviews cover the stated scopes. Product exact-SHA CI and emulator are separate release gates, not claims made by this manifest.
+# reviewer=claudecode: full diffs read 2026-11-18 (source only, nothing run).
+
+# Fast-forward by 2 commits (tinic/netxduo #43, master). Fork PR CI green (42 checks).
+# One definition of "directed broadcast" and "network address", false for a mask of 31 or 32 bits (RFC 3021, RFC 1122 3.2.1.3);
+# every shorter mask gives the expression the ten call sites had. Regression test netx_ip_host_network_mask_test.
+third_party/netxduo dde25cf4c359da8d03bbd6369b4972b247109bed..fdedab40c81eb36d1e5fc54860b408678d593487
++6e6c861111329c5cee809b343fc3bf15621b5daa reviewer=claudecode compatible: behaviour changes only for /31 and /32 interfaces, where broadcast and network-address tests were wrong
++fdedab40c81eb36d1e5fc54860b408678d593487 reviewer=claudecode compatible: merge of #43, no change beyond 6e6c8611
+
+# Fast-forward by 2 commits (wifipi #29, main).
+# The opener's S2_CopyToBuff/S2_CopyFromBuff are called through an asm wrapper that names a6 and d1 as clobbered;
+# WirelessManager 1.5 returns from them with SysBase in a6. Argument registers d0/a0/a1 and their order are unchanged.
+third_party/wifipi cc3d92b80aacc3a1c517c3eec2f039818d5ad82f..6d118feef3db18adb4505aef9a9414ea6b050c5d
++082a048a1b4139b489b2578f16f1a312ac4d1fad reviewer=claudecode compatible: same SANA-II buffer-call contract; a6 is no longer assumed preserved
++6d118feef3db18adb4505aef9a9414ea6b050c5d reviewer=claudecode compatible: merge of #29, no change beyond 082a048a

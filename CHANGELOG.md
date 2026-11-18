@@ -7,6 +7,8 @@ are history.
 
 ## Unreleased
 
+## 1.0.0-rc4
+
 - A PPP or SLIP interface without GATEWAY gets its default route through the
   other end, and a PPP interface without ADDRESS takes over the default route
   once the link agrees an address, as Roadshow's ppp_dialer does.
