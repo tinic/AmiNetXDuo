@@ -7,6 +7,9 @@ are history.
 
 ## Unreleased
 
+- SyncReboot writes every volume's buffers to disk before it restarts the
+  machine, so it is safe to use right after files are written.
+
 ## 1.0.0-rc4
 
 - A PPP or SLIP interface without GATEWAY gets its default route through the

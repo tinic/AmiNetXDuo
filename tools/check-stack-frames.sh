@@ -171,6 +171,7 @@ COMMAND_BUDGETS=(
     "RemoveNetInterface:448"
     "ShowNetServices:1216"
     "ShowNetStatus:2752"
+    "SyncReboot:192"
     "ToolsSmoke:1472"
     "arp:576"
     "fetch:3456"
