@@ -295,7 +295,7 @@ EndIf
 Wait 1
 Set scnn `Eval $scnn + 1`
 Echo >DH0:scn/hb "$scnn"
-If VAL $scnn LT 90
+If NOT VAL $scnn GE 90
   Skip top BACK
 EndIf
 Echo >DH0:scn/net.txt "net=down waited=$scnn"
@@ -317,13 +317,42 @@ EndIf
 Wait 1
 Set scng `Eval $scng + 1`
 Echo >DH0:scn/hb "$scng"
-If VAL $scng LT 240
+If NOT VAL $scng GE 240
   Skip top BACK
 EndIf
 Echo >>DH0:scn/gone.txt "<name>=running waited=$scng"
 Lab done
 EOF
     chmod 644 "$HD/scn/waitnet" "$HD/scn/waitgone"
+}
+# AmigaDOS If compares with EQ, GT and GE only (NOT/S,WARN/S,ERROR/S,FAIL/S,,
+# EQ/K,GT/K,GE/K,VAL/S,EXISTS/K in the 3.1 and the 3.2 Kickstart): "below n"
+# is NOT ... GE n.  An LT made If fail, and under FailAt 9999 the loop never
+# ended once the network stayed down.
+
+# reinstall: the NEW archive's Commodore Installer, driven as the base
+# install is, over what the row has left -- staged here, on the restored
+# drive, as DH0:UpdNew and C:installdrive-new.
+upd_stage_reinstall() { # layout flavour
+    local lvl=NOVICE spec="" _lvl _unpack
+    case "$2" in
+        minimal) spec="4:3:0" ;;
+        micro)   spec="4:4:0" ;;
+        fat)     spec="4:5:0" ;;
+    esac
+    [ "$2" = full ] && [ "$1" = system ] || lvl=AVERAGE
+    rm -rf "$HD/UpdNew"; mkdir -p "$HD/UpdNew"
+    ( cd "$HD/UpdNew" && lha -xfq "$NEW_ARCHIVE" ) >/dev/null 2>&1 ||
+        ( cd "$HD/UpdNew" && lha xf "$NEW_ARCHIVE" ) >/dev/null 2>&1 || return 1
+    [ -d "$HD/UpdNew/AmiNetXDuo" ] || return 1
+    stage_installer "$HD/UpdNew/AmiNetXDuo"
+    chmod -R a+rx "$HD/UpdNew"
+    _lvl="$LEVEL"; _unpack="$UNPACK_AMIGA"
+    LEVEL="$lvl"; UNPACK_AMIGA="DH0:UpdNew"; DRIVE_STACK_ARCHIVE="$NEW_ARCHIVE"
+    build_driver "$ROOT/build/installdrive-$TAG-upd-new" 1 "" "$spec" >/dev/null
+    LEVEL="$_lvl"; UNPACK_AMIGA="$_unpack"; DRIVE_STACK_ARCHIVE=""
+    cp "$ROOT/build/installdrive-$TAG-upd-new" "$HD/C/installdrive-new" || return 1
+    chmod 755 "$HD/C/installdrive-new"
 }
 
 # One segment: what one guest boot does after the startup.  $1 session,
@@ -355,6 +384,15 @@ upd_segment() {
             case "$w" in
                 -|startup)
                     echo "Execute DH0:scn/waitgone UpdateAmiNetXDuo"
+                    continue ;;
+                reinstall)
+                    UPD_CMDNO=$((UPD_CMDNO + 1))
+                    echo "Execute DH0:scn/waitgone UpdateAmiNetXDuo"
+                    echo "C:installdrive-new >DH0:scn/reinstall-console.txt"
+                    echo "Echo >>DH0:scn/rc.txt \"cmd=$UPD_CMDNO rc=\$RC\""
+                    # The settings as the installer left them: the next
+                    # session writes its own.
+                    echo "Copy ENVARC:AmiNetXDuo/Update DH0:scn/prefs-reinstall.txt"
                     continue ;;
                 check)        cmd="CHECK" ;;
                 check=*)      cmd="CHECK ANSWER=$(echo "${w#check=}" | tr '[:lower:]' '[:upper:]')" ;;
@@ -449,6 +487,14 @@ upd_row() {
     upd_restore "$UPD_STORE/base-$UPD_BASE_KEY"
     rm -rf "$HD/scn"; mkdir -p "$HD/scn"
     upd_scripts
+    case ";$S_ACTION;" in
+        *reinstall*)
+            if upd_stage_reinstall "$S_LAYOUT" "$S_FLAVOUR"; then
+                upd_setup_ok reinstall_staged yes
+            else
+                upd_setup_ok reinstall_staged no
+            fi ;;
+    esac
 
     S_AUTO=OFF; S_CHANNEL=""; S_ANSWER=""; S_NOPREFS=0; S_CLOCK=""
     S_NONET=0; S_MODE=""; S_STOP=""; S_PRE=(); S_PROBES=(); S_GUEST=()
@@ -583,10 +629,13 @@ upd_row() {
     upd_hash_rows "$before_root" UPD_BEFORE
     declare -gA UPD_KEEP=()
     IFS=','; local -a fitems=($S_FILES); IFS="$IFS_SAVE"
+    declare -gA UPD_PRIORSUM=()
     for item in "${fitems[@]}"; do
         case "$item" in
             keep=*) f=$(upd_rel "${item#keep=}")
                     UPD_KEEP["$f"]=$(sha256_file "$before_root/$f") ;;
+            prior=*) f=$(upd_rel "${item#prior=}")
+                    UPD_PRIORSUM["$f"]=$(sha256_file "$before_root/$f.old") ;;
         esac
     done
     local user_startup_before files_rec_before
@@ -674,6 +723,15 @@ upd_row() {
     upd_check tool "$([ "$tool" = present ] && echo yes || echo no)" "tool=${tool:-unknown}"
 
     upd_files_checks "$before_root" "$after_root" "$unchanged" "$files_rec_before"
+    case ";$S_ACTION;" in
+        *reinstall*)
+            # A reinstall sets AUTO= and keeps the rest (the MIRROR= this
+            # harness wrote): one AUTO line, the MIRROR line still there.
+            local pr="$HD/scn/prefs-reinstall.txt"
+            upd_check reinstall_prefs "$([ -f "$pr" ] &&
+                [ "$(tr -d '\r' < "$pr" | grep -c '^AUTO=')" = 1 ] &&
+                tr -d '\r' < "$pr" | grep -q "^MIRROR=$UPD_MIRROR/" && echo yes || echo no)" ;;
+    esac
     upd_rc_check
     upd_log_checks
     upd_mirror_check "${mclass[@]}"
@@ -727,6 +785,7 @@ upd_files_checks() { # before_root after_root unchanged files_rec_before
             keep=*)   keep+=("${item#keep=}") ;;
             absent=*) absent+=("${item#absent=}") ;;
             old=*)    olds+=("${item#old=}") ;;
+            prior=*)  ;;
         esac
     done
     local skip=" "
@@ -752,6 +811,18 @@ upd_files_checks() { # before_root after_root unchanged files_rec_before
             absent=*)
                 rel=$(upd_rel "${item#absent=}")
                 upd_check "absent:${item#absent=}" "$([ ! -e "$ar/$rel" ] && echo yes || echo no)" ;;
+            prior=*)
+                # The foreign <f>.old the row began with: still in prior-old/
+                # or back at <f>.old, byte for byte.
+                local want_p="" got_p=no pf
+                rel=$(upd_rel "${item#prior=}")
+                want_p=${UPD_PRIORSUM[$rel]:-}
+                if [ -n "$want_p" ]; then
+                    for pf in "$ar/$rel.old" "$ar"/AmiNetXDuo/Installed/Update/prior-old/*; do
+                        [ -f "$pf" ] && [ "$(sha256_file "$pf")" = "$want_p" ] && { got_p=yes; break; }
+                    done
+                fi
+                upd_check "prior:${item#prior=}" "$got_p" ;;
             old=*)
                 rel=$(upd_rel "${item#old=}")
                 upd_check "old:${item#old=}" "$([ -f "$ar/$rel.old" ] && [ "$(sha256_file "$ar/$rel.old")" = "${UPD_BEFORE[$rel]:-x}" ] && echo yes || echo no)" ;;

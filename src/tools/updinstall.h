@@ -47,13 +47,40 @@
  *   mid-append and is ignored.  <n> counts the file= lines from 1.  <prior>
  *   is the prior-old drawer beside the journal.
  *
- * RECOVERY from a journal (BOOT, PR 6):
+ * RECOVERY from a journal (BOOT):
  *
  *   no "ready"   undo: delete every <path>.new, then the journal.  No live
  *                file was touched.
  *   "ready"      forward: upd_forward() over the file= lines, with the
  *                aside and done lines parsed, finishes every file from what
- *                is on disk; each of its steps can be repeated.
+ *                is on disk; each of its steps can be repeated.  A last line
+ *                without its LF is cut off (SetFileSize) before anything is
+ *                appended.
+ *
+ * THE TRIAL, <DOCDIR>/Installed/Update/trial: the journal, renamed once
+ * every file is done, with state phase=trial.  BOOT counts the boots in the
+ * state; CONFIRM, once the network is up, commits it (upd_commit()); the
+ * third boot without that rolls it back (upd_rollback()).  Both append
+ * their own lines:
+ *
+ *   back <n>     rollback: file n's <path>.old is live again
+ *   other <n>    commit: file n (otherbuild) moved its .old to
+ *                <path>.otherbuild, so its prior .old can come back
+ *   kept <n>     commit: file n is finished
+ *
+ * THE .old RULES, at the commit, never losing a file that was there:
+ *
+ *   ours, no prior .old         <path>.old (the version replaced) deleted
+ *   ours, prior .old            <path>.old deleted, <prior>/<n> back to it
+ *   otherbuild, no prior .old   <path>.old (the other build) kept
+ *   otherbuild, prior .old      <path>.old to <path>.otherbuild, then
+ *                               <prior>/<n> back to <path>.old; when that
+ *                               name is taken or cannot be made, both stay
+ *                               where they are (upd_commit_stays())
+ *
+ * and at the rollback: <path>.old live again, then <prior>/<n> back to
+ * <path>.old.  The prior copy goes back the way it went aside: Rename, or a
+ * copy to <path>.tmp renamed to <path>.old and the copy deleted.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -223,6 +250,9 @@ typedef struct UpdJEntry
     unsigned char  why;                 /* UPD_WHY_OURS | _OTHERBUILD      */
     unsigned char  aside;               /* an "aside <n>" line             */
     unsigned char  done;                /* a "done <n>" line               */
+    unsigned char  back;                /* a "back <n>" line (rollback)    */
+    unsigned char  other;               /* an "other <n>" line (commit)    */
+    unsigned char  kept;                /* a "kept <n>" line (commit)      */
     unsigned char  staged;              /* this run wrote <path>.new       */
 } UpdJEntry;
 
@@ -291,6 +321,43 @@ int upd_forward(UpdJEntry *e, unsigned int n, const char *prior,
    a .old to move aside. */
 unsigned int upd_forward_steps(unsigned int n, unsigned int olds);
 
+/*
+ * The rollback over the trial's entries: per entry, the new <path> deleted
+ * and <path>.old renamed to it, "back <n>", then an aside's <prior>/<n> back
+ * to <path>.old; each step taken only when the disk says it is still to do,
+ * a cut point after each.  Returns 1 when every entry is back, 0 when an
+ * operation failed or a cut stopped it, -1 for an entry with neither a .old
+ * nor a live file.
+ */
+int upd_rollback(UpdJEntry *e, unsigned int n, const char *prior,
+                 const UpdFsOps *ops, unsigned int *failed);
+
+/* The commit over the trial's entries, by the .old rules above; "kept <n>"
+   after each.  1 when every entry is kept, 0 as upd_rollback(). */
+int upd_commit(UpdJEntry *e, unsigned int n, const char *prior,
+               const UpdFsOps *ops, unsigned int *failed);
+
+/* After upd_commit(): 1 when entry e left its other build at <path>.old and
+   its prior .old in <prior>/<n>, because <path>.otherbuild could not be
+   made. */
+int upd_commit_stays(const UpdJEntry *e);
+
+/* The length of `text` up to and with its last LF: what a journal keeps
+   when its last line was cut short. */
+unsigned long upd_journal_trim(const char *text, unsigned long len);
+
+/*
+ * S:AmiNetXDuo-Files with `section` -- a block from "; BEGIN
+ * UpdateAmiNetXDuo" to "; END UpdateAmiNetXDuo" and its LF -- in place of
+ * the one `old` holds, or after its first FailAt line, or first.  The
+ * length, or 0 when it does not fit in `outlen`.
+ */
+#define UPD_REC_BEGIN       "; BEGIN UpdateAmiNetXDuo"
+#define UPD_REC_END         "; END UpdateAmiNetXDuo"
+unsigned long upd_record_merge(const char *old, unsigned long oldlen,
+                               const char *section, unsigned long seclen,
+                               char *out, unsigned long outlen);
+
 /* 1 when the journal holds entry `i` (from 0) and upd_forward() names all
    it needs -- <path>, .new, .old, <prior>/<n> and its .tmp -- within
    UPD_APATH_MAX; 0 otherwise.  PREPARE asks it of every file before it
@@ -356,6 +423,11 @@ unsigned long upd_state_merge(const char *old, unsigned long oldlen,
                               unsigned long boots, const char *flavour,
                               char *out, unsigned long outlen);
 
+/* The value of the state line "<key>=" (key without case) into `out`, NUL
+   ended; 1, or 0 when there is none or it does not fit. */
+int upd_state_get(const char *text, unsigned long len, const char *key,
+                  char *out, unsigned long outlen);
+
 /* 1 when an installed update waits for CONFIRM: the trial file is there
    (`trial`), or the state (`len` bytes, NULL for none) says phase=trial.
    INSTALL then refuses before it removes anything: receipt-next is
@@ -406,6 +478,30 @@ int upd_lock_why(long ioerr);
 unsigned long upd_state_next(const char *old, unsigned long oldlen, int absent,
                              const char *version, const char *flavour,
                              char *out, unsigned long outlen);
+
+/*
+ * A file written as <file>.tmp and then renamed over <file> -- the state,
+ * the trust store's copy in Installed, S:AmiNetXDuo-Install -- is removed
+ * only once its .tmp is whole, so a lone .tmp is the file.  What a reader
+ * does, by what each look found (1 there, 0 not there, < 0 cannot be
+ * said): UPD_PAIR_READ <file>; UPD_PAIR_RECOVER rename the .tmp to <file>
+ * first, then read it; UPD_PAIR_EMPTY neither is there; UPD_PAIR_FAIL a
+ * look failed: nothing is read, written or removed.
+ */
+enum { UPD_PAIR_EMPTY = 0, UPD_PAIR_READ, UPD_PAIR_RECOVER, UPD_PAIR_FAIL };
+
+int upd_pair_plan(int file, int tmp);
+
+/*
+ * The state's verdict on an update to `version`: 0 none; 1 skipped -- a
+ * rollback took that version out (phase=rolledback version=) or the user
+ * skipped it (skip=) -- for CHECK and every automatic path; 2 overridden,
+ * for an explicit INSTALL, which installs it and says so.
+ */
+enum { UPD_SKIP_NONE = 0, UPD_SKIP_SKIPPED, UPD_SKIP_OVERRIDDEN };
+
+int upd_skip_verdict(const char *state, unsigned long len, const char *version,
+                     int explicit_install);
 
 /* Lower-case hex of 32 bytes into `out`, 65 bytes with the NUL. */
 void upd_hex32(const unsigned char *b, char *out);

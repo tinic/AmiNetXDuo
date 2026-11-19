@@ -353,6 +353,19 @@
        "semicolon.\n\n"
        "At Expert level the installer asks for the server next."))
 
+(set H_UPDATE
+  (cat "If the answer is yes, AmiNetXDuo looks for a newer version of "
+       "itself when this Amiga boots, after the network is up, and asks "
+       "before it installs anything.  The check runs in the background, so "
+       "the boot does not wait for it.\n\n"
+       "Only the files of the installed flavour that this installation "
+       "placed are replaced.  Each one is checked against a signed list "
+       "before the first file is changed, and the previous files are put "
+       "back if the network does not come up after the update.\n\n"
+       "The answer is kept in ENVARC:AmiNetXDuo/Update as AUTO=ON or "
+       "AUTO=OFF, and can be changed there later.  UpdateAmiNetXDuo CHECK "
+       "in a Shell checks at any time, whatever the answer."))
+
 (set H_SNTPSERVER
   (cat "The name or address of an SNTP server.  pool.ntp.org selects a "
        "public server near this machine.  A router or another machine on the "
@@ -2437,6 +2450,22 @@
       ))
   ))
 
+; --- check for updates at boot? -----------------------------------------
+;
+; DEFAULTS TO YES.  Only asked when the network starts at boot: the startup
+; block's lines that check, and that confirm or undo an update, run only
+; then.  The answer goes to ENVARC:AmiNetXDuo/Update (AUTO=ON|OFF), which
+; UpdateAmiNetXDuo CHECK QUIET reads at every boot; the startup line itself
+; is written either way, so that the setting alone switches the check.
+(set DO_UPDCHECK 0)
+(if DO_STARTUP
+    (set DO_UPDCHECK
+      (askbool
+        (prompt "Check for a newer AmiNetXDuo when this Amiga boots?")
+        (help    H_UPDATE)
+        (choices "Yes, check at boot" "No")
+        (default 1))))
+
 (complete 10)
 
 ; ==========================================================================
@@ -2513,6 +2542,8 @@
 ; Installed: a copy of each configuration file and icon as this
 ; installation left it, and the tools the record runs.
 (set D_INSTALLED (tackon DOCDIR "Installed"))
+
+(set D_UPDATE (tackon D_INSTALLED "Update"))
 (set BK_SUB "")
 (set D_BACKUP "")
 (set BK_MAX 0)
@@ -3401,6 +3432,41 @@
 (set MADE_TOOLS      (if (OR DRAWER_LAYOUT (exists "SYS:Tools" (noreq))) 0 1))
 (set MADE_COMMODITIES (if (OR DRAWER_LAYOUT
                               (exists "SYS:Tools/Commodities" (noreq))) 0 1))
+; --- an update under way ends here, just before the first file is replaced
+;
+; UpdateAmiNetXDuo (#497) may have left a swap half done (journal) or an
+; update on trial (trial, state phase=trial) that the next boot would
+; finish, count or roll back -- over the files this run is about to write.
+; So it ends here, after every question and before the record and the
+; first copy: the archive's own UpdateAmiNetXDuo BOOT finishes or undoes a
+; journal (a preparation's .new files go) and settles a trial.  Only when
+; BOOT says so (RC 0) are the trial, the state and the staged receipt
+; discarded, so that no later BOOT acts on them; otherwise the run stops
+; here with everything left as it was, the update's recovery data too.
+; prior-old/ stays: what is in it may be another stack's .old, which only
+; the user can judge.  The log stays.
+(if (AND (= @pretend 0) (= (exists D_UPDATE (noreq)) 2))
+  (
+    (if (OR (exists (tackon D_UPDATE "journal") (noreq))
+            (exists (tackon D_UPDATE "trial") (noreq)))
+        (if (<> 0 (run ("\"%s\" BOOT QUIET" (tackon S_C "UpdateAmiNetXDuo"))
+                       (prompt "Finishing the update UpdateAmiNetXDuo had begun")
+                       (help   H_UPDATE)))
+            (abort (cat "An update UpdateAmiNetXDuo began could not be "
+                        "finished or undone, so nothing was installed and "
+                        "nothing of it was removed.  Restart the Amiga, "
+                        "which finishes it, and run the installer again.  "
+                        (tackon D_UPDATE "log") " says what it did."))))
+    (set RCPT_N 0)
+    (while (set RCPT_X (select RCPT_N "journal" "journal.tmp" "trial"
+                                      "receipt-next" "state" "state.tmp"
+                                      "container.update.lha" ""))
+      (
+        (delete (tackon D_UPDATE RCPT_X) (optional "force" "nofail"))
+        (set RCPT_N (+ RCPT_N 1))
+      ))
+  ))
+
 (set REC_FINAL 0)
 (P_write_record)
 
@@ -4639,11 +4705,36 @@
 ; S:Network-Startup, rather than from a line buried in User-Startup among the
 ; assigns.  A user with a second card edits one obvious file and the managed
 ; block above it stays the installer's to rewrite.
+;
+; UpdateAmiNetXDuo (#497) around it.  BOOT first, before anything opens
+; bsdsocket.library: it finishes or undoes an update a power cut stopped,
+; and rolls back one whose network has not come up for two boots.  CONFIRM
+; after the network: once an interface has an address, an update on trial
+; is kept.  Then the check, in the background (Run, for httpd's reason), which
+; does nothing when ENVARC:AmiNetXDuo/Update says AUTO=OFF.  BOOT and
+; CONFIRM do nothing at all without an update under way, and never return
+; more than WARN, so the startup goes on.  The block is written whole, so a
+; second run never adds them twice, and the uninstall takes them with it.
+; A cut between the two renames that swap UpdateAmiNetXDuo itself leaves
+; only its .old (and .new): that copy runs BOOT then, and finishes it.  An
+; UpdateAmiNetXDuo deleted by hand stops none of the lines.
+(set UPD_CMD (cat C_PREFIX "UpdateAmiNetXDuo"))
 (if DO_STARTUP
     (set BOOT_CMD
       (cat BOOT_CMD
+           "If EXISTS " UPD_CMD "\n"
+           "  " UPD_CMD " BOOT QUIET\n"
+           "Else\n"
+           "  If EXISTS " UPD_CMD ".old\n"
+           "    " UPD_CMD ".old BOOT QUIET\n"
+           "  EndIf\n"
+           "EndIf\n"
            "If EXISTS S:Network-Startup\n"
            "  Execute S:Network-Startup\n"
+           "EndIf\n"
+           "If EXISTS " UPD_CMD "\n"
+           "  " UPD_CMD " CONFIRM QUIET\n"
+           "  Run >NIL: <NIL: " UPD_CMD " CHECK QUIET\n"
            "EndIf\n")))
 
 ; The assign is written here ONLY when the drawer install did not already
@@ -4918,6 +5009,43 @@
                                      "DEVS:Internet/certificates")))
     (P_receipt)
     (if (= RCPT_OK 0) (delete RCPT_F (optional "force" "nofail")))
+
+    ; S:AmiNetXDuo-Install: what UpdateAmiNetXDuo reads of this run, and
+    ; the updater's settings with the answer to the question in section 4.
+    ; ENV: gets the same file now, as ENVARC: is copied there only at boot.
+    (textfile
+      (prompt "Writing S:AmiNetXDuo-Install")
+      (help   "What UpdateAmiNetXDuo reads of this installation: the "
+              "version, the flavour and where its files are.")
+      (dest   "S:AmiNetXDuo-Install")
+      (append "; S:AmiNetXDuo-Install -- written by the AmiNetXDuo installer.\n")
+      (append ("version=%s\n" VERSION_STR))
+      (append ("flavour=%s\n" (select MINPICK "full" "minimal" "micro" "fat")))
+      (append ("layout=%s\n" (if DRAWER_LAYOUT "drawer" "system")))
+      (append ("docdir=%s\n" DOCDIR))
+      (append ("libs=%s\nc=%s\ndevs=%s\n" D_LIBS D_C D_DEVS))
+      (append ("channel=%s\n" (if (patmatch "#?-#?" VERSION_STR)
+                                  "prerelease" "release"))))
+    ; AUTO= only: InstallSameFile SETKEY keeps every other line, so a
+    ; reinstall keeps the CHANNEL= and MIRROR= the user set.  Written whole
+    ; only when that fails.
+    (set UPD_PREFS (if DO_UPDCHECK "AUTO=ON" "AUTO=OFF"))
+    (set RCPT_N 0)
+    (while (set RCPT_X (select RCPT_N "ENVARC:AmiNetXDuo" "ENV:AmiNetXDuo" ""))
+      (
+        (makedir RCPT_X (prompt ("Creating %s" RCPT_X)) (help H_UPDATE))
+        ; Quoted: ReadArgs ends an unquoted item at its "=".
+        (if (<> 0 (run ("\"%s\" \"%s\" \"%s\" SETKEY" S_SAMEFILE
+                        (tackon RCPT_X "Update") UPD_PREFS)
+                       (prompt ("Writing %s" (tackon RCPT_X "Update")))
+                       (help   H_UPDATE)))
+            (textfile
+              (prompt ("Writing %s" (tackon RCPT_X "Update")))
+              (help   H_UPDATE)
+              (dest   (tackon RCPT_X "Update"))
+              (append (cat UPD_PREFS "\n"))))
+        (set RCPT_N (+ RCPT_N 1))
+      ))
   ))
 
 (complete 100)

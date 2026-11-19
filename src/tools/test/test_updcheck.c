@@ -17,6 +17,8 @@
 #include <string.h>
 #include <time.h>
 
+#include "updprefs.h"
+
 static int failures;
 static int checks;
 
@@ -410,6 +412,29 @@ static void test_fetch_result(void)
     CHECK(upd_fetch_result(0, 1) == -1);
 }
 
+/* updprefs.h: the installer's AUTO= over a settings file. */
+static void test_prefs_set(void)
+{
+    static const char old[] = "; mine\r\nCHANNEL=PRERELEASE\r\nAuto = OFF\n"
+                              "MIRROR=http://m/\nAUTO=ON\nAUTOX=1";
+    char          out[256];
+    unsigned long n;
+
+    n = upd_prefs_set(old, sizeof(old) - 1, "AUTO=ON", out, sizeof(out));
+    out[n] = '\0';
+    CHECK(n > 0 && strcmp(out, "; mine\r\nCHANNEL=PRERELEASE\r\nAUTO=ON\n"
+                               "MIRROR=http://m/\nAUTOX=1\n") == 0);
+    n = upd_prefs_set("", 0, "AUTO=OFF", out, sizeof(out));
+    out[n] = '\0';
+    CHECK(n == 9 && strcmp(out, "AUTO=OFF\n") == 0);
+    n = upd_prefs_set("MIRROR=x", 8, "AUTO=OFF", out, sizeof(out));
+    out[n] = '\0';
+    CHECK(strcmp(out, "MIRROR=x\nAUTO=OFF\n") == 0);
+    CHECK(upd_prefs_set("", 0, "AUTO", out, sizeof(out)) == 0);
+    CHECK(upd_prefs_set("", 0, "=ON", out, sizeof(out)) == 0);
+    CHECK(upd_prefs_set(old, sizeof(old) - 1, "AUTO=ON", out, 20) == 0);
+}
+
 int main(void)
 {
     test_settings();
@@ -420,6 +445,7 @@ int main(void)
     test_said();
     test_stack();
     test_fetch_result();
+    test_prefs_set();
 
     printf("test_updcheck: %d checks, %d failures\n", checks, failures);
 

@@ -134,7 +134,8 @@
       "HOSTLINE": true,
       "MARK": true,
       "RECEIPT": true,
-      "SECOND": "RAM:cli-input"
+      "SECOND": "RAM:cli-input",
+      "SETKEY": true
     }
   },
   "InstallWiFi": {

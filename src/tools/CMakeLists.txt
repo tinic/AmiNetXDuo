@@ -1206,7 +1206,9 @@ if(NOT CMAKE_CROSSCOMPILING)
         NX_CRYPTO_STANDALONE_ENABLE)
 
     # INSTALL's decisions: the receipt, the three-way selection, the
-    # container headers, the journal, and the swap cut after every step.
+    # container headers, the journal, and the swap cut after every step;
+    # BOOT's and CONFIRM's: the rollback and the commit cut after every
+    # step, the state and the record.
     add_executable(test_updinstall
         test/test_updinstall.c
         updinstall.c
@@ -1461,6 +1463,7 @@ if(NOT CMAKE_CROSSCOMPILING)
     add_test(NAME updcheck_verdict COMMAND test_updcheck)
     add_test(NAME updinstall_select COMMAND test_updinstall select)
     add_test(NAME updinstall_journal COMMAND test_updinstall journal)
+    add_test(NAME updinstall_trial COMMAND test_updinstall trial)
     add_test(NAME toolsock_connect_budget COMMAND test_toolbudget)
     add_test(NAME netprefs_preserves_text COMMAND test_netprefs_text)
     add_test(NAME devicehome_rewrites_only_ours COMMAND test_devicehome)
