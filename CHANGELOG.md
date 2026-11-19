@@ -7,6 +7,8 @@ are history.
 
 ## Unreleased
 
+## 1.0.0-rc5
+
 - AmiNetXDuo updates itself. Once a day at boot, UpdateAmiNetXDuo looks for
   a newer version and offers it with Install, Skip this version and Later.
   It installs the same kind of stack to the same places, and replaces only
