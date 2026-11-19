@@ -200,9 +200,9 @@ BUDGETS=(
     # record's block.  These sizes are a build that holds a key (the
     # test-key build); the default arm holds none yet, and LTO drops what
     # only a verified manifest reaches: 56,736 there on 2026-11-19.
-    # -> 66,204 with a key (57,616 without) with the startup requester
+    # -> 66,252 with a key (57,644 without) with the startup requester
     # (Install / Later / Skip, Restart now / Later), the daily check and
-    # the state's last_check= later= skip= (+2,068; #497 PR 7).
+    # the state's last_check= later= skip= (+2,116; #497 PR 7).
     "default:src/tools/UpdateAmiNetXDuo:67584"
     # 225,876 -> 226,216 on 2026-09-17: the write queue behind the SANA-II
     # ring and its launcher (a round trip in flight for every card: A1200

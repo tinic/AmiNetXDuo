@@ -118,16 +118,32 @@ static inline unsigned long upd_prefs_set2(const char *old, unsigned long oldlen
     return n == 0 ? 0 : upd_prefs_set(tmp, n, line2, out, cap);
 }
 
-/*
- * The value of the first line that sets `key` (without case), its spaces
- * and a CR around it dropped, into `out` (`outlen` bytes, NUL ended).  1,
- * or 0 when no line sets it or the value does not fit.
- */
-static inline int upd_prefs_get(const char *text, unsigned long len,
-                                const char *key, char *out,
-                                unsigned long outlen)
+/* `n` bytes at `a` are `word`, without case. */
+static inline int upd_prefs_same(const char *a, unsigned long n,
+                                 const char *word)
 {
-    unsigned long klen = 0, i = 0, n, b, e, k;
+    unsigned long i;
+
+    for (i = 0; i < n; i++)
+        if (word[i] == '\0' ||
+            upd_prefs_fold((unsigned char)a[i]) != upd_prefs_fold((unsigned char)word[i]))
+            return 0;
+    return word[n] == '\0';
+}
+
+/*
+ * The setting `key` reads as, the way UpdateAmiNetXDuo reads it
+ * (upd_settings_parse(), updcheck.c): of the lines that set it, the LAST
+ * whose value, its spaces and a CR dropped, is one of `words` (without
+ * case; NULL ends the list) wins, and a line with any other value is
+ * passed by.  The index of that word, or `def` when no line sets one.
+ */
+static inline int upd_prefs_word(const char *text, unsigned long len,
+                                 const char *key, const char *const *words,
+                                 int def)
+{
+    unsigned long klen = 0, i = 0, n, b, e;
+    int           w, got = def;
 
     while (key[klen] != '\0')
         klen++;
@@ -148,14 +164,45 @@ static inline int upd_prefs_get(const char *text, unsigned long len,
             while (e > b && (l[e - 1] == ' ' || l[e - 1] == '\t' ||
                              l[e - 1] == '\r'))
                 e--;
-            if (e - b + 1 > outlen)
-                return 0;
-            for (k = 0; k < e - b; k++)
-                out[k] = l[b + k];
-            out[k] = '\0';
-            return 1;
+            for (w = 0; words[w] != 0; w++)
+                if (upd_prefs_same(l + b, e - b, words[w]))
+                    got = w;
         }
         i += n + 1;
+    }
+    return got;
+}
+
+/*
+ * The value of the first "<key>=" token of UpdateAmiNetXDuo's key=value
+ * output (`key` with its '='), a token being one that starts a line or
+ * follows a space: "version=" in "update=available version=1.0.1".  Up to
+ * the next space or the line's end, into `out` (`outlen` bytes, NUL
+ * ended, cut to fit).  1, or 0 when there is none.
+ */
+static inline int upd_output_value(const char *text, unsigned long len,
+                                   const char *key, char *out,
+                                   unsigned long outlen)
+{
+    unsigned long klen = 0, i, k;
+
+    while (key[klen] != '\0')
+        klen++;
+    if (outlen == 0)
+        return 0;
+    for (i = 0; i + klen <= len; i++)
+    {
+        if (i > 0 && text[i - 1] != ' ' && text[i - 1] != '\n')
+            continue;
+        for (k = 0; k < klen && text[i + k] == key[k]; k++)
+            ;
+        if (k < klen)
+            continue;
+        i += klen;
+        for (k = 0; i + k < len && text[i + k] > ' ' && k + 1 < outlen; k++)
+            out[k] = text[i + k];
+        out[k] = '\0';
+        return 1;
     }
     return 0;
 }

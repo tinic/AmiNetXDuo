@@ -1061,7 +1061,8 @@ static VOID load_updates(VOID)
     static const char *const where[] = {
         "ENV:AmiNetXDuo/Update", "ENVARC:AmiNetXDuo/Update"
     };
-    char  v[16];
+    static const char *const onoff[] = { "OFF", "ON", NULL };
+    static const char *const channels[] = { "RELEASE", "PRERELEASE", NULL };
     char *text = NULL;
     ULONG len = 0, i;
 
@@ -1074,14 +1075,10 @@ static VOID load_updates(VOID)
     for (i = 0; i < 2 && text == NULL; i++)
         if (quiet_exists(where[i])) text = read_file(where[i], &len, TRUE);
     if (text == NULL) return;
-    if (upd_prefs_get(text, len, "AUTO", v, sizeof(v)) &&
-        tool_stricmp(v, "OFF") == 0)
-        np_upd_auto = FALSE;
-    if (upd_prefs_get(text, len, "CHANNEL", v, sizeof(v)))
-    {
-        if (tool_stricmp(v, "RELEASE") == 0) np_upd_channel = 0;
-        else if (tool_stricmp(v, "PRERELEASE") == 0) np_upd_channel = 1;
-    }
+    /* As the updater reads them: the last valid line wins. */
+    np_upd_auto = (BOOL)upd_prefs_word(text, len, "AUTO", onoff, 1);
+    np_upd_channel = (ULONG)upd_prefs_word(text, len, "CHANNEL", channels,
+                                           (int)np_upd_channel);
     ami_free(text);
 }
 
@@ -1124,27 +1121,12 @@ static BOOL save_updates(BOOL archive)
     return TRUE;
 }
 
-/* The first "<key>=" line of the output, its value up to a space or the
-   line's end, into np_upd_tmp; NULL when there is none. */
+/* A key=value token of the updater's output (updprefs.h), into
+   np_upd_tmp; NULL when there is none. */
 static const char *upd_output(const char *text, ULONG len, const char *key)
 {
-    ULONG klen = text_len(key), i = 0, n, k;
-
-    while (i < len)
-    {
-        for (n = 0; i + n < len && text[i + n] != '\n'; n++) ;
-        for (k = 0; k < klen && k < n && text[i + k] == key[k]; k++) ;
-        if (k == klen)
-        {
-            for (k = 0; klen + k < n && text[i + klen + k] > ' ' &&
-                        k + 1 < NP_UPD_MAX; k++)
-                np_upd_tmp[k] = text[i + klen + k];
-            np_upd_tmp[k] = '\0';
-            return np_upd_tmp;
-        }
-        i += n + 1;
-    }
-    return NULL;
+    return upd_output_value(text, len, key, np_upd_tmp, sizeof(np_upd_tmp))
+           ? np_upd_tmp : NULL;
 }
 
 /* UpdateAmiNetXDuo <words> run, its output read into np_upd_out; the
@@ -1206,11 +1188,36 @@ static VOID check_now(VOID)
         set_status("Installing the update...");
         len = run_updater("INSTALL RESTART");
         set_status("");
-        v = len < 0 ? NULL : upd_output(np_upd_out, (ULONG)len, "refused=");
-        say_join(body, sizeof(body), "The update was not installed",
-                 v != NULL ? " (" : ".", v != NULL ? v : "");
-        if (v != NULL) tool_copy_string(body + text_len(body),
-                                        sizeof(body) - text_len(body), ").");
+        /* Back here: the Amiga did not restart.  Why, from the output. */
+        if (len < 0)
+        {
+            requester("UpdateAmiNetXDuo could not be run.");
+            return;
+        }
+        v = upd_output(np_upd_out, (ULONG)len, "refused=");
+        if (v == NULL)
+        {
+            v = upd_output(np_upd_out, (ULONG)len, "update=");
+            if (v != NULL && tool_stricmp(v, "unchanged") == 0)
+                say_join(body, sizeof(body), "Nothing was replaced: every "
+                         "AmiNetXDuo file is already ", ver, " or is kept "
+                         "(another program's, or newer).");
+            else if (v != NULL && tool_stricmp(v, "current") == 0)
+                say_join(body, sizeof(body), "AmiNetXDuo ",
+                         AMINETXDUO_VERSION, " is up to date: nothing to "
+                         "install.");
+            else if (v != NULL && tool_stricmp(v, "installed") == 0)
+                say_join(body, sizeof(body), "AmiNetXDuo ", ver,
+                         " is installed.\nRestart the Amiga to use it.");
+            else
+                say_join(body, sizeof(body), "The update was not installed.",
+                         "", "");
+        }
+        else
+        {
+            say_join(body, sizeof(body), "The update was not installed (",
+                     v, ").");
+        }
         requester(body);
     }
     else if (v != NULL && tool_stricmp(v, "current") == 0)
@@ -1223,10 +1230,12 @@ static VOID check_now(VOID)
     else
     {
         v = upd_output(np_upd_out, (ULONG)len, "refused=");
-        say_join(body, sizeof(body), "The check did not complete",
-                 v != NULL ? " (" : ".", v != NULL ? v : "");
-        if (v != NULL) tool_copy_string(body + text_len(body),
-                                        sizeof(body) - text_len(body), ").");
+        if (v != NULL)
+            say_join(body, sizeof(body), "The check did not complete (", v,
+                     ").");
+        else
+            say_join(body, sizeof(body), "The check did not complete.", "",
+                     "");
         requester(body);
     }
 }

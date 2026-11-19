@@ -12,7 +12,7 @@
 #
 #   UpdateAmiNetXDuo CHECK [QUIET] [ANSWER=INSTALL|LATER|SKIP]
 #       Fetch <MIRROR><channel>/update.manifest and .sig, verify, compare.
-#       An update offers the Install / Later / Skip this version requester;
+#       An update offers the Install / Skip this version / Later requester;
 #       ANSWER= answers it without drawing it.  INSTALL then runs as below.
 #       QUIET is the startup line: no output, nothing when AUTO=OFF or when
 #       it already checked today, and it waits for the Workbench screen.

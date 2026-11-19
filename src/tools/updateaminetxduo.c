@@ -19,7 +19,7 @@
  *
  * CHECK QUIET is the startup line, run in the background: nothing with
  * AUTO=OFF, at most one check a day (the state's last_check= and later=),
- * and an update offered with the Install / Later / Skip this version
+ * and an update offered with the Install / Skip this version / Later
  * requester once the Workbench screen is open.  Install installs it and
  * asks to restart; Later asks again the next day; Skip passes that version
  * by (skip=).  ANSWER= answers the requester without drawing it.
@@ -2167,14 +2167,16 @@ static LONG upd_offer(const char *mirror, const UpdWant *want,
         if (drawn)
         {
             upd_ver_format(&want->installed, inst);
+            /* 0 is also what a requester that could not open returns:
+               the last button is Later, never the lasting Skip. */
             switch (upd_ask("AmiNetXDuo %s is available (installed %s).",
-                            "Install|Later|Skip this version", upd_ver_text,
+                            "Install|Skip this version|Later", upd_ver_text,
                             inst))
             {
             case 1:  answer = ANSWER_INSTALL; break;
-            case 2:  answer = ANSWER_LATER;   break;
-            case 0:  answer = ANSWER_SKIP;    break;
-            default: break;
+            case 2:  answer = ANSWER_SKIP;    break;
+            case 0:  answer = ANSWER_LATER;   break;
+            default: break;             /* none drawn: asked next startup */
             }
         }
     }
@@ -2254,7 +2256,9 @@ static LONG upd_check(BOOL install)
     const char     *mirror;
 
     upd_read_settings(&upd_set);
-    if (upd_run_args.quiet && !upd_set.auto_check)
+    /* AUTO=OFF and the daily check are the startup line's (CHECK QUIET);
+       an INSTALL, QUIET or not, is asked for and runs. */
+    if (upd_run_args.quiet && !install && !upd_set.auto_check)
     {
         say("update=off", NULL, NULL);
         return RETURN_OK;
@@ -2313,7 +2317,7 @@ static LONG upd_check(BOOL install)
         DateStamp(&ds);
         upd_date((unsigned long)ds.ds_Days, upd_today);
     }
-    if (upd_run_args.quiet)
+    if (upd_run_args.quiet && !install)
     {
         (VOID)upd_state_load_as(FALSE);
         if (!upd_due(upd_st, upd_st_len, upd_today))
@@ -2377,7 +2381,7 @@ static LONG upd_check(BOOL install)
     case UPD_V_CURRENT:
         upd_ver_format(&want.installed, upd_ver_text);
         say("update=current version=", upd_ver_text, NULL);
-        if (upd_run_args.quiet)
+        if (upd_run_args.quiet && !install)
             upd_state_note(NULL);
         rc = RETURN_OK;
         break;
@@ -2392,7 +2396,7 @@ static LONG upd_check(BOOL install)
         {
         case UPD_SKIP_SKIPPED:
             say("update=skipped version=", upd_ver_text, NULL);
-            if (upd_run_args.quiet)
+            if (upd_run_args.quiet && !install)
                 upd_state_note(NULL);
             rc = RETURN_OK;
             goto done;

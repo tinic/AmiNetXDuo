@@ -441,19 +441,37 @@ static void test_prefs_page(void)
 {
     static const char old[] = "; mine\r\n auto = off \r\nMIRROR=http://m/\n"
                               "CHANNEL=Release\nCHANNEL=PRERELEASE\n";
-    char          v[16], tmp[256], out[256];
+    char          tmp[256], out[256];
     unsigned long n;
+    static const char *const onoff[] = { "OFF", "ON", 0 };
+    static const char *const chan[] = { "RELEASE", "PRERELEASE", 0 };
+    /* NetPrefs reads what the updater reads (#510 review): the last valid
+       line wins, an invalid one is passed by. */
+    static const char *const texts[] = {
+        "",
+        "AUTO=OFF\nAUTO=ON\n",
+        "AUTO=ON\nAUTO=off\n",
+        "AUTO=OFF\nAUTO=maybe\n",
+        " auto = off \r\n",
+        "#AUTO=OFF\n;AUTO=OFF\nAUTOX=OFF\n",
+        "CHANNEL=Release\nCHANNEL=PRERELEASE\n",
+        "CHANNEL=prerelease\nCHANNEL=beta\n",
+        "channel = release\r\nAUTO=OFF",
+        "CHANNEL=\nAUTO=\n",
+    };
+    unsigned int t;
 
-    CHECK(upd_prefs_get(old, sizeof(old) - 1, "AUTO", v, sizeof(v)) &&
-          strcmp(v, "off") == 0);
-    CHECK(upd_prefs_get(old, sizeof(old) - 1, "channel", v, sizeof(v)) &&
-          strcmp(v, "Release") == 0);
-    CHECK(upd_prefs_get(old, sizeof(old) - 1, "MIRROR", v, sizeof(v)) &&
-          strcmp(v, "http://m/") == 0);
-    CHECK(!upd_prefs_get(old, sizeof(old) - 1, "MIRROR", v, 9));
-    CHECK(!upd_prefs_get(old, sizeof(old) - 1, "AUT", v, sizeof(v)));
-    CHECK(!upd_prefs_get("", 0, "AUTO", v, sizeof(v)));
-    CHECK(upd_prefs_get("AUTO=", 5, "AUTO", v, sizeof(v)) && v[0] == '\0');
+    for (t = 0; t < sizeof(texts) / sizeof(texts[0]); t++)
+    {
+        UpdSettings u = parse(texts[t]);
+        unsigned long tl = (unsigned long)strlen(texts[t]);
+
+        CHECK(upd_prefs_word(texts[t], tl, "AUTO", onoff, 1) == u.auto_check);
+        CHECK(upd_prefs_word(texts[t], tl, "CHANNEL", chan, -1) == u.channel);
+    }
+    CHECK(upd_prefs_word(old, sizeof(old) - 1, "AUTO", onoff, 1) == 0);
+    CHECK(upd_prefs_word(old, sizeof(old) - 1, "CHANNEL", chan, -1) ==
+          UPD_CHANNEL_PRERELEASE);
 
     n = upd_prefs_set2(old, sizeof(old) - 1, "AUTO=ON", "CHANNEL=PRERELEASE",
                        tmp, out, sizeof(out));
@@ -468,6 +486,32 @@ static void test_prefs_page(void)
                          tmp, out, 30) == 0);
 }
 
+/* NetPrefs' Check now: a key=value token anywhere on a line, at a word's
+   start (#510 review: version= follows update=available). */
+static void test_output_value(void)
+{
+    static const char out[] = "skip=overridden version=1.0.1\n"
+                              "update=available version=1.0.1\n"
+                              "refused=protected AmiNetXDuo:C/ping\n"
+                              "xversion=9\n";
+    char v[16];
+
+    CHECK(upd_output_value(out, sizeof(out) - 1, "version=", v, sizeof(v)) &&
+          strcmp(v, "1.0.1") == 0);
+    CHECK(upd_output_value(out, sizeof(out) - 1, "update=", v, sizeof(v)) &&
+          strcmp(v, "available") == 0);
+    CHECK(upd_output_value(out, sizeof(out) - 1, "refused=", v, sizeof(v)) &&
+          strcmp(v, "protected") == 0);
+    CHECK(!upd_output_value(out, sizeof(out) - 1, "boot=", v, sizeof(v)));
+    CHECK(upd_output_value("xversion=9 version=2", 20, "version=", v, sizeof(v)) &&
+          strcmp(v, "2") == 0);
+    CHECK(!upd_output_value("xversion=9", 10, "version=", v, sizeof(v)));
+    CHECK(upd_output_value("update=current version=1.0.0-rc5", 32, "version=",
+                           v, 6) && strcmp(v, "1.0.0") == 0);
+    CHECK(upd_output_value("update=", 7, "update=", v, sizeof(v)) && v[0] == '\0');
+    CHECK(!upd_output_value("", 0, "update=", v, sizeof(v)));
+}
+
 int main(void)
 {
     test_settings();
@@ -480,6 +524,7 @@ int main(void)
     test_fetch_result();
     test_prefs_set();
     test_prefs_page();
+    test_output_value();
 
     printf("test_updcheck: %d checks, %d failures\n", checks, failures);
 
