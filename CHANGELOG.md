@@ -7,6 +7,12 @@ are history.
 
 ## Unreleased
 
+## 1.0.0-rc7
+
+- NetPrefs Check now shows the update it found instead of saying that
+  UpdateAmiNetXDuo could not be run. Starting and stopping an interface from
+  NetPrefs no longer leaves files open.
+
 ## 1.0.0-rc6
 
 - The Installer no longer computes checksums on the Amiga. On a 68000 an
