@@ -1591,6 +1591,42 @@ static void test_fail_closed(void)
     CHECK(upd_rcpt_write_plan(0, 1, 67) == UPD_RW_WRITE);
     CHECK(upd_rcpt_write_plan(1, 0, 0) == UPD_RW_NONE);
     CHECK(upd_rcpt_write_plan(1, 0, 134) == UPD_RW_WRITE);
+
+    /* RECEIPT's hashes come from the archive's InstallSums, by the source
+       path under the drawer the InstallSums is in. */
+    {
+        static const char sums[] =
+            "1111111111111111111111111111111111111111111111111111111111111111 C/ssh\n"
+            "2222222222222222222222222222222222222222222222222222222222222222 C/fat/ssh\n"
+            "3333333333333333333333333333333333333333333333333333333333333333 Libs/micro/bsdsocket.library\n"
+            "4444444444444444444444444444444444444444444444444444444444444444 Devs/Internet/certificates\n"
+            "ABCDEF1111111111111111111111111111111111111111111111111111111111 C/bad\n"
+            "55555555555555555555555555555555555555555555555555555555555555555 C/long\n"
+            "6666666666666666666666666666666666666666666666666666666666666666 C/last";
+        static const char wb[] = "Work:AmiNetXDuo/InstallSums";
+        static const char ram[] = "RAM:InstallSums";
+        unsigned long sn = sizeof(sums) - 1;
+
+        CHECK(upd_sums_find(sums, sn, wb, 15, "Work:AmiNetXDuo/C/ssh") == sums);
+        CHECK(upd_sums_find(sums, sn, wb, 15, "work:aminetxduo/c/SSH") == sums);
+        CHECK(upd_sums_find(sums, sn, wb, 15, "Work:AmiNetXDuo/C/fat/ssh") == sums + 71);
+        CHECK(upd_sums_find(sums, sn, wb, 15,
+                            "Work:AmiNetXDuo/Libs/micro/bsdsocket.library") == sums + 146);
+        CHECK(upd_sums_find(sums, sn, wb, 15,
+                            "Work:AmiNetXDuo/Devs/Internet/certificates") != NULL);
+        CHECK(upd_sums_find(sums, sn, ram, 4, "RAM:C/ssh") == sums);
+        CHECK(upd_sums_find(sums, sn, "InstallSums", 0, "C/ssh") == sums);
+        CHECK(upd_sums_find(sums, sn, wb, 15, "Work:AmiNetXDuo/C/last") != NULL);
+        /* Not under the root, not listed, a prefix only, a bad line. */
+        CHECK(upd_sums_find(sums, sn, wb, 15, "Work:Other/C/ssh") == NULL);
+        CHECK(upd_sums_find(sums, sn, wb, 15, "Work:AmiNetXDuoX/C/ssh") == NULL);
+        CHECK(upd_sums_find(sums, sn, wb, 15, "Work:AmiNetXDuo/C/ping") == NULL);
+        CHECK(upd_sums_find(sums, sn, wb, 15, "Work:AmiNetXDuo/C/ss") == NULL);
+        CHECK(upd_sums_find(sums, sn, wb, 15, "Work:AmiNetXDuo/") == NULL);
+        CHECK(upd_sums_find(sums, sn, wb, 15, "Work:AmiNetXDuo/C/bad") == NULL);
+        CHECK(upd_sums_find(sums, sn, wb, 15, "Work:AmiNetXDuo/C/long") == NULL);
+        CHECK(upd_sums_find(sums, 0, wb, 15, "Work:AmiNetXDuo/C/ssh") == NULL);
+    }
 }
 
 /*

@@ -219,16 +219,12 @@ aminetxduo_add_tool(tool_addnetinterface AddNetInterface
 # Installer can compare bytes but cannot ask whether two paths are the same
 # object; dos.library can.  The archive keeps this beside the Installer and
 # does not copy it into C:.
-# RECEIPT hashes what it lists with crypto68k's SHA-256, as
-# UpdateAmiNetXDuo INSTALL compares it.
+# RECEIPT hashes nothing: it takes each hash from the archive's InstallSums,
+# which dist/make-dist.sh writes, so a 68000 install does no SHA-256.
 aminetxduo_add_tool(tool_installsamefile InstallSameFile
-    SOURCES installsamefile.c devicehome.c
-            "${CMAKE_SOURCE_DIR}/src/crypto68k/c68k_sha256.c")
-target_compile_definitions(tool_installsamefile PRIVATE NX_CRYPTO_STANDALONE_ENABLE)
+    SOURCES installsamefile.c devicehome.c)
 target_include_directories(tool_installsamefile PRIVATE
-    "${CMAKE_SOURCE_DIR}/include"
-    "${CMAKE_SOURCE_DIR}/src/crypto68k"
-    "${AMINETXDUO_NETXDUO}/crypto_libraries/inc")
+    "${CMAKE_SOURCE_DIR}/include")
 
 # The other Installer-only primitive: identify Emu68's supported on-board
 # network devices from its device tree without opening either device.

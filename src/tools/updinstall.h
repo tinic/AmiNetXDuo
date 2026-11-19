@@ -16,7 +16,8 @@
  *   as the startup block names it -- LIBS:, DEVS:Networks/, C: and
  *   DEVS:Internet/ for the system layout, AmiNetXDuo:Libs/, Devs/Networks/,
  *   C/ and Devs/Internet/ for the drawer layout.  Written by
- *   `InstallSameFile <receipt> ... RECEIPT`.
+ *   `InstallSameFile <receipt> ... RECEIPT SUMS <InstallSums>`, with the
+ *   hash the archive's InstallSums gives the file (upd_sums_find()).
  *
  * FILE SELECTION, per file of the installed flavour in the new manifest
  * (receipt hash R, disk hash D, new hash N):
@@ -455,6 +456,70 @@ static inline int upd_rcpt_write_plan(int opened, int absent, unsigned long have
     if (!opened && !absent)
         return UPD_RW_ERROR;
     return have == 0 ? UPD_RW_NONE : UPD_RW_WRITE;
+}
+
+/*
+ * InstallSameFile RECEIPT takes each hash from the archive's InstallSums
+ * (dist/make-dist.sh), "<sha256> <archive path>" per line, and never
+ * hashes on the Amiga: SHA-256 on a 68000 cost the install minutes.  The
+ * line for `src` is the one whose path is `src` with the archive root
+ * taken off: the first `rootlen` bytes of `root` (the InstallSums path up
+ * to its PathPart()), then the '/' after them unless the root ends in ':'
+ * or '/'.  Names are compared without case.  The 64 digits of that line,
+ * or NULL when `src` is not under the root, is not listed, or its line is
+ * not 64 lower-case hex digits, a space and the path.
+ */
+static inline int upd_sums_lower(int c)
+{
+    return (c >= 'A' && c <= 'Z') ? c + ('a' - 'A') : c;
+}
+
+static inline const char *upd_sums_find(const char *sums, unsigned long len,
+                                        const char *root, unsigned long rootlen,
+                                        const char *src)
+{
+    const char   *rel = src + rootlen;
+    unsigned long i = 0, k, n = 0;
+
+    for (k = 0; k < rootlen; k++)
+        if (src[k] == '\0' ||
+            upd_sums_lower((unsigned char)src[k]) !=
+            upd_sums_lower((unsigned char)root[k]))
+            return 0;
+    if (rootlen > 0 && root[rootlen - 1] != ':' && root[rootlen - 1] != '/')
+    {
+        if (*rel != '/')
+            return 0;
+        rel++;
+    }
+    while (rel[n] != '\0')
+        n++;
+    if (n == 0)
+        return 0;
+    while (i < len)
+    {
+        unsigned long e = i;
+
+        while (e < len && sums[e] != '\n')
+            e++;
+        if (e - i == 65 + n && sums[i + 64] == ' ')
+        {
+            for (k = 0; k < n; k++)
+                if (upd_sums_lower((unsigned char)sums[i + 65 + k]) !=
+                    upd_sums_lower((unsigned char)rel[k]))
+                    break;
+            if (k == n)
+            {
+                for (k = 0; k < 64; k++)
+                    if (!((sums[i + k] >= '0' && sums[i + k] <= '9') ||
+                          (sums[i + k] >= 'a' && sums[i + k] <= 'f')))
+                        return 0;
+                return sums + i;
+            }
+        }
+        i = e + 1;
+    }
+    return 0;
 }
 
 /*
