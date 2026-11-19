@@ -135,7 +135,8 @@
       "MARK": true,
       "RECEIPT": true,
       "SECOND": "RAM:cli-input",
-      "SETKEY": true
+      "SETKEY": true,
+      "SUMS": "RAM:cli-input"
     }
   },
   "InstallWiFi": {

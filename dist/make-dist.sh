@@ -850,6 +850,19 @@ write_flavour full "$BUILD" Libs Devs/Networks C 68000
 [ "$WANT_FAT" = "0" ]     || write_flavour fat "$FAT_BUILD" Libs/fat Devs/Networks/fat C/fat 68020
 echo "==> flavours: $(cd "$TREE/Flavours" && echo *)"
 
+# InstallSums: "<sha256> <path>" for every file of every flavour an install
+# receipt can list -- Libs/, Devs/Networks/, C/ and the trust store -- the
+# path relative to this drawer.  InstallSameFile RECEIPT takes its hashes
+# from here and compares bytes only: SHA-256 on a 68000 made the install
+# minutes longer.
+(cd "$TREE" &&
+    find Libs Devs/Networks C -type f ! -name '*.info' | LC_ALL=C sort |
+        while IFS= read -r rel; do echo "$(sha256_of "$rel") $rel"; done
+    [ ! -f Devs/Internet/certificates ] ||
+        echo "$(sha256_of Devs/Internet/certificates) Devs/Internet/certificates"
+) > "$TREE/InstallSums"
+echo "==> InstallSums: $(wc -l < "$TREE/InstallSums" | tr -d " ") files"
+
 # ------------------------------------- everything packed has been decided --
 #
 # BEFORE THE ARCHIVE IS MADE, so a release cannot be built with a file in it

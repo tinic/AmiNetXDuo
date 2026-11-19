@@ -47,11 +47,15 @@
  * NAME<file>; a SOURCE file is DEST itself, named NAME.  Every DEST holding
  * the same bytes as its SOURCE -- the file this installation placed --
  * gets a "<sha256> <name>" line, once per name, after the lines FIRST
- * holds already; written to FIRST.tmp and renamed over FIRST.  RETURN_OK
+ * holds already; written to FIRST.tmp and renamed over FIRST.  The hash is
+ * SOURCE's line in SUMS, the archive's InstallSums, which the build wrote
+ * (upd_sums_find()): nothing is hashed here, as SHA-256 on a 68000 took
+ * the install minutes, and a byte compare is the only read.  RETURN_OK
  * with the receipt written, or with nothing to add and FIRST as it was;
- * RETURN_ERROR otherwise, and then FIRST is as it was.  A FIRST that
- * cannot be opened for any reason but not being there is an error.  The Installer deletes FIRST first and calls once per drawer, which
- * keeps each command line short.
+ * RETURN_ERROR otherwise -- no SUMS, or a placed file it does not list --
+ * and then FIRST is as it was.  A FIRST that cannot be opened for any
+ * reason but not being there is an error.  The Installer deletes FIRST
+ * first and calls once per drawer, which keeps each command line short.
  *
  * SETKEY: FIRST is ENVARC:AmiNetXDuo/Update (or ENV:'s copy), SECOND one
  * KEY=VALUE line, set in place of the line that sets KEY and every other
@@ -62,9 +66,6 @@
  *
  * SPDX-License-Identifier: MIT
  */
-
-/* First, as tools.h has it: c68k_sha256.h's UINT and UCHAR. */
-#include "tx_api.h"
 
 #include <exec/types.h>
 #include <exec/memory.h>
@@ -81,7 +82,6 @@
 #include "aminetxduo/config.h"
 #include "updprefs.h"
 #include "devicehome.h"
-#include "c68k_sha256.h"
 #include "updinstall.h"
 
 const char *const tool_name = "InstallSameFile";
@@ -90,7 +90,7 @@ static const char version_tag[] __attribute__((used)) =
     TOOL_VERSTAG("InstallSameFile");
 
 #define TEMPLATE "FIRST/A,SECOND/A/M,DEVICES/S,HOSTLINE/S,BYTES/S,MARK/S,DRAWER/S," \
-                 "RECEIPT/S,SETKEY/S"
+                 "RECEIPT/S,SETKEY/S,SUMS/K"
 
 /* An interface file is a few hundred bytes; the cap only bounds a stray. */
 #define DEVICES_FILE_MAX 65536L
@@ -107,6 +107,7 @@ enum
     ARG_DRAWER,
     ARG_RECEIPT,
     ARG_SETKEY,
+    ARG_SUMS,
     ARG_COUNT
 };
 
@@ -277,10 +278,16 @@ static LONG copy_hostline(const char *from, const char *to)
     return (got == n) ? RETURN_OK : RETURN_ERROR;
 }
 
+/* RECEIPT compares every file it lists, so a 68000 does it by longwords
+   in reads of 8 KB rather than by bytes in reads of 2 KB. */
+#define SAME_BLOCK 8192L
+
 static LONG same_bytes(const char *a, const char *b)
 {
-    static UBYTE ba[2048];
-    static UBYTE bb[2048];
+    static ULONG la[SAME_BLOCK / 4];
+    static ULONG lb[SAME_BLOCK / 4];
+    UBYTE *ba = (UBYTE *)la;
+    UBYTE *bb = (UBYTE *)lb;
     BPTR fa = Open((CONST_STRPTR)a, MODE_OLDFILE);
     BPTR fb = Open((CONST_STRPTR)b, MODE_OLDFILE);
     LONG rc = RETURN_OK;
@@ -289,8 +296,8 @@ static LONG same_bytes(const char *a, const char *b)
         rc = RETURN_ERROR;
     while (rc == RETURN_OK)
     {
-        LONG na = Read(fa, ba, sizeof(ba));
-        LONG nb = Read(fb, bb, sizeof(bb));
+        LONG na = Read(fa, ba, SAME_BLOCK);
+        LONG nb = Read(fb, bb, SAME_BLOCK);
         LONG i;
 
         if (na < 0 || nb < 0)
@@ -300,12 +307,17 @@ static LONG same_bytes(const char *a, const char *b)
         else if (na == 0)
             break;
         else
-            for (i = 0; i < na; i++)
+        {
+            for (i = 0; i < na / 4; i++)
+                if (la[i] != lb[i])
+                    break;
+            for (i *= 4; i < na; i++)
                 if (ba[i] != bb[i])
                 {
                     rc = RETURN_WARN;
                     break;
                 }
+        }
     }
     if (fa != 0)
         Close(fa);
@@ -411,6 +423,10 @@ static LONG  rc_len;
 static char  rc_src[RECEIPT_PATH];
 static char  rc_dst[RECEIPT_PATH];
 static char  rc_name[RECEIPT_PATH];
+static char *rc_sums;                   /* SUMS, the archive's InstallSums */
+static LONG  rc_sums_len;
+static const char *rc_root;             /* SUMS up to its PathPart()       */
+static ULONG rc_root_len;
 
 static int rc_lower(int c)
 {
@@ -442,42 +458,22 @@ static int rc_listed(const char *name)
     return 0;
 }
 
-static int rc_hash(const char *path, UBYTE *sha)
-{
-    static UBYTE  buf[2048];
-    C68K_SHA256   ctx;
-    BPTR          fh = Open((CONST_STRPTR)path, MODE_OLDFILE);
-    LONG          n;
-
-    if (fh == 0)
-        return 0;
-    (VOID)c68k_sha256_initialize(&ctx, NX_CRYPTO_HASH_SHA256);
-    while ((n = Read(fh, buf, sizeof(buf))) > 0)
-        (VOID)c68k_sha256_update(&ctx, buf, (UINT)n);
-    Close(fh);
-    if (n < 0)
-        return 0;
-    (VOID)c68k_sha256_digest_calculate(&ctx, sha, NX_CRYPTO_HASH_SHA256);
-    return 1;
-}
-
-/* One line for DEST named NAME when its bytes are SOURCE's.  0 on an
-   error that must fail the receipt: no room, a placed file unreadable. */
+/* One line for DEST named NAME when its bytes are SOURCE's, with SOURCE's
+   hash from SUMS.  0 on an error that must fail the receipt: no room, a
+   placed file SUMS does not list. */
 static int rc_add(const char *src, const char *dst, const char *name)
 {
-    static const char hex[] = "0123456789abcdef";
-    UBYTE sha[32];
-    LONG  n = (LONG)strlen(name), i;
+    const char *sum;
+    LONG        n = (LONG)strlen(name);
 
-    if (same_bytes(src, dst) != RETURN_OK || rc_listed(name))
+    if (rc_listed(name) || same_bytes(src, dst) != RETURN_OK)
         return 1;
-    if (!rc_hash(dst, sha) || rc_len + 66 + n > RECEIPT_MAX)
+    sum = upd_sums_find(rc_sums, (unsigned long)rc_sums_len, rc_root,
+                        rc_root_len, src);
+    if (sum == NULL || rc_len + 66 + n > RECEIPT_MAX)
         return 0;
-    for (i = 0; i < 32; i++)
-    {
-        rc_text[rc_len++] = hex[sha[i] >> 4];
-        rc_text[rc_len++] = hex[sha[i] & 15];
-    }
+    memcpy(rc_text + rc_len, sum, 64);
+    rc_len += 64;
     rc_text[rc_len++] = ' ';
     memcpy(rc_text + rc_len, name, (size_t)n);
     rc_len += n;
@@ -536,7 +532,25 @@ static int rc_triple(const char *src, const char *dst, const char *name)
     return ok;
 }
 
-static LONG write_receipt(const char *file, STRPTR *second)
+/* SUMS whole into rc_sums, and the root its paths are under. */
+static int rc_load_sums(const char *sums)
+{
+    BPTR fh = Open((CONST_STRPTR)sums, MODE_OLDFILE);
+
+    if (fh == 0)
+        return 0;
+    rc_sums = (char *)AllocVec((ULONG)RECEIPT_MAX, MEMF_ANY);
+    if (rc_sums != NULL)
+        rc_sums_len = Read(fh, rc_sums, RECEIPT_MAX);
+    Close(fh);
+    if (rc_sums == NULL || rc_sums_len <= 0 || rc_sums_len >= RECEIPT_MAX)
+        return 0;
+    rc_root     = sums;
+    rc_root_len = (ULONG)((const char *)PathPart((CONST_STRPTR)sums) - sums);
+    return 1;
+}
+
+static LONG write_lines(const char *file, STRPTR *second)
 {
     char  tmp[RECEIPT_PATH];
     ULONG n = 0;
@@ -596,6 +610,17 @@ static LONG write_receipt(const char *file, STRPTR *second)
             (VOID)DeleteFile((CONST_STRPTR)tmp);
     }
     FreeVec(rc_text);
+    return rc;
+}
+
+static LONG write_receipt(const char *file, STRPTR *second, const char *sums)
+{
+    LONG rc = RETURN_ERROR;
+
+    if (sums != NULL && rc_load_sums(sums))
+        rc = write_lines(file, second);
+    if (rc_sums != NULL)
+        FreeVec(rc_sums);
     return rc;
 }
 
@@ -667,7 +692,8 @@ int main(int argc, char **argv)
     if (args[ARG_SETKEY] != 0)
         rc = set_key((const char *)args[ARG_FIRST], second);
     else if (args[ARG_RECEIPT] != 0)
-        rc = write_receipt((const char *)args[ARG_FIRST], second);
+        rc = write_receipt((const char *)args[ARG_FIRST], second,
+                           (const char *)args[ARG_SUMS]);
     else if (args[ARG_DRAWER] != 0)
         rc = (second[1] != NULL) ? RETURN_ERROR
                                  : record_drawer((const char *)args[ARG_FIRST],

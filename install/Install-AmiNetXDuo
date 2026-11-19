@@ -83,6 +83,8 @@
 (set S_README (if (> (strlen SRCDIR) 0) (tackon SRCDIR "ReadMe")   "ReadMe"))
 (set S_SAMEFILE (if (> (strlen SRCDIR) 0)
                     (tackon SRCDIR "InstallSameFile") "InstallSameFile"))
+(set S_SUMS (if (> (strlen SRCDIR) 0)
+                (tackon SRCDIR "InstallSums") "InstallSums"))
 (set S_FIRMWARE (tackon S_DEVS "Firmware"))
 (set S_NETPROBE (if (> (strlen SRCDIR) 0)
                     (tackon SRCDIR "InstallNetProbe") "InstallNetProbe"))
@@ -4971,13 +4973,15 @@
 ; command and the trust store this run placed, by the names the startup
 ; block gives them (LIBS:, or AmiNetXDuo:Libs/ in the drawer layout).
 ; InstallSameFile RECEIPT lists a file only where it holds the archive's
-; bytes, so a file this run kept is not claimed.  The updater replaces only
-; what the receipt lists; a receipt that could not be written whole is
-; deleted, and the updater then asks for this installer again.
+; bytes, so a file this run kept is not claimed.  The hash is the one the
+; archive's InstallSums gives it: nothing is hashed here, which on a 68000
+; took minutes.  The updater replaces only what the receipt lists; a
+; receipt that could not be written whole is deleted, and the updater then
+; asks for this installer again.
 (procedure P_receipt
   (if RCPT_OK
-    (if (<> 0 (run ("\"%s\" \"%s\" \"%s\" \"%s\" \"%s\" RECEIPT"
-                    S_SAMEFILE RCPT_F RCPT_SRC RCPT_DST RCPT_NAME)
+    (if (<> 0 (run ("\"%s\" \"%s\" \"%s\" \"%s\" \"%s\" RECEIPT SUMS \"%s\""
+                    S_SAMEFILE RCPT_F RCPT_SRC RCPT_DST RCPT_NAME S_SUMS)
                    (prompt "Writing the install receipt")
                    (help   H_BACKUP)))
         (set RCPT_OK 0)))
