@@ -7,6 +7,11 @@ are history.
 
 ## Unreleased
 
+## 1.0.0-rc6
+
+- The Installer no longer computes checksums on the Amiga. On a 68000 an
+  installation takes about as long as with rc4 again.
+
 ## 1.0.0-rc5
 
 - AmiNetXDuo updates itself. Once a day at boot, UpdateAmiNetXDuo looks for
