@@ -274,3 +274,56 @@ UpdVerdict upd_check_verdict(const unsigned char *m, unsigned long mlen,
 
     return UPD_V_MANIFEST;
 }
+
+static unsigned long uc_len(const char *s)
+{
+    unsigned long n = 0;
+
+    while (s != 0 && s[n] != '\0')
+        n++;
+    return n;
+}
+
+unsigned long upd_said_add(char *buf, unsigned long cap, unsigned long len,
+                           const char *a, const char *b, const char *c)
+{
+    static const char mark[] = UPD_SAID_TRUNCATED;
+    const char   *part[3];
+    unsigned long need, i, k, t = sizeof(mark) - 1;
+
+    /* Ended already: the marker is the last line. */
+    if (len >= t && len <= cap)
+    {
+        for (k = 0; k < t && buf[len - t + k] == mark[k]; k++)
+            ;
+        if (k == t)
+            return len;
+    }
+    part[0] = a;
+    part[1] = b;
+    part[2] = c;
+    need = uc_len(a) + uc_len(b) + uc_len(c) + 1;
+    /* Room for this line and still the marker after it. */
+    if (len + need + t > cap)
+    {
+        if (len + t > cap)
+            return len;
+        for (k = 0; k < t; k++)
+            buf[len++] = mark[k];
+        return len;
+    }
+    for (i = 0; i < 3; i++)
+        for (k = 0; part[i] != 0 && part[i][k] != '\0'; k++)
+            buf[len++] = part[i][k];
+    buf[len++] = '\n';
+    return len;
+}
+
+unsigned long upd_stack_size(const char *word)
+{
+    if (word != 0 && (word[0] == 'B' || word[0] == 'b' ||
+                      (word[0] == 'C' && word[1] == 'O') ||
+                      (word[0] == 'c' && word[1] == 'o')))
+        return 16UL * 1024UL;
+    return 64UL * 1024UL;
+}

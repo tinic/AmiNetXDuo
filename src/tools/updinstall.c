@@ -618,6 +618,7 @@ int upd_journal_parse(const char *text, unsigned long len, UpdJournal *j,
                 e[j->nfiles].why   = why;
                 e[j->nfiles].aside = 0;
                 e[j->nfiles].done  = 0;
+                e[j->nfiles].staged = 0;
                 j->nfiles++;
             }
             else if (n == 5 && ui_prefix(l, n, "ready") == 5)
@@ -647,6 +648,16 @@ int upd_journal_parse(const char *text, unsigned long len, UpdJournal *j,
     return line > 0;
 }
 
+int upd_stale_journal(const char *text, unsigned long len, int absent,
+                      UpdJournal *j, UpdJEntry *e, unsigned int max)
+{
+    if (text == 0)
+        return absent ? UPD_STALE_NONE : UPD_STALE_PENDING;
+    if (e == 0 || !upd_journal_parse(text, len, j, e, max) || j->ready)
+        return UPD_STALE_PENDING;
+    return UPD_STALE_UNDO;
+}
+
 /* ---------------------------------------------------------------- swap --- */
 
 typedef struct UiNames
@@ -668,13 +679,8 @@ static int ui_names(UiNames *nm, const UpdJEntry *e, unsigned int i,
     at = 0;
     if (!ui_cat(nm->live, sizeof(nm->live), &at, e->path, e->len))
         return 0;
-    at = 0;
-    if (!ui_cat(nm->fresh, sizeof(nm->fresh), &at, e->path, e->len) ||
-        !ui_cat(nm->fresh, sizeof(nm->fresh), &at, ".new", 4))
-        return 0;
-    at = 0;
-    if (!ui_cat(nm->old, sizeof(nm->old), &at, e->path, e->len) ||
-        !ui_cat(nm->old, sizeof(nm->old), &at, ".old", 4))
+    if (!upd_sidecar(nm->fresh, sizeof(nm->fresh), e->path, e->len, ".new") ||
+        !upd_sidecar(nm->old, sizeof(nm->old), e->path, e->len, ".old"))
         return 0;
     at = 0;
     if (!ui_cat(nm->prior, sizeof(nm->prior), &at, prior, ui_len(prior)) ||
@@ -717,6 +723,89 @@ int upd_swap_fits(const UpdJEntry *e, unsigned int i, const char *prior)
     return ui_len(prior) + 1 + nn + 4 + 1 <= sizeof(((UiNames *)0)->tmp);
 }
 
+/* <path>.new of `e` into ui_new; 0 when it does not fit. */
+static char ui_new[UPD_APATH_MAX + 4];
+
+static int ui_new_name(const UpdJEntry *e)
+{
+    return upd_sidecar(ui_new, sizeof(ui_new), e->path, e->len, ".new");
+}
+
+/* What of `path` a sidecar with an `extlen` suffix keeps. */
+static unsigned long ui_side_keep(const char *path, unsigned long len,
+                                  unsigned long extlen)
+{
+    unsigned long c = len;
+
+    while (c > 0 && path[c - 1] != '/' && path[c - 1] != ':')
+        c--;
+    if (len - c + extlen > UPD_FNAME_MAX)
+        return c + UPD_FNAME_MAX - extlen;
+    return len;
+}
+
+int upd_sidecar(char *out, unsigned long cap, const char *path,
+                unsigned long len, const char *ext)
+{
+    unsigned long at = 0, k = ui_len(ext);
+
+    return ui_cat(out, cap, &at, path, ui_side_keep(path, len, k)) &&
+           ui_cat(out, cap, &at, ext, k);
+}
+
+int upd_sidecars_distinct(const UpdJEntry *e, unsigned int n, unsigned int *bad)
+{
+    unsigned int i, k;
+
+    for (i = 1; i < n; i++)
+        for (k = 0; k < i; k++)
+        {
+            unsigned long a = ui_side_keep(e[i].path, e[i].len, 4);
+
+            if (ui_same(e[i].path, a, e[k].path, ui_side_keep(e[k].path, e[k].len, 4)))
+            {
+                if (bad != 0)
+                    *bad = i;
+                return 0;
+            }
+        }
+    return 1;
+}
+
+int upd_all_staged(const UpdJEntry *e, unsigned int n)
+{
+    unsigned int i;
+
+    for (i = 0; i < n; i++)
+        if (!e[i].staged)
+            return 0;
+    return 1;
+}
+
+int upd_new_free(const UpdJEntry *e, unsigned int n, const UpdFsOps *ops,
+                 unsigned int *bad)
+{
+    unsigned int i;
+
+    for (i = 0; i < n; i++)
+        if (!ui_new_name(&e[i]) || ops->exists(ops->ctx, ui_new))
+        {
+            if (bad != 0)
+                *bad = i;
+            return 0;
+        }
+    return 1;
+}
+
+void upd_unstage_new(UpdJEntry *e, unsigned int n, const UpdFsOps *ops)
+{
+    unsigned int i;
+
+    for (i = 0; i < n; i++)
+        if (e[i].staged && ui_new_name(&e[i]) && ops->remove(ops->ctx, ui_new))
+            e[i].staged = 0;
+}
+
 int upd_forward(UpdJEntry *e, unsigned int n, const char *prior,
                 const UpdFsOps *ops, unsigned int *failed)
 {
@@ -745,6 +834,10 @@ int upd_forward(UpdJEntry *e, unsigned int n, const char *prior,
             {
                 if (!e[i].aside)
                 {
+                    /* Not this swap's: an earlier update's.  Deleting the
+                       .old on its strength would lose the .old. */
+                    if (ops->exists(ops->ctx, nm.prior))
+                        return 0;
                     if (!ui_jline(ops, &nm, "aside", i))
                         return 0;
                     e[i].aside = 1;
@@ -861,4 +954,18 @@ int upd_trial_active(int trial, const char *state, unsigned long len)
         i += n + 1;
     }
     return 0;
+}
+
+int upd_lock_why(long ioerr)
+{
+    switch (ioerr)
+    {
+    case 202:                           /* ERROR_OBJECT_IN_USE         */
+        return UPD_LOCK_BUSY;
+    case 214:                           /* ERROR_DISK_WRITE_PROTECTED  */
+    case 223:                           /* ERROR_WRITE_PROTECTED       */
+        return UPD_LOCK_WP;
+    default:
+        return UPD_LOCK_OTHER;
+    }
 }
