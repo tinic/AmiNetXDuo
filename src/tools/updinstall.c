@@ -1299,3 +1299,34 @@ unsigned long upd_state_next(const char *old, unsigned long oldlen, int absent,
     return upd_state_merge(old != 0 ? old : "", old != 0 ? oldlen : 0, "trial",
                            version, 0, flavour, out, outlen);
 }
+
+int upd_pair_plan(int file, int tmp)
+{
+    if (file < 0)
+        return UPD_PAIR_FAIL;
+    if (file > 0)
+        return UPD_PAIR_READ;
+    if (tmp < 0)
+        return UPD_PAIR_FAIL;
+    return tmp > 0 ? UPD_PAIR_RECOVER : UPD_PAIR_EMPTY;
+}
+
+int upd_skip_verdict(const char *state, unsigned long len, const char *version,
+                     int explicit_install)
+{
+    char          v[UPD_VER_MAX + 16];
+    unsigned long n = ui_len(version);
+    int           hit = 0;
+
+    if (upd_state_get(state, len, "phase", v, sizeof(v)) &&
+        ui_same(v, ui_len(v), "rolledback", 10) &&
+        upd_state_get(state, len, "version", v, sizeof(v)) &&
+        ui_same(v, ui_len(v), version, n))
+        hit = 1;
+    if (upd_state_get(state, len, "skip", v, sizeof(v)) && n != 0 &&
+        ui_same(v, ui_len(v), version, n))
+        hit = 1;
+    if (!hit)
+        return UPD_SKIP_NONE;
+    return explicit_install ? UPD_SKIP_OVERRIDDEN : UPD_SKIP_SKIPPED;
+}

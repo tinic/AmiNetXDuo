@@ -1050,6 +1050,35 @@ static void test_trial_edges(void)
     }
 }
 
+/* #509 review: a lone .tmp is the file; a look that fails touches nothing. */
+static void test_pair_plan(void)
+{
+    CHECK(upd_pair_plan(1, 0) == UPD_PAIR_READ);
+    CHECK(upd_pair_plan(1, 1) == UPD_PAIR_READ);      /* .tmp may be half   */
+    CHECK(upd_pair_plan(1, -1) == UPD_PAIR_READ);
+    CHECK(upd_pair_plan(0, 1) == UPD_PAIR_RECOVER);   /* cut after remove   */
+    CHECK(upd_pair_plan(0, 0) == UPD_PAIR_EMPTY);
+    CHECK(upd_pair_plan(0, -1) == UPD_PAIR_FAIL);
+    CHECK(upd_pair_plan(-1, 0) == UPD_PAIR_FAIL);
+    CHECK(upd_pair_plan(-1, 1) == UPD_PAIR_FAIL);
+}
+
+/* #509 review: only CHECK and the automatic paths skip; INSTALL overrides. */
+static void test_skip_verdict(void)
+{
+    static const char rb[] = "phase=rolledback\nversion=1.0.1\nboots=3\n";
+    static const char sk[] = "phase=confirmed\nversion=1.0.0\nskip=1.0.2\n";
+    static const char no[] = "phase=confirmed\nversion=1.0.1\n";
+
+    CHECK(upd_skip_verdict(rb, sizeof(rb) - 1, "1.0.1", 0) == UPD_SKIP_SKIPPED);
+    CHECK(upd_skip_verdict(rb, sizeof(rb) - 1, "1.0.1", 1) == UPD_SKIP_OVERRIDDEN);
+    CHECK(upd_skip_verdict(rb, sizeof(rb) - 1, "1.0.2", 0) == UPD_SKIP_NONE);
+    CHECK(upd_skip_verdict(sk, sizeof(sk) - 1, "1.0.2", 0) == UPD_SKIP_SKIPPED);
+    CHECK(upd_skip_verdict(sk, sizeof(sk) - 1, "1.0.2", 1) == UPD_SKIP_OVERRIDDEN);
+    CHECK(upd_skip_verdict(no, sizeof(no) - 1, "1.0.1", 0) == UPD_SKIP_NONE);
+    CHECK(upd_skip_verdict("", 0, "1.0.1", 1) == UPD_SKIP_NONE);
+}
+
 static void test_state_get(void)
 {
     static const char st[] = "phase=trial\r\nVersion=1.0.0-rc5.1\nboots=2\nskip=";
@@ -1613,6 +1642,8 @@ int main(int argc, char **argv)
     if (strcmp(which, "trial") == 0 || strcmp(which, "all") == 0)
     {
         test_state_get();
+        test_pair_plan();
+        test_skip_verdict();
         test_record();
         test_trial_cut("U:Installed/Update/prior-old", 1);
         test_trial_cut("B:Installed/Update/prior-old", 1);

@@ -49,6 +49,8 @@
 #     boot=forward|trial|rolledback|undone boots=<n> [version=<v>]
 #            (a boot with nothing to do says nothing and logs nothing)
 #     confirm=confirmed|timeout version=<v>
+#     skip=overridden version=<v>  (an explicit INSTALL of a version the
+#            state skips: rolled back, or skip=; CHECK says update=skipped)
 #     file=keep otherbuild <path>.old prior=prior-old/<n>  (CONFIRM: the
 #            name <path>.otherbuild was taken; both copies stay)
 #   State: <DOCDIR>/Installed/Update/state, key=value (phase= version=

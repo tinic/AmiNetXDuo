@@ -49,6 +49,7 @@
 #include "updcheck.h"
 #include "updinstall.h"
 #include "updkeys.h"
+#include "updprefs.h"
 
 const char *const tool_name = "UpdateAmiNetXDuo";
 
@@ -850,31 +851,53 @@ static LONG upd_clean_stale(VOID)
 
 /* ---- the state ---- */
 
+static int ao_exists(void *c, const char *p);
+
 static char  upd_st[UPD_STATE_MAX + 1];
 static ULONG upd_st_len;
 
-/* The state into upd_st; state.tmp when a cut left only that.  Empty when
-   there is neither. */
-static VOID upd_state_load(VOID)
+/*
+ * The state into upd_st, empty when there is none.  A cut between the
+ * remove of state and the rename of state.tmp leaves state.tmp alone, and
+ * whole: `recover` renames it to state first (under the lock), else it is
+ * read where it is.  FALSE, and upd_st empty, when a look or the read
+ * fails or it is over the size: then nothing may be written from it.
+ */
+static BOOL upd_state_load_as(BOOL recover)
 {
-    static const char *const names[] = { "state", "state.tmp" };
-    UBYTE *t = NULL;
-    ULONG  len = 0, i;
+    UBYTE *t;
+    ULONG  len = 0;
+    int    plan;
 
     upd_st_len = 0;
     upd_st[0] = '\0';
-    for (i = 0; i < 2 && t == NULL; i++)
+    upd_in_dir(upd_p2, UPD_N_STATE);
+    upd_in_dir(upd_p1, UPD_N_STATE_TMP);
+    plan = upd_pair_plan(ao_exists(NULL, upd_p2), ao_exists(NULL, upd_p1));
+    if (plan == UPD_PAIR_EMPTY)
+        return TRUE;
+    if (plan == UPD_PAIR_FAIL)
+        return FALSE;
+    if (plan == UPD_PAIR_RECOVER)
     {
-        upd_in_dir(upd_p2, names[i]);
-        t = upd_slurp(upd_p2, UPD_STATE_MAX, &len);
+        if (!recover)
+            upd_in_dir(upd_p2, UPD_N_STATE_TMP);
+        else if (!Rename((CONST_STRPTR)upd_p1, (CONST_STRPTR)upd_p2))
+            return FALSE;
     }
-    if (t != NULL)
-    {
-        CopyMem(t, upd_st, len);
-        upd_st_len = len;
-        upd_st[len] = '\0';
-        FreeVec(t);
-    }
+    t = upd_slurp(upd_p2, UPD_STATE_MAX, &len);
+    if (t == NULL)
+        return FALSE;
+    CopyMem(t, upd_st, len);
+    upd_st_len = len;
+    upd_st[len] = '\0';
+    FreeVec(t);
+    return TRUE;
+}
+
+static BOOL upd_state_load(VOID)
+{
+    return upd_state_load_as(TRUE);
 }
 
 /* A state value, "" when there is none. */
@@ -909,7 +932,10 @@ static BOOL upd_state_put(const char *phase, const char *version, ULONG boots,
     ULONG       n;
     BOOL        ok;
 
-    upd_state_load();
+    /* A state that cannot be read is not written over: its keys (skip=,
+       last_check=) would go. */
+    if (!upd_state_load())
+        return FALSE;
     if (flavour == NULL)
     {
         tool_copy_string(fl, sizeof(fl), upd_state_value("flavour"));
@@ -1013,7 +1039,8 @@ static LONG upd_install_begin(VOID)
     rc = upd_lock_take();
     if (rc >= 0)
         return rc;
-    upd_state_load();
+    if (!upd_state_load())
+        return refuse("pending", "the update state cannot be read");
     if (upd_phase_open())
         return refuse("pending", "the update installed last is on trial: "
                                  "restart, and the next boot with the "
@@ -2103,14 +2130,20 @@ static LONG upd_check(BOOL install)
 
     case UPD_V_AVAILABLE:
         upd_ver_format(&m.version, upd_ver_text);
-        /* The version a rollback took back out, or one the user skipped. */
-        upd_state_load();
-        if ((upd_phase_is("rolledback") &&
-             tool_stricmp(upd_state_value("version"), upd_ver_text) == 0) ||
-            tool_stricmp(upd_state_value("skip"), upd_ver_text) == 0)
+        /* The version a rollback took back out, or one the user skipped:
+           CHECK and the automatic paths pass it by, an explicit INSTALL
+           installs it.  A state that cannot be read skips nothing. */
+        (VOID)upd_state_load_as(FALSE);
+        switch (upd_skip_verdict(upd_st, upd_st_len, upd_ver_text, install))
         {
+        case UPD_SKIP_SKIPPED:
             say("update=skipped version=", upd_ver_text, NULL);
             rc = RETURN_OK;
+            goto done;
+        case UPD_SKIP_OVERRIDDEN:
+            say("skip=overridden version=", upd_ver_text, NULL);
+            break;
+        default:
             break;
         }
         say("update=available version=", upd_ver_text, NULL);
@@ -2346,6 +2379,14 @@ static __attribute__((noinline)) VOID upd_record(const UpdJFile *f)
             snap[0] = '\0';
             sbn(snap, UPD_PATH, upd_p2, strlen(upd_p2) - 15);
             sb(snap, UPD_PATH, "Devs/Internet/certificates");
+            /* A cut after the old copy went and before the new one was
+               renamed: the lone .tmp is the copy. */
+            upd_line[0] = '\0';
+            sb(upd_line, sizeof(upd_line), snap);
+            sb(upd_line, sizeof(upd_line), ".tmp");
+            if (upd_pair_plan(ao_exists(NULL, snap), ao_exists(NULL, upd_line)) ==
+                UPD_PAIR_RECOVER)
+                (VOID)Rename((CONST_STRPTR)upd_line, (CONST_STRPTR)snap);
             if (upd_exists(snap) && upd_hash_file(upd_p1, sha, &scan) &&
                 (upd_hex32(sha, have), memcmp(have, want, 64) == 0))
             {
@@ -2395,6 +2436,46 @@ static __attribute__((noinline)) VOID upd_record(const UpdJFile *f)
     if (sec != NULL)
         FreeVec(sec);
     FreeVec(old);
+}
+
+/*
+ * S:AmiNetXDuo-Install's version= set to the version now installed (the
+ * state's), every other line kept: .tmp, then renamed; a lone .tmp a cut
+ * left is the file.  Not there: nothing to do.
+ */
+#define UPD_INSTALL_INFO "S:AmiNetXDuo-Install"
+
+static VOID upd_install_info_version(VOID)
+{
+    static char out[4096 + UPD_VER_MAX + 16], line[UPD_VER_MAX + 16];
+    UBYTE      *t;
+    ULONG       len, n;
+
+    switch (upd_pair_plan(ao_exists(NULL, UPD_INSTALL_INFO),
+                          ao_exists(NULL, UPD_INSTALL_INFO ".tmp")))
+    {
+    case UPD_PAIR_RECOVER:
+        if (!Rename((CONST_STRPTR)UPD_INSTALL_INFO ".tmp",
+                    (CONST_STRPTR)UPD_INSTALL_INFO))
+            return;
+        break;
+    case UPD_PAIR_READ:
+        break;
+    default:
+        return;
+    }
+    t = upd_slurp(UPD_INSTALL_INFO, 4096UL, &len);
+    if (t == NULL)
+        return;
+    line[0] = '\0';
+    sb(line, sizeof(line), "version=");
+    sb(line, sizeof(line), upd_state_value("version"));
+    n = upd_prefs_set((const char *)t, len, line, out, sizeof(out));
+    FreeVec(t);
+    if (n != 0 && upd_write_file(UPD_INSTALL_INFO ".tmp", out, n) &&
+        DeleteFile((CONST_STRPTR)UPD_INSTALL_INFO))
+        (VOID)Rename((CONST_STRPTR)UPD_INSTALL_INFO ".tmp",
+                     (CONST_STRPTR)UPD_INSTALL_INFO);
 }
 
 /* The trial committed: the .old rules, receipt-next as the receipt, the
@@ -2454,8 +2535,12 @@ static LONG upd_commit_run(VOID)
         rc = RETURN_WARN;
         break;
     }
-    if (fp->ok)
+    /* The record from the receipt as it is now: not after a rename that
+       failed, which the next boot does again first. */
+    if (rc == RETURN_OK && fp->ok)
         upd_record(fp);
+    if (rc == RETURN_OK)
+        upd_install_info_version();
 
     tool_copy_string(upd_ver_text, sizeof(upd_ver_text), upd_state_value("version"));
     if (rc == RETURN_OK &&
@@ -2572,7 +2657,8 @@ static LONG upd_boot(VOID)
     }
     upd_jfree(fp);
 
-    upd_state_load();
+    if (!upd_state_load())
+        return refuse("pending", "the update state cannot be read");
     if (upd_phase_is("trial"))
     {
         tool_copy_string(upd_ver_text, sizeof(upd_ver_text), upd_state_value("version"));
@@ -2666,13 +2752,16 @@ static LONG upd_confirm(VOID)
 
     if (!upd_find_udir())
         return RETURN_OK;
-    upd_state_load();
-    if (!upd_phase_is("commit") && !upd_phase_is("trial"))
+    /* A peek, unlocked and writing nothing: what cannot be read is
+       looked at again under the lock. */
+    if (upd_state_load_as(FALSE) && !upd_phase_is("commit") &&
+        !upd_phase_is("trial"))
         return RETURN_OK;               /* nothing to lock for           */
     rc = upd_lock_take();
     if (rc >= 0)
         return rc;
-    upd_state_load();
+    if (!upd_state_load())
+        return refuse("pending", "the update state cannot be read");
     if (upd_phase_is("commit"))
         return upd_commit_run();
     if (!upd_phase_is("trial"))

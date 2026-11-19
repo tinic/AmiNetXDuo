@@ -479,6 +479,30 @@ unsigned long upd_state_next(const char *old, unsigned long oldlen, int absent,
                              const char *version, const char *flavour,
                              char *out, unsigned long outlen);
 
+/*
+ * A file written as <file>.tmp and then renamed over <file> -- the state,
+ * the trust store's copy in Installed, S:AmiNetXDuo-Install -- is removed
+ * only once its .tmp is whole, so a lone .tmp is the file.  What a reader
+ * does, by what each look found (1 there, 0 not there, < 0 cannot be
+ * said): UPD_PAIR_READ <file>; UPD_PAIR_RECOVER rename the .tmp to <file>
+ * first, then read it; UPD_PAIR_EMPTY neither is there; UPD_PAIR_FAIL a
+ * look failed: nothing is read, written or removed.
+ */
+enum { UPD_PAIR_EMPTY = 0, UPD_PAIR_READ, UPD_PAIR_RECOVER, UPD_PAIR_FAIL };
+
+int upd_pair_plan(int file, int tmp);
+
+/*
+ * The state's verdict on an update to `version`: 0 none; 1 skipped -- a
+ * rollback took that version out (phase=rolledback version=) or the user
+ * skipped it (skip=) -- for CHECK and every automatic path; 2 overridden,
+ * for an explicit INSTALL, which installs it and says so.
+ */
+enum { UPD_SKIP_NONE = 0, UPD_SKIP_SKIPPED, UPD_SKIP_OVERRIDDEN };
+
+int upd_skip_verdict(const char *state, unsigned long len, const char *version,
+                     int explicit_install);
+
 /* Lower-case hex of 32 bytes into `out`, 65 bytes with the NUL. */
 void upd_hex32(const unsigned char *b, char *out);
 
