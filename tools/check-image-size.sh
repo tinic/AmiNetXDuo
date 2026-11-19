@@ -194,7 +194,7 @@ BUDGETS=(
     # no release key yet, LTO drops the check and it is 27,040.
     # -> 51,464 the same day with INSTALL: SHA-256, the receipt selection,
     # the container reader, the journal and the swap (updinstall.c); BSS
-    # 30,052 -> 38,624 (a 4 KB chunk buffer, the swap paths).  -> 59,768
+    # 30,052 -> 38,624 (a 4 KB chunk buffer, the swap paths).  -> 61,204
     # with BOOT and CONFIRM: the rollback and the commit (updinstall.c),
     # the state, the trial file, the network check and the Uninstall
     # record's block.
@@ -333,7 +333,7 @@ BUDGETS=(
     "fat:src/usergroup/usergroup.library:15360"
     "fat:src/tlslib/tls.library:244000"
     # UpdateAmiNetXDuo in C/fat: 38,288 with CHECK and one key, 2026-11-18;
-    # 63,900 with INSTALL the same day; 74,764 with BOOT and CONFIRM.
+    # 63,900 with INSTALL the same day; 75,796 with BOOT and CONFIRM.
     "fat:src/tools/UpdateAmiNetXDuo:77824"
 )
 

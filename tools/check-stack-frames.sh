@@ -174,7 +174,7 @@ COMMAND_BUDGETS=(
     "SyncReboot:192"
     # UpdateAmiNetXDuo swaps to 16 KB (64 KB for https:) before its work;
     # this is the path it takes on the Shell's stack when that AllocMem
-    # fails: 916 with BOOT and CONFIRM (#497) -- main's 308, and CONFIRM
+    # fails: 776 with BOOT and CONFIRM (#497) -- main's 308, and CONFIRM
     # hashing the trust store, c68k_sha256_blocks_c's 360.
     "UpdateAmiNetXDuo:1024"
     "ToolsSmoke:1472"

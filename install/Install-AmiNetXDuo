@@ -2542,6 +2542,34 @@
 ; Installed: a copy of each configuration file and icon as this
 ; installation left it, and the tools the record runs.
 (set D_INSTALLED (tackon DOCDIR "Installed"))
+
+; --- an update under way ends here, before the first file is copied -----
+;
+; UpdateAmiNetXDuo (#497) may have left a swap half done (journal) or an
+; update on trial (trial, state phase=trial) that the next boot would
+; finish, count or roll back -- over the files this run is about to write.
+; So it ends now: the archive's own UpdateAmiNetXDuo BOOT finishes or
+; undoes a journal (a preparation's .new files go) and settles a trial,
+; and then the trial, the state and the staged receipt are discarded, so
+; that no later BOOT acts on them.  prior-old/ stays: what is in it may be
+; another stack's .old, which only the user can judge.  The log stays.
+(set D_UPDATE (tackon D_INSTALLED "Update"))
+(if (AND (= @pretend 0) (= (exists D_UPDATE (noreq)) 2))
+  (
+    (if (OR (exists (tackon D_UPDATE "journal") (noreq))
+            (exists (tackon D_UPDATE "trial") (noreq)))
+        (run ("\"%s\" BOOT QUIET" (tackon S_C "UpdateAmiNetXDuo"))
+             (prompt "Finishing the update UpdateAmiNetXDuo had begun")
+             (help   H_UPDATE)))
+    (set RCPT_N 0)
+    (while (set RCPT_X (select RCPT_N "journal" "journal.tmp" "trial"
+                                      "receipt-next" "state" "state.tmp"
+                                      "container.update.lha" ""))
+      (
+        (delete (tackon D_UPDATE RCPT_X) (optional "force" "nofail"))
+        (set RCPT_N (+ RCPT_N 1))
+      ))
+  ))
 (set BK_SUB "")
 (set D_BACKUP "")
 (set BK_MAX 0)
@@ -4972,17 +5000,6 @@
                                      "DEVS:Internet/certificates")))
     (P_receipt)
     (if (= RCPT_OK 0) (delete RCPT_F (optional "force" "nofail")))
-
-    ; An update this installation replaces is over: its journal, trial and
-    ; state go, so that BOOT neither finishes nor rolls back files this run
-    ; wrote.  A prior-old copy stays where it is.
-    (set RCPT_N 0)
-    (while (set RCPT_X (select RCPT_N "journal" "journal.tmp" "trial"
-                                      "receipt-next" "state" "state.tmp" ""))
-      (
-        (delete (tackon D_UPDATE RCPT_X) (optional "force" "nofail"))
-        (set RCPT_N (+ RCPT_N 1))
-      ))
 
     ; S:AmiNetXDuo-Install: what UpdateAmiNetXDuo reads of this run, and
     ; the updater's settings with the answer to the question in section 4.
