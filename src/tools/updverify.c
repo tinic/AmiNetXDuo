@@ -29,32 +29,29 @@
 #include "updsig.h"
 
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
 static UpdFile uv_files[UPD_FILES_MAX];
 
-/* All of `path`, or NULL when it cannot be read; *len is cap + 1 when the
-   file holds more than `cap` bytes. */
-static char *uv_read(const char *path, unsigned long cap, unsigned long *len)
+/* Static, so that no refusal path has anything to free. */
+static char uv_mbuf[UPD_MANIFEST_MAX + 2];
+static char uv_sbuf[UPD_SIG_MAX + 2];
+
+/* All of `path` into buf (cap + 2 bytes), or 0 when it cannot be read;
+   *len is cap + 1 when the file holds more than `cap` bytes. */
+static int uv_read(const char *path, char *buf, unsigned long cap,
+                   unsigned long *len)
 {
     FILE  *f = fopen(path, "rb");
-    char  *buf;
     size_t n;
 
     if (f == NULL)
-        return NULL;
-    buf = malloc(cap + 2);
-    if (buf == NULL)
-    {
-        fclose(f);
-        return NULL;
-    }
+        return 0;
     n = fread(buf, 1, cap + 1, f);
     fclose(f);
     buf[n] = '\0';
     *len = (unsigned long)n;
-    return buf;
+    return 1;
 }
 
 static int uv_cmp(const char *a, const char *b)
@@ -106,11 +103,12 @@ int main(int argc, char **argv)
         }
     }
 
-    m = uv_read(argv[1], UPD_MANIFEST_MAX, &mlen);
-    s = uv_read(argv[2], UPD_SIG_MAX, &slen);
-    if (m == NULL || s == NULL)
+    m = uv_mbuf;
+    s = uv_sbuf;
+    if (!uv_read(argv[1], m, UPD_MANIFEST_MAX, &mlen) ||
+        !uv_read(argv[2], s, UPD_SIG_MAX, &slen))
     {
-        printf("update_verify=FAIL unreadable=%s\n", m == NULL ? argv[1] : argv[2]);
+        printf("update_verify=FAIL unreadable=%s %s\n", argv[1], argv[2]);
         return 2;
     }
     if (mlen > UPD_MANIFEST_MAX)
@@ -175,7 +173,5 @@ int main(int argc, char **argv)
         printf("%s%s", k ? "," : "", upd_keys[k].id);
     printf(" flavours=%u\n", (unsigned)UPD_FLAVOUR_COUNT);
 
-    free(m);
-    free(s);
     return 0;
 }

@@ -174,8 +174,12 @@ COMMAND_BUDGETS=(
     "SyncReboot:192"
     # UpdateAmiNetXDuo swaps to 16 KB (64 KB for https:) before its work;
     # this is the path it takes on the Shell's stack when that AllocMem
-    # fails: 852 with BOOT and CONFIRM (#497) -- main's 308, and CONFIRM
-    # hashing the trust store, c68k_sha256_blocks_c's 360.
+    # fails, upd_main_shell(): 852 with BOOT and CONFIRM (#497) -- main's
+    # 308, and CONFIRM hashing the trust store, c68k_sha256_blocks_c's 360.
+    # upd_trampoline is cut: what it calls runs on the swapped stack, which
+    # SWAPPED_BUDGETS below bounds.  Until the release key (PR 8) this row
+    # measured the same 812 only because a build with no key folded CHECK
+    # and INSTALL away.
     "UpdateAmiNetXDuo:1024"
     "ToolsSmoke:1472"
     "arp:576"
@@ -342,6 +346,16 @@ done
 tools_dir="$BUILD/src/tools"
 one="$BUILD/.one-command"
 
+# What a command runs on a stack it swapped to, not the Shell's: the root,
+# and the smallest stack the command asks for.  The command's own row above
+# cuts the trampoline, so this is where that path is measured.
+#   UpdateAmiNetXDuo  upd_main on upd_stack_size()'s 16 KB (64 KB for a
+#                     word that fetches, which tls.library needs)
+SWAPPED_BUDGETS=(
+    "UpdateAmiNetXDuo:upd_main:16384"
+)
+SWAP_CUTS=( --cut upd_trampoline )
+
 for row in "${COMMAND_BUDGETS[@]}"; do
     cmd=${row%%:*}
     budget=${row##*:}
@@ -360,7 +374,7 @@ for row in "${COMMAND_BUDGETS[@]}"; do
        "$one/" 2>/dev/null
 
     out=$("$PYTHON" "$DEPTH" --quiet "${LADDER_EDGES[@]}" "${NOT_A_CALL[@]}" \
-          "$one" main 2>/dev/null)
+          "${SWAP_CUTS[@]}" "$one" main 2>/dev/null)
     got=${out##*worst_case_bytes=}
     got=${got%%[!0-9]*}
 
@@ -376,10 +390,35 @@ for row in "${COMMAND_BUDGETS[@]}"; do
         say "  A Shell gives 4096 and only fetch swaps to a stack of its own."
         say "  The deepest path:"
         "$PYTHON" "$DEPTH" "${LADDER_EDGES[@]}" "${NOT_A_CALL[@]}" \
-            "$one" main 2>/dev/null | sed -n '2,$p' | sed 's/^/  /'
+            "${SWAP_CUTS[@]}" "$one" main 2>/dev/null | sed -n '2,$p' | sed 's/^/  /'
         rc=1
     else
         say "stack_frames_bytes command=$cmd bytes=$got budget=$budget"
+    fi
+done
+
+for row in "${SWAPPED_BUDGETS[@]}"; do
+    IFS=: read -r cmd sym budget <<< "$row"
+    rm -rf "$one"; mkdir -p "$one"
+    cp "$tools_dir/$cmd".ltrans*.ltrans.su "$tools_dir/$cmd".ltrans*.ltrans.s \
+       "$one/" 2>/dev/null
+    out=$("$PYTHON" "$DEPTH" --quiet "${LADDER_EDGES[@]}" "${NOT_A_CALL[@]}" \
+          "$one" "$sym" 2>/dev/null)
+    got=${out##*worst_case_bytes=}
+    got=${got%%[!0-9]*}
+    if [ -z "$got" ] || [ "$got" = 0 ]; then
+        say "stack_frames=FAILED command=$cmd root=$sym reason=symbol_not_found"
+        rc=1
+        continue
+    fi
+    checked=$((checked + 1))
+    if [ "$got" -gt "$budget" ]; then
+        say "stack_frames=FAILED command=$cmd root=$sym bytes=$got budget=$budget"
+        "$PYTHON" "$DEPTH" "${LADDER_EDGES[@]}" "${NOT_A_CALL[@]}" \
+            "$one" "$sym" 2>/dev/null | sed -n '2,$p' | sed 's/^/  /'
+        rc=1
+    else
+        say "stack_frames_bytes command=$cmd root=$sym bytes=$got budget=$budget"
     fi
 done
 rm -rf "$one"
