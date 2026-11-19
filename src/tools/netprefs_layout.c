@@ -62,6 +62,11 @@ const NpItem np_items[NP_L_COUNT] =
     [NP_L_ARPREQUESTS]   = { "ARP reads",       NP_PLACE_LEFT,  NP_PAGE_TUNING },
     [NP_L_WRITEREQUESTS] = { "Writes",          NP_PLACE_LEFT,  NP_PAGE_TUNING },
     [NP_L_NOTE]          = { "0 = automatic",   NP_PLACE_IN,    NP_PAGE_TUNING },
+    [NP_L_UPD_AUTO]      = { "Check for updates automatically",
+                                                NP_PLACE_RIGHT, NP_PAGE_UPDATES },
+    [NP_L_UPD_CHANNEL]   = { "Channel",         NP_PLACE_LEFT,  NP_PAGE_UPDATES },
+    [NP_L_UPD_USE]       = { "Use",             NP_PLACE_IN,    NP_PAGE_UPDATES },
+    [NP_L_UPD_CHECK]     = { "Check now",       NP_PLACE_IN,    NP_PAGE_UPDATES },
 #ifdef AMINETXDUO_PTP
     [NP_L_PTP]           = { "Point-to-point",  NP_PLACE_RIGHT, NP_PAGE_GENERAL },
     [NP_L_DESTINATION]   = { "Peer",            NP_PLACE_LEFT,  NP_PAGE_IPV4 },
@@ -70,7 +75,7 @@ const NpItem np_items[NP_L_COUNT] =
 };
 
 const char *const np_panel_labels[] =
-    { "General", "IPv4", "IPv6", "Device", "Tuning", 0 };
+    { "General", "IPv4", "IPv6", "Device", "Tuning", "Updates", 0 };
 const char *const np_ipv4_labels[] =
     { "Static", "DHCP", "Link-local", "Off", 0 };
 const char *const np_ipv6_labels[] =
@@ -79,9 +84,11 @@ const char *const np_ipv6_labels[] =
 const char *const np_live_labels[] =
     { "New", "Stack off", "Not added", "Offline", "Online", "Unknown", 0 };
 const char *const np_action_labels[] = { "Go online", "Go offline", 0 };
+/* UpdCheck's UPD_CHANNEL_RELEASE and UPD_CHANNEL_PRERELEASE, in order. */
+const char *const np_channel_labels[] = { "Releases", "Pre-releases", 0 };
 
 enum { K_FILL, K_FIELD, K_INT, K_CYCLE_IPV4, K_CYCLE_IPV6, K_CHECK, K_TEXT,
-       K_ICON };
+       K_ICON, K_CYCLE_CHANNEL, K_BUTTON };
 enum { AT_FIELD, AT_PANEL, AT_NEXT, AT_RIGHT, AT_FIELD2 };
 enum { DEVICE_ICON_PAD = 4, DEVICE_ICON_GAP = 3 };
 
@@ -141,6 +148,11 @@ static const NpCell cells[] =
     { NP_L_ARPREQUESTS,   1, K_INT,        10, AT_RIGHT },
     { NP_L_WRITEREQUESTS, 2, K_INT,        6,  AT_FIELD },
     { NP_L_NOTE,          2, K_TEXT,       0,  AT_RIGHT },
+
+    { NP_L_UPD_AUTO,      0, K_CHECK,      0,  AT_PANEL },
+    { NP_L_UPD_CHANNEL,   1, K_CYCLE_CHANNEL, 0, AT_FIELD },
+    { NP_L_UPD_USE,       2, K_BUTTON,     0,  AT_FIELD },
+    { NP_L_UPD_CHECK,     2, K_BUTTON,     0,  AT_NEXT  },
 };
 
 #define CELL_COUNT ((int)(sizeof(cells) / sizeof(cells[0])))
@@ -194,6 +206,9 @@ static int cell_w(const Metrics *m, const NpCell *c)
                               2 * BUTTON_PAD;
     case K_CYCLE_IPV6: return widest(m, np_ipv6_labels) + CYCLE_GLYPH +
                               2 * BUTTON_PAD;
+    case K_CYCLE_CHANNEL: return widest(m, np_channel_labels) + CYCLE_GLYPH +
+                              2 * BUTTON_PAD;
+    case K_BUTTON:     return button_w(label_w(m, c->item));
     case K_CHECK:      return m->cb_w;
     case K_TEXT:       return label_w(m, c->item);
     case K_ICON:       return m->gh + DEVICE_ICON_PAD;

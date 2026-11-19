@@ -435,6 +435,39 @@ static void test_prefs_set(void)
     CHECK(upd_prefs_set(old, sizeof(old) - 1, "AUTO=ON", out, 20) == 0);
 }
 
+/* updprefs.h: NetPrefs' Updates page, AUTO= and CHANNEL= read and saved
+   over a file the user and the installer wrote. */
+static void test_prefs_page(void)
+{
+    static const char old[] = "; mine\r\n auto = off \r\nMIRROR=http://m/\n"
+                              "CHANNEL=Release\nCHANNEL=PRERELEASE\n";
+    char          v[16], tmp[256], out[256];
+    unsigned long n;
+
+    CHECK(upd_prefs_get(old, sizeof(old) - 1, "AUTO", v, sizeof(v)) &&
+          strcmp(v, "off") == 0);
+    CHECK(upd_prefs_get(old, sizeof(old) - 1, "channel", v, sizeof(v)) &&
+          strcmp(v, "Release") == 0);
+    CHECK(upd_prefs_get(old, sizeof(old) - 1, "MIRROR", v, sizeof(v)) &&
+          strcmp(v, "http://m/") == 0);
+    CHECK(!upd_prefs_get(old, sizeof(old) - 1, "MIRROR", v, 9));
+    CHECK(!upd_prefs_get(old, sizeof(old) - 1, "AUT", v, sizeof(v)));
+    CHECK(!upd_prefs_get("", 0, "AUTO", v, sizeof(v)));
+    CHECK(upd_prefs_get("AUTO=", 5, "AUTO", v, sizeof(v)) && v[0] == '\0');
+
+    n = upd_prefs_set2(old, sizeof(old) - 1, "AUTO=ON", "CHANNEL=PRERELEASE",
+                       tmp, out, sizeof(out));
+    out[n] = '\0';
+    CHECK(n > 0 && strcmp(out, "; mine\r\nAUTO=ON\nMIRROR=http://m/\n"
+                               "CHANNEL=PRERELEASE\n") == 0);
+    n = upd_prefs_set2("", 0, "AUTO=OFF", "CHANNEL=RELEASE", tmp, out,
+                       sizeof(out));
+    out[n] = '\0';
+    CHECK(strcmp(out, "AUTO=OFF\nCHANNEL=RELEASE\n") == 0);
+    CHECK(upd_prefs_set2(old, sizeof(old) - 1, "AUTO=ON", "CHANNEL=RELEASE",
+                         tmp, out, 30) == 0);
+}
+
 int main(void)
 {
     test_settings();
@@ -446,6 +479,7 @@ int main(void)
     test_stack();
     test_fetch_result();
     test_prefs_set();
+    test_prefs_page();
 
     printf("test_updcheck: %d checks, %d failures\n", checks, failures);
 

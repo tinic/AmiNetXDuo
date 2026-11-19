@@ -8,7 +8,7 @@
 #
 # -f sets the Workbench screen font through ENVARC:Sys/font.prefs, e.g.
 # helvetica.font/13.  -V 32 boots Workbench 3.2 on its own Kickstart.  -s netprefs grabs NetPrefs on each of its pages as
-# netprefs.pfs, netprefs-1.pfs ... netprefs-4.pfs; netprefs_window is the
+# netprefs.pfs, netprefs-1.pfs ... netprefs-5.pfs; netprefs_window is the
 # window's box for cropping.  -s netswitch boots the stack on an A2065
 # (slirp) and drives NetSwitch: ETH0 selected (netswitch.pfs), Offline
 # (-2), Online (-3), Offline and Online three times each (-4, -5), then
@@ -347,6 +347,9 @@ C:wbgrab TO DH0:netprefs-3.pfs >NIL:
 C:WinClick "AmiNetXDuo Network" 2 >NIL:
 C:Wait 1
 C:wbgrab TO DH0:netprefs-4.pfs >NIL:
+C:WinClick "AmiNetXDuo Network" 2 >NIL:
+C:Wait 1
+C:wbgrab TO DH0:netprefs-5.pfs >NIL:
 Echo >DH0:.done "$RC"
 EOF
         ;;

@@ -12,6 +12,7 @@
 #include "tools.h"
 #include "netprefs_text.h"
 #include "netprefs_layout.h"
+#include "updprefs.h"
 #include "aminetxduo/version.h"
 
 #include <exec/libraries.h>
@@ -109,6 +110,12 @@ enum
     GID_DESTINATION,
     GID_DESTINATION6,
 #endif
+    /* Last, so that every ID above stays what tests/tools/run-netprefs.sh
+       clicks. */
+    GID_UPD_AUTO = 64,
+    GID_UPD_CHANNEL,
+    GID_UPD_USE,
+    GID_UPD_CHECK,
 };
 
 enum
@@ -118,6 +125,7 @@ enum
     NP_PANEL_IPV6,
     NP_PANEL_DEVICE,
     NP_PANEL_TUNING,
+    NP_PANEL_UPDATES,
     NP_PANEL_COUNT
 };
 
@@ -177,6 +185,9 @@ typedef struct NetPrefs
     struct Gadget *g_arprequests;
     struct Gadget *g_writerequests;
     struct Gadget *g_status;
+    struct Gadget *g_apply;
+    struct Gadget *g_upd_auto;
+    struct Gadget *g_upd_channel;
     struct Gadget *g_live_status;
     struct Gadget *live_online_gadgets;
     struct Gadget *live_offline_gadgets;
@@ -959,7 +970,9 @@ static BOOL command_dir(char *dir, ULONG len)
 static char np_line[NP_PATH_LEN + 48];
 static char np_dir[NP_PATH_LEN];
 
-static LONG run_command(const char *command, const char *name, BOOL quiet)
+/* `output` NULL: NIL:; else the file the command's output goes to. */
+static LONG run_command_to(const char *command, const char *name, BOOL quiet,
+                           const char *output_path)
 {
     char *line = np_line;
     char *dir = np_dir;
@@ -996,7 +1009,8 @@ static LONG run_command(const char *command, const char *name, BOOL quiet)
        doing so can pull that screen to the front, and Online/Offline have no
        QUIET option.  SystemTagList owns and closes streams once it starts. */
     input = Open((CONST_STRPTR)"NIL:", MODE_OLDFILE);
-    output = Open((CONST_STRPTR)"NIL:", MODE_NEWFILE);
+    output = Open((CONST_STRPTR)(output_path != NULL ? output_path : "NIL:"),
+                  MODE_NEWFILE);
     if (input == (BPTR)0 || output == (BPTR)0)
     {
         if (input != (BPTR)0) Close(input);
@@ -1019,6 +1033,202 @@ static LONG run_command(const char *command, const char *name, BOOL quiet)
         Close(output);
     }
     return result;
+}
+
+static LONG run_command(const char *command, const char *name, BOOL quiet)
+{
+    return run_command_to(command, name, quiet, NULL);
+}
+
+/* ---------------------------------------------------------- the Updates page.
+ * ENVARC:AmiNetXDuo/Update (ENV: at boot), the settings UpdateAmiNetXDuo
+ * reads (tests/updater/scenarios.tsv): AUTO=ON|OFF and CHANNEL=RELEASE|
+ * PRERELEASE set, every other line (MIRROR=, comments) kept, as the
+ * installer's InstallSameFile SETKEY does (updprefs.h).  Save writes
+ * ENVARC: and ENV:, Use ENV: alone. */
+#define NP_UPD_MAX      1024UL
+#define NP_UPD_OUT      "T:NetPrefs-Update"
+
+static char np_upd_tmp[NP_UPD_MAX];
+static char np_upd_out[NP_UPD_MAX];
+static BOOL np_upd_auto = TRUE;
+static ULONG np_upd_channel;            /* np_channel_labels[] */
+
+/* The settings into np_upd_auto and np_upd_channel: ENV: first, then
+   ENVARC:, the updater's own order. */
+static VOID load_updates(VOID)
+{
+    static const char *const where[] = {
+        "ENV:AmiNetXDuo/Update", "ENVARC:AmiNetXDuo/Update"
+    };
+    char  v[16];
+    char *text = NULL;
+    ULONG len = 0, i;
+
+    /* The updater's default channel: the installed version's own. */
+    np_upd_channel = 0;
+    for (i = 0; AMINETXDUO_VERSION[i] != '\0'; i++)
+        if (AMINETXDUO_VERSION[i] == '-') np_upd_channel = 1;
+    np_upd_auto = TRUE;
+
+    for (i = 0; i < 2 && text == NULL; i++)
+        if (quiet_exists(where[i])) text = read_file(where[i], &len, TRUE);
+    if (text == NULL) return;
+    if (upd_prefs_get(text, len, "AUTO", v, sizeof(v)) &&
+        tool_stricmp(v, "OFF") == 0)
+        np_upd_auto = FALSE;
+    if (upd_prefs_get(text, len, "CHANNEL", v, sizeof(v)))
+    {
+        if (tool_stricmp(v, "RELEASE") == 0) np_upd_channel = 0;
+        else if (tool_stricmp(v, "PRERELEASE") == 0) np_upd_channel = 1;
+    }
+    ami_free(text);
+}
+
+/* AUTO= and CHANNEL= into <dir>AmiNetXDuo/Update, the rest kept. */
+static BOOL write_updates(const char *dir)
+{
+    char  path[40];
+    char *old = NULL;
+    ULONG len = 0, n;
+
+    tool_copy_string(path, sizeof(path), dir);
+    tool_copy_string(path + text_len(path), sizeof(path) - text_len(path),
+                     "AmiNetXDuo");
+    if (!ensure_dir(path)) return FALSE;
+    tool_copy_string(path + text_len(path), sizeof(path) - text_len(path),
+                     "/Update");
+    if (quiet_exists(path))
+    {
+        old = read_file(path, &len, FALSE);
+        if (old == NULL) return FALSE;
+    }
+    n = upd_prefs_set2(old != NULL ? old : "", len,
+                       np_upd_auto ? "AUTO=ON" : "AUTO=OFF",
+                       np_upd_channel ? "CHANNEL=PRERELEASE" : "CHANNEL=RELEASE",
+                       np_upd_tmp, np_upd_out, NP_UPD_MAX);
+    if (old != NULL) ami_free(old);
+    return n != 0 && replace_file(path, np_upd_out, n);
+}
+
+/* Save (archive) or Use: the page's two settings written. */
+static BOOL save_updates(BOOL archive)
+{
+    np_upd_auto = checked(np.g_upd_auto);
+    if ((archive && !write_updates("ENVARC:")) || !write_updates("ENV:"))
+    {
+        requester("The update settings could not be written.");
+        return FALSE;
+    }
+    set_status(archive ? "Update settings saved." : "Update settings in use.");
+    return TRUE;
+}
+
+/* The first "<key>=" line of the output, its value up to a space or the
+   line's end, into np_upd_tmp; NULL when there is none. */
+static const char *upd_output(const char *text, ULONG len, const char *key)
+{
+    ULONG klen = text_len(key), i = 0, n, k;
+
+    while (i < len)
+    {
+        for (n = 0; i + n < len && text[i + n] != '\n'; n++) ;
+        for (k = 0; k < klen && k < n && text[i + k] == key[k]; k++) ;
+        if (k == klen)
+        {
+            for (k = 0; klen + k < n && text[i + klen + k] > ' ' &&
+                        k + 1 < NP_UPD_MAX; k++)
+                np_upd_tmp[k] = text[i + klen + k];
+            np_upd_tmp[k] = '\0';
+            return np_upd_tmp;
+        }
+        i += n + 1;
+    }
+    return NULL;
+}
+
+/* UpdateAmiNetXDuo <words> run, its output read into np_upd_out; the
+   length, or -1 when it did not run. */
+static LONG run_updater(const char *words)
+{
+    char *text;
+    ULONG len = 0;
+
+    (VOID)DeleteFile((CONST_STRPTR)NP_UPD_OUT);
+    if (run_command_to("UpdateAmiNetXDuo", words, FALSE, NP_UPD_OUT) == -1)
+        return -1;
+    text = quiet_exists(NP_UPD_OUT) ? read_file(NP_UPD_OUT, &len, TRUE) : NULL;
+    (VOID)DeleteFile((CONST_STRPTR)NP_UPD_OUT);
+    if (text == NULL) return -1;
+    if (len >= NP_UPD_MAX) len = NP_UPD_MAX - 1;
+    CopyMem(text, np_upd_out, len);
+    np_upd_out[len] = '\0';
+    ami_free(text);
+    return (LONG)len;
+}
+
+static VOID say_join(char *out, ULONG cap, const char *a, const char *b,
+                     const char *c)
+{
+    tool_copy_string(out, cap, a);
+    tool_copy_string(out + text_len(out), cap - text_len(out), b);
+    tool_copy_string(out + text_len(out), cap - text_len(out), c);
+}
+
+/* Check now: the settings shown in use, CHECK run, its answer shown; an
+   update can be installed from here, which restarts the Amiga. */
+static VOID check_now(VOID)
+{
+    static char body[160];
+    static char ver[40];
+    const char *v;
+    LONG        len;
+
+    if (!save_updates(FALSE)) return;
+    set_status("Checking for updates...");
+    len = run_updater("CHECK");
+    set_status("");
+    if (len < 0)
+    {
+        requester("UpdateAmiNetXDuo could not be run.");
+        return;
+    }
+    v = upd_output(np_upd_out, (ULONG)len, "version=");
+    tool_copy_string(ver, sizeof(ver), v != NULL ? v : "");
+    v = upd_output(np_upd_out, (ULONG)len, "update=");
+    if (v != NULL && (tool_stricmp(v, "available") == 0 ||
+                      tool_stricmp(v, "skipped") == 0))
+    {
+        say_join(body, sizeof(body), "AmiNetXDuo ", ver,
+                 " is available (installed " AMINETXDUO_VERSION ").\n"
+                 "Install it now? The Amiga restarts when it is installed.");
+        if (!choose(body, "Install and restart|Later")) return;
+        set_status("Installing the update...");
+        len = run_updater("INSTALL RESTART");
+        set_status("");
+        v = len < 0 ? NULL : upd_output(np_upd_out, (ULONG)len, "refused=");
+        say_join(body, sizeof(body), "The update was not installed",
+                 v != NULL ? " (" : ".", v != NULL ? v : "");
+        if (v != NULL) tool_copy_string(body + text_len(body),
+                                        sizeof(body) - text_len(body), ").");
+        requester(body);
+    }
+    else if (v != NULL && tool_stricmp(v, "current") == 0)
+    {
+        say_join(body, sizeof(body), "AmiNetXDuo ", ver, " is up to date.");
+        requester(body);
+    }
+    else if (v != NULL && tool_stricmp(v, "foreign_stack") == 0)
+        requester("Another TCP/IP stack is running: nothing was checked.");
+    else
+    {
+        v = upd_output(np_upd_out, (ULONG)len, "refused=");
+        say_join(body, sizeof(body), "The check did not complete",
+                 v != NULL ? " (" : ".", v != NULL ? v : "");
+        if (v != NULL) tool_copy_string(body + text_len(body),
+                                        sizeof(body) - text_len(body), ").");
+        requester(body);
+    }
 }
 
 static VOID sort_names(VOID)
@@ -2021,6 +2231,17 @@ static VOID show_panel(ULONG which)
              np.layout.bevel.x + np.layout.bevel.w - 1,
              np.layout.bevel.y + np.layout.bevel.h - 1);
     np.active_panel = which;
+    /* Save & Start starts an interface: nothing to start on Updates. */
+    if (np.g_apply != NULL)
+    {
+        struct TagItem t[2];
+
+        t[0].ti_Tag = GA_Disabled;
+        t[0].ti_Data = (ULONG)(which == NP_PANEL_UPDATES);
+        t[1].ti_Tag = TAG_DONE;
+        t[1].ti_Data = 0;
+        GT_SetGadgetAttrsA(np.g_apply, np.window, NULL, t);
+    }
     draw_layout();
     (VOID)AddGList(np.window, np.panel_gadgets[which], (UWORD)-1,
                    np.panel_gadget_count[which], NULL);
@@ -2178,7 +2399,7 @@ static BOOL make_window(VOID)
     ITEM(np.g_status,TEXT_KIND,GID_STATUS,NP_L_STATUS);
     TAG1(TAG_DONE, 0);
     ITEM(g,BUTTON_KIND,GID_SAVE,NP_L_SAVE);
-    ITEM(g,BUTTON_KIND,GID_APPLY,NP_L_APPLY);
+    ITEM(np.g_apply,BUTTON_KIND,GID_APPLY,NP_L_APPLY);
     /* The state is text, not a control: with a border it read as a second
        button beside the action. */
     TEXTBOX(np_live_labels[NP_LIVE_UNAVAILABLE], GTJ_RIGHT);
@@ -2276,6 +2497,18 @@ static BOOL make_window(VOID)
     ITEM(np.g_arprequests,INTEGER_KIND,GID_ARPREQUESTS,NP_L_ARPREQUESTS);
     TAG1(GTIN_MaxChars, 3);
     ITEM(np.g_writerequests,INTEGER_KIND,GID_WRITEREQUESTS,NP_L_WRITEREQUESTS);
+
+    /* Updates page: not an interface's, the updater's settings. */
+    context = CreateContext(&np.panel_gadgets[NP_PANEL_UPDATES]);
+    if (context == NULL) return FALSE;
+    g = context;
+    CHECK(np_upd_auto);
+    ITEM(np.g_upd_auto,CHECKBOX_KIND,GID_UPD_AUTO,NP_L_UPD_AUTO);
+    CYCLE(np_channel_labels, np_upd_channel);
+    ITEM(np.g_upd_channel,CYCLE_KIND,GID_UPD_CHANNEL,NP_L_UPD_CHANNEL);
+    TAG1(TAG_DONE, 0);
+    ITEM(g,BUTTON_KIND,GID_UPD_USE,NP_L_UPD_USE);
+    ITEM(g,BUTTON_KIND,GID_UPD_CHECK,NP_L_UPD_CHECK);
 
     for (i = 0; i < NP_PANEL_COUNT; i++)
         np.panel_gadget_count[i] = gadget_count(np.panel_gadgets[i]);
@@ -2433,8 +2666,19 @@ static VOID event_loop(VOID)
                         browse_device();
                         draw_device_browse_icon();
                         break;
-                    case GID_SAVE: (VOID)save_form(FALSE); break;
-                    case GID_APPLY: (VOID)save_form(TRUE); break;
+                    case GID_SAVE:
+                        if (np.active_panel == NP_PANEL_UPDATES)
+                            (VOID)save_updates(TRUE);
+                        else
+                            (VOID)save_form(FALSE);
+                        break;
+                    case GID_APPLY:
+                        if (np.active_panel != NP_PANEL_UPDATES)
+                            (VOID)save_form(TRUE);
+                        break;
+                    case GID_UPD_CHANNEL: np_upd_channel = code; break;
+                    case GID_UPD_USE: (VOID)save_updates(FALSE); break;
+                    case GID_UPD_CHECK: check_now(); break;
                     case GID_LIVE_ACTION:
                         update_live_state();
                         if (np.live_state == NP_LIVE_OFFLINE &&
@@ -2524,6 +2768,7 @@ static int netprefs_run(void)
     }
 
     scan_interfaces();
+    load_updates();
     if (!make_window())
     {
         requester("Cannot open window: needs a 640x200 Workbench screen and "

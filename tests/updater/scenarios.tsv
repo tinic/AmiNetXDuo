@@ -160,13 +160,13 @@ S01-swap	3.1	system	full	-	install	new,nostaging	0	update=installed version=@NEW
 S02-os32	3.2	system	full	-	install;reboot	new,receipt,filesrec,nostaging	0	update=installed version=@NEW;boot=trial boots=1;confirm=confirmed;state:phase=confirmed	-	good	container,none	6	pass
 S03-current	3.1	system	full	-	check	unchanged	0	update=current version=@OLD	-	current	manifest	4	pass
 S04-noreceipt	3.1	system	full	noreceipt	check	unchanged	10	refused=no_receipt	-	good	none	6	pass
-S05-restart	3.1	system	full	auto=on,answer=INSTALL RESTART	startup;restart	new,receipt,filesrec,nostaging	-	ustartup:UpdateAmiNetXDuo CHECK QUIET;update=installed version=@NEW;confirm=confirmed;state:phase=confirmed	restart	good	container	7	expected-fail
-S10-auto-off	3.1	system	full	auto=off	startup	unchanged	-	ustartup:UpdateAmiNetXDuo CHECK QUIET;!update=available	-	good	none	7	expected-fail
-S11-daily	3.1	system	full	auto=on,answer=LATER	startup;reboot;reboot+1d	unchanged	-	ustartup:UpdateAmiNetXDuo CHECK QUIET;update=notdue;update=later version=@NEW	offer	good	manifest,none,manifest	7	expected-fail
-S12-later	3.1	system	full	auto=on,answer=LATER	startup;reboot+1d	unchanged	-	update=later version=@NEW;state:later=	offer	good	manifest,manifest	7	expected-fail
-S12-skip	3.1	system	full	auto=on,answer=SKIP	startup;reboot+1d	unchanged	-	update=skipped version=@NEW;state:skip=@NEW	offer	good	manifest,manifest	7	expected-fail
-S13-prerelease	3.1	system	full	channel=prerelease	check=later	unchanged	5	update=available version=@NEW;update=later version=@NEW	offer	good	manifest@prerelease	7	expected-fail
-S13-release	3.1	system	full	channel=release	check	unchanged	0	update=current;!update=available	-	good	manifest@release	7	expected-fail
+S05-restart	3.1	system	full	auto=on,answer=INSTALL RESTART	startup;restart	new,receipt,filesrec,nostaging	-	ustartup:UpdateAmiNetXDuo CHECK QUIET;update=installed version=@NEW;confirm=confirmed;state:phase=confirmed	restart	good	container	7	pass
+S10-auto-off	3.1	system	full	auto=off	startup	unchanged	-	ustartup:UpdateAmiNetXDuo CHECK QUIET;!update=available	-	good	none	7	pass
+S11-daily	3.1	system	full	auto=on,answer=LATER	startup;reboot;reboot+1d	unchanged	-	ustartup:UpdateAmiNetXDuo CHECK QUIET;update=notdue;update=later version=@NEW	offer	good	manifest,none,manifest	7	pass
+S12-later	3.1	system	full	auto=on,answer=LATER	startup;reboot+1d	unchanged	-	update=later version=@NEW;state:later=	offer	good	manifest,manifest	7	pass
+S12-skip	3.1	system	full	auto=on,answer=SKIP	startup;reboot+1d	unchanged	-	update=skipped version=@NEW;state:skip=@NEW	offer	good	manifest,manifest	7	pass
+S13-prerelease	3.1	system	full	channel=prerelease	check=later	unchanged	5	update=available version=@NEW;update=later version=@NEW	offer	good	manifest@prerelease	7	pass
+S13-release	3.1	system	full	channel=release	check	unchanged	0	update=current;!update=available	-	good	manifest@release	7	pass
 S14-installer	3.1	system	full	noprefs	startup	unchanged	-	envarc:AUTO=ON;ustartup:UpdateAmiNetXDuo BOOT;ustartup:UpdateAmiNetXDuo CONFIRM;ustartup:UpdateAmiNetXDuo CHECK QUIET	-	good	-	6	pass
 S20-foreign	3.1	system	full	foreign=C/ping	install	new,keep=C/ping,nostaging	0	file=keep foreign C:ping;update=installed version=@NEW	-	good	container	5	pass
 S21-deleted	3.1	system	full	delete=C/ping	install	new,absent=C/ping,nostaging	0	file=missing deleted C:ping;update=installed version=@NEW	-	good	container	5	pass
