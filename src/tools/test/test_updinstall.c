@@ -491,6 +491,7 @@ typedef struct Fs
     long  budget;           /* -1: unlimited                              */
     unsigned int cuts;
     unsigned int stop_cut;  /* 0: none                                    */
+    const char  *err;       /* exists() of this name fails: a DOS error   */
 } Fs;
 
 static int fs_find(Fs *fs, const char *p)
@@ -537,6 +538,9 @@ static int vol_b(const char *p) { return p[0] == 'B' && p[1] == ':'; }
 static int op_exists(void *c, const char *p)
 {
     Fs *fs = c;
+
+    if (fs->err != 0 && strcmp(fs->err, p) == 0)
+        return -1;
 
     return fs_find(fs, p) >= 0;
 }
@@ -1143,6 +1147,166 @@ static void test_all_staged(void)
     CHECK(upd_all_staged(e, 3) == 1);
 }
 
+/*
+ * An empty "$VER: " before the real one -- UpdateAmiNetXDuo's scanner key,
+ * NetEnv's template, both NUL-ended in a program's data -- is skipped,
+ * and the scan goes on to the version (#497 review: the scan stopped
+ * there, found no version, and a newer build was replaced).
+ */
+static void test_scan_skip(void)
+{
+    static const char bin[] =
+        "\0\0$VER: \0code AmiNetXDuo $VER: \0$VER: junk\0"
+        "$VER: UpdateAmiNetXDuo 9.9.9 (17.11.2030)\0tail";
+    unsigned char r[32], d[32], f[32], act, why;
+    UpdScan       sc;
+    UpdVer        v, upd;
+    UpdSelIn      in;
+    static const char empty[] = "AmiNetXDuo$VER: \0$VER: \0";
+    unsigned long i, step;
+
+    for (step = 1; step <= sizeof(bin); step++)
+    {
+        upd_scan_init(&sc);
+        for (i = 0; i < sizeof(bin) - 1; i += step)
+            upd_scan_feed(&sc, (const unsigned char *)bin + i,
+                          i + step <= sizeof(bin) - 1 ? step : sizeof(bin) - 1 - i);
+        CHECK(sc.mark == 1);
+        CHECK(upd_scan_version(&sc, &v) == 1 && v.major == 9 && v.minor == 9);
+    }
+
+    /* So the newer build is kept, not replaced. */
+    fill(r, 1);
+    fill(f, 2);
+    fill(d, 3);
+    CHECK(upd_ver_parse("1.0.0-rc5", 9, &upd));
+    memset(&in, 0, sizeof(in));
+    in.receipt = r; in.disk = d; in.fresh = f; in.update = &upd; in.scan = &sc;
+    upd_select(&in, &act, &why);
+    CHECK(act == UPD_ACT_SKIP && why == UPD_WHY_NEWER);
+
+    /* Only empty ones: no version, as before. */
+    upd_scan_init(&sc);
+    upd_scan_feed(&sc, (const unsigned char *)empty, sizeof(empty) - 1);
+    CHECK(upd_scan_version(&sc, &v) == 0);
+    /* The file ends in the middle of it: what came counts. */
+    upd_scan_init(&sc);
+    upd_scan_feed(&sc, (const unsigned char *)"$VER: ping 1.2.3", 16);
+    CHECK(upd_scan_version(&sc, &v) == 1 && v.major == 1 && v.patch == 3);
+}
+
+/*
+ * The fail-closed rules of review three: absent is ERROR_OBJECT_NOT_FOUND
+ * alone, for the trial, the state and a live file; the state is merged
+ * before PREPARE or refused; no size adds or subtracts past its range; and
+ * InstallSameFile RECEIPT keeps the drawers it holds (#497 review).
+ */
+static void test_fail_closed(void)
+{
+    static const char trial_state[] = "phase=trial\nversion=1.0.1\n";
+    static const char kept[] = "phase=confirmed\nlast_check=2026-11-17\nskip=1.0.3\n";
+    static char       big[1200];
+    char              out[256];
+    unsigned long     n;
+
+    /* The trial and the state. */
+    CHECK(upd_trial_refuse(1, 0, 0, 1) == 0);           /* neither there   */
+    CHECK(upd_trial_refuse(0, 0, 0, 1) == 1);           /* trial there     */
+    CHECK(upd_trial_refuse(1, 0, 0, 0) == 1);           /* state unread    */
+    CHECK(upd_trial_refuse(1, kept, sizeof(kept) - 1, 0) == 0);
+    CHECK(upd_trial_refuse(1, trial_state, sizeof(trial_state) - 1, 0) == 1);
+
+    CHECK(upd_ioerr_absent(205) == 1);
+    CHECK(upd_ioerr_absent(202) == 0);                  /* in use          */
+    CHECK(upd_ioerr_absent(218) == 0);                  /* not mounted     */
+    CHECK(upd_ioerr_absent(0) == 0);
+
+    /* The state SWAP will write: merged, or refused with nothing dropped. */
+    n = upd_state_next(kept, sizeof(kept) - 1, 0, "1.0.2", "full", out, sizeof(out));
+    CHECK(n > 0 && strstr(out, "phase=trial\n") != 0 &&
+          strstr(out, "last_check=2026-11-17\n") != 0 && strstr(out, "skip=1.0.3\n") != 0);
+    CHECK(upd_state_next(0, 0, 1, "1.0.2", "full", out, sizeof(out)) > 0);
+    CHECK(upd_state_next(0, 0, 0, "1.0.2", "full", out, sizeof(out)) == 0);
+    memset(big, 'k', sizeof(big) - 2);
+    big[sizeof(big) - 2] = '\n';
+    CHECK(upd_state_next(big, sizeof(big) - 1, 0, "1.0.2", "full", out, sizeof(out)) == 0);
+
+    /* Sizes held, not wrapped. */
+    CHECK(upd_sat_add(~0UL - 1, 5) == ~0UL && upd_sat_add(3, 4) == 7);
+    CHECK(upd_free_blocks(100, 120) == 0 && upd_free_blocks(120, 100) == 20);
+    CHECK(upd_dl_chunk(1, 0xFFFFFF00UL, 0x200, 0xFFFFFFF0UL) == UPD_DL_LONG);
+    CHECK(upd_dl_chunk(1, 0x10, 0xFFFFFFFFUL, 1000) == UPD_DL_LONG);
+    CHECK(upd_dl_chunk(1, 1000, 24, 1024) == UPD_DL_OK);
+
+    /* InstallSameFile RECEIPT. */
+    CHECK(upd_rcpt_write_plan(0, 0, 0) == UPD_RW_ERROR);    /* in use      */
+    CHECK(upd_rcpt_write_plan(0, 1, 0) == UPD_RW_NONE);     /* C/fat, first */
+    CHECK(upd_rcpt_write_plan(0, 1, 67) == UPD_RW_WRITE);
+    CHECK(upd_rcpt_write_plan(1, 0, 0) == UPD_RW_NONE);
+    CHECK(upd_rcpt_write_plan(1, 0, 134) == UPD_RW_WRITE);
+}
+
+/*
+ * A look that fails with a DOS error, not "not found", stops the swap:
+ * nothing removed, no line written (#507 review: an error on
+ * prior-old/<n> during a recovery read as there and the .old was deleted;
+ * one on the live file with no .new wrote "done").
+ */
+static void test_exists_error(void)
+{
+    static Fs   fs;
+    UpdJEntry   e[1];
+    const char *prior = "U:Update/prior-old";
+
+    /* Recovery after "aside 1": prior-old/1 cannot be looked at. */
+    memset(&fs, 0, sizeof(fs));
+    memset(e, 0, sizeof(e));
+    fs_ops.ctx = &fs;
+    fs.budget = -1;
+    e[0].path = "SYS:C/ping";
+    e[0].len  = 10;
+    e[0].aside = 1;
+    fs_put(&fs, "SYS:C/ping", 1);
+    fs_put(&fs, "SYS:C/ping.new", 2);
+    fs_put(&fs, "SYS:C/ping.old", 3);
+    fs.err = "U:Update/prior-old/1";
+    CHECK(upd_forward(e, 1, prior, &fs_ops, 0) == 0);
+    CHECK(fs_get(&fs, "SYS:C/ping.old") == 3 && fs_get(&fs, "SYS:C/ping") == 1 &&
+          fs_get(&fs, "SYS:C/ping.new") == 2);
+    CHECK(fs.journal[0] == '\0' && e[0].done == 0);
+
+    /* The same before "aside": no aside line either. */
+    e[0].aside = 0;
+    CHECK(upd_forward(e, 1, prior, &fs_ops, 0) == 0);
+    CHECK(fs.journal[0] == '\0' && fs_get(&fs, "SYS:C/ping.old") == 3);
+
+    /* The .old cannot be looked at. */
+    fs.err = "SYS:C/ping.old";
+    CHECK(upd_forward(e, 1, prior, &fs_ops, 0) == 0);
+    CHECK(fs.journal[0] == '\0' && fs_get(&fs, "SYS:C/ping") == 1);
+
+    /* No .new, and the live file cannot be looked at: no "done". */
+    memset(&fs, 0, sizeof(fs));
+    fs_ops.ctx = &fs;
+    fs.budget = -1;
+    e[0].aside = 0;
+    fs_put(&fs, "SYS:C/ping", 2);
+    fs_put(&fs, "SYS:C/ping.old", 1);
+    fs.err = "SYS:C/ping";
+    CHECK(upd_forward(e, 1, prior, &fs_ops, 0) == 0);
+    CHECK(fs.journal[0] == '\0' && e[0].done == 0);
+    CHECK(fs_get(&fs, "SYS:C/ping") == 2 && fs_get(&fs, "SYS:C/ping.old") == 1);
+
+    /* The .new cannot be looked at. */
+    fs.err = "SYS:C/ping.new";
+    CHECK(upd_forward(e, 1, prior, &fs_ops, 0) == 0);
+    CHECK(fs.journal[0] == '\0');
+
+    /* Cleared: the same disk finishes. */
+    fs.err = 0;
+    CHECK(upd_forward(e, 1, prior, &fs_ops, 0) == 1 && e[0].done == 1);
+}
+
 int main(int argc, char **argv)
 {
     const char *which = argc > 1 ? argv[1] : "all";
@@ -1153,6 +1317,7 @@ int main(int argc, char **argv)
         test_scan();
         test_select();
         test_container();
+        test_scan_skip();
         test_download();
     }
     if (strcmp(which, "journal") == 0 || strcmp(which, "all") == 0)
@@ -1167,6 +1332,8 @@ int main(int argc, char **argv)
         test_names();
         test_stale_prior();
         test_all_staged();
+        test_fail_closed();
+        test_exists_error();
         test_swap("U:Installed/Update/prior-old");   /* the volume of most */
         test_swap("B:Installed/Update/prior-old");   /* another: copies    */
     }

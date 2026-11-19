@@ -207,7 +207,30 @@ int upd_dest(char *out, unsigned long outlen, int layout, unsigned int cls,
 
 /* ----------------------------------------------------------- selection --- */
 
-static const char ui_ver_key[] = "$VER: ";
+/* "$VER: " without its "$": the whole key in this program's data would
+   be a stray, empty $VER of its own. */
+static const char ui_ver_tail[] = "VER: ";
+#define UI_VER_KEY_LEN  (sizeof(ui_ver_tail))
+#define ui_ver_key(i)   ((i) == 0 ? '$' : ui_ver_tail[(i) - 1])
+
+/* The version in what follows "$VER: ": "<name> <version> (<date>)". */
+static int ui_scan_ver(const char *ver, unsigned long vlen, UpdVer *v)
+{
+    unsigned long i = 0, b;
+
+    while (i < vlen && ver[i] == ' ')
+        i++;
+    while (i < vlen && ver[i] != ' ')
+        i++;                            /* the name                        */
+    while (i < vlen && ver[i] == ' ')
+        i++;
+    b = i;
+    while (i < vlen && ver[i] != ' ' && ver[i] != '(')
+        i++;
+    if (i == b)
+        return 0;
+    return upd_ver_parse(ver + b, i - b, v);
+}
 
 void upd_scan_init(UpdScan *s)
 {
@@ -218,7 +241,7 @@ void upd_scan_init(UpdScan *s)
 void upd_scan_feed(UpdScan *s, const unsigned char *d, unsigned long n)
 {
     static const char    mark[] = UPD_MARK;
-    const unsigned long  vk = sizeof(ui_ver_key) - 1;
+    const unsigned long  vk = UI_VER_KEY_LEN;
     unsigned long        i;
 
     for (i = 0; i < n; i++)
@@ -248,16 +271,27 @@ void upd_scan_feed(UpdScan *s, const unsigned char *d, unsigned long n)
         }
         if (s->vpos < vk)
         {
-            if (c == (unsigned char)ui_ver_key[s->vpos])
+            if (c == (unsigned char)ui_ver_key(s->vpos))
                 s->vpos++;
             else
-                s->vpos = (unsigned char)(c == (unsigned char)ui_ver_key[0] ? 1 : 0);
+                s->vpos = (unsigned char)(c == (unsigned char)'$' ? 1 : 0);
             continue;
         }
         if (c == 0 || c == '\n' || c == '\r' || s->vlen >= sizeof(s->ver) - 1)
         {
+            UpdVer v;
+
             s->ver[s->vlen] = '\0';
-            s->vdone = 1;
+            /* An empty or unparsable "$VER: " -- the scanner's own key in
+               a program's data, NetEnv's -- is not the version: on. */
+            if (ui_scan_ver(s->ver, s->vlen, &v))
+            {
+                s->vdone = 1;
+                continue;
+            }
+            s->vlen = 0;
+            s->ver[0] = '\0';
+            s->vpos = (unsigned char)(c == (unsigned char)'$' ? 1 : 0);
             continue;
         }
         s->ver[s->vlen++] = (char)c;
@@ -267,22 +301,10 @@ void upd_scan_feed(UpdScan *s, const unsigned char *d, unsigned long n)
 
 int upd_scan_version(const UpdScan *s, UpdVer *v)
 {
-    unsigned long i = 0, b;
-
-    if (s->vpos < sizeof(ui_ver_key) - 1)
+    /* Done, or the file ended in the middle of it. */
+    if (!s->vdone && s->vpos < UI_VER_KEY_LEN)
         return 0;
-    while (i < s->vlen && s->ver[i] == ' ')
-        i++;
-    while (i < s->vlen && s->ver[i] != ' ')
-        i++;                            /* the name                        */
-    while (i < s->vlen && s->ver[i] == ' ')
-        i++;
-    b = i;
-    while (i < s->vlen && s->ver[i] != ' ' && s->ver[i] != '(')
-        i++;
-    if (i == b)
-        return 0;
-    return upd_ver_parse(s->ver + b, i - b, v);
+    return ui_scan_ver(s->ver, s->vlen, v);
 }
 
 void upd_select(const UpdSelIn *in, unsigned char *act, unsigned char *why)
@@ -478,9 +500,25 @@ int upd_dl_chunk(int opened, unsigned long total, unsigned long n,
 {
     if (!opened)
         return UPD_DL_NETWORK;
-    if (total + n > size)
+    /* Not total + n: that wraps past 4 GB. */
+    if (n > size || total > size - n)
         return UPD_DL_LONG;
     return UPD_DL_OK;
+}
+
+int upd_ioerr_absent(long ioerr)
+{
+    return ioerr == 205;                /* ERROR_OBJECT_NOT_FOUND         */
+}
+
+unsigned long upd_sat_add(unsigned long a, unsigned long b)
+{
+    return a > ~0UL - b ? ~0UL : a + b;
+}
+
+unsigned long upd_free_blocks(long num, long used)
+{
+    return num > used ? (unsigned long)(num - used) : 0;
 }
 
 int upd_dl_verdict(long status, int whole, int wfail, int toolong,
@@ -823,26 +861,37 @@ int upd_forward(UpdJEntry *e, unsigned int n, const char *prior,
         if (!ui_names(&nm, &e[i], i, prior))
             return 0;
 
+        /* Each look is there, not there, or cannot be said (< 0): that
+           stops the swap with nothing deleted and no line written. */
         has_new  = ops->exists(ops->ctx, nm.fresh);
         has_live = ops->exists(ops->ctx, nm.live);
+        if (has_new < 0 || has_live < 0)
+            return 0;
 
         if (has_new && has_live)
         {
+            int has_old = ops->exists(ops->ctx, nm.old), has_prior;
+
+            if (has_old < 0)
+                return 0;
             /* The live file is not moved yet, so a .old is the one that
                was there before: another stack's, or an earlier install's. */
-            if (ops->exists(ops->ctx, nm.old))
+            if (has_old)
             {
+                has_prior = ops->exists(ops->ctx, nm.prior);
+                if (has_prior < 0)
+                    return 0;
                 if (!e[i].aside)
                 {
                     /* Not this swap's: an earlier update's.  Deleting the
                        .old on its strength would lose the .old. */
-                    if (ops->exists(ops->ctx, nm.prior))
+                    if (has_prior)
                         return 0;
                     if (!ui_jline(ops, &nm, "aside", i))
                         return 0;
                     e[i].aside = 1;
                 }
-                if (ops->exists(ops->ctx, nm.prior))
+                if (has_prior)
                 {
                     /* Copied whole before; the original is still there. */
                     if (!ops->remove(ops->ctx, nm.old))
@@ -968,4 +1017,24 @@ int upd_lock_why(long ioerr)
     default:
         return UPD_LOCK_OTHER;
     }
+}
+
+int upd_trial_refuse(int trial_absent, const char *state, unsigned long len,
+                     int state_absent)
+{
+    if (!trial_absent)
+        return 1;
+    if (state == 0)
+        return !state_absent;
+    return upd_trial_active(0, state, len);
+}
+
+unsigned long upd_state_next(const char *old, unsigned long oldlen, int absent,
+                             const char *version, const char *flavour,
+                             char *out, unsigned long outlen)
+{
+    if (old == 0 && !absent)
+        return 0;
+    return upd_state_merge(old != 0 ? old : "", old != 0 ? oldlen : 0, "trial",
+                           version, 0, flavour, out, outlen);
 }

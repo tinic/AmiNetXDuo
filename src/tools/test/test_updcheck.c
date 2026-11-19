@@ -397,6 +397,19 @@ static void test_stack(void)
     CHECK(upd_stack_size("CONFIRM") == 16384);
 }
 
+/* The status first, for the manifest and its .sig as for the container:
+   a 404 whose body overran the buffer is a 404 (#497 review). */
+static void test_fetch_result(void)
+{
+    CHECK(upd_fetch_result(404, 0) == 404);
+    CHECK(upd_fetch_result(404, 1) == 404);
+    CHECK(upd_fetch_result(500, 0) == 500);
+    CHECK(upd_fetch_result(200, 1) == 0);
+    CHECK(upd_fetch_result(200, 0) == -1);
+    CHECK(upd_fetch_result(0, 0) == -1);
+    CHECK(upd_fetch_result(0, 1) == -1);
+}
+
 int main(void)
 {
     test_settings();
@@ -406,6 +419,7 @@ int main(void)
     test_verdict();
     test_said();
     test_stack();
+    test_fetch_result();
 
     printf("test_updcheck: %d checks, %d failures\n", checks, failures);
 
