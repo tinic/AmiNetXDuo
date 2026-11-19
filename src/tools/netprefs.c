@@ -1007,7 +1007,7 @@ static LONG run_command_to(const char *command, const char *name, BOOL quiet,
 
     /* A Preferences program must not borrow its launching Shell's streams:
        doing so can pull that screen to the front, and Online/Offline have no
-       QUIET option.  SystemTagList owns and closes streams once it starts. */
+       QUIET option. */
     input = Open((CONST_STRPTR)"NIL:", MODE_OLDFILE);
     output = Open((CONST_STRPTR)(output_path != NULL ? output_path : "NIL:"),
                   MODE_NEWFILE);
@@ -1027,11 +1027,10 @@ static LONG run_command_to(const char *command, const char *name, BOOL quiet,
                         TAG_DONE);
     if (np.window != NULL && IntuitionBase->LibNode.lib_Version >= 39)
         SetWindowPointer(np.window, WA_Pointer, 0, TAG_DONE);
-    if (result == -1)
-    {
-        Close(input);
-        Close(output);
-    }
+    /* Synchronous, so the handles stay ours: only SYS_Asynch closes them.
+       Left open, the output file stays locked and cannot be read. */
+    Close(input);
+    Close(output);
     return result;
 }
 
