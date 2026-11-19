@@ -7,6 +7,17 @@ are history.
 
 ## Unreleased
 
+- AmiNetXDuo updates itself. Once a day at boot, UpdateAmiNetXDuo looks for
+  a newer version and offers it with Install, Skip this version and Later.
+  It installs the same kind of stack to the same places, and replaces only
+  the files the Installer put there that nobody changed since.
+- Every update is signed and every file is checked before anything changes.
+  A power cut during an update is safe, and an update after which the
+  network does not come up is taken back on the third boot.
+- The Installer asks whether to check for updates at boot, and the new
+  NetPrefs Updates page switches the check and chooses releases or
+  pre-releases. A machine installed before this version needs the Installer
+  run once before it can update.
 - SyncReboot writes every volume's buffers to disk before it restarts the
   machine, so it is safe to use right after files are written.
 
