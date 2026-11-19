@@ -618,6 +618,7 @@ int upd_journal_parse(const char *text, unsigned long len, UpdJournal *j,
                 e[j->nfiles].why   = why;
                 e[j->nfiles].aside = 0;
                 e[j->nfiles].done  = 0;
+                e[j->nfiles].staged = 0;
                 j->nfiles++;
             }
             else if (n == 5 && ui_prefix(l, n, "ready") == 5)
@@ -645,6 +646,16 @@ int upd_journal_parse(const char *text, unsigned long len, UpdJournal *j,
         }
     }
     return line > 0;
+}
+
+int upd_stale_journal(const char *text, unsigned long len, int absent,
+                      UpdJournal *j, UpdJEntry *e, unsigned int max)
+{
+    if (text == 0)
+        return absent ? UPD_STALE_NONE : UPD_STALE_PENDING;
+    if (e == 0 || !upd_journal_parse(text, len, j, e, max) || j->ready)
+        return UPD_STALE_PENDING;
+    return UPD_STALE_UNDO;
 }
 
 /* ---------------------------------------------------------------- swap --- */
@@ -715,6 +726,41 @@ int upd_swap_fits(const UpdJEntry *e, unsigned int i, const char *prior)
             return 0;
     /* ui_names(): .new and .old fit when <path> does; <prior>/<n>.tmp. */
     return ui_len(prior) + 1 + nn + 4 + 1 <= sizeof(((UiNames *)0)->tmp);
+}
+
+/* <path>.new of `e` into ui_new; 0 when it does not fit. */
+static char ui_new[UPD_APATH_MAX + 4];
+
+static int ui_new_name(const UpdJEntry *e)
+{
+    unsigned long at = 0;
+
+    return ui_cat(ui_new, sizeof(ui_new), &at, e->path, e->len) &&
+           ui_cat(ui_new, sizeof(ui_new), &at, ".new", 4);
+}
+
+int upd_new_free(const UpdJEntry *e, unsigned int n, const UpdFsOps *ops,
+                 unsigned int *bad)
+{
+    unsigned int i;
+
+    for (i = 0; i < n; i++)
+        if (!ui_new_name(&e[i]) || ops->exists(ops->ctx, ui_new))
+        {
+            if (bad != 0)
+                *bad = i;
+            return 0;
+        }
+    return 1;
+}
+
+void upd_unstage_new(UpdJEntry *e, unsigned int n, const UpdFsOps *ops)
+{
+    unsigned int i;
+
+    for (i = 0; i < n; i++)
+        if (e[i].staged && ui_new_name(&e[i]) && ops->remove(ops->ctx, ui_new))
+            e[i].staged = 0;
 }
 
 int upd_forward(UpdJEntry *e, unsigned int n, const char *prior,
@@ -861,4 +907,18 @@ int upd_trial_active(int trial, const char *state, unsigned long len)
         i += n + 1;
     }
     return 0;
+}
+
+int upd_lock_why(long ioerr)
+{
+    switch (ioerr)
+    {
+    case 202:                           /* ERROR_OBJECT_IN_USE         */
+        return UPD_LOCK_BUSY;
+    case 214:                           /* ERROR_DISK_WRITE_PROTECTED  */
+    case 223:                           /* ERROR_WRITE_PROTECTED       */
+        return UPD_LOCK_WP;
+    default:
+        return UPD_LOCK_OTHER;
+    }
 }

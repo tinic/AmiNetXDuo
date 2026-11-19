@@ -212,6 +212,7 @@ typedef struct UpdJEntry
     unsigned char  why;                 /* UPD_WHY_OURS | _OTHERBUILD      */
     unsigned char  aside;               /* an "aside <n>" line             */
     unsigned char  done;                /* a "done <n>" line               */
+    unsigned char  staged;              /* this run wrote <path>.new       */
 } UpdJEntry;
 
 typedef struct UpdJournal
@@ -226,6 +227,19 @@ typedef struct UpdJournal
 /* 1 and the journal, or 0 for one that is not one. */
 int upd_journal_parse(const char *text, unsigned long len, UpdJournal *j,
                       UpdJEntry *e, unsigned int max);
+
+/*
+ * What INSTALL's cleanup does with the journal it finds: `text` is NULL
+ * when it could not be read, and `absent` says the file is not there
+ * (ERROR_OBJECT_NOT_FOUND).  UPD_STALE_NONE: no journal; UPD_STALE_UNDO:
+ * a preparation that stopped before "ready", whose .new files go;
+ * UPD_STALE_PENDING: anything else -- ready, unreadable, not a journal --
+ * which is refused with nothing removed.
+ */
+enum { UPD_STALE_NONE = 0, UPD_STALE_UNDO, UPD_STALE_PENDING };
+
+int upd_stale_journal(const char *text, unsigned long len, int absent,
+                      UpdJournal *j, UpdJEntry *e, unsigned int max);
 
 /* The file operations the swap runs on.  Every one returns 1 for done.
    rename fails when `to` exists or the two are on different volumes;
@@ -268,6 +282,14 @@ unsigned int upd_forward_steps(unsigned int n, unsigned int olds);
    stages anything. */
 int upd_swap_fits(const UpdJEntry *e, unsigned int i, const char *prior);
 
+/* 1 when no entry's <path>.new is there; 0 and *bad, the first that is:
+   a file PREPARE did not write and must not overwrite or delete. */
+int upd_new_free(const UpdJEntry *e, unsigned int n, const UpdFsOps *ops,
+                 unsigned int *bad);
+
+/* Removes <path>.new of every entry this run staged, and no other. */
+void upd_unstage_new(UpdJEntry *e, unsigned int n, const UpdFsOps *ops);
+
 /* ---------------------------------------------------------------- state --- */
 
 /*
@@ -285,6 +307,20 @@ unsigned long upd_state_merge(const char *old, unsigned long oldlen,
    INSTALL then refuses before it removes anything: receipt-next is
    CONFIRM's. */
 int upd_trial_active(int trial, const char *state, unsigned long len);
+
+/*
+ * The Update drawer's lock, <DOCDIR>/Installed/Update/lock, opened
+ * MODE_NEWFILE (an exclusive lock) for the whole of an INSTALL, BOOT or
+ * CONFIRM and deleted when it is closed.  The filesystem drops the lock
+ * when the machine restarts, so a run that crashed blocks nothing after
+ * a reboot; the file it leaves is reopened.  What a failed open means,
+ * by its IoErr(): UPD_LOCK_BUSY (202, ERROR_OBJECT_IN_USE) another run
+ * holds it, UPD_LOCK_WP (214, 223: write-protected) the drawer's volume
+ * is read-only, UPD_LOCK_OTHER anything else.
+ */
+enum { UPD_LOCK_BUSY = 1, UPD_LOCK_WP, UPD_LOCK_OTHER };
+
+int upd_lock_why(long ioerr);
 
 /* Lower-case hex of 32 bytes into `out`, 65 bytes with the NUL. */
 void upd_hex32(const unsigned char *b, char *out);

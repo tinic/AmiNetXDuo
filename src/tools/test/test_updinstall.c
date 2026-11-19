@@ -8,7 +8,9 @@
  *                             container fetch's verdict
  *   test_updinstall journal   the journal parse, the state merge, the
  *                             trial INSTALL refuses, the paths PREPARE
- *                             refuses, and the
+ *                             refuses, the journal the cleanup refuses,
+ *                             the .new files PREPARE owns, the drawer
+ *                             lock's refusals, and the
  *                             swap over an in-memory volume: stopped after
  *                             every single operation (a power cut there),
  *                             then finished from the journal it left, and
@@ -924,6 +926,85 @@ static void test_swap_fits(void)
     CHECK(upd_swap_fits(&e, 0, "U:p") == 0);
 }
 
+/*
+ * The journal INSTALL's cleanup finds.  Only one read whole and without
+ * "ready" is undone, only one not there is ignored: a ready journal that
+ * could not be read is refused, and receipt-next stays (#497 review).
+ */
+static void test_stale_journal(void)
+{
+    static const char unready[] =
+        "format=1\nversion=1.0.1\nfrom=1.0.0\nflavour=full\nfile=ours C:fetch\n";
+    static const char ready[] =
+        "format=1\nversion=1.0.1\nfrom=1.0.0\nflavour=full\nfile=ours C:fetch\nready\n";
+    UpdJournal j;
+    UpdJEntry  e[2];
+
+    CHECK(upd_stale_journal(0, 0, 1, &j, e, 2) == UPD_STALE_NONE);
+    CHECK(upd_stale_journal(0, 0, 0, &j, e, 2) == UPD_STALE_PENDING);
+    CHECK(upd_stale_journal(ready, sizeof(ready) - 1, 0, &j, e, 2) == UPD_STALE_PENDING);
+    CHECK(upd_stale_journal("garbage\n", 8, 0, &j, e, 2) == UPD_STALE_PENDING);
+    CHECK(upd_stale_journal("", 0, 0, &j, e, 2) == UPD_STALE_PENDING);
+    CHECK(upd_stale_journal(unready, sizeof(unready) - 1, 0, &j, 0, 2) == UPD_STALE_PENDING);
+    CHECK(upd_stale_journal(unready, sizeof(unready) - 1, 0, &j, e, 2) == UPD_STALE_UNDO &&
+          j.nfiles == 1 && e[0].staged == 0);
+    /* A cut in the middle of "ready": not there yet, undone. */
+    CHECK(upd_stale_journal(ready, sizeof(ready) - 3, 0, &j, e, 2) == UPD_STALE_UNDO);
+}
+
+/*
+ * The .new files: PREPARE refuses one it did not write, and a failure
+ * removes only the ones it did -- never the user's C:fetch.new (#497
+ * review).
+ */
+static void test_staging(void)
+{
+    static Fs  fs;
+    UpdJEntry  e[3];
+    unsigned int bad = 99;
+
+    memset(&fs, 0, sizeof(fs));
+    memset(e, 0, sizeof(e));
+    fs_ops.ctx = &fs;
+    fs.budget = -1;
+    e[0].path = "SYS:C/fetch";             e[0].len = 11;
+    e[1].path = "SYS:C/ping";              e[1].len = 10;
+    e[2].path = "SYS:Libs/bsdsocket.library"; e[2].len = 26;
+
+    CHECK(upd_new_free(e, 3, &fs_ops, &bad) == 1 && bad == 99);
+    fs_put(&fs, "SYS:C/ping.new", 7);       /* the user's                  */
+    CHECK(upd_new_free(e, 3, &fs_ops, &bad) == 0 && bad == 1);
+    CHECK(upd_new_free(e, 1, &fs_ops, 0) == 1);
+
+    /* A failure after two were staged: those go, the user's stays. */
+    fs_put(&fs, "SYS:C/fetch.new", 1);
+    fs_put(&fs, "SYS:Libs/bsdsocket.library.new", 2);
+    e[0].staged = 1;
+    e[2].staged = 1;
+    upd_unstage_new(e, 3, &fs_ops);
+    CHECK(fs_get(&fs, "SYS:C/fetch.new") == -1);
+    CHECK(fs_get(&fs, "SYS:Libs/bsdsocket.library.new") == -1);
+    CHECK(fs_get(&fs, "SYS:C/ping.new") == 7);
+    CHECK(e[0].staged == 0 && e[1].staged == 0 && e[2].staged == 0);
+
+    /* None staged (the download failed): nothing removed. */
+    fs_put(&fs, "SYS:C/fetch.new", 3);
+    upd_unstage_new(e, 3, &fs_ops);
+    CHECK(fs_get(&fs, "SYS:C/fetch.new") == 3 && fs_get(&fs, "SYS:C/ping.new") == 7);
+}
+
+/* The drawer lock: a second run is refused busy, a read-only drawer is
+   left to the write-protection refusal, anything else refused. */
+static void test_lock_why(void)
+{
+    CHECK(upd_lock_why(202) == UPD_LOCK_BUSY);
+    CHECK(upd_lock_why(214) == UPD_LOCK_WP);
+    CHECK(upd_lock_why(223) == UPD_LOCK_WP);
+    CHECK(upd_lock_why(0) == UPD_LOCK_OTHER);
+    CHECK(upd_lock_why(205) == UPD_LOCK_OTHER);
+    CHECK(upd_lock_why(221) == UPD_LOCK_OTHER);
+}
+
 int main(int argc, char **argv)
 {
     const char *which = argc > 1 ? argv[1] : "all";
@@ -942,6 +1023,9 @@ int main(int argc, char **argv)
         test_state();
         test_trial();
         test_swap_fits();
+        test_stale_journal();
+        test_staging();
+        test_lock_why();
         test_swap("U:Installed/Update/prior-old");   /* the volume of most */
         test_swap("B:Installed/Update/prior-old");   /* another: copies    */
     }
