@@ -203,6 +203,17 @@ int upd_dl_chunk(int opened, unsigned long total, unsigned long n,
 int upd_dl_verdict(long status, int whole, int wfail, int toolong,
                    unsigned long total, unsigned long size);
 
+/* 1 for an IoErr() that says the object is not there (205,
+   ERROR_OBJECT_NOT_FOUND).  Any other failure to lock or read is not
+   "absent": the caller refuses. */
+int upd_ioerr_absent(long ioerr);
+
+/* a + b, held at ~0UL rather than wrapped. */
+unsigned long upd_sat_add(unsigned long a, unsigned long b);
+
+/* id_NumBlocks - id_NumBlocksUsed, 0 rather than wrapped below it. */
+unsigned long upd_free_blocks(long num, long used);
+
 /* ------------------------------------------------------------- journal --- */
 
 typedef struct UpdJEntry
@@ -350,6 +361,29 @@ unsigned long upd_state_merge(const char *old, unsigned long oldlen,
    CONFIRM's. */
 int upd_trial_active(int trial, const char *state, unsigned long len);
 
+/* What INSTALL's cleanup asks: 1 to refuse pending.  The trial file
+   counts as gone only when `trial_absent` (ERROR_OBJECT_NOT_FOUND), the
+   state only when `state_absent`; a state that could not be read (NULL,
+   not absent) refuses, as an unreadable journal does. */
+int upd_trial_refuse(int trial_absent, const char *state, unsigned long len,
+                     int state_absent);
+
+/*
+ * InstallSameFile RECEIPT: what it does with FIRST, by how its Open() went
+ * (`opened`, else `absent` for ERROR_OBJECT_NOT_FOUND) and the lines it
+ * has (`have` bytes, the kept ones and this call's).  Any other open
+ * failure is an error, not an empty receipt; no lines at all is done with
+ * nothing to write (a drawer of this flavour with none of its files).
+ */
+enum { UPD_RW_ERROR = 0, UPD_RW_NONE, UPD_RW_WRITE };
+
+static inline int upd_rcpt_write_plan(int opened, int absent, unsigned long have)
+{
+    if (!opened && !absent)
+        return UPD_RW_ERROR;
+    return have == 0 ? UPD_RW_NONE : UPD_RW_WRITE;
+}
+
 /*
  * The Update drawer's lock, <DOCDIR>/Installed/Update/lock, opened
  * MODE_NEWFILE (an exclusive lock) for the whole of an INSTALL, BOOT or
@@ -363,6 +397,14 @@ int upd_trial_active(int trial, const char *state, unsigned long len);
 enum { UPD_LOCK_BUSY = 1, UPD_LOCK_WP, UPD_LOCK_OTHER };
 
 int upd_lock_why(long ioerr);
+
+/* The state SWAP writes, phase=trial and every other line of `old` kept;
+   merged before PREPARE.  0 -- refused, nothing dropped -- when `old` is
+   NULL and not `absent` (it could not be read, or is over the size), or
+   when the merge does not fit. */
+unsigned long upd_state_next(const char *old, unsigned long oldlen, int absent,
+                             const char *version, const char *flavour,
+                             char *out, unsigned long outlen);
 
 /* Lower-case hex of 32 bytes into `out`, 65 bytes with the NUL. */
 void upd_hex32(const unsigned char *b, char *out);

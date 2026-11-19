@@ -79,6 +79,11 @@ unsigned long upd_said_add(char *buf, unsigned long cap, unsigned long len,
    for BOOT and CONFIRM, which do not. */
 unsigned long upd_stack_size(const char *word);
 
+/* What a fetch into memory came to, the status first: 0 a whole 200, the
+   status for any other, -1 no status at all or a 200 cut short.  A 404
+   whose body overran the buffer is still 404 (the .sig's: signature). */
+long upd_fetch_result(long status, int whole);
+
 typedef enum UpdVerdict
 {
     UPD_V_CURRENT = 0,      /* update=current: nothing newer               */
