@@ -24,6 +24,7 @@
 #   setup=<item> scenario=<id> ok=yes|no
 #   check=<name> scenario=<id> ok=yes|no ...
 #   scenario=<id> result=PASS|FAIL|XFAIL|XPASS reason=<key> wall=<s> boots=<n>
+#            lock_wait=<s>   (of wall, waiting for another guest's bridge)
 #   scenarios=<n> pass=<n> fail=<n> xfail=<n> xpass=<n>
 #
 # UPD_EXIT is 0 only with no FAIL and no XPASS, 2 when an ingredient is
@@ -435,6 +436,7 @@ upd_row() {
     local t0 item f p old_sum sessions=() s seg nsess nseg boots=0 tok
     local before_root after_root before_man after_man
     t0=$(date +%s)
+    UPD_LOCK0=${RIG_BRIDGE_WAITED:-0}
     UPD_CHECK_FAIL=""; UPD_SETUP_FAIL=""
     UPD_EV="$UPD_OUT/$S_ID"
     rm -rf "$UPD_EV"; mkdir -p "$UPD_EV"
@@ -690,7 +692,7 @@ upd_row() {
         reason="$UPD_CHECK_FAIL"
         [ "$S_STATUS" = expected-fail ] && result=XFAIL || result=FAIL
     fi
-    echo "scenario=$S_ID result=$result reason=$reason pr=$S_PR wall=$(( $(date +%s) - t0 )) boots=$boots"
+    echo "scenario=$S_ID result=$result reason=$reason pr=$S_PR wall=$(( $(date +%s) - t0 )) boots=$boots lock_wait=$(( ${RIG_BRIDGE_WAITED:-0} - UPD_LOCK0 ))"
     UPD_RESULT=$result
 }
 
@@ -905,7 +907,7 @@ upd_cut_each() { # t0
         [ "$S_STATUS" = expected-fail ] && result=XFAIL || result=FAIL
     fi
     upd_check tool "$([ "$tool" = present ] && echo yes || echo no)" "tool=${tool:-unknown}"
-    echo "scenario=$S_ID result=$result reason=$reason pr=$S_PR wall=$(( $(date +%s) - t0 )) boots=$boots cuts=$cuts"
+    echo "scenario=$S_ID result=$result reason=$reason pr=$S_PR wall=$(( $(date +%s) - t0 )) boots=$boots cuts=$cuts lock_wait=$(( ${RIG_BRIDGE_WAITED:-0} - UPD_LOCK0 ))"
     UPD_RESULT=$result
 }
 

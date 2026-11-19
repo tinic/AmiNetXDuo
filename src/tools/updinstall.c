@@ -473,6 +473,30 @@ unsigned long upd_blocks(unsigned long size, unsigned long bpb)
     return d + (d + 71) / 72 + 1;
 }
 
+int upd_dl_chunk(int opened, unsigned long total, unsigned long n,
+                 unsigned long size)
+{
+    if (!opened)
+        return UPD_DL_NETWORK;
+    if (total + n > size)
+        return UPD_DL_LONG;
+    return UPD_DL_OK;
+}
+
+int upd_dl_verdict(long status, int whole, int wfail, int toolong,
+                   unsigned long total, unsigned long size)
+{
+    if (status != 200)
+        return UPD_DL_NETWORK;
+    if (wfail)
+        return UPD_DL_SPACE;
+    if (toolong)
+        return UPD_DL_LONG;
+    if (!whole || total < size)
+        return UPD_DL_NETWORK;
+    return UPD_DL_OK;
+}
+
 /* ------------------------------------------------------------- journal --- */
 
 /* The text of one line as key and value; 1 when it is "key=value". */
@@ -706,6 +730,21 @@ static int ui_jline(const UpdFsOps *ops, UiNames *nm, const char *word,
 }
 
 #define nm ui_nm
+
+int upd_swap_fits(const UpdJEntry *e, unsigned int i, const char *prior)
+{
+    char          num[12];
+    unsigned long q, nn = ui_utoa((unsigned long)i + 1, num);
+
+    /* As upd_journal_parse() reads a file= path back. */
+    if (e->len == 0 || e->len + 1 > UPD_APATH_MAX)
+        return 0;
+    for (q = 0; q < e->len; q++)
+        if (!ui_pathbyte((unsigned char)e->path[q]) && e->path[q] != ' ')
+            return 0;
+    /* ui_names(): .new and .old fit when <path> does; <prior>/<n>.tmp. */
+    return ui_len(prior) + 1 + nn + 4 + 1 <= sizeof(((UiNames *)0)->tmp);
+}
 
 int upd_forward(UpdJEntry *e, unsigned int n, const char *prior,
                 const UpdFsOps *ops, unsigned int *failed)
@@ -1042,4 +1081,23 @@ unsigned long upd_state_merge(const char *old, unsigned long oldlen,
         i += n + 1;
     }
     return at;
+}
+
+int upd_trial_active(int trial, const char *state, unsigned long len)
+{
+    unsigned long i = 0;
+
+    if (trial)
+        return 1;
+    while (state != 0 && i < len)
+    {
+        unsigned long n = 0;
+
+        while (i + n < len && state[i + n] != '\n')
+            n++;
+        if (n == 11 && ui_prefix(state + i, n, "phase=trial") == 11)
+            return 1;
+        i += n + 1;
+    }
+    return 0;
 }

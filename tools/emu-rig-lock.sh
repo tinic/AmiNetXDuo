@@ -214,6 +214,9 @@ rig_release_name() { # name
 # Kept across a second `.` of this file, which must not forget a claim.
 RIG_BRIDGE_FD="${RIG_BRIDGE_FD:-}"
 RIG_BRIDGE_WAITER="${RIG_BRIDGE_WAITER:-}"
+# Seconds this process spent waiting for another guest's bridge, in all:
+# a caller that times its own steps reports it apart (lock_wait=).
+RIG_BRIDGE_WAITED="${RIG_BRIDGE_WAITED:-0}"
 
 rig_bridge_path() {
     printf '%s\n' "${AMINETXDUO_BRIDGE_LOCK:-/tmp/aminetxduo-bridge.lock}"
@@ -267,6 +270,7 @@ rig_claim_bridge() { # backend who
         wait "$RIG_BRIDGE_WAITER" || rc=$?
         RIG_BRIDGE_WAITER=""
         waited=$(( $(date +%s) - start ))
+        RIG_BRIDGE_WAITED=$(( RIG_BRIDGE_WAITED + waited ))
         if [ "$rc" != 0 ]; then
             echo >&2
             echo "REFUSING to boot a second bridged guest on this host" \
