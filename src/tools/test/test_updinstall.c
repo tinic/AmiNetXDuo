@@ -1313,9 +1313,12 @@ static void test_names(void)
 
     for (i = 0; i < sizeof(drawer) / sizeof(drawer[0]); i++)
         CHECK(strlen(drawer[i]) <= UPD_FNAME_MAX);
-    CHECK(strlen(UPD_N_CONTAINER) > strlen(UPD_N_CONTAINER_EXT) &&
-          strcmp(UPD_N_CONTAINER + strlen(UPD_N_CONTAINER) -
-                 strlen(UPD_N_CONTAINER_EXT), UPD_N_CONTAINER_EXT) == 0);
+    {
+        const char *name = UPD_N_CONTAINER;
+        size_t      nl = strlen(name), el = strlen(UPD_N_CONTAINER_EXT);
+
+        CHECK(nl > el && strcmp(name + nl - el, UPD_N_CONTAINER_EXT) == 0);
+    }
     for (i = 1; i <= UPD_RCPT_MAX; i++)
     {
         snprintf(p, sizeof(p), "%u.tmp", i);
