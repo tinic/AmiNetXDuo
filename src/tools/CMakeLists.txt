@@ -1215,8 +1215,38 @@ if(NOT CMAKE_CROSSCOMPILING)
         updmanifest.c
         updver.c)
 
+    # Which keys a build holds (test_updkeys: the release build, which must
+    # refuse the TEST key; test_updkeys_testkey: the scenario build), and
+    # updverify, the host check release.yml runs on the signed manifest
+    # before it is published (tools/verify-update-manifest.sh).  All three
+    # link the updkeys.c and updsig.c the Amiga tool links.
+    foreach(_upd test_updkeys test_updkeys_testkey updverify)
+        if(_upd STREQUAL "updverify")
+            set(_main updverify.c)
+        else()
+            set(_main test/test_updkeys.c)
+        endif()
+        add_executable(${_upd}
+            ${_main}
+            updkeys.c
+            updsig.c
+            updmanifest.c
+            updver.c
+            "${CMAKE_SOURCE_DIR}/src/crypto68k/c68k_25519.c"
+            "${AMINETXDUO_NETXDUO}/crypto_libraries/src/nx_crypto_sha5.c"
+            "${AMINETXDUO_NETXDUO}/crypto_libraries/src/nx_crypto_initialize.c")
+        target_include_directories(${_upd} PRIVATE
+            "${CMAKE_SOURCE_DIR}/tests/crypto68k/host/shim"
+            "${CMAKE_SOURCE_DIR}/include"
+            "${CMAKE_SOURCE_DIR}/src/crypto68k"
+            "${AMINETXDUO_NETXDUO}/crypto_libraries/inc")
+        target_compile_definitions(${_upd} PRIVATE
+            NX_CRYPTO_STANDALONE_ENABLE)
+    endforeach()
+    target_compile_definitions(test_updkeys_testkey PRIVATE UPD_TEST_KEY)
+
     foreach(_upd test_updver test_updmanifest test_updsig test_updcheck
-                 test_updinstall)
+                 test_updinstall test_updkeys test_updkeys_testkey updverify)
         target_include_directories(${_upd} PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}")
         target_compile_options(${_upd} PRIVATE -Wall -Wextra)
@@ -1464,6 +1494,16 @@ if(NOT CMAKE_CROSSCOMPILING)
     add_test(NAME updinstall_select COMMAND test_updinstall select)
     add_test(NAME updinstall_journal COMMAND test_updinstall journal)
     add_test(NAME updinstall_trial COMMAND test_updinstall trial)
+    add_test(NAME updkeys_release COMMAND test_updkeys)
+    add_test(NAME updkeys_testkey COMMAND test_updkeys_testkey)
+    # A manifest signed by the committed TEST key: the release verifier
+    # refuses it at the signature.
+    add_test(NAME updverify_refuses_test_key
+        COMMAND updverify
+            "${CMAKE_CURRENT_SOURCE_DIR}/test/updverify-testkey.manifest"
+            "${CMAKE_CURRENT_SOURCE_DIR}/test/updverify-testkey.manifest.sig")
+    set_tests_properties(updverify_refuses_test_key PROPERTIES
+        PASS_REGULAR_EXPRESSION "^update_verify=FAIL step=signature ")
     add_test(NAME toolsock_connect_budget COMMAND test_toolbudget)
     add_test(NAME netprefs_preserves_text COMMAND test_netprefs_text)
     add_test(NAME devicehome_rewrites_only_ours COMMAND test_devicehome)

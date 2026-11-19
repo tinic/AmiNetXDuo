@@ -357,6 +357,10 @@ jobs:
             tools/check-release-candidate.sh \
             tools/build-release.sh \
             tools/make-update-manifest.sh \
+            tools/sign-update-manifest.sh \
+            tools/verify-update-manifest.sh \
+            tools/update-certificates-prev.sh \
+            tools/publish-update.sh \
             tools/stage-developer.sh \
             tools/check-release-ready.sh \
             tools/upstream-drift.sh \

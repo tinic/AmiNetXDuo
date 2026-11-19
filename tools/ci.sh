@@ -562,7 +562,10 @@ host_test_targets() { # builddir
 #      609 with updinstall_trial (#497): UpdateAmiNetXDuo BOOT's rollback
 #      and CONFIRM's commit cut after every step, the state and the
 #      Uninstall record (all hosts).
-HOST_TESTS_EXPECTED=609
+#      612 with updkeys_release, updkeys_testkey and
+#      updverify_refuses_test_key (#497): the release build holds the
+#      release key only, the scenario build the TEST key only (all hosts).
+HOST_TESTS_EXPECTED=612
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,

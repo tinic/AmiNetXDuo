@@ -1,0 +1,6 @@
+format=1
+product=AmiNetXDuo
+version=1.0.0-rc5
+channel=prerelease
+container=full 5 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef AmiNetXDuo-1.0.0-rc5-full.update.lha
+end=5

@@ -85,9 +85,9 @@ enum { ANSWER_NONE = 0, ANSWER_INSTALL, ANSWER_LATER, ANSWER_SKIP };
 #define UPD_RC_AVAILABLE    5
 #define UPD_RC_REFUSED      10
 
-/* Placeholder until the mirror exists (#497 Q1/Q2): .invalid never
-   resolves.  A build with no release key refuses before it is used. */
-#define UPD_DEFAULT_MIRROR  "http://update.aminetxduo.invalid/"
+/* The project's plain-HTTP mirror (#497 Q1/Q2), one folder per channel:
+   release/ and prerelease/.  release.yml publishes there. */
+#define UPD_DEFAULT_MIRROR  "http://aminetxduo.tinic.info/"
 #define UPD_NTP_SERVER      "pool.ntp.org"
 #define UPD_TIMEOUT         60UL            /* seconds, per fetch          */
 #define UPD_MANIFEST_MAX    (64UL * 1024UL)
