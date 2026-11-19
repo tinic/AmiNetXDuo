@@ -63,6 +63,22 @@ int upd_url(char *out, unsigned long outlen, const char *mirror,
 /* DateStamp() days to "YYYY-MM-DD"; `out` holds at least 11 bytes. */
 void upd_date(unsigned long days, char *out);
 
+/*
+ * One key=value line, a + b + c (b, c NULL for none) and a LF, onto the
+ * run's log text `buf` (`len` bytes of `cap` used): whole or not at all.
+ * The first line that does not fit ends it with "truncated=yes" instead,
+ * and nothing follows.  The new length.
+ */
+#define UPD_SAID_TRUNCATED  "truncated=yes\n"
+
+unsigned long upd_said_add(char *buf, unsigned long cap, unsigned long len,
+                           const char *a, const char *b, const char *c);
+
+/* The stack the run gets, by its word: 64 KB for CHECK and INSTALL, which
+   fetch (and an http: mirror may redirect to https:, tls.library), 16 KB
+   for BOOT and CONFIRM, which do not. */
+unsigned long upd_stack_size(const char *word);
+
 typedef enum UpdVerdict
 {
     UPD_V_CURRENT = 0,      /* update=current: nothing newer               */

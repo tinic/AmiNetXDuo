@@ -1,7 +1,8 @@
 /*
  * The tests for src/tools/updcheck.c: the settings file, the flavour from
- * the IdString, the mirror URLs, the date and the clock floor, and the CHECK
- * verdict over signed manifests.  The signatures are openssl's, made with the
+ * the IdString, the mirror URLs, the date and the clock floor, the CHECK
+ * verdict over signed manifests, the log's whole lines and the stack by
+ * the word.  The signatures are openssl's, made with the
  * TEST key tests/updater/test-only-update-key-a.pem (see test_updsig.c):
  *
  *   openssl pkeyutl -sign -rawin \
@@ -341,6 +342,61 @@ static void test_verdict(void)
     CHECK(why == UPD_E_NO_FLAVOUR);
 }
 
+/*
+ * The log keeps whole key=value lines: one that does not fit ends it with
+ * truncated=yes, and nothing after (#497 review: a line was cut in the
+ * middle when the 2048 bytes filled).
+ */
+static void test_said(void)
+{
+    static char buf[64];
+    unsigned long len = 0, n;
+    const unsigned long t = sizeof(UPD_SAID_TRUNCATED) - 1;
+
+    len = upd_said_add(buf, sizeof(buf), len, "update=available version=", "1.0.1", 0);
+    CHECK(len == 31 && memcmp(buf, "update=available version=1.0.1\n", 31) == 0);
+    len = upd_said_add(buf, sizeof(buf), len, "staging=removed", 0, 0);
+    CHECK(len == 47);
+    /* 17 bytes of 64 left: this one of 16 and the marker do not fit. */
+    n = upd_said_add(buf, sizeof(buf), len, "refused=", "network", 0);
+    CHECK(n == len + t && memcmp(buf + len, UPD_SAID_TRUNCATED, t) == 0);
+    len = n;
+    /* Ended: a short line after it is not added. */
+    CHECK(upd_said_add(buf, sizeof(buf), len, "a=b", 0, 0) == len);
+    /* Every line in it is whole. */
+    CHECK(buf[len - 1] == '\n');
+    {
+        unsigned long i, start = 0;
+
+        for (i = 0; i < len; i++)
+            if (buf[i] == '\n')
+            {
+                CHECK(memchr(buf + start, '=', i - start) != 0);
+                start = i + 1;
+            }
+    }
+    /* Exactly full: a line with the marker's room after it fits; the
+       next one gets the marker in the last 14 bytes. */
+    len = upd_said_add(buf, sizeof(buf), 0, "abcdefghijklmnopqrstuvwxyz0123456789=abcdefghij", 0, 0);
+    CHECK(len == 48);
+    len = upd_said_add(buf, sizeof(buf), len, "x", 0, 0);
+    CHECK(len == 50);
+    CHECK(upd_said_add(buf, sizeof(buf), len, "y", 0, 0) == 50 + t &&
+          memcmp(buf + 50, UPD_SAID_TRUNCATED, t) == 0);
+    /* No room even for the marker: nothing written. */
+    CHECK(upd_said_add(buf, 10, 0, "abcdefghijklmnop=x", 0, 0) == 0);
+}
+
+/* 64 KB for every word that fetches: an http: mirror can redirect to
+   https:, and tls.library wants fetch's stack (#497 review). */
+static void test_stack(void)
+{
+    CHECK(upd_stack_size("CHECK") == 65536);
+    CHECK(upd_stack_size("INSTALL") == 65536);
+    CHECK(upd_stack_size("BOOT") == 16384);
+    CHECK(upd_stack_size("CONFIRM") == 16384);
+}
+
 int main(void)
 {
     test_settings();
@@ -348,6 +404,8 @@ int main(void)
     test_url();
     test_date();
     test_verdict();
+    test_said();
+    test_stack();
 
     printf("test_updcheck: %d checks, %d failures\n", checks, failures);
 

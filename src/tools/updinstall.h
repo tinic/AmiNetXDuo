@@ -242,6 +242,7 @@ typedef struct UpdJEntry
     unsigned char  back;                /* a "back <n>" line (rollback)    */
     unsigned char  other;               /* an "other <n>" line (commit)    */
     unsigned char  kept;                /* a "kept <n>" line (commit)      */
+    unsigned char  staged;              /* this run wrote <path>.new       */
 } UpdJEntry;
 
 typedef struct UpdJournal
@@ -256,6 +257,19 @@ typedef struct UpdJournal
 /* 1 and the journal, or 0 for one that is not one. */
 int upd_journal_parse(const char *text, unsigned long len, UpdJournal *j,
                       UpdJEntry *e, unsigned int max);
+
+/*
+ * What INSTALL's cleanup does with the journal it finds: `text` is NULL
+ * when it could not be read, and `absent` says the file is not there
+ * (ERROR_OBJECT_NOT_FOUND).  UPD_STALE_NONE: no journal; UPD_STALE_UNDO:
+ * a preparation that stopped before "ready", whose .new files go;
+ * UPD_STALE_PENDING: anything else -- ready, unreadable, not a journal --
+ * which is refused with nothing removed.
+ */
+enum { UPD_STALE_NONE = 0, UPD_STALE_UNDO, UPD_STALE_PENDING };
+
+int upd_stale_journal(const char *text, unsigned long len, int absent,
+                      UpdJournal *j, UpdJEntry *e, unsigned int max);
 
 /* The file operations the swap runs on.  Every one returns 1 for done.
    rename fails when `to` exists or the two are on different volumes;
@@ -281,7 +295,10 @@ typedef struct UpdFsOps
  *   "done <n>"
  *
  * each step taken only when the disk says it is still to do, and a cut
- * point after each.  Returns 1 when every entry is done, 0 when an
+ * point after each.  A prior-old/<n> that is there before "aside <n>" is
+ * an earlier update's: the swap stops there (0) and deletes no .old;
+ * PREPARE refuses it first.  <path>.new and .old are upd_sidecar()'s.
+ * Returns 1 when every entry is done, 0 when an
  * operation failed or a cut stopped it (*failed, if not NULL, is the
  * entry), -1 for an entry whose live and .new files are both gone.
  */
@@ -335,6 +352,53 @@ unsigned long upd_record_merge(const char *old, unsigned long oldlen,
    stages anything. */
 int upd_swap_fits(const UpdJEntry *e, unsigned int i, const char *prior);
 
+/* 1 when no entry's <path>.new is there; 0 and *bad, the first that is:
+   a file PREPARE did not write and must not overwrite or delete. */
+int upd_new_free(const UpdJEntry *e, unsigned int n, const UpdFsOps *ops,
+                 unsigned int *bad);
+
+/* Removes <path>.new of every entry this run staged, and no other. */
+void upd_unstage_new(UpdJEntry *e, unsigned int n, const UpdFsOps *ops);
+
+/* 1 when every entry was staged: each selected member came, and once
+   (the extraction refuses a second one before it writes it). */
+int upd_all_staged(const UpdJEntry *e, unsigned int n);
+
+/* ------------------------------------------------------------- names --- */
+
+/*
+ * Every name the updater makes, in the Update drawer and beside a target,
+ * fits UPD_FNAME_MAX: a classic OFS/FFS volume holds no longer one, and
+ * cuts or refuses it -- and a cut name escapes a cleanup by name.  The
+ * container is stored as UPD_N_CONTAINER whatever the mirror calls it.
+ */
+#define UPD_FNAME_MAX       30
+#define UPD_N_JOURNAL       "journal"
+#define UPD_N_JOURNAL_TMP   "journal.tmp"
+#define UPD_N_TRIAL         "trial"
+#define UPD_N_RECEIPT       "receipt"
+#define UPD_N_RECEIPT_NEXT  "receipt-next"
+#define UPD_N_STATE         "state"
+#define UPD_N_STATE_TMP     "state.tmp"
+#define UPD_N_PRIOR         "prior-old"     /* a drawer: <n>, <n>.tmp      */
+#define UPD_N_LOCK          "lock"
+#define UPD_N_LOG           "log"
+#define UPD_N_CONTAINER     "container.update.lha"
+#define UPD_N_CONTAINER_EXT ".update.lha"   /* every container, cleaned    */
+
+/*
+ * <path> and `ext` (".new", ".old") into `out`: the sidecar the swap uses.
+ * A last component too long for UPD_FNAME_MAX with `ext` is cut first
+ * (C:CreateAmiNetXDuoStatusReport is 28: its .new is
+ * C:CreateAmiNetXDuoStatusRepo.new).  0 when it does not fit `cap`.
+ */
+int upd_sidecar(char *out, unsigned long cap, const char *path,
+                unsigned long len, const char *ext);
+
+/* 1 when no two entries' sidecars are one name (two long names in one
+   drawer cut alike); 0 and *bad, the later of the two. */
+int upd_sidecars_distinct(const UpdJEntry *e, unsigned int n, unsigned int *bad);
+
 /* ---------------------------------------------------------------- state --- */
 
 /*
@@ -357,6 +421,20 @@ int upd_state_get(const char *text, unsigned long len, const char *key,
    INSTALL then refuses before it removes anything: receipt-next is
    CONFIRM's. */
 int upd_trial_active(int trial, const char *state, unsigned long len);
+
+/*
+ * The Update drawer's lock, <DOCDIR>/Installed/Update/lock, opened
+ * MODE_NEWFILE (an exclusive lock) for the whole of an INSTALL, BOOT or
+ * CONFIRM and deleted when it is closed.  The filesystem drops the lock
+ * when the machine restarts, so a run that crashed blocks nothing after
+ * a reboot; the file it leaves is reopened.  What a failed open means,
+ * by its IoErr(): UPD_LOCK_BUSY (202, ERROR_OBJECT_IN_USE) another run
+ * holds it, UPD_LOCK_WP (214, 223: write-protected) the drawer's volume
+ * is read-only, UPD_LOCK_OTHER anything else.
+ */
+enum { UPD_LOCK_BUSY = 1, UPD_LOCK_WP, UPD_LOCK_OTHER };
+
+int upd_lock_why(long ioerr);
 
 /* Lower-case hex of 32 bytes into `out`, 65 bytes with the NUL. */
 void upd_hex32(const unsigned char *b, char *out);

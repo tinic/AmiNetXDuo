@@ -36,9 +36,10 @@
 #     update=current|available|installed|off|notdue|later|skipped|foreign_stack
 #            version=<v>          (installed adds replaced= kept= skipped= missing=)
 #     refused=signature|unknown_key|manifest|container_hash|member_hash|clock|
-#             network|space|protected|writeprotected|no_receipt|pending
+#             network|space|protected|writeprotected|no_receipt|pending|busy
 #             [<amiga path>]   (pending: a swap is half done, BOOT ends it;
-#                               or a trial waits for CONFIRM)
+#                               or a trial waits for CONFIRM; busy: another
+#                               run holds <DOCDIR>/Installed/Update/lock)
 #     file=replace|skip|keep|missing ours|current|otherbuild|newer|foreign|deleted <amiga path>
 #     requester=offer|restart|run_installer|clock_not_set|refused
 #     sntp=ok|failed   staging=removed   restart=needed
