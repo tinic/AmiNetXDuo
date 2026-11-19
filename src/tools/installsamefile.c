@@ -53,6 +53,13 @@
  * cannot be opened for any reason but not being there is an error.  The Installer deletes FIRST first and calls once per drawer, which
  * keeps each command line short.
  *
+ * SETKEY: FIRST is ENVARC:AmiNetXDuo/Update (or ENV:'s copy), SECOND one
+ * KEY=VALUE line, set in place of the line that sets KEY and every other
+ * line kept (src/tools/updprefs.h); written to FIRST.tmp and renamed.
+ * RETURN_OK with it written, RETURN_ERROR otherwise, and then FIRST is as
+ * it was.  The Installer sets AUTO= with it, so that a reinstall keeps a
+ * CHANNEL= or MIRROR= line.
+ *
  * SPDX-License-Identifier: MIT
  */
 
@@ -72,6 +79,7 @@
 
 #include "aminetxduo/version.h"
 #include "aminetxduo/config.h"
+#include "updprefs.h"
 #include "devicehome.h"
 #include "c68k_sha256.h"
 #include "updinstall.h"
@@ -82,7 +90,7 @@ static const char version_tag[] __attribute__((used)) =
     TOOL_VERSTAG("InstallSameFile");
 
 #define TEMPLATE "FIRST/A,SECOND/A/M,DEVICES/S,HOSTLINE/S,BYTES/S,MARK/S,DRAWER/S," \
-                 "RECEIPT/S"
+                 "RECEIPT/S,SETKEY/S"
 
 /* An interface file is a few hundred bytes; the cap only bounds a stray. */
 #define DEVICES_FILE_MAX 65536L
@@ -98,6 +106,7 @@ enum
     ARG_MARK,
     ARG_DRAWER,
     ARG_RECEIPT,
+    ARG_SETKEY,
     ARG_COUNT
 };
 
@@ -590,6 +599,54 @@ static LONG write_receipt(const char *file, STRPTR *second)
     return rc;
 }
 
+/* FIRST with the line SECOND (KEY=VALUE) set and every other line kept
+   (updprefs.h): FIRST.tmp, renamed over FIRST.  A FIRST that is not there
+   starts empty; one that cannot be read is left as it is. */
+#define SETKEY_MAX 4096L
+
+static LONG set_key(const char *file, STRPTR *second)
+{
+    static char   in[SETKEY_MAX], out[SETKEY_MAX + 256];
+    char          tmp[RECEIPT_PATH];
+    LONG          len = 0, wrote;
+    unsigned long n;
+    BPTR          fh;
+
+    if (second[0] == NULL || second[1] != NULL || strlen(file) + 5 > sizeof(tmp))
+        return RETURN_ERROR;
+    fh = Open((CONST_STRPTR)file, MODE_OLDFILE);
+    if (fh == 0 && IoErr() != ERROR_OBJECT_NOT_FOUND)
+        return RETURN_ERROR;
+    if (fh != 0)
+    {
+        len = Read(fh, in, SETKEY_MAX);
+        Close(fh);
+        if (len < 0 || len >= SETKEY_MAX)
+            return RETURN_ERROR;
+    }
+    n = upd_prefs_set(in, (unsigned long)len, (const char *)second[0], out, sizeof(out));
+    if (n == 0)
+        return RETURN_ERROR;
+    strcpy(tmp, file);
+    strcat(tmp, ".tmp");
+    fh = Open((CONST_STRPTR)tmp, MODE_NEWFILE);
+    if (fh == 0)
+        return RETURN_ERROR;
+    wrote = Write(fh, out, (LONG)n);
+    if (!Close(fh) || wrote != (LONG)n)
+    {
+        (VOID)DeleteFile((CONST_STRPTR)tmp);
+        return RETURN_ERROR;
+    }
+    (VOID)DeleteFile((CONST_STRPTR)file);
+    if (!Rename((CONST_STRPTR)tmp, (CONST_STRPTR)file))
+    {
+        (VOID)DeleteFile((CONST_STRPTR)tmp);
+        return RETURN_ERROR;
+    }
+    return RETURN_OK;
+}
+
 int main(int argc, char **argv)
 {
     LONG           args[ARG_COUNT] = { 0 };
@@ -607,7 +664,9 @@ int main(int argc, char **argv)
         return RETURN_ERROR;
 
     second = (STRPTR *)args[ARG_SECOND];
-    if (args[ARG_RECEIPT] != 0)
+    if (args[ARG_SETKEY] != 0)
+        rc = set_key((const char *)args[ARG_FIRST], second);
+    else if (args[ARG_RECEIPT] != 0)
         rc = write_receipt((const char *)args[ARG_FIRST], second);
     else if (args[ARG_DRAWER] != 0)
         rc = (second[1] != NULL) ? RETURN_ERROR

@@ -117,9 +117,8 @@
 #   action     ";" between boots, "," between the words of one boot.
 #              Commands: check | check=install|later|skip | install |
 #              install+restart | startup (no command: the startup lines
-#              only) | reinstall (Install-AmiNetXDuo again, the old
-#              archive, over an update on trial; not in the harness yet) |
-#              cut=each (every cut point of prepare and swap, each
+#              only) | reinstall (the NEW archive's Install-AmiNetXDuo,
+#              driven as the base install is) | cut=each (every cut point of prepare and swap, each
 #              followed by a recovery boot).  Every boot after the first
 #              starts with how it starts: reboot (a power cycle), reboot+1d
 #              (the clock one day on), restart (the guest reboots itself,
@@ -129,7 +128,8 @@
 #              keep=<f> absent=<f> old=<f> (a .old with the bytes before)
 #              receipt (lists every placed file's new hash) filesrec
 #              (S:AmiNetXDuo-Files names every placed file) nostaging (no
-#              .new, no container left)
+#              .new, no container left) prior=<f> (the foreign <f>.old the
+#              row began with, in prior-old/ or back at <f>.old)
 #   rc         one per CLI word, comma list; - none
 #   log        ";" list: <prefix> a line starting so, in stdout or the log;
 #              !<prefix> no such line; state:<k=v> a state line;
@@ -184,6 +184,6 @@ S31-clock-nosntp	3.1	system	full	clock=1978,nosntp	check	unchanged	10	sntp=faile
 S32-drop	3.1	system	full	-	install,check=later	unchanged,nostaging	10,5	refused=network;staging=removed	offer	drop	container	5	pass
 S33-fullvolume	3.1	drawer@Upd	full	fullvolume	install	unchanged,nostaging	10	refused=space	-	good	manifest	5	pass
 S40-cut	3.1	system	full	-	cut=each	atomic	-	boot=	-	good	-	6	pass
-S41-rollback	3.1	system	full	-	install;reboot;reboot;reboot,check	old,nostaging	0,0	boot=trial boots=1;boot=trial boots=2;boot=rolledback version=@NEW;update=skipped version=@NEW;state:phase=rolledback	-	broken	container,none,none,manifest	harness	expected-fail
-S42-cut-rollback	3.1	system	full	-	install;reboot;reboot;reboot+cut=rollback:1;reboot	old,nostaging	0	boot=rolledback version=@NEW;state:phase=rolledback	-	broken	-	harness	expected-fail
-S43-reinstall-trial	3.1	system	full	-	install;reinstall;reboot;reboot;reboot	old,nostaging	0	!boot=rolledback;!boot=trial boots=1;!boot=forward	-	good	-	harness	expected-fail
+S41-rollback	3.1	system	full	-	install;reboot;reboot;reboot,check	old,nostaging	0,0	boot=trial boots=1;boot=trial boots=2;boot=rolledback version=@NEW;update=skipped version=@NEW;state:phase=rolledback	-	broken	container,none,none,manifest	6	pass
+S42-cut-rollback	3.1	system	full	-	install;reboot;reboot;reboot+cut=rollback:1;reboot	old,nostaging	0	boot=rolledback version=@NEW;state:phase=rolledback	-	broken	-	6	pass
+S43-reinstall-trial	3.1	system	full	foreignold=Libs/bsdsocket.library	install;reboot,reinstall;reboot;reboot	new,prior=Libs/bsdsocket.library,nostaging	0,0	update=installed version=@NEW;boot=trial boots=1;!boot=rolledback	-	broken	-	6	pass

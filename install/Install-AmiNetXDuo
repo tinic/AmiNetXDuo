@@ -5017,16 +5017,24 @@
       (append ("libs=%s\nc=%s\ndevs=%s\n" D_LIBS D_C D_DEVS))
       (append ("channel=%s\n" (if (patmatch "#?-#?" VERSION_STR)
                                   "prerelease" "release"))))
-    (set UPD_PREFS (if DO_UPDCHECK "AUTO=ON\n" "AUTO=OFF\n"))
+    ; AUTO= only: InstallSameFile SETKEY keeps every other line, so a
+    ; reinstall keeps the CHANNEL= and MIRROR= the user set.  Written whole
+    ; only when that fails.
+    (set UPD_PREFS (if DO_UPDCHECK "AUTO=ON" "AUTO=OFF"))
     (set RCPT_N 0)
     (while (set RCPT_X (select RCPT_N "ENVARC:AmiNetXDuo" "ENV:AmiNetXDuo" ""))
       (
         (makedir RCPT_X (prompt ("Creating %s" RCPT_X)) (help H_UPDATE))
-        (textfile
-          (prompt ("Writing %s" (tackon RCPT_X "Update")))
-          (help   H_UPDATE)
-          (dest   (tackon RCPT_X "Update"))
-          (append UPD_PREFS))
+        ; Quoted: ReadArgs ends an unquoted item at its "=".
+        (if (<> 0 (run ("\"%s\" \"%s\" \"%s\" SETKEY" S_SAMEFILE
+                        (tackon RCPT_X "Update") UPD_PREFS)
+                       (prompt ("Writing %s" (tackon RCPT_X "Update")))
+                       (help   H_UPDATE)))
+            (textfile
+              (prompt ("Writing %s" (tackon RCPT_X "Update")))
+              (help   H_UPDATE)
+              (dest   (tackon RCPT_X "Update"))
+              (append (cat UPD_PREFS "\n"))))
         (set RCPT_N (+ RCPT_N 1))
       ))
   ))
