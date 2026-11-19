@@ -4,8 +4,11 @@
  *
  *   test_updinstall select    the receipt, the destinations, the mark and
  *                             $VER scan, the selection rule, the container
- *                             member headers, the block count
- *   test_updinstall journal   the journal parse, the state merge, and the
+ *                             member headers, the block count, the
+ *                             container fetch's verdict
+ *   test_updinstall journal   the journal parse, the state merge, the
+ *                             trial INSTALL refuses, the paths PREPARE
+ *                             refuses, and the
  *                             swap over an in-memory volume: stopped after
  *                             every single operation (a power cut there),
  *                             then finished from the journal it left, and
@@ -342,6 +345,39 @@ static void test_container(void)
     CHECK(upd_blocks(488UL * 73, 512) == 73 + 2 + 1);
 }
 
+/*
+ * The container fetch.  fetchcore opens the sink on a final 2xx only, but
+ * still hands it a 404's body: as the sink sees it, a chunk before any
+ * open.  That body is neither written nor counted, and the answer is
+ * refused=network -- not space, as when the sink called it a write that
+ * failed (#497 review).
+ */
+static void test_download(void)
+{
+    unsigned long total = 0;
+    int           wfail = 0, toolong = 0, r;
+
+    /* A 404 with "Not Found": no open, one chunk, the fetch fails. */
+    r = upd_dl_chunk(0, total, 9, 1000);
+    CHECK(r == UPD_DL_NETWORK);
+    CHECK(upd_dl_verdict(404, 0, wfail, toolong, total, 1000) == UPD_DL_NETWORK);
+    /* Its status decides even where a flag is set. */
+    CHECK(upd_dl_verdict(404, 1, 1, 0, 0, 1000) == UPD_DL_NETWORK);
+    CHECK(upd_dl_verdict(500, 0, 0, 1, 0, 1000) == UPD_DL_NETWORK);
+    CHECK(upd_dl_verdict(206, 1, 0, 0, 1000, 1000) == UPD_DL_NETWORK);
+    CHECK(upd_dl_verdict(0, 0, 0, 0, 0, 1000) == UPD_DL_NETWORK);
+
+    /* A 200: written up to the manifest's size, and no further. */
+    CHECK(upd_dl_chunk(1, 0, 1000, 1000) == UPD_DL_OK);
+    CHECK(upd_dl_chunk(1, 999, 1, 1000) == UPD_DL_OK);
+    CHECK(upd_dl_chunk(1, 1, 1000, 1000) == UPD_DL_LONG);
+    CHECK(upd_dl_verdict(200, 0, 1, 0, 500, 1000) == UPD_DL_SPACE);
+    CHECK(upd_dl_verdict(200, 0, 0, 1, 1000, 1000) == UPD_DL_LONG);
+    CHECK(upd_dl_verdict(200, 1, 0, 0, 999, 1000) == UPD_DL_NETWORK);
+    CHECK(upd_dl_verdict(200, 0, 0, 0, 1000, 1000) == UPD_DL_NETWORK);
+    CHECK(upd_dl_verdict(200, 1, 0, 0, 1000, 1000) == UPD_DL_OK);
+}
+
 /* ------------------------------------------------------------- journal --- */
 
 static void test_journal_parse(void)
@@ -401,6 +437,36 @@ static void test_state(void)
     CHECK(n > 0 && strcmp(out, "phase=trial\nversion=1.0.2\nboots=12\nflavour=fat\n") == 0);
     CHECK(upd_state_merge(old, sizeof(old) - 1, "trial", "1.0.2", 0, "full",
                           out, 40) == 0);
+}
+
+/*
+ * After a SWAP the journal is the trial file and the state says
+ * phase=trial; CONFIRM needs receipt-next.  A second INSTALL refuses
+ * before its cleanup removes that (#497 review).
+ */
+static void test_trial(void)
+{
+    static const char kept[] =
+        "last_check=2026-11-17\nphase=trial\nversion=1.0.2\n";
+    char          out[256];
+    unsigned long n;
+
+    CHECK(upd_trial_active(1, 0, 0) == 1);
+    CHECK(upd_trial_active(1, "phase=confirmed\n", 16) == 1);
+    CHECK(upd_trial_active(0, 0, 0) == 0);
+    CHECK(upd_trial_active(0, "", 0) == 0);
+    CHECK(upd_trial_active(0, kept, sizeof(kept) - 1) == 1);
+    CHECK(upd_trial_active(0, "PHASE=Trial", 11) == 1);
+    CHECK(upd_trial_active(0, "phase=confirmed\n", 16) == 0);
+    CHECK(upd_trial_active(0, "phase=trialx\nxphase=trial\n", 26) == 0);
+    CHECK(upd_trial_active(0, kept, 20) == 0);
+
+    /* The state SWAP writes is a trial; once confirmed it is not. */
+    n = upd_state_merge("", 0, "trial", "1.0.2", 0, "full", out, sizeof(out));
+    CHECK(n > 0 && upd_trial_active(0, out, n) == 1);
+    n = upd_state_merge(kept, sizeof(kept) - 1, "confirmed", "1.0.2", 0, "full",
+                        out, sizeof(out));
+    CHECK(n > 0 && upd_trial_active(0, out, n) == 0);
 }
 
 /* ------------------------------------------- the swap on a test volume --- */
@@ -747,6 +813,117 @@ static void test_swap(const char *prior)
     CHECK(upd_forward(e, j.nfiles, prior, &fs_ops, 0) == -1);
 }
 
+/*
+ * What upd_swap_fits() takes, the journal reads back and the swap names;
+ * what it refuses, one of them cannot hold.  An assign resolves to a
+ * physical path that can be longer than the one the receipt names: PREPARE
+ * asks before it stages anything (#497 review: 173 bytes passed, then the
+ * swap failed and its own journal did not parse).
+ */
+static int fits_swaps(const char *path, unsigned int i, const char *prior,
+                      int old)
+{
+    static Fs   fs;
+    char        p[UPD_APATH_MAX + 32];
+    UpdJEntry   e[2];
+
+    memset(&fs, 0, sizeof(fs));
+    memset(e, 0, sizeof(e));
+    fs_ops.ctx = &fs;
+    fs.budget = -1;
+    /* Entry i is the one under test; the one before it is done. */
+    e[0].path = "SYS:C/done";
+    e[0].len  = 10;
+    e[0].done = 1;
+    e[i].path = path;
+    e[i].len  = (unsigned short)strlen(path);
+    e[i].done = 0;
+    fs_put(&fs, path, 1);
+    snprintf(p, sizeof(p), "%.180s.new", path);
+    fs_put(&fs, p, 2);
+    if (old)
+    {
+        snprintf(p, sizeof(p), "%.180s.old", path);
+        fs_put(&fs, p, 3);
+    }
+    return upd_forward(e, i + 1, prior, &fs_ops, 0) == 1 &&
+           fs_get(&fs, path) == 2;
+}
+
+static int fits_parses(const char *path)
+{
+    static char t[UPD_APATH_MAX + 128];
+    UpdJournal  j;
+    UpdJEntry   e[1];
+
+    snprintf(t, sizeof(t), "format=1\nversion=1.0.1\nfrom=1.0.0\nflavour=full\n"
+             "file=ours %s\nready\n", path);
+    return upd_journal_parse(t, strlen(t), &j, e, 1) == 1 && j.nfiles == 1 &&
+           e[0].len == strlen(path);
+}
+
+static void test_swap_fits(void)
+{
+    static char  path[UPD_APATH_MAX + 32], prior[UPD_APATH_MAX + 32];
+    UpdJEntry    e;
+    unsigned int len, i;
+    int          fits;
+
+    memset(&e, 0, sizeof(e));
+    e.path = path;
+
+    /* The live path: up to UPD_APATH_MAX - 1 bytes, as the journal. */
+    for (len = 8; len <= UPD_APATH_MAX + 8; len++)
+    {
+        memset(path, 'a', len);
+        memcpy(path, "DH0:", 4);
+        path[len] = '\0';
+        e.len = (unsigned short)len;
+        fits = upd_swap_fits(&e, 0, "U:p");
+        CHECK(fits == (len < UPD_APATH_MAX));
+        CHECK(fits_swaps(path, 0, "U:p", 1) == fits);
+        CHECK(fits_parses(path) == fits);
+    }
+
+    /* The review's: an assign resolved to 173 bytes. */
+    strcpy(path, "DH0:");
+    for (i = 0; i < 6; i++)
+        strcat(path, "abcdefghijklmnopqrstuvwxyz/");
+    strcat(path, "C/fetch");
+    e.len = (unsigned short)strlen(path);
+    CHECK(e.len == 173 && upd_swap_fits(&e, 0, "U:p") == 0);
+
+    /* The prior-old drawer's names, <prior>/<n>.tmp, with n's digits. */
+    strcpy(path, "SYS:C/ping");
+    e.len = 10;
+    for (len = UPD_APATH_MAX - 8; len <= UPD_APATH_MAX + 8; len++)
+        for (i = 0; i < 2; i++)
+        {
+            memset(prior, 'p', len);
+            memcpy(prior, "U:", 2);
+            prior[len] = '\0';
+            fits = upd_swap_fits(&e, i, prior);
+            CHECK(fits == (len + 1 + 1 + 4 < UPD_APATH_MAX + 12));
+            CHECK(fits_swaps(path, i, prior, 1) == fits);
+            CHECK(fits_swaps(path, i, prior, 0) == fits);
+        }
+    memset(prior, 'p', UPD_APATH_MAX + 5);
+    memcpy(prior, "U:", 2);
+    prior[UPD_APATH_MAX + 5] = '\0';
+    CHECK(upd_swap_fits(&e, 8, prior) == 1);    /* "/9.tmp"                */
+    CHECK(upd_swap_fits(&e, 9, prior) == 0);    /* "/10.tmp"               */
+
+    /* A byte the journal does not read back, and no path at all. */
+    strcpy(path, "SYS:C/p\xe4ng");
+    e.len = (unsigned short)strlen(path);
+    CHECK(upd_swap_fits(&e, 0, "U:p") == 0 && fits_parses(path) == 0);
+    strcpy(path, "SYS:C/my ping");
+    e.len = (unsigned short)strlen(path);
+    CHECK(upd_swap_fits(&e, 0, "U:p") == 1 && fits_parses(path) == 1);
+    e.len = 0;
+    CHECK(upd_swap_fits(&e, 0, "U:p") == 0);
+}
+
 int main(int argc, char **argv)
 {
     const char *which = argc > 1 ? argv[1] : "all";
@@ -757,11 +934,14 @@ int main(int argc, char **argv)
         test_scan();
         test_select();
         test_container();
+        test_download();
     }
     if (strcmp(which, "journal") == 0 || strcmp(which, "all") == 0)
     {
         test_journal_parse();
         test_state();
+        test_trial();
+        test_swap_fits();
         test_swap("U:Installed/Update/prior-old");   /* the volume of most */
         test_swap("B:Installed/Update/prior-old");   /* another: copies    */
     }
