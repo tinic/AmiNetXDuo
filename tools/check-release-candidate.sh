@@ -4,6 +4,7 @@
 
 set -euo pipefail
 
+ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 dir="${1:-build/candidate}"
 want_sha="${2:-}"
 manifest="$dir/release-candidate.txt"
@@ -101,4 +102,13 @@ for f in full fat minimal micro; do
     }
 done
 
-echo "release_candidate=PASS source_sha=$got_sha archive=$archive_name sha256=$got_hash update_manifest_sha256=$umanifest_hash"
+# The UpdateAmiNetXDuo in every container holds the release keys of
+# src/tools/updkeys.c and not the test key; a tree with no release key is
+# refused, as its tool would accept nothing.
+keys=$(python3 -I "$ROOT/tools/updkeys.py" check "$ROOT/src/tools/updkeys.c" \
+           "$update"/*.update.lha) || {
+    echo "release_candidate=FAIL $keys" >&2
+    exit 1
+}
+
+echo "release_candidate=PASS source_sha=$got_sha archive=$archive_name sha256=$got_hash update_manifest_sha256=$umanifest_hash ${keys#update_keys=PASS }"

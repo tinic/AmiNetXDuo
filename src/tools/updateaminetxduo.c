@@ -85,14 +85,11 @@ enum { ANSWER_NONE = 0, ANSWER_INSTALL, ANSWER_LATER, ANSWER_SKIP };
 #define UPD_RC_AVAILABLE    5
 #define UPD_RC_REFUSED      10
 
-/* Placeholder until the mirror exists (#497 Q1/Q2): .invalid never
-   resolves.  A build with no release key refuses before it is used. */
-#define UPD_DEFAULT_MIRROR  "http://update.aminetxduo.invalid/"
+/* The project's plain-HTTP mirror (#497 Q1/Q2), one folder per channel:
+   release/ and prerelease/.  release.yml publishes there. */
+#define UPD_DEFAULT_MIRROR  "http://aminetxduo.tinic.info/"
 #define UPD_NTP_SERVER      "pool.ntp.org"
 #define UPD_TIMEOUT         60UL            /* seconds, per fetch          */
-#define UPD_MANIFEST_MAX    (64UL * 1024UL)
-#define UPD_SIG_MAX         1024UL
-#define UPD_FILES_MAX       160
 #define UPD_SETTINGS_MAX    1024
 #define UPD_PATH            300
 
@@ -3039,7 +3036,9 @@ static LONG upd_startup_word(VOID)
     return rc > RETURN_WARN ? RETURN_WARN : rc;
 }
 
-static LONG upd_main(VOID)
+/* Runs on upd_trampoline()'s stack only.  noinline: inlined into the
+   trampoline its locals would be allocated before the StackSwap. */
+static __attribute__((noinline)) LONG upd_main(VOID)
 {
     /* The swap finished or undone whatever stack is to run: BOOT runs
        before any opens. */
@@ -3081,6 +3080,29 @@ static LONG upd_main(VOID)
         me->pr_WindowPtr = saved;
         return rc;
     }
+}
+
+/*
+ * With no memory for a stack of its own, on the Shell's 4096: only BOOT and
+ * CONFIRM, upd_startup_word()'s path, fit there (tools/check-stack-frames.sh
+ * bounds it at 1024).  CHECK and INSTALL need about 6 KB before
+ * tls.library, so they are refused rather than run into the Shell's stack.
+ */
+static __attribute__((noinline)) LONG upd_main_shell(VOID)
+{
+    if (upd_run_args.word[0] == 'B')
+        return upd_startup_word();
+
+    if (tool_stack_foreign_loaded())
+    {
+        say("update=foreign_stack", NULL, NULL);
+        return RETURN_OK;
+    }
+
+    if (upd_run_args.word[0] == 'C' && upd_run_args.word[1] == 'O')
+        return upd_startup_word();
+
+    return refuse("memory", "not enough memory for the updater's stack");
 }
 
 /*
@@ -3203,9 +3225,8 @@ int main(int argc, char **argv)
     }
     else
     {
-        /* Too short of memory for a stack: http: fits on the caller's, as
-           in fetch, so try rather than refuse. */
-        upd_result = upd_main();
+        /* Too short of memory for a stack: what fits on the caller's. */
+        upd_result = upd_main_shell();
     }
     if (IntuitionBase != NULL)
         CloseLibrary((struct Library *)IntuitionBase);

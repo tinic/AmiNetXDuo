@@ -39,8 +39,11 @@
 #                                  replace, adds kept= skipped= missing=, and
 #                                  writes no trial and needs no restart)
 #     refused=signature|unknown_key|manifest|container_hash|member_hash|clock|
-#             network|space|protected|writeprotected|no_receipt|pending|busy
-#             [<amiga path>]   (pending: a swap is half done, BOOT ends it;
+#             network|space|protected|writeprotected|no_receipt|pending|busy|
+#             memory
+#             [<amiga path>]   (memory: no RAM for its own stack, and only
+#                               BOOT and CONFIRM fit the Shell's;
+#                               pending: a swap is half done, BOOT ends it;
 #                               or a trial waits for CONFIRM; busy: another
 #                               run holds <DOCDIR>/Installed/Update/lock)
 #     file=replace|skip|keep|missing ours|current|otherbuild|newer|foreign|deleted <amiga path>

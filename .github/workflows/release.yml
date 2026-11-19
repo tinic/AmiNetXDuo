@@ -1,7 +1,26 @@
 # Promote the immutable release candidate produced by CI for this exact SHA.
-# No source is compiled here: successful CI is the build-and-test attestation,
-# and release-candidate.txt binds the downloaded archive to its commit and
-# digest.  A tag therefore cannot publish convenient-but-different bytes.
+# No product source is compiled here: successful CI is the build-and-test
+# attestation, and release-candidate.txt binds the downloaded archive and
+# update containers to their commit and digest.  A tag therefore cannot
+# publish convenient-but-different bytes.  The one thing built here is
+# updverify, the host build of the updater's signature and manifest check.
+#
+# THE UPDATE RELEASE (#497), on a v* tag only:
+#
+#   prev     self-hosted: certificates.prev from the channel's published,
+#            signed manifest on the mirror (tools/update-certificates-prev.sh)
+#   sign     GitHub-hosted, environment `release`: the CI candidate's
+#            update.manifest with that line, signed with the environment
+#            secret AMINETXDUO_UPDATE_SIGNING_KEY, checked by updverify
+#   publish  self-hosted, environment `release`: checked again, uploaded to
+#            the mirror's channel folder and switched in atomically
+#   github   the GitHub release: the archive, update.manifest and its .sig
+#
+# The channel is prerelease for a tag with a "-" (v1.0.0-rc5) and release
+# otherwise, the rule the GitHub release's --prerelease uses.  The secret and
+# the mirror upload key never reach a pull request: this workflow runs on
+# tag pushes and dispatch only, and the environment `release` admits v* tags
+# only, with turo as required reviewer.
 #
 # SPDX-License-Identifier: MIT
 
@@ -64,9 +83,11 @@ jobs:
         run: tools/check-changelog-prose.sh
 
   release:
-    name: publish the CI candidate
+    name: verify the CI candidate
     needs: verify
     runs-on: ubuntu-latest
+    outputs:
+      compound: ${{ steps.version.outputs.compound }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -74,8 +95,10 @@ jobs:
           fetch-depth: 0
 
       - name: Derive the version
+        id: version
         run: |
           tools/version.sh --env >> "$GITHUB_ENV"
+          echo "compound=$(tools/version.sh --compound)" >> "$GITHUB_OUTPUT"
           echo "### $(tools/version.sh --long)" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Download the exact CI candidate
@@ -100,8 +123,153 @@ jobs:
           retention-days: 30
           compression-level: 0
 
+  prev:
+    name: certificates.prev from the mirror
+    permissions:
+      actions: read
+      contents: read
+    needs: release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    # The mirror is on the lab LAN; this runner reaches it.
+    runs-on: [self-hosted, playhouse3]
+    outputs:
+      certificates_prev: ${{ steps.prev.outputs.certificates_prev }}
+      channel: ${{ steps.prev.outputs.channel }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: The published manifest of the channel
+        id: prev
+        run: |
+          tag=${GITHUB_REF#refs/tags/}
+          channel=release
+          case "$tag" in *-*) channel=prerelease ;; esac
+          out=$(tools/update-certificates-prev.sh -m "$AMINETXDUO_UPDATE_MIRROR" \
+                    -c "$channel" -v "$(tools/version.sh --product)" \
+                    -b "$RUNNER_TEMP/updverify")
+          echo "$out"
+          prev=$(printf '%s\n' "$out" | sed -n 's/^certificates_prev=\([0-9a-f]\{64\}\) .*/\1/p')
+          [[ "$prev" =~ ^[0-9a-f]{64}$ ]] || {
+            echo "::error::no certificates.prev (64 hex digits) from the mirror"; exit 1; }
+          echo "certificates_prev=$prev" >> "$GITHUB_OUTPUT"
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+        env:
+          AMINETXDUO_UPDATE_MIRROR: http://aminetxduo.tinic.info/
+
+  sign:
+    name: sign the update manifest
+    permissions:
+      actions: read
+      contents: read
+    needs: [verify, prev]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Download the exact CI candidate
+        uses: actions/download-artifact@v4
+        with:
+          name: release-candidate-${{ github.sha }}
+          path: build/candidate
+          github-token: ${{ github.token }}
+          run-id: ${{ needs.verify.outputs.run_id }}
+
+      - name: Verify source identity, digests and the tool's keys
+        run: tools/check-release-candidate.sh build/candidate "$GITHUB_SHA"
+
+      - name: Sign
+        env:
+          AMINETXDUO_UPDATE_SIGNING_KEY: ${{ secrets.AMINETXDUO_UPDATE_SIGNING_KEY }}
+          PREV: ${{ needs.prev.outputs.certificates_prev }}
+          CHANNEL: ${{ needs.prev.outputs.channel }}
+        run: |
+          # An empty or short prev is an error, never "keep the CI line".
+          [[ "$PREV" =~ ^[0-9a-f]{64}$ ]] || {
+            echo "::error::certificates.prev from the prev job is not 64 hex digits"; exit 1; }
+          [ "$(sed -n 's/^channel=//p' build/candidate/update/update.manifest)" = "$CHANNEL" ] || {
+            echo "::error::the manifest's channel is not $CHANNEL"; exit 1; }
+          tools/sign-update-manifest.sh -k rel-2026 -p "$PREV" \
+              -o build/signed build/candidate/update
+
+      - name: Check the signature with the updater's code
+        run: |
+          tools/verify-update-manifest.sh -c "${{ needs.prev.outputs.channel }}" \
+              -b "$RUNNER_TEMP/updverify" build/signed
+
+      - name: Keep the signed update
+        uses: actions/upload-artifact@v4
+        with:
+          name: update-signed-${{ github.sha }}
+          path: build/signed/
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 0
+
+  publish:
+    name: publish the update to the mirror
+    permissions:
+      actions: read
+      contents: read
+    needs: [prev, sign]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: [self-hosted, playhouse3]
+    environment: release
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Download the signed update
+        uses: actions/download-artifact@v4
+        with:
+          name: update-signed-${{ github.sha }}
+          path: build/signed
+
+      - name: Check the signature with the updater's code
+        run: |
+          tools/verify-update-manifest.sh -c "${{ needs.prev.outputs.channel }}" \
+              -b "$RUNNER_TEMP/updverify" build/signed
+
+      - name: Upload and switch the channel folder
+        env:
+          AMINETXDUO_MIRROR_UPLOAD_HOST: ${{ vars.AMINETXDUO_MIRROR_UPLOAD_HOST }}
+          AMINETXDUO_MIRROR_UPLOAD_USER: ${{ vars.AMINETXDUO_MIRROR_UPLOAD_USER }}
+          AMINETXDUO_UPDVERIFY_BUILD: ${{ runner.temp }}/updverify
+        run: tools/publish-update.sh -c "${{ needs.prev.outputs.channel }}" build/signed
+
+  github:
+    name: publish the GitHub release
+    needs: [release, publish]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Download the exact CI candidate
+        uses: actions/download-artifact@v4
+        with:
+          name: AmiNetXDuo-${{ needs.release.outputs.compound }}
+          path: build/candidate
+
+      - name: Download the signed update
+        uses: actions/download-artifact@v4
+        with:
+          name: update-signed-${{ github.sha }}
+          path: build/signed
+
       - name: Publish the release
-        if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -128,4 +296,6 @@ jobs:
           gh release create "$tag" "$kind" \
              --title "$(tools/version.sh --long)" \
              --notes-file "$notes" \
-             build/candidate/*.lha
+             build/candidate/*.lha \
+             build/signed/update.manifest \
+             build/signed/update.manifest.sig
