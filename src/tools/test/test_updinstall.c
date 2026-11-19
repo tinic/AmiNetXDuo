@@ -491,6 +491,7 @@ typedef struct Fs
     long  budget;           /* -1: unlimited                              */
     unsigned int cuts;
     unsigned int stop_cut;  /* 0: none                                    */
+    const char  *err;       /* exists() of this name fails: a DOS error   */
 } Fs;
 
 static int fs_find(Fs *fs, const char *p)
@@ -537,6 +538,9 @@ static int vol_b(const char *p) { return p[0] == 'B' && p[1] == ':'; }
 static int op_exists(void *c, const char *p)
 {
     Fs *fs = c;
+
+    if (fs->err != 0 && strcmp(fs->err, p) == 0)
+        return -1;
 
     return fs_find(fs, p) >= 0;
 }
@@ -1242,6 +1246,67 @@ static void test_fail_closed(void)
     CHECK(upd_rcpt_write_plan(1, 0, 134) == UPD_RW_WRITE);
 }
 
+/*
+ * A look that fails with a DOS error, not "not found", stops the swap:
+ * nothing removed, no line written (#507 review: an error on
+ * prior-old/<n> during a recovery read as there and the .old was deleted;
+ * one on the live file with no .new wrote "done").
+ */
+static void test_exists_error(void)
+{
+    static Fs   fs;
+    UpdJEntry   e[1];
+    const char *prior = "U:Update/prior-old";
+
+    /* Recovery after "aside 1": prior-old/1 cannot be looked at. */
+    memset(&fs, 0, sizeof(fs));
+    memset(e, 0, sizeof(e));
+    fs_ops.ctx = &fs;
+    fs.budget = -1;
+    e[0].path = "SYS:C/ping";
+    e[0].len  = 10;
+    e[0].aside = 1;
+    fs_put(&fs, "SYS:C/ping", 1);
+    fs_put(&fs, "SYS:C/ping.new", 2);
+    fs_put(&fs, "SYS:C/ping.old", 3);
+    fs.err = "U:Update/prior-old/1";
+    CHECK(upd_forward(e, 1, prior, &fs_ops, 0) == 0);
+    CHECK(fs_get(&fs, "SYS:C/ping.old") == 3 && fs_get(&fs, "SYS:C/ping") == 1 &&
+          fs_get(&fs, "SYS:C/ping.new") == 2);
+    CHECK(fs.journal[0] == '\0' && e[0].done == 0);
+
+    /* The same before "aside": no aside line either. */
+    e[0].aside = 0;
+    CHECK(upd_forward(e, 1, prior, &fs_ops, 0) == 0);
+    CHECK(fs.journal[0] == '\0' && fs_get(&fs, "SYS:C/ping.old") == 3);
+
+    /* The .old cannot be looked at. */
+    fs.err = "SYS:C/ping.old";
+    CHECK(upd_forward(e, 1, prior, &fs_ops, 0) == 0);
+    CHECK(fs.journal[0] == '\0' && fs_get(&fs, "SYS:C/ping") == 1);
+
+    /* No .new, and the live file cannot be looked at: no "done". */
+    memset(&fs, 0, sizeof(fs));
+    fs_ops.ctx = &fs;
+    fs.budget = -1;
+    e[0].aside = 0;
+    fs_put(&fs, "SYS:C/ping", 2);
+    fs_put(&fs, "SYS:C/ping.old", 1);
+    fs.err = "SYS:C/ping";
+    CHECK(upd_forward(e, 1, prior, &fs_ops, 0) == 0);
+    CHECK(fs.journal[0] == '\0' && e[0].done == 0);
+    CHECK(fs_get(&fs, "SYS:C/ping") == 2 && fs_get(&fs, "SYS:C/ping.old") == 1);
+
+    /* The .new cannot be looked at. */
+    fs.err = "SYS:C/ping.new";
+    CHECK(upd_forward(e, 1, prior, &fs_ops, 0) == 0);
+    CHECK(fs.journal[0] == '\0');
+
+    /* Cleared: the same disk finishes. */
+    fs.err = 0;
+    CHECK(upd_forward(e, 1, prior, &fs_ops, 0) == 1 && e[0].done == 1);
+}
+
 int main(int argc, char **argv)
 {
     const char *which = argc > 1 ? argv[1] : "all";
@@ -1268,6 +1333,7 @@ int main(int argc, char **argv)
         test_stale_prior();
         test_all_staged();
         test_fail_closed();
+        test_exists_error();
         test_swap("U:Installed/Update/prior-old");   /* the volume of most */
         test_swap("B:Installed/Update/prior-old");   /* another: copies    */
     }

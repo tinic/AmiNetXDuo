@@ -861,26 +861,37 @@ int upd_forward(UpdJEntry *e, unsigned int n, const char *prior,
         if (!ui_names(&nm, &e[i], i, prior))
             return 0;
 
+        /* Each look is there, not there, or cannot be said (< 0): that
+           stops the swap with nothing deleted and no line written. */
         has_new  = ops->exists(ops->ctx, nm.fresh);
         has_live = ops->exists(ops->ctx, nm.live);
+        if (has_new < 0 || has_live < 0)
+            return 0;
 
         if (has_new && has_live)
         {
+            int has_old = ops->exists(ops->ctx, nm.old), has_prior;
+
+            if (has_old < 0)
+                return 0;
             /* The live file is not moved yet, so a .old is the one that
                was there before: another stack's, or an earlier install's. */
-            if (ops->exists(ops->ctx, nm.old))
+            if (has_old)
             {
+                has_prior = ops->exists(ops->ctx, nm.prior);
+                if (has_prior < 0)
+                    return 0;
                 if (!e[i].aside)
                 {
                     /* Not this swap's: an earlier update's.  Deleting the
                        .old on its strength would lose the .old. */
-                    if (ops->exists(ops->ctx, nm.prior))
+                    if (has_prior)
                         return 0;
                     if (!ui_jline(ops, &nm, "aside", i))
                         return 0;
                     e[i].aside = 1;
                 }
-                if (ops->exists(ops->ctx, nm.prior))
+                if (has_prior)
                 {
                     /* Copied whole before; the original is still there. */
                     if (!ops->remove(ops->ctx, nm.old))

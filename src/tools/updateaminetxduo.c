@@ -949,7 +949,19 @@ static BOOL upd_protected(const char *path, ULONG *size)
 
 static char upd_journal_path[UPD_PATH];
 
-static int ao_exists(void *c, const char *p) { (VOID)c; return upd_exists(p); }
+/* Tri-state for the swap: a lock error is neither there nor not. */
+static int ao_exists(void *c, const char *p)
+{
+    BPTR l = Lock((CONST_STRPTR)p, SHARED_LOCK);
+
+    (VOID)c;
+    if (l != (BPTR)0)
+    {
+        UnLock(l);
+        return 1;
+    }
+    return upd_ioerr_absent(IoErr()) ? 0 : -1;
+}
 static int ao_rename(void *c, const char *a, const char *b)
 {
     (VOID)c;

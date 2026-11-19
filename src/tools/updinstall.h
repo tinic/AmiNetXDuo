@@ -258,7 +258,8 @@ int upd_stale_journal(const char *text, unsigned long len, int absent,
 typedef struct UpdFsOps
 {
     void *ctx;
-    int (*exists)(void *ctx, const char *path);
+    int (*exists)(void *ctx, const char *path);     /* 1, 0, or < 0:  */
+                                        /* it cannot be said (a DOS error) */
     int (*rename)(void *ctx, const char *from, const char *to);
     int (*remove)(void *ctx, const char *path);
     int (*copy)(void *ctx, const char *from, const char *to);
