@@ -635,6 +635,35 @@ static ULONG upd_stop_n;
 static char  upd_stop_file[128];
 static ULONG upd_cuts[3];
 
+/*
+ * PREPARE's and SWAP's cut points are a sample, one at each boundary that
+ * differs, so that the scenario that stops at every one of them (S40,
+ * cut=each) is a handful of boots: every single operation is cut, and
+ * recovered from, by test_updinstall on the host.  upd_samp[phase] holds
+ * the raw step numbers that count, 1-based, set by upd_install(); the
+ * rollback's (S42) are not sampled.
+ *
+ *   prepare  1 the first .new written   2 half of them   3 the last .new
+ *            4 "ready" appended
+ *   swap     1 the first .old moved aside (when there is one)
+ *            2 half way: a live file at .old, its .new not live yet
+ *            3 the last "done"           4 the journal renamed to trial
+ */
+#define UPD_SAMP_MAX    4
+static ULONG upd_samp[2][UPD_SAMP_MAX];
+static ULONG upd_nsamp[2];
+
+static VOID upd_samp_add(ULONG phase, ULONG raw)
+{
+    ULONG i;
+
+    for (i = 0; i < upd_nsamp[phase]; i++)
+        if (upd_samp[phase][i] == raw)
+            return;
+    if (upd_nsamp[phase] < UPD_SAMP_MAX)
+        upd_samp[phase][upd_nsamp[phase]++] = raw;
+}
+
 /* ENV:AmiNetXDuo/UpdateTestStop: "<prepare|swap|rollback> <n> <file>". */
 static VOID upd_stop_read(VOID)
 {
@@ -671,7 +700,16 @@ static VOID upd_stop_read(VOID)
 static VOID upd_cut(ULONG phase)
 {
     static const char *const names[] = { "prepare", "swap", "rollback" };
-    ULONG n = ++upd_cuts[phase];
+    ULONG raw = ++upd_cuts[phase], n = raw, i;
+
+    if (phase < 2)
+    {
+        for (i = 0; i < upd_nsamp[phase] && upd_samp[phase][i] != raw; i++)
+            ;
+        if (i == upd_nsamp[phase])
+            return;
+        n = i + 1;
+    }
 
     if (upd_stop_n == n && tool_stricmp(upd_stop_phase, names[phase]) == 0)
     {
@@ -1800,11 +1838,53 @@ static LONG upd_install(const char *mirror, const UpdWant *want,
     }
 
 #ifdef UPD_TEST_KEY
+    /* The sampled cut points, by the raw steps PREPARE and SWAP pass:
+       PREPARE 1 the download, 2 the journal, 2+k member k, 3+nrep
+       "ready"; SWAP per file [aside], live to .old, .new to live, done,
+       then the state and the rename to trial. */
+    if (in.nrep != 0)
+    {
+        ULONG raw = 0, k = 0, j, t;
+        BOOL  aside = FALSE;
+
+        upd_samp_add(0, 3);
+        upd_samp_add(0, 2 + (in.nrep + 1) / 2);
+        upd_samp_add(0, 2 + in.nrep);
+        upd_samp_add(0, 3 + in.nrep);
+        for (i = 0; i < m->nfiles; i++)
+        {
+            if (in.pick[i].act != UPD_ACT_REPLACE)
+                continue;
+            if (in.pick[i].has_old)
+            {
+                raw++;
+                if (!aside)
+                    upd_samp_add(1, raw);   /* the first .old aside        */
+                aside = TRUE;
+            }
+            raw++;
+            if (k == in.nrep / 2)
+                upd_samp_add(1, raw);       /* live at .old, .new not live */
+            raw += 2;
+            k++;
+        }
+        upd_samp_add(1, raw);               /* the last "done"             */
+        upd_samp_add(1, raw + 2);           /* the rename to trial         */
+        /* In the order they come. */
+        for (j = 1; j < upd_nsamp[1]; j++)
+            for (t = j; t > 0 && upd_samp[1][t - 1] > upd_samp[1][t]; t--)
+            {
+                ULONG x = upd_samp[1][t];
+
+                upd_samp[1][t] = upd_samp[1][t - 1];
+                upd_samp[1][t - 1] = x;
+            }
+    }
     upd_line[0] = '\0';
     sb(upd_line, sizeof(upd_line), "steps.prepare=");
-    sbu(upd_line, sizeof(upd_line), (in.nrep != 0 ? 1 : 0) + 1 + in.nrep + 1);
+    sbu(upd_line, sizeof(upd_line), upd_nsamp[0]);
     sb(upd_line, sizeof(upd_line), " steps.swap=");
-    sbu(upd_line, sizeof(upd_line), upd_forward_steps(in.nrep, in.nold) + 2);
+    sbu(upd_line, sizeof(upd_line), upd_nsamp[1]);
     say(upd_line, NULL, NULL);
 #endif
 

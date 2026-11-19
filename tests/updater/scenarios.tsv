@@ -81,6 +81,16 @@
 #                                  that phase's n-th cut point write
 #                                  "cut <n>" to <file> and Wait(0).  INSTALL
 #                                  prints steps.prepare=<n> steps.swap=<n>.
+#                                  prepare and swap count a sample, one
+#                                  point per boundary: prepare 1 the first
+#                                  .new, 2 half of them, 3 the last, 4
+#                                  "ready"; swap 1 the first .old aside
+#                                  (when one is), then half way (a live
+#                                  file at .old, its .new not yet live),
+#                                  the last "done", the rename to trial.
+#                                  rollback counts every step.  Every
+#                                  single step is cut on the host
+#                                  (test_updinstall journal and trial).
 #
 # FIELDS
 #   os         3.1 | 3.2
