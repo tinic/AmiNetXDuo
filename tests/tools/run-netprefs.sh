@@ -7,7 +7,8 @@
 #
 # Each row drives the window with WinClick (click, TEXT, DUMP), then reads
 # back what it changed: the interface file, S:Network-Startup,
-# DEVS:Internet/name_resolution, the gadgets after the window is opened
+# DEVS:Internet/name_resolution, ENV: and ENVARC: AmiNetXDuo/Update, the
+# gadgets after the window is opened
 # again, and for the live group ShowNetStatus.  Groups: cold (no stack),
 # live (a2065 on slirp), boot (two boots: configure, then the startup the
 # configuration wrote), wifiboot (At boot on the Installer's Wi-Fi blocks).  Prints row_<id>=PASS|FAIL, row_<id>_fail=<check>
@@ -125,6 +126,9 @@ C:Wait 1
 C:WinClick "AmiNetXDuo Network" DUMP >>{out}
 C:WinClick "AmiNetXDuo Network" 2 >NIL:
 C:Wait 1
+C:WinClick "AmiNetXDuo Network" DUMP >>{out}
+C:WinClick "AmiNetXDuo Network" 2 >NIL:
+C:Wait 1
 EOF
     # A file, or missing=1.
     cat > "$HD/S/npfile" <<'EOF'
@@ -164,7 +168,7 @@ close_np(){ emit "C:WinClick $W 36 >NIL:"; emit "C:Wait 2"; }
 click()  { emit "C:WinClick $W $* >>DH0:np/trace.txt"; emit "C:Wait 1"; }
 text()   { emit "C:WinClick $W $1 TEXT \"$2\" >>DH0:np/trace.txt"; }
 page()   {
-    local n=$(( ($1 - PAGE + 5) % 5 ))
+    local n=$(( ($1 - PAGE + 6) % 6 ))
     [ "$n" = 0 ] || click 2 TIMES "$n"
     PAGE=$1
 }
@@ -228,7 +232,7 @@ build_cold() {
     # shellcheck disable=SC2034  # read through the name ROWS_<group>
     ROWS_cold=(wb load progdir static todhcp spaceform boot drawer wildcard
                new newdup remove device tuning general ipv6 dns dnsbad dnsone dnsdhcp
-               badstatic)
+               badstatic updates)
     # From Workbench: the icon left out at 62,146 (48x26), double-clicked.
     row wb
     emit "C:WinClick \"Workbench\" X 86 Y 156 TIMES 2 >>DH0:np/trace.txt"
@@ -477,6 +481,27 @@ build_cold() {
     req bad
     file DEVS:NetInterfaces/ETH0 file
     close_np
+
+    # The Updates page: Use writes ENV: alone, Save ENV: and ENVARC:.
+    # Check now is not clicked: the slirp guest reaches no mirror.
+    row updates
+    open_np
+    page 5
+    dump page
+    click 64
+    click 66
+    dump use
+    file ENV:AmiNetXDuo/Update env
+    file ENVARC:AmiNetXDuo/Update arc
+    click 65
+    save
+    dump save
+    file ENV:AmiNetXDuo/Update env2
+    file ENVARC:AmiNetXDuo/Update arc2
+    close_np
+    open_np
+    dumpall reopen
+    close_np
 }
 
 stage_cold() {
@@ -490,6 +515,11 @@ spec.loader.exec_module(layout)
 layout.edit(pathlib.Path(sys.argv[2]), (62, 146))
 PY
     printf ':NetPrefs\n' > "$HD/.backdrop"
+    local envarc
+    envarc=$(find "$HD/Prefs" -maxdepth 1 -iname 'env-archive' | head -1)
+    mkdir -p "${envarc:=$HD/Prefs/Env-Archive}/AmiNetXDuo"
+    printf '%s\n' "; updater" "MIRROR=http://mirror.example/" "AUTO=ON" \
+        "CHANNEL=RELEASE" > "$envarc/AmiNetXDuo/Update"
     printf '%s\n' "; resolver" ";nameserver 192.168.1.1" "domain example.org" \
         "hostname np" > "$HD/Devs/Internet/name_resolution"
     printf '%s\n' "DEVICE a2065.device" "UNIT 0" "CONFIGURE STATIC" \
@@ -621,6 +651,28 @@ check_cold() {
 
     reqd badstatic bad 1
     has badstatic file '^CONFIGURE *= *DHCP'
+
+    gad load dump 5 g64.checked 1
+    gad load dump 5 g65.cycle 0
+    gad load dump 5 g33.disabled 1
+    gad load dump 5 g67.disabled 0
+
+    gad updates page 5 g64.checked 1
+    gad updates use 5 g31.text "Update settings in use."
+    has updates env '^AUTO=OFF$'
+    has updates env '^CHANNEL=RELEASE$'
+    has updates arc '^AUTO=ON$'
+    gad updates save 5 g31.text "Update settings saved."
+    local t
+    for t in env2 arc2; do
+        has updates "$t" '^AUTO=OFF$'
+        has updates "$t" '^CHANNEL=PRERELEASE$'
+        count updates "$t" '^(AUTO|CHANNEL)=' 2
+        has updates "$t" '^MIRROR=http://mirror\.example/$'
+        has updates "$t" '^; updater$'
+    done
+    gad updates reopen 5 g64.checked 0
+    gad updates reopen 5 g65.cycle 1
 }
 
 # shellcheck disable=SC2034
