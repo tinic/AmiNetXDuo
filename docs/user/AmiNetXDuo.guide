@@ -26,6 +26,7 @@
     @{"Network configuration     " link CONFIG}
     @{"Starting the stack        " link STARTING}
     @{"Checking the network      " link CHECK}
+    @{"Updating AmiNetXDuo       " link UPDATING}
     @{"X-Surf 100 and flow control" link XSURF100FLOW}
 
   @{b}Reference@{ub}
@@ -201,7 +202,8 @@
   @{"Being found by name" link DNSSD}; it writes MDNS=YES or NO),
   DHCP or a fixed address, the machine's name, and whether the network
   and httpd start at boot, and writes the configuration files from the
-  answers.
+  answers. When the network starts at boot it also asks whether to check
+  for updates; see @{"Updating AmiNetXDuo" link UPDATING}.
 
   To install by hand, copy the files to these places:
 
@@ -1163,7 +1165,7 @@
 @node CHECK "Checking the network"
 @toc MAIN
 @prev STARTING
-@next COMMANDS
+@next UPDATING
 
                        @{b}Checking the network@{ub}
 
@@ -1231,9 +1233,122 @@
 @endnode
 
 
-@node COMMANDS "The commands"
+@node UPDATING "Updating AmiNetXDuo"
 @toc MAIN
 @prev CHECK
+@next COMMANDS
+
+                       @{b}Updating AmiNetXDuo@{ub}
+
+  AmiNetXDuo can look for a newer version by itself and install it. It
+  does this only when the network starts at boot. The Installer then
+  asks:
+
+      Check for a newer AmiNetXDuo when this Amiga boots?
+
+  The answer is Yes unless you change it. The NetPrefs Updates page
+  changes it later (see below).
+
+  @{b}What happens@{ub}
+
+  Once a day, after the network is up, UpdateAmiNetXDuo asks
+  aminetxduo.tinic.info whether a newer version exists. It does this in
+  the background; the boot does not wait for it. When there is one, it
+  waits for the Workbench screen and shows:
+
+      AmiNetXDuo <new> is available (installed <old>).
+      Install | Skip this version | Later
+
+  @{b}Install@{ub}  downloads the update and installs it, then asks
+           whether to restart now. The new version runs after the
+           restart.
+  @{b}Skip this version@{ub}
+           does not ask about this version again. A newer one is
+           offered as usual.
+  @{b}Later@{ub}    asks again on the next day the Amiga boots.
+
+  @{b}What is replaced@{ub}
+
+  Only files the Installer put there and nobody changed since: the
+  libraries, the drivers in DEVS:Networks, the commands in C:, and the
+  certificate store if it is still the one installed. The update is the
+  same kind the Installer chose (full, minimal, micro or fat) and goes
+  to the same places.
+
+  Never touched: the configuration files, ENV: and ENVARC:, a file you
+  changed or deleted, a file of another program, and a file that is
+  newer than the update's. Each replaced file is kept beside the new one
+  as <file>.old until the update is confirmed. When another TCP/IP stack
+  is running, UpdateAmiNetXDuo does nothing.
+
+  @{b}Safety@{ub}
+
+  Every update is signed. UpdateAmiNetXDuo checks the signature and the
+  checksum of every file before it changes anything, and refuses an
+  update it cannot check. Nothing needs https:, so the minimal and micro
+  stacks update the same way.
+
+  A power cut at any point is safe. The next boot finishes the update or
+  undoes it, so the machine has the old version or the new one, never a
+  mix of both.
+
+  After the restart the update is on trial. When the network comes up,
+  the update is confirmed and the .old files are removed. If it does not
+  come up on two boots in a row, the third boot puts the old version
+  back and the same version is not offered again.
+
+  @{b}The NetPrefs Updates page@{ub}
+
+  @{b}Check for updates automatically@{ub}
+           the daily check at boot, on or off.
+  @{b}Channel@{ub}  Releases, or Pre-releases for test versions.
+  @{b}Use@{ub}      applies the settings until the next boot. Save keeps
+           them.
+  @{b}Check now@{ub}
+           checks at once and offers to install and restart.
+
+  The settings are in ENVARC:AmiNetXDuo/Update:
+
+      AUTO=ON              ON or OFF
+      CHANNEL=RELEASE      RELEASE or PRERELEASE
+
+  @{b}From a Shell@{ub}
+
+      UpdateAmiNetXDuo CHECK/S,INSTALL/S,BOOT/S,CONFIRM/S,QUIET/S,
+                       ANSWER/K,RESTART/S
+
+  @{b}CHECK@{ub}    says whether an update exists. This is the default.
+  @{b}INSTALL@{ub}  installs it without asking. It also installs a version
+           that was skipped or taken back. With @{b}RESTART@{ub} it then
+           restarts the Amiga; without it, the update runs after the
+           next restart.
+  @{b}ANSWER@{ub}   INSTALL, LATER or SKIP: answers the requester without
+           showing it.
+  @{b}QUIET@{ub}    prints nothing. This is how the boot runs it.
+  @{b}BOOT@{ub}, @{b}CONFIRM@{ub}
+           are run by the Installer's lines in S:User-Startup. Do not
+           remove those lines while an update is on trial.
+
+  Every run prints key=value lines and appends them to
+  Installed/Update/log in the AmiNetXDuo drawer the Installer made.
+  update= says what was found, and refused= says why nothing was done:
+  @{b}clock@{ub} (the Amiga's clock is not set; sntp sets it),
+  @{b}network@{ub}, @{b}space@{ub}, @{b}protected@{ub} or @{b}writeprotected@{ub} (a file or
+  disk cannot be written), @{b}signature@{ub} or a hash (the download is not
+  the one that was signed), @{b}pending@{ub} (an update is still on trial),
+  @{b}busy@{ub} (another UpdateAmiNetXDuo is running), @{b}memory@{ub}, and
+  @{b}no_receipt@{ub} (installed before 1.0.0-rc5: run the Installer once).
+
+  Return codes: 0 done, or nothing to do; 5 an update is available and
+  was not installed; 10 refused, nothing changed; 20 failed after a file
+  was replaced: restart, and the next boot finishes or undoes it.
+
+@endnode
+
+
+@node COMMANDS "The commands"
+@toc MAIN
+@prev UPDATING
 @next ADDNETINTERFACE
 
                            @{b}The commands@{ub}
@@ -1259,6 +1374,7 @@
     ConfigureNetInterface  change a running interface's address, add
                       or remove an alias address (ALIASADDR,
                       DELETEADDR), or renew and release its DHCP lease
+    @{"UpdateAmiNetXDuo" link UPDATING}  install a newer AmiNetXDuo
     hostname          what this machine is called, and where the name
                       came from; with a name, set it
     AddNetRoute       add a route by hand
@@ -3557,16 +3673,31 @@
                                       delete; it is rebuilt as
                                       connections are made
 
+  Written by @{"UpdateAmiNetXDuo" link UPDATING}:
+
+      ENVARC:AmiNetXDuo/Update        AUTO= and CHANNEL=, also written
+                                      by the Installer and NetPrefs
+      S:AmiNetXDuo-Install            the version, kind and places the
+                                      Installer chose
+      <drawer>/Installed/Update/      in the AmiNetXDuo drawer: the
+                                      list of installed files and their
+                                      checksums, the log, and while an
+                                      update runs, its download and
+                                      journal
+      <file>.old                      the replaced file, until the
+                                      update is confirmed
+
   @{b}Not written to@{ub}
 
-  Apart from that session cache, the stack writes none of these files.
+  Apart from that session cache and UpdateAmiNetXDuo's files, the stack
+  writes none of these files.
   NetSetup, NetPrefs, the Installer and a text editor are what create them.
   Nothing here creates a drawer of its own or patches the operating
   system, and deleting the files above removes AmiNetXDuo completely.
 
   NetPrefs is installed in SYS:Prefs by a system installation. Its interface
-  list and General, IPv4, IPv6, Device and Tuning panels edit the settings the
-  stack uses, including both static IPv6 addresses and the driver queue
+  list and General, IPv4, IPv6, Device, Tuning and Updates panels edit the
+  settings the stack uses, including both static IPv6 addresses and the driver queue
   depths. It starts or stops an interface through the same commands used from
   the Shell, and controls its line in S:Network-Startup; for a Wi-Fi
   interface, At boot switches the Installer's whole Wi-Fi block, the
