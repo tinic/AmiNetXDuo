@@ -265,7 +265,10 @@ typedef struct UpdFsOps
  *   "done <n>"
  *
  * each step taken only when the disk says it is still to do, and a cut
- * point after each.  Returns 1 when every entry is done, 0 when an
+ * point after each.  A prior-old/<n> that is there before "aside <n>" is
+ * an earlier update's: the swap stops there (0) and deletes no .old;
+ * PREPARE refuses it first.  <path>.new and .old are upd_sidecar()'s.
+ * Returns 1 when every entry is done, 0 when an
  * operation failed or a cut stopped it (*failed, if not NULL, is the
  * entry), -1 for an entry whose live and .new files are both gone.
  */
@@ -289,6 +292,45 @@ int upd_new_free(const UpdJEntry *e, unsigned int n, const UpdFsOps *ops,
 
 /* Removes <path>.new of every entry this run staged, and no other. */
 void upd_unstage_new(UpdJEntry *e, unsigned int n, const UpdFsOps *ops);
+
+/* 1 when every entry was staged: each selected member came, and once
+   (the extraction refuses a second one before it writes it). */
+int upd_all_staged(const UpdJEntry *e, unsigned int n);
+
+/* ------------------------------------------------------------- names --- */
+
+/*
+ * Every name the updater makes, in the Update drawer and beside a target,
+ * fits UPD_FNAME_MAX: a classic OFS/FFS volume holds no longer one, and
+ * cuts or refuses it -- and a cut name escapes a cleanup by name.  The
+ * container is stored as UPD_N_CONTAINER whatever the mirror calls it.
+ */
+#define UPD_FNAME_MAX       30
+#define UPD_N_JOURNAL       "journal"
+#define UPD_N_JOURNAL_TMP   "journal.tmp"
+#define UPD_N_TRIAL         "trial"
+#define UPD_N_RECEIPT       "receipt"
+#define UPD_N_RECEIPT_NEXT  "receipt-next"
+#define UPD_N_STATE         "state"
+#define UPD_N_STATE_TMP     "state.tmp"
+#define UPD_N_PRIOR         "prior-old"     /* a drawer: <n>, <n>.tmp      */
+#define UPD_N_LOCK          "lock"
+#define UPD_N_LOG           "log"
+#define UPD_N_CONTAINER     "container.update.lha"
+#define UPD_N_CONTAINER_EXT ".update.lha"   /* every container, cleaned    */
+
+/*
+ * <path> and `ext` (".new", ".old") into `out`: the sidecar the swap uses.
+ * A last component too long for UPD_FNAME_MAX with `ext` is cut first
+ * (C:CreateAmiNetXDuoStatusReport is 28: its .new is
+ * C:CreateAmiNetXDuoStatusRepo.new).  0 when it does not fit `cap`.
+ */
+int upd_sidecar(char *out, unsigned long cap, const char *path,
+                unsigned long len, const char *ext);
+
+/* 1 when no two entries' sidecars are one name (two long names in one
+   drawer cut alike); 0 and *bad, the later of the two. */
+int upd_sidecars_distinct(const UpdJEntry *e, unsigned int n, unsigned int *bad);
 
 /* ---------------------------------------------------------------- state --- */
 

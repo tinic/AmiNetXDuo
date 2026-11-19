@@ -10,7 +10,8 @@
  *                             trial INSTALL refuses, the paths PREPARE
  *                             refuses, the journal the cleanup refuses,
  *                             the .new files PREPARE owns, the drawer
- *                             lock's refusals, and the
+ *                             lock's refusals, the 30-character names, a
+ *                             stale prior-old/<n>, and the
  *                             swap over an in-memory volume: stopped after
  *                             every single operation (a power cut there),
  *                             then finished from the journal it left, and
@@ -841,11 +842,11 @@ static int fits_swaps(const char *path, unsigned int i, const char *prior,
     e[i].len  = (unsigned short)strlen(path);
     e[i].done = 0;
     fs_put(&fs, path, 1);
-    snprintf(p, sizeof(p), "%.180s.new", path);
+    CHECK(upd_sidecar(p, sizeof(p), path, strlen(path), ".new") == 1);
     fs_put(&fs, p, 2);
     if (old)
     {
-        snprintf(p, sizeof(p), "%.180s.old", path);
+        CHECK(upd_sidecar(p, sizeof(p), path, strlen(path), ".old") == 1);
         fs_put(&fs, p, 3);
     }
     return upd_forward(e, i + 1, prior, &fs_ops, 0) == 1 &&
@@ -1005,6 +1006,143 @@ static void test_lock_why(void)
     CHECK(upd_lock_why(221) == UPD_LOCK_OTHER);
 }
 
+/* The last component of `p`. */
+static unsigned long comp_len(const char *p)
+{
+    const char *c = p, *s;
+
+    for (s = p; *s != '\0'; s++)
+        if (*s == '/' || *s == ':')
+            c = s + 1;
+    return strlen(c);
+}
+
+/*
+ * Every name the updater makes fits 30 characters, the classic OFS/FFS
+ * limit: the Update drawer's files, prior-old/<n> and <n>.tmp, and the
+ * .new and .old beside a target, whatever the target's name (#497
+ * review: AmiNetXDuo-1.0.0-rc4.1-full.update.lha is 38, and a cut name
+ * escaped the cleanup).
+ */
+static void test_names(void)
+{
+    static const char *const drawer[] = {
+        UPD_N_JOURNAL, UPD_N_JOURNAL_TMP, UPD_N_TRIAL, UPD_N_RECEIPT,
+        UPD_N_RECEIPT_NEXT, UPD_N_STATE, UPD_N_STATE_TMP, UPD_N_PRIOR,
+        UPD_N_LOCK, UPD_N_LOG, UPD_N_CONTAINER
+    };
+    static Fs    fs;
+    char         p[UPD_APATH_MAX + 32], q[UPD_APATH_MAX + 32];
+    UpdJEntry    e[3];
+    unsigned int i, len, bad = 99;
+    int          k;
+
+    for (i = 0; i < sizeof(drawer) / sizeof(drawer[0]); i++)
+        CHECK(strlen(drawer[i]) <= UPD_FNAME_MAX);
+    CHECK(strlen(UPD_N_CONTAINER) > strlen(UPD_N_CONTAINER_EXT) &&
+          strcmp(UPD_N_CONTAINER + strlen(UPD_N_CONTAINER) -
+                 strlen(UPD_N_CONTAINER_EXT), UPD_N_CONTAINER_EXT) == 0);
+    for (i = 1; i <= UPD_RCPT_MAX; i++)
+    {
+        snprintf(p, sizeof(p), "%u.tmp", i);
+        CHECK(strlen(p) <= UPD_FNAME_MAX);
+    }
+
+    /* .new and .old beside a target of every length. */
+    for (len = 1; len <= 40; len++)
+    {
+        snprintf(p, sizeof(p), "SYS:C/%.*s", (int)len,
+                 "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMN");
+        CHECK(upd_sidecar(q, sizeof(q), p, strlen(p), ".new") == 1);
+        CHECK(comp_len(q) <= UPD_FNAME_MAX && strcmp(q + strlen(q) - 4, ".new") == 0);
+        CHECK(strncmp(q, p, 6) == 0);
+        if (len + 4 <= UPD_FNAME_MAX)
+            CHECK(strlen(q) == strlen(p) + 4 && strncmp(q, p, strlen(p)) == 0);
+        CHECK(upd_sidecar(q, sizeof(q), p, strlen(p), ".old") == 1 &&
+              comp_len(q) <= UPD_FNAME_MAX);
+    }
+    CHECK(upd_sidecar(q, sizeof(q), "C:CreateAmiNetXDuoStatusReport", 30, ".new") == 1 &&
+          strcmp(q, "C:CreateAmiNetXDuoStatusRepo.new") == 0);
+    CHECK(upd_sidecar(q, 8, "SYS:C/ping", 10, ".new") == 0);
+
+    /* The swap of a 28-character target makes no longer name. */
+    memset(&fs, 0, sizeof(fs));
+    memset(e, 0, sizeof(e));
+    fs_ops.ctx = &fs;
+    fs.budget = -1;
+    e[0].path = "SYS:C/CreateAmiNetXDuoStatusReport";
+    e[0].len  = (unsigned short)strlen(e[0].path);
+    fs_put(&fs, e[0].path, 1);
+    fs_put(&fs, "SYS:C/CreateAmiNetXDuoStatusRepo.new", 2);
+    fs_put(&fs, "SYS:C/CreateAmiNetXDuoStatusRepo.old", 3);
+    CHECK(upd_forward(e, 1, "U:Update/" UPD_N_PRIOR, &fs_ops, 0) == 1);
+    CHECK(fs_get(&fs, e[0].path) == 2 &&
+          fs_get(&fs, "SYS:C/CreateAmiNetXDuoStatusRepo.old") == 1 &&
+          fs_get(&fs, "U:Update/" UPD_N_PRIOR "/1") == 3);
+    for (k = 0; k < FS_MAX; k++)
+        if (fs.used[k])
+            CHECK(comp_len(fs.name[k]) <= UPD_FNAME_MAX);
+
+    /* Two long names in one drawer cut alike: refused; elsewhere not. */
+    e[0].path = "SYS:C/abcdefghijklmnopqrstuvwxyzAB"; e[0].len = 34;
+    e[1].path = "SYS:C/ping";                         e[1].len = 10;
+    e[2].path = "SYS:C/abcdefghijklmnopqrstuvwxyzCD"; e[2].len = 34;
+    CHECK(upd_sidecars_distinct(e, 2, &bad) == 1);
+    CHECK(upd_sidecars_distinct(e, 3, &bad) == 0 && bad == 2);
+    e[2].path = "SYS:L/abcdefghijklmnopqrstuvwxyzCD";
+    CHECK(upd_sidecars_distinct(e, 3, 0) == 1);
+}
+
+/*
+ * A prior-old/<n> already there before "aside <n>" is an earlier update's:
+ * the swap stops and the user's .old stays (#497 review: it was deleted
+ * on the strength of a stale prior-old/<n>).  After "aside <n>" it is
+ * this swap's copy, and the .old goes.
+ */
+static void test_stale_prior(void)
+{
+    static Fs  fs;
+    UpdJEntry  e[1];
+    const char *prior = "U:Update/prior-old";
+
+    memset(&fs, 0, sizeof(fs));
+    memset(e, 0, sizeof(e));
+    fs_ops.ctx = &fs;
+    fs.budget = -1;
+    e[0].path = "SYS:C/ping";
+    e[0].len  = 10;
+    fs_put(&fs, "SYS:C/ping", 1);
+    fs_put(&fs, "SYS:C/ping.new", 2);
+    fs_put(&fs, "SYS:C/ping.old", 3);
+    fs_put(&fs, "U:Update/prior-old/1", 9);
+    CHECK(upd_forward(e, 1, prior, &fs_ops, 0) == 0);
+    CHECK(fs_get(&fs, "SYS:C/ping.old") == 3 && fs_get(&fs, "SYS:C/ping") == 1 &&
+          fs_get(&fs, "SYS:C/ping.new") == 2 && fs_get(&fs, "U:Update/prior-old/1") == 9);
+    CHECK(strstr(fs.journal, "aside") == 0);
+
+    /* Journalled aside: a copy that was made whole; the original goes. */
+    e[0].aside = 1;
+    fs_put(&fs, "U:Update/prior-old/1", 3);
+    CHECK(upd_forward(e, 1, prior, &fs_ops, 0) == 1);
+    CHECK(fs_get(&fs, "SYS:C/ping") == 2 && fs_get(&fs, "SYS:C/ping.old") == 1 &&
+          fs_get(&fs, "U:Update/prior-old/1") == 3);
+}
+
+/* Each selected member exactly once: a duplicate of one and the lack of
+   another counted as many as were wanted (#497 review). */
+static void test_all_staged(void)
+{
+    UpdJEntry e[3];
+
+    memset(e, 0, sizeof(e));
+    CHECK(upd_all_staged(e, 0) == 1);
+    e[0].staged = 1;
+    e[2].staged = 1;
+    CHECK(upd_all_staged(e, 3) == 0);
+    e[1].staged = 1;
+    CHECK(upd_all_staged(e, 3) == 1);
+}
+
 int main(int argc, char **argv)
 {
     const char *which = argc > 1 ? argv[1] : "all";
@@ -1026,6 +1164,9 @@ int main(int argc, char **argv)
         test_stale_journal();
         test_staging();
         test_lock_why();
+        test_names();
+        test_stale_prior();
+        test_all_staged();
         test_swap("U:Installed/Update/prior-old");   /* the volume of most */
         test_swap("B:Installed/Update/prior-old");   /* another: copies    */
     }

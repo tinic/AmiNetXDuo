@@ -87,34 +87,22 @@ static VOID upd_in_dir(char *out, const char *name);
 
 /* ------------------------------------------------------------ the lines --- */
 
-/* What this run said, for the log.  A line that does not fit is still
-   printed; the log gets the lines before it. */
+/* What this run said, for the log: whole lines, and truncated=yes after
+   the last that fits (upd_said_add).  Every line is still printed. */
 static char  upd_said[2048];
 static ULONG upd_said_len;
-
-static VOID say_part(const char *s)
-{
-    ULONG n = 0;
-
-    while (s[n] != '\0')
-        n++;
-    if (upd_said_len + n < sizeof(upd_said))
-    {
-        CopyMem((APTR)s, upd_said + upd_said_len, n);
-        upd_said_len += n;
-    }
-    tool_printf("%s", (LONG)s);
-}
 
 /* One key=value line, from up to three parts. */
 static VOID say(const char *a, const char *b, const char *c)
 {
-    say_part(a);
+    upd_said_len = upd_said_add(upd_said, sizeof(upd_said), upd_said_len,
+                                a, b, c);
+    tool_printf("%s", (LONG)a);
     if (b != NULL)
-        say_part(b);
+        tool_printf("%s", (LONG)b);
     if (c != NULL)
-        say_part(c);
-    say_part("\n");
+        tool_printf("%s", (LONG)c);
+    tool_printf("%s", (LONG)"\n");
 }
 
 static VOID upd_log_write(const char *word)
@@ -134,7 +122,7 @@ static VOID upd_log_write(const char *word)
     me->pr_WindowPtr = (APTR)-1L;
     if (upd_find_udir())
     {
-        upd_in_dir(path, "log");
+        upd_in_dir(path, UPD_N_LOG);
         fh = Open((CONST_STRPTR)path, MODE_READWRITE);
         if (fh != (BPTR)0)
         {
@@ -687,9 +675,9 @@ static LONG upd_clean_stale(VOID)
     ULONG                 len, i;
     BPTR                  dir;
 
-    upd_in_dir(upd_p1, "state");
+    upd_in_dir(upd_p1, UPD_N_STATE);
     t = upd_slurp(upd_p1, UPD_STATE_MAX, &len);
-    upd_in_dir(upd_p1, "trial");
+    upd_in_dir(upd_p1, UPD_N_TRIAL);
     i = (ULONG)upd_trial_active(upd_exists(upd_p1), (const char *)t,
                                 t != NULL ? len : 0);
     if (t != NULL)
@@ -700,7 +688,7 @@ static LONG upd_clean_stale(VOID)
 
     /* Undone only when it is read whole and has no "ready"; gone only
        when it is not there.  A journal that cannot be read is refused. */
-    upd_in_dir(upd_p1, "journal");
+    upd_in_dir(upd_p1, UPD_N_JOURNAL);
     t = upd_slurp(upd_p1, 64UL * 1024UL, &len);
     {
         UpdJournal j;
@@ -715,10 +703,8 @@ static LONG upd_clean_stale(VOID)
         case UPD_STALE_UNDO:
             for (i = 0; i < j.nfiles; i++)
             {
-                upd_p2[0] = '\0';
-                sbn(upd_p2, UPD_PATH, e[i].path, e[i].len);
-                sb(upd_p2, UPD_PATH, ".new");
-                (VOID)upd_remove(upd_p2);
+                if (upd_sidecar(upd_p2, UPD_PATH, e[i].path, e[i].len, ".new"))
+                    (VOID)upd_remove(upd_p2);
             }
             (VOID)upd_remove(upd_p1);
             removed = TRUE;
@@ -737,10 +723,10 @@ static LONG upd_clean_stale(VOID)
             FreeVec(t);
     }
 
-    upd_in_dir(upd_p1, "journal.tmp");
+    upd_in_dir(upd_p1, UPD_N_JOURNAL_TMP);
     if (upd_exists(upd_p1))
         removed = upd_remove(upd_p1) || removed;
-    upd_in_dir(upd_p1, "receipt-next");
+    upd_in_dir(upd_p1, UPD_N_RECEIPT_NEXT);
     if (upd_exists(upd_p1))
         removed = upd_remove(upd_p1) || removed;
 
@@ -761,9 +747,10 @@ static LONG upd_clean_stale(VOID)
             {
                 ULONG n = strlen((const char *)fib->fib_FileName);
 
-                if (fib->fib_DirEntryType < 0 && n > 11 &&
-                    tool_stricmp((const char *)fib->fib_FileName + n - 11,
-                                 ".update.lha") == 0)
+                if (fib->fib_DirEntryType < 0 && n > sizeof(UPD_N_CONTAINER_EXT) - 1 &&
+                    tool_stricmp((const char *)fib->fib_FileName + n -
+                                 (sizeof(UPD_N_CONTAINER_EXT) - 1),
+                                 UPD_N_CONTAINER_EXT) == 0)
                 {
                     upd_in_dir(upd_p1, (const char *)fib->fib_FileName);
                     if (DeleteFile((CONST_STRPTR)upd_p1))
@@ -803,7 +790,7 @@ static LONG upd_lock_take(VOID)
 {
     if (upd_lock_fh != (BPTR)0)
         return -1;
-    upd_in_dir(upd_p1, "lock");
+    upd_in_dir(upd_p1, UPD_N_LOCK);
     upd_lock_fh = Open((CONST_STRPTR)upd_p1, MODE_NEWFILE);
     if (upd_lock_fh != (BPTR)0)
         return -1;
@@ -824,7 +811,7 @@ static VOID upd_lock_drop(VOID)
         return;
     Close(upd_lock_fh);
     upd_lock_fh = (BPTR)0;
-    upd_in_dir(upd_p1, "lock");
+    upd_in_dir(upd_p1, UPD_N_LOCK);
     (VOID)DeleteFile((CONST_STRPTR)upd_p1);
 }
 
@@ -839,7 +826,7 @@ static LONG upd_install_begin(VOID)
     if (rc >= 0)
         return rc;
 
-    upd_in_dir(upd_p1, "receipt");
+    upd_in_dir(upd_p1, UPD_N_RECEIPT);
     upd_rcpt_text = upd_slurp(upd_p1, UPD_RCPT_FILE_MAX, &upd_rcpt_len);
     upd_rcpt = (UpdRcpt *)AllocVec(UPD_RCPT_MAX * sizeof(UpdRcpt), MEMF_ANY);
     if (upd_rcpt_text == NULL || upd_rcpt == NULL ||
@@ -1065,9 +1052,9 @@ static VOID upd_unstage(UpdInst *in)
 {
     upd_unstage_new(in->je, in->nrep, &upd_amiga_ops);
     (VOID)upd_remove(in->cpath);
-    upd_in_dir(upd_p1, "receipt-next");
+    upd_in_dir(upd_p1, UPD_N_RECEIPT_NEXT);
     (VOID)upd_remove(upd_p1);
-    upd_in_dir(upd_p1, "journal.tmp");
+    upd_in_dir(upd_p1, UPD_N_JOURNAL_TMP);
     (VOID)upd_remove(upd_p1);
     (VOID)upd_remove(upd_journal_path);
     say("staging=removed", NULL, NULL);
@@ -1167,6 +1154,9 @@ static LONG upd_extract(UpdInst *in)
             rc = refuse("member_hash", "a member is not one the manifest names");
             break;
         }
+        /* Not replaced: skipped unhashed.  upd_download() checked the
+           SHA-256 of the whole container, every byte of it, against the
+           signed manifest. */
         if (in->pick[idx].act != UPD_ACT_REPLACE)
         {
             if (Seek(fh, (LONG)lm.size, OFFSET_CURRENT) < 0)
@@ -1177,9 +1167,15 @@ static LONG upd_extract(UpdInst *in)
             continue;
         }
 
-        upd_p2[0] = '\0';
-        sb(upd_p2, UPD_PATH, in->pick[idx].real);
-        sb(upd_p2, UPD_PATH, ".new");
+        /* Each selected file once: a second copy is refused before it
+           overwrites the first. */
+        if (in->je[in->pick[idx].jn].staged)
+        {
+            rc = refuse("member_hash", "a file is in the container twice");
+            break;
+        }
+        (VOID)upd_sidecar(upd_p2, UPD_PATH, in->pick[idx].real,
+                          strlen(in->pick[idx].real), ".new");
         out = Open((CONST_STRPTR)upd_p2, MODE_NEWFILE);
         if (out == (BPTR)0)
         {
@@ -1222,7 +1218,7 @@ static LONG upd_extract(UpdInst *in)
         upd_cut(0);
     }
     Close(fh);
-    if (rc < 0 && got != in->nrep)
+    if (rc < 0 && (got != in->nrep || !upd_all_staged(in->je, in->nrep)))
         rc = refuse("member_hash", "the container lacks a file the manifest "
                                    "names");
     return rc;
@@ -1262,7 +1258,7 @@ static BOOL upd_receipt_next(UpdInst *in)
         sb(out, cap, "\n");
     }
     at = strlen(out);
-    upd_in_dir(upd_p1, "receipt-next");
+    upd_in_dir(upd_p1, UPD_N_RECEIPT_NEXT);
     ok = upd_write_file(upd_p1, out, at);
     FreeVec(out);
     return ok;
@@ -1300,7 +1296,7 @@ static BOOL upd_journal_write(UpdInst *in, const UpdWant *want)
             sb(t, cap, "\n");
         }
     at = strlen(t);
-    upd_in_dir(upd_p1, "journal.tmp");
+    upd_in_dir(upd_p1, UPD_N_JOURNAL_TMP);
     ok = upd_write_file(upd_p1, t, at) &&
          Rename((CONST_STRPTR)upd_p1, (CONST_STRPTR)upd_journal_path);
     FreeVec(t);
@@ -1315,7 +1311,7 @@ static BOOL upd_state_trial(UpdInst *in, const UpdWant *want)
     ULONG       oldlen, n;
     BOOL        ok;
 
-    upd_in_dir(upd_p2, "state");
+    upd_in_dir(upd_p2, UPD_N_STATE);
     old = upd_slurp(upd_p2, UPD_STATE_MAX, &oldlen);
     n = upd_state_merge(old != NULL ? (const char *)old : "", oldlen, "trial",
                         in->newv, 0, upd_flavour_name(want->flavour), out,
@@ -1324,7 +1320,7 @@ static BOOL upd_state_trial(UpdInst *in, const UpdWant *want)
         FreeVec(old);
     if (n == 0)
         return FALSE;
-    upd_in_dir(upd_p1, "state.tmp");
+    upd_in_dir(upd_p1, UPD_N_STATE_TMP);
     ok = upd_write_file(upd_p1, out, n);
     (VOID)upd_remove(upd_p2);
     return ok && Rename((CONST_STRPTR)upd_p1, (CONST_STRPTR)upd_p2);
@@ -1348,7 +1344,7 @@ static LONG upd_install(const char *mirror, const UpdWant *want,
     in.channel = want->channel;
     upd_ver_format(&m->version, in.newv);
     upd_nvols = 0;
-    upd_in_dir(upd_journal_path, "journal");
+    upd_in_dir(upd_journal_path, UPD_N_JOURNAL);
 
     in.pick = (UpdPick *)AllocVec(m->nfiles * sizeof(UpdPick) + 1, MEMF_ANY | MEMF_CLEAR);
     in.pool = (char *)AllocVec(m->nfiles * UPD_PATH, MEMF_ANY);
@@ -1472,6 +1468,12 @@ static LONG upd_install(const char *mirror, const UpdWant *want,
             in.je[v].why  = in.pick[i].why;
             v++;
         }
+    if (!upd_sidecars_distinct(in.je, in.nrep, &failed))
+    {
+        rc = refuse_at("protected", in.je[failed].path, "its name, cut to "
+                       "fit 30 characters, is another file's");
+        goto out;
+    }
     for (i = 0; i < m->nfiles; i++)
     {
         UpdPick *p = &in.pick[i];
@@ -1482,7 +1484,7 @@ static LONG upd_install(const char *mirror, const UpdWant *want,
                  files[i].path_len);
         /* The physical path, which an assign can make longer than the
            journal and the swap's names hold. */
-        upd_in_dir(upd_p2, "prior-old");
+        upd_in_dir(upd_p2, UPD_N_PRIOR);
         if (!upd_swap_fits(&in.je[p->jn], p->jn, upd_p2))
         {
             rc = refuse_at("protected", upd_p1, "its full path does not "
@@ -1500,9 +1502,7 @@ static LONG upd_install(const char *mirror, const UpdWant *want,
                                                 "(Protect <file> +wd)");
             goto out;
         }
-        upd_p2[0] = '\0';
-        sb(upd_p2, UPD_PATH, p->real);
-        sb(upd_p2, UPD_PATH, ".new");
+        (VOID)upd_sidecar(upd_p2, UPD_PATH, p->real, strlen(p->real), ".new");
         /* Not ours: the cleanup took any an unfinished run left. */
         if (!upd_new_free(&in.je[p->jn], 1, &upd_amiga_ops, NULL))
         {
@@ -1510,14 +1510,22 @@ static LONG upd_install(const char *mirror, const UpdWant *want,
                                                 "move it away");
             goto out;
         }
-        upd_p2[strlen(upd_p2) - 4] = '\0';
-        sb(upd_p2, UPD_PATH, ".old");
+        (VOID)upd_sidecar(upd_p2, UPD_PATH, p->real, strlen(p->real), ".old");
         if (upd_exists(upd_p2))
         {
             if (upd_protected(upd_p2, &p->old_size))
             {
                 rc = refuse_at("protected", upd_p2, "an existing .old cannot "
                                                     "be moved aside");
+                goto out;
+            }
+            /* Where it goes, an earlier update's: the swap would stop. */
+            upd_in_dir(upd_p1, UPD_N_PRIOR "/");
+            sbu(upd_p1, UPD_PATH, (ULONG)p->jn + 1);
+            if (upd_exists(upd_p1))
+            {
+                rc = refuse_at("protected", upd_p1, "an earlier update's "
+                                                    "saved file is there");
                 goto out;
             }
             p->has_old = 1;
@@ -1547,7 +1555,7 @@ static LONG upd_install(const char *mirror, const UpdWant *want,
     /* ---- PREPARE ---- */
     tool_copy_string(in.cname, sizeof(in.cname), "");
     sbn(in.cname, sizeof(in.cname), m->container, m->container_len);
-    upd_in_dir(in.cpath, in.cname);
+    upd_in_dir(in.cpath, UPD_N_CONTAINER);
 
     if (in.nrep != 0)
     {
@@ -1585,7 +1593,7 @@ static LONG upd_install(const char *mirror, const UpdWant *want,
     upd_cut(0);
 
     /* ---- SWAP ---- */
-    upd_in_dir(upd_p1, "prior-old");
+    upd_in_dir(upd_p1, UPD_N_PRIOR);
     if (in.nold != 0 && !upd_exists(upd_p1))
     {
         l = CreateDir((CONST_STRPTR)upd_p1);
@@ -1606,7 +1614,7 @@ static LONG upd_install(const char *mirror, const UpdWant *want,
         goto out;
     }
     upd_cut(1);
-    upd_in_dir(upd_p1, "trial");
+    upd_in_dir(upd_p1, UPD_N_TRIAL);
     (VOID)upd_remove(upd_p1);
     if (!Rename((CONST_STRPTR)upd_journal_path, (CONST_STRPTR)upd_p1))
     {
@@ -1820,35 +1828,34 @@ static LONG upd_main(VOID)
     if (upd_key_count == 0)
         return refuse("unknown_key", "this build holds no release key");
 
-    if (upd_run_args.word[0] == 'I')
     {
         struct Process *me = (struct Process *)FindTask(NULL);
         APTR            saved = me->pr_WindowPtr;
         LONG            rc;
 
-        /* No "volume is write protected" or "insert volume" requester:
-           every refusal is a line. */
+        /* No "volume is write protected" or "insert volume" requester on
+           any path to the Update drawer, CHECK ANSWER=INSTALL's too: every
+           refusal is a line. */
         me->pr_WindowPtr = (APTR)-1L;
-        rc = upd_install_begin();
-        if (rc < 0)
-            rc = upd_check(TRUE);
+        if (upd_run_args.word[0] == 'I')
+        {
+            rc = upd_install_begin();
+            if (rc < 0)
+                rc = upd_check(TRUE);
+        }
+        else
+            rc = upd_check(FALSE);
         upd_install_end();
         me->pr_WindowPtr = saved;
-        return rc;
-    }
-
-    {
-        LONG rc = upd_check(FALSE);
-
-        upd_install_end();
         return rc;
     }
 }
 
 /*
  * Hazard: upd_trampoline() must have no locals and no arguments, and must
- * stay noinline; see fetch.c.  16 KB covers http: and the Ed25519 check;
- * https: (tls.library) gets fetch's 64 KB.
+ * stay noinline; see fetch.c.  Its size is upd_stack_size()'s: every
+ * word that fetches gets fetch's 64 KB, as an http: mirror can redirect
+ * to https: (tls.library).
  */
 static struct StackSwapStruct upd_sss;
 static LONG                   upd_result;
@@ -1949,15 +1956,7 @@ int main(int argc, char **argv)
         tool_quiet_begin();
 
     upd_result = RETURN_FAIL;
-    stack_size = 16UL * 1024UL;
-    {
-        UpdSettings peek;
-
-        /* The mirror decides the stack: tls.library wants fetch's. */
-        upd_read_settings(&peek);
-        if (peek.mirror[0] == 'h' && peek.mirror[4] == 's')
-            stack_size = 64UL * 1024UL;
-    }
+    stack_size = upd_stack_size(upd_run_args.word);
     stack = AllocMem(stack_size, MEMF_ANY);
     if (stack != NULL)
     {
