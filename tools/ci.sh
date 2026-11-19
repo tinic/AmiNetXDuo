@@ -559,7 +559,10 @@ host_test_targets() { # builddir
 #      608 with updinstall_select and updinstall_journal (#497):
 #      UpdateAmiNetXDuo INSTALL's receipt, three-way selection, container
 #      headers, journal, and the swap cut after every step (all hosts).
-HOST_TESTS_EXPECTED=608
+#      609 with updinstall_trial (#497): UpdateAmiNetXDuo BOOT's rollback
+#      and CONFIRM's commit cut after every step, the state and the
+#      Uninstall record (all hosts).
+HOST_TESTS_EXPECTED=609
 case "$(uname -m)" in
     x86_64|amd64) ;;
     # test_inet, test_route, test_expunge, test_expunge_cork, test_select,

@@ -747,6 +747,241 @@ static void test_swap(const char *prior)
     CHECK(upd_forward(e, j.nfiles, prior, &fs_ops, 0) == -1);
 }
 
+/* ------------------------------------------- the trial: commit, rollback --- */
+
+/* No half file, no .tmp, nothing left in the prior drawer. */
+static int fs_clean(Fs *fs, const char *prior)
+{
+    char p[UPD_APATH_MAX + 16];
+    int  i, k, ok = 1;
+
+    for (i = 0; i < TF_N; i++)
+    {
+        snprintf(p, sizeof(p), "%s/%d", prior, i + 1);
+        ok &= fs_get(fs, p) == -1;
+        snprintf(p, sizeof(p), "%s/%d.tmp", prior, i + 1);
+        ok &= fs_get(fs, p) == -1;
+        snprintf(p, sizeof(p), "%s.tmp", tf_paths[i]);
+        ok &= fs_get(fs, p) == -1;
+        snprintf(p, sizeof(p), "%s.new", tf_paths[i]);
+        ok &= fs_get(fs, p) == -1;
+    }
+    for (k = 0; k < FS_MAX; k++)
+        if (fs->used[k] && fs->val[k] == -7)
+            ok = 0;
+    return ok;
+}
+
+/* Committed: every file new; ours' .old gone, or the prior one back; the
+   other build (file 1) at .otherbuild with its prior .old back. */
+static int fs_committed(Fs *fs, const char *prior)
+{
+    char p[UPD_APATH_MAX + 16];
+    int  i, ok = fs_clean(fs, prior);
+
+    for (i = 0; i < TF_N; i++)
+    {
+        ok &= fs_get(fs, tf_paths[i]) == 20 + i;
+        snprintf(p, sizeof(p), "%s.old", tf_paths[i]);
+        ok &= fs_get(fs, p) == (tf_old[i] ? 30 + i : -1);
+        snprintf(p, sizeof(p), "%s.otherbuild", tf_paths[i]);
+        ok &= fs_get(fs, p) == (i == 1 ? 11 : -1);
+    }
+    return ok;
+}
+
+static int fs_rolledback(Fs *fs, const char *prior)
+{
+    char p[UPD_APATH_MAX + 16];
+    int  i, ok = fs_clean(fs, prior) && fs_all_old(fs);
+
+    for (i = 0; i < TF_N; i++)
+    {
+        snprintf(p, sizeof(p), "%s.otherbuild", tf_paths[i]);
+        ok &= fs_get(fs, p) == -1;
+    }
+    return ok;
+}
+
+/* The state INSTALL leaves: the swap done, its journal the trial. */
+static void trial_setup(Fs *fs, const char *prior)
+{
+    UpdJournal  j;
+    UpdJEntry   e[TF_N];
+    static char copy[4096];
+
+    fs_setup(fs);
+    strcat(fs->journal, "ready\n");
+    strcpy(copy, fs->journal);
+    upd_journal_parse(copy, strlen(copy), &j, e, TF_N);
+    CHECK(upd_forward(e, j.nfiles, prior, &fs_ops, 0) == 1 && fs_all_new(fs, prior));
+}
+
+/* From the trial file as the disk has it, the way BOOT runs it: a line
+   cut short cut off, then commit (1) or rollback (0) to the end. */
+static int trial_run(Fs *fs, const char *prior, int commit, long budget,
+                     unsigned int stop)
+{
+    UpdJournal  j;
+    UpdJEntry   e[TF_N];
+    static char copy[4096];
+
+    fs_trim(fs);
+    strcpy(copy, fs->journal);
+    if (!upd_journal_parse(copy, strlen(copy), &j, e, TF_N) || !j.ready)
+        return -2;
+    fs->budget = budget;
+    fs->stop_cut = stop;
+    fs->cuts = 0;
+    return commit ? upd_commit(e, j.nfiles, prior, &fs_ops, 0)
+                  : upd_rollback(e, j.nfiles, prior, &fs_ops, 0);
+}
+
+static void test_trial(const char *prior, int commit)
+{
+    static Fs    fs;
+    unsigned int k, full_ops, full_cuts;
+    long         left;
+
+    trial_setup(&fs, prior);
+    CHECK(trial_run(&fs, prior, commit, 100000, 0) == 1);
+    left = fs.budget;
+    full_cuts = fs.cuts;
+    CHECK(commit ? fs_committed(&fs, prior) : fs_rolledback(&fs, prior));
+    full_ops = (unsigned int)(100000 - left);
+    /* Run again over a finished one: nothing to do, nothing changed. */
+    CHECK(trial_run(&fs, prior, commit, -1, 0) == 1);
+    CHECK(commit ? fs_committed(&fs, prior) : fs_rolledback(&fs, prior));
+
+    /* Stopped after every operation, finished by the next boot; and that
+       boot cut again half way. */
+    for (k = 0; k <= full_ops; k++)
+    {
+        int ok;
+
+        trial_setup(&fs, prior);
+        (void)trial_run(&fs, prior, commit, (long)k, 0);
+        CHECK(trial_run(&fs, prior, commit, -1, 0) == 1);
+        ok = commit ? fs_committed(&fs, prior) : fs_rolledback(&fs, prior);
+        if (!ok)
+        {
+            printf("  %s cut after %u operations (prior %s): wrong end\n",
+                   commit ? "commit" : "rollback", k, prior);
+            failures++;
+        }
+        trial_setup(&fs, prior);
+        (void)trial_run(&fs, prior, commit, (long)k, 0);
+        (void)trial_run(&fs, prior, commit, (long)(k / 2), 0);
+        CHECK(trial_run(&fs, prior, commit, -1, 0) == 1);
+        CHECK(commit ? fs_committed(&fs, prior) : fs_rolledback(&fs, prior));
+    }
+
+    /* Each cut point stops it, and the next run finishes it. */
+    for (k = 1; k <= full_cuts; k++)
+    {
+        trial_setup(&fs, prior);
+        CHECK(trial_run(&fs, prior, commit, -1, k) == 0);
+        CHECK(trial_run(&fs, prior, commit, -1, 0) == 1);
+        CHECK(commit ? fs_committed(&fs, prior) : fs_rolledback(&fs, prior));
+    }
+}
+
+static void test_trial_edges(void)
+{
+    static Fs    fs;
+    UpdJournal   j;
+    UpdJEntry    e[TF_N];
+    static char  copy[4096];
+    const char  *prior = "U:Installed/Update/prior-old";
+
+    /* .otherbuild taken: the other build stays at .old, its prior .old in
+       the prior drawer; nothing is lost. */
+    trial_setup(&fs, prior);
+    fs_put(&fs, "SYS:Libs/bsdsocket.library.otherbuild", 99);
+    fs_trim(&fs);
+    strcpy(copy, fs.journal);
+    upd_journal_parse(copy, strlen(copy), &j, e, TF_N);
+    CHECK(upd_commit(e, j.nfiles, prior, &fs_ops, 0) == 1);
+    CHECK(upd_commit_stays(&e[1]) && !upd_commit_stays(&e[0]) &&
+          !upd_commit_stays(&e[2]));
+    CHECK(fs_get(&fs, "SYS:Libs/bsdsocket.library.old") == 11);
+    CHECK(fs_get(&fs, "U:Installed/Update/prior-old/2") == 31);
+    CHECK(fs_get(&fs, "SYS:Libs/bsdsocket.library.otherbuild") == 99);
+    CHECK(fs_get(&fs, "B:Devs/Networks/anxnet.device.old") == 32);
+    /* The journal says so: run again, still both there. */
+    fs_trim(&fs);
+    strcpy(copy, fs.journal);
+    upd_journal_parse(copy, strlen(copy), &j, e, TF_N);
+    CHECK(e[1].kept && !e[1].other && upd_commit_stays(&e[1]));
+    CHECK(upd_commit(e, j.nfiles, prior, &fs_ops, 0) == 1);
+    CHECK(fs_get(&fs, "U:Installed/Update/prior-old/2") == 31);
+
+    /* A rollback whose .old and live file are both gone. */
+    trial_setup(&fs, prior);
+    op_remove(&fs, "SYS:C/fetch");
+    op_remove(&fs, "SYS:C/fetch.old");
+    fs_trim(&fs);
+    strcpy(copy, fs.journal);
+    upd_journal_parse(copy, strlen(copy), &j, e, TF_N);
+    CHECK(upd_rollback(e, j.nfiles, prior, &fs_ops, 0) == -1);
+
+    /* The trial's own lines. */
+    {
+        static const char t[] =
+            "format=1\nversion=1.0.1\nfrom=1.0.0\nflavour=micro\n"
+            "file=ours C:a\nfile=otherbuild C:b\nready\ndone 1\ndone 2\n"
+            "back 2\nother 2\nkept 1\nkept";
+        CHECK(upd_journal_parse(t, sizeof(t) - 1, &j, e, TF_N) == 1);
+        CHECK(e[1].back && !e[0].back && e[1].other && e[0].kept && !e[1].kept);
+        CHECK(upd_journal_trim(t, sizeof(t) - 1) == sizeof(t) - 1 - 4);
+        CHECK(upd_journal_trim("x", 1) == 0 && upd_journal_trim("x\n", 2) == 2);
+        static const char k2[] = "format=1\nversion=1.0.1\nfrom=1.0.0\nflavour=full\n"
+                                 "file=ours C:a\nready\nkept 2\n";
+
+        CHECK(upd_journal_parse(k2, sizeof(k2) - 1, &j, e, TF_N) == 0);
+    }
+}
+
+static void test_state_get(void)
+{
+    static const char st[] = "phase=trial\r\nVersion=1.0.0-rc5.1\nboots=2\nskip=";
+    char v[16];
+
+    CHECK(upd_state_get(st, sizeof(st) - 1, "phase", v, sizeof(v)) && strcmp(v, "trial") == 0);
+    CHECK(upd_state_get(st, sizeof(st) - 1, "version", v, sizeof(v)) &&
+          strcmp(v, "1.0.0-rc5.1") == 0);
+    CHECK(upd_state_get(st, sizeof(st) - 1, "boots", v, sizeof(v)) && strcmp(v, "2") == 0);
+    CHECK(upd_state_get(st, sizeof(st) - 1, "skip", v, sizeof(v)) && v[0] == '\0');
+    CHECK(!upd_state_get(st, sizeof(st) - 1, "phas", v, sizeof(v)));
+    CHECK(!upd_state_get(st, sizeof(st) - 1, "flavour", v, sizeof(v)));
+    CHECK(!upd_state_get(st, sizeof(st) - 1, "version", v, 5));
+}
+
+static void test_record(void)
+{
+    static const char rec[] =
+        "; S:AmiNetXDuo-Files -- written by the AmiNetXDuo installer.\n"
+        "FailAt 21\nDelete \"C:ping\" QUIET\n";
+    static const char sec1[] = UPD_REC_BEGIN "\n; 1.0.1\n" UPD_REC_END "\n";
+    static const char sec2[] = UPD_REC_BEGIN "\n; 1.0.2\nDelete x\n" UPD_REC_END "\n";
+    char          a[512], b[512];
+    unsigned long n, m;
+
+    n = upd_record_merge(rec, sizeof(rec) - 1, sec1, sizeof(sec1) - 1, a, sizeof(a));
+    CHECK(n == strlen(a) && n == sizeof(rec) - 1 + sizeof(sec1) - 1);
+    CHECK(strstr(a, "FailAt 21\n" UPD_REC_BEGIN) != 0);
+    CHECK(strstr(a, UPD_REC_END "\nDelete \"C:ping\" QUIET\n") != 0);
+    /* Again: the block replaced, not added. */
+    m = upd_record_merge(a, n, sec2, sizeof(sec2) - 1, b, sizeof(b));
+    CHECK(m == sizeof(rec) - 1 + sizeof(sec2) - 1);
+    CHECK(strstr(b, "1.0.1") == 0 && strstr(b, "FailAt 21\n" UPD_REC_BEGIN "\n; 1.0.2") != 0);
+    CHECK(strstr(b, "Delete \"C:ping\"") != 0);
+    /* No FailAt line: first.  Too small: 0. */
+    n = upd_record_merge("Delete y\n", 9, sec1, sizeof(sec1) - 1, a, sizeof(a));
+    CHECK(n > 0 && strncmp(a, UPD_REC_BEGIN, strlen(UPD_REC_BEGIN)) == 0);
+    CHECK(upd_record_merge(rec, sizeof(rec) - 1, sec1, sizeof(sec1) - 1, a, 40) == 0);
+}
+
 int main(int argc, char **argv)
 {
     const char *which = argc > 1 ? argv[1] : "all";
@@ -764,6 +999,16 @@ int main(int argc, char **argv)
         test_state();
         test_swap("U:Installed/Update/prior-old");   /* the volume of most */
         test_swap("B:Installed/Update/prior-old");   /* another: copies    */
+    }
+    if (strcmp(which, "trial") == 0 || strcmp(which, "all") == 0)
+    {
+        test_state_get();
+        test_record();
+        test_trial("U:Installed/Update/prior-old", 1);
+        test_trial("B:Installed/Update/prior-old", 1);
+        test_trial("U:Installed/Update/prior-old", 0);
+        test_trial("B:Installed/Update/prior-old", 0);
+        test_trial_edges();
     }
 
     printf("test_updinstall %s: %d checks, %d failures\n", which, checks, failures);

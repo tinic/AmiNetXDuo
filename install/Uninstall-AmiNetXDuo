@@ -117,10 +117,34 @@
 ; The record goes with what it records; kept while anything is still to
 ; be put back, so that running this again finishes the job.
 (if (NOT NOT_BACK)
+  (
     (delete REC
             (prompt ("Deleting %s" REC))
             (help "A file AmiNetXDuo put there.")
-            (optional "force" "nofail")))
+            (optional "force" "nofail"))
+    (if (exists "S:AmiNetXDuo-Install" (noreq))
+        (delete "S:AmiNetXDuo-Install"
+                (prompt "Deleting S:AmiNetXDuo-Install")
+                (help "A file AmiNetXDuo put there.")
+                (optional "force" "nofail")))
+  ))
+
+; UpdateAmiNetXDuo's settings, and their drawers when nothing else is in
+; them.
+(set UPD_N 0)
+(while (set UPD_D (select UPD_N "ENVARC:AmiNetXDuo" "ENV:AmiNetXDuo" ""))
+  (
+    (if (exists (tackon UPD_D "Update") (noreq))
+        (delete (tackon UPD_D "Update")
+                (prompt ("Deleting %s" (tackon UPD_D "Update")))
+                (help "The settings of UpdateAmiNetXDuo.")
+                (optional "force" "nofail")))
+    (if (= 2 (exists UPD_D (noreq)))
+        (run ("Delete >NIL: %s QUIET" UPD_D)
+             (prompt ("Deleting %s when it is empty" UPD_D))
+             (help "The drawer of AmiNetXDuo's settings.")))
+    (set UPD_N (+ UPD_N 1))
+  ))
 
 (complete 100)
 

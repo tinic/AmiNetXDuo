@@ -11,11 +11,17 @@
  * INSTALL (and CHECK ANSWER=INSTALL): CHECK, then the receipt's three-way
  * file selection, PREPARE (the container to the Update drawer, every
  * member to <live>.new, the journal) and SWAP (src/tools/updinstall.h).
- * BOOT, CONFIRM and the SKIP answer are refused as not implemented until
- * their part of #497 lands.
+ * BOOT, the first startup line: a journal finished or undone, the trial's
+ * boots counted, and on the third boot without CONFIRM the update rolled
+ * back.  CONFIRM, after S:Network-Startup: once an interface has an
+ * address, the trial committed (the .old files, the receipt, the record
+ * Uninstall-AmiNetXDuo runs).  The SKIP answer is refused as not
+ * implemented until its part of #497 lands.
  *
  *   rc 0   update=current, update=off, update=foreign_stack,
- *          update=installed
+ *          update=installed, update=skipped; BOOT and CONFIRM always, but
+ *          for a journal they cannot read (5): a startup line never stops
+ *          the startup
  *      5   update=available (and update=later with ANSWER=LATER)
  *     10   refused=<why>; nothing changed
  *     20   failed after the first live file was touched
@@ -499,10 +505,21 @@ static UBYTE *upd_slurp(const char *path, ULONG cap, ULONG *len)
     return buf;
 }
 
+/* <dir>/Installed/Update, locked; 0 when it is not there. */
+static BPTR upd_lock_udir(const char *dir, ULONG n)
+{
+    upd_p1[0] = '\0';
+    sbn(upd_p1, UPD_PATH, dir, n);
+    sb(upd_p1, UPD_PATH, upd_p1[strlen(upd_p1) - 1] == ':'
+                         ? "Installed/Update" : "/Installed/Update");
+    return Lock((CONST_STRPTR)upd_p1, SHARED_LOCK);
+}
+
 /*
  * The Update drawer: AmiNetXDuo:Installed/Update, or, in the system layout,
  * which assigns no AmiNetXDuo:, <DOCDIR>/Installed/Update with DOCDIR from
- * the T:AmiNetXDuo-DrawerKept line of S:AmiNetXDuo-Files (the record
+ * the docdir= line of S:AmiNetXDuo-Install, or from the
+ * T:AmiNetXDuo-DrawerKept line of S:AmiNetXDuo-Files (the record
  * InstallSameFile DRAWER reads).  FALSE when there is none.  The caller has
  * the window pointer at -1.
  */
@@ -520,6 +537,14 @@ static BOOL upd_find_udir(VOID)
     upd_udir[0] = '\0';
 
     lock = Lock((CONST_STRPTR)"AmiNetXDuo:Installed/Update", SHARED_LOCK);
+    if (lock == (BPTR)0 &&
+        (t = upd_slurp("S:AmiNetXDuo-Install", 4096UL, &len)) != NULL)
+    {
+        if (upd_state_get((const char *)t, len, "docdir", upd_p2, UPD_PATH - 20) &&
+            upd_p2[0] != '\0')
+            lock = upd_lock_udir(upd_p2, strlen(upd_p2));
+        FreeVec(t);
+    }
     if (lock == (BPTR)0)
     {
         t = upd_slurp("S:AmiNetXDuo-Files", 256UL * 1024UL, &len);
@@ -532,13 +557,7 @@ static BOOL upd_find_udir(VOID)
                 for (j = i; j < len && t[j] != '"' && t[j] != '\n'; j++)
                     ;
                 if (j < len && t[j] == '"' && j > i && j - i < UPD_PATH - 20)
-                {
-                    upd_p1[0] = '\0';
-                    sbn(upd_p1, UPD_PATH, (const char *)t + i, j - i);
-                    sb(upd_p1, UPD_PATH, upd_p1[strlen(upd_p1) - 1] == ':'
-                                         ? "Installed/Update" : "/Installed/Update");
-                    lock = Lock((CONST_STRPTR)upd_p1, SHARED_LOCK);
-                }
+                    lock = upd_lock_udir((const char *)t + i, j - i);
                 break;
             }
         FreeVec(t);
@@ -601,7 +620,7 @@ static LONG refuse_at(const char *why, const char *path, const char *hint)
 static char  upd_stop_phase[12];
 static ULONG upd_stop_n;
 static char  upd_stop_file[128];
-static ULONG upd_cuts[2];
+static ULONG upd_cuts[3];
 
 /* ENV:AmiNetXDuo/UpdateTestStop: "<prepare|swap|rollback> <n> <file>". */
 static VOID upd_stop_read(VOID)
@@ -634,11 +653,11 @@ static VOID upd_stop_read(VOID)
     FreeVec(t);
 }
 
-/* A cut point of PREPARE (0) or SWAP (1): the one named stops here, as a
-   power cut would, after saying so. */
+/* A cut point of PREPARE (0), SWAP (1) or the rollback (2): the one named
+   stops here, as a power cut would, after saying so. */
 static VOID upd_cut(ULONG phase)
 {
-    static const char *const names[] = { "prepare", "swap" };
+    static const char *const names[] = { "prepare", "swap", "rollback" };
     ULONG n = ++upd_cuts[phase];
 
     if (upd_stop_n == n && tool_stricmp(upd_stop_phase, names[phase]) == 0)
@@ -660,9 +679,13 @@ static VOID upd_cut(ULONG phase)
 
 /*
  * Leftovers of a run that stopped: a journal without "ready" is undone (its
- * .new files deleted), a container and the staged receipt removed.  A
- * journal with "ready" is a swap half done, which BOOT finishes: refused.
+ * .new files deleted), a container and the staged receipt removed, and a
+ * trial that was committed or rolled back before its file went.  A journal
+ * with "ready" is a swap half done, which BOOT finishes: refused.  Called
+ * only outside a trial, whose receipt-next and trial are still wanted.
  */
+static BOOL upd_removed;
+
 static LONG upd_clean_stale(VOID)
 {
     struct FileInfoBlock *fib;
@@ -706,6 +729,11 @@ static LONG upd_clean_stale(VOID)
     upd_in_dir(upd_p1, "receipt-next");
     if (upd_exists(upd_p1))
         removed = upd_remove(upd_p1) || removed;
+    upd_in_dir(upd_p1, "trial");
+    if (upd_exists(upd_p1))
+        removed = upd_remove(upd_p1) || removed;
+    upd_in_dir(upd_p1, "prior-old");
+    (VOID)DeleteFile((CONST_STRPTR)upd_p1);     /* only when empty */
 
     /* Every container: <name>.update.lha. */
     fib = (struct FileInfoBlock *)AllocDosObject(DOS_FIB, NULL);
@@ -746,12 +774,102 @@ static LONG upd_clean_stale(VOID)
 
     if (removed)
         say("staging=removed", NULL, NULL);
+    upd_removed = removed;
     return -1;
 }
 
-/* The receipt and the Update drawer, before anything is fetched. */
-static LONG upd_install_begin(VOID)
+/* ---- the state ---- */
+
+static char  upd_st[UPD_STATE_MAX + 1];
+static ULONG upd_st_len;
+
+/* The state into upd_st; state.tmp when a cut left only that.  Empty when
+   there is neither. */
+static VOID upd_state_load(VOID)
 {
+    static const char *const names[] = { "state", "state.tmp" };
+    UBYTE *t = NULL;
+    ULONG  len = 0, i;
+
+    upd_st_len = 0;
+    upd_st[0] = '\0';
+    for (i = 0; i < 2 && t == NULL; i++)
+    {
+        upd_in_dir(upd_p2, names[i]);
+        t = upd_slurp(upd_p2, UPD_STATE_MAX, &len);
+    }
+    if (t != NULL)
+    {
+        CopyMem(t, upd_st, len);
+        upd_st_len = len;
+        upd_st[len] = '\0';
+        FreeVec(t);
+    }
+}
+
+/* A state value, "" when there is none. */
+static const char *upd_state_value(const char *key)
+{
+    static char v[UPD_VER_MAX + 16];
+
+    if (!upd_state_get(upd_st, upd_st_len, key, v, sizeof(v)))
+        v[0] = '\0';
+    return v;
+}
+
+static BOOL upd_phase_is(const char *phase)
+{
+    return tool_stricmp(upd_state_value("phase"), phase) == 0;
+}
+
+/* A trial, its commit or its rollback is under way. */
+static BOOL upd_phase_open(VOID)
+{
+    return upd_phase_is("trial") || upd_phase_is("commit") ||
+           upd_phase_is("rollback");
+}
+
+/* phase, version and boots set, flavour (NULL: the state's own) and every
+   other line kept: state.tmp, then renamed over state. */
+static BOOL upd_state_put(const char *phase, const char *version, ULONG boots,
+                          const char *flavour)
+{
+    static char out[UPD_STATE_MAX];
+    static char fl[16];
+    ULONG       n;
+    BOOL        ok;
+
+    upd_state_load();
+    if (flavour == NULL)
+    {
+        tool_copy_string(fl, sizeof(fl), upd_state_value("flavour"));
+        flavour = fl;
+    }
+    n = upd_state_merge(upd_st, upd_st_len, phase, version, boots, flavour,
+                        out, sizeof(out));
+    if (n == 0)
+        return FALSE;
+    upd_in_dir(upd_p1, "state.tmp");
+    upd_in_dir(upd_p2, "state");
+    ok = upd_write_file(upd_p1, out, n);
+    if (ok)
+        (VOID)upd_remove(upd_p2);
+    ok = ok && Rename((CONST_STRPTR)upd_p1, (CONST_STRPTR)upd_p2);
+    if (ok)
+    {
+        CopyMem(out, upd_st, n);
+        upd_st_len = n;
+        upd_st[n] = '\0';
+    }
+    return ok;
+}
+
+/* The receipt and the Update drawer, before anything is fetched: an
+   installation from before 1.0.0-rc5 has neither. */
+static LONG upd_receipt_load(VOID)
+{
+    if (upd_rcpt != NULL)
+        return -1;
     if (!upd_find_udir())
         return refuse("no_receipt", "no install receipt: run Install-AmiNetXDuo");
 
@@ -761,8 +879,28 @@ static LONG upd_install_begin(VOID)
     if (upd_rcpt_text == NULL || upd_rcpt == NULL ||
         !upd_receipt_parse((const char *)upd_rcpt_text, upd_rcpt_len, upd_rcpt,
                            UPD_RCPT_MAX, &upd_nrcpt))
+    {
+        if (upd_rcpt != NULL)
+            FreeVec(upd_rcpt);
+        upd_rcpt = NULL;
         return refuse("no_receipt", "no install receipt: run Install-AmiNetXDuo");
+    }
+    return -1;
+}
 
+/* INSTALL's start: the receipt, no trial under way, and what a run that
+   stopped left behind removed. */
+static LONG upd_install_begin(VOID)
+{
+    LONG rc = upd_receipt_load();
+
+    if (rc >= 0)
+        return rc;
+    upd_state_load();
+    if (upd_phase_open())
+        return refuse("pending", "the update installed last is on trial: "
+                                 "restart, and the next boot with the "
+                                 "network up confirms it");
     upd_stop_read();
     return upd_clean_stale();
 }
@@ -893,10 +1031,15 @@ static int ao_journal(void *c, const char *line)
     return Close(fh) && ok;
 }
 
+/* The phase the swap's cut points count in: 1 SWAP (and BOOT's forward),
+   2 the rollback, 3 none (the commit). */
+static ULONG upd_cut_phase = 1;
+
 static int ao_cut(void *c)
 {
     (VOID)c;
-    upd_cut(1);
+    if (upd_cut_phase < 3)
+        upd_cut(upd_cut_phase);
     return 1;
 }
 
@@ -1217,29 +1360,6 @@ static BOOL upd_journal_write(UpdInst *in, const UpdWant *want)
     return ok;
 }
 
-/* phase=trial with the rest of the state kept: state.tmp, then renamed. */
-static BOOL upd_state_trial(UpdInst *in, const UpdWant *want)
-{
-    static char out[UPD_STATE_MAX];
-    UBYTE      *old;
-    ULONG       oldlen, n;
-    BOOL        ok;
-
-    upd_in_dir(upd_p2, "state");
-    old = upd_slurp(upd_p2, UPD_STATE_MAX, &oldlen);
-    n = upd_state_merge(old != NULL ? (const char *)old : "", oldlen, "trial",
-                        in->newv, 0, upd_flavour_name(want->flavour), out,
-                        sizeof(out));
-    if (old != NULL)
-        FreeVec(old);
-    if (n == 0)
-        return FALSE;
-    upd_in_dir(upd_p1, "state.tmp");
-    ok = upd_write_file(upd_p1, out, n);
-    (VOID)upd_remove(upd_p2);
-    return ok && Rename((CONST_STRPTR)upd_p1, (CONST_STRPTR)upd_p2);
-}
-
 static LONG upd_install(const char *mirror, const UpdWant *want,
                         UpdManifest *m, UpdFile *files)
 {
@@ -1496,7 +1616,7 @@ static LONG upd_install(const char *mirror, const UpdWant *want,
         rc = UPD_RC_FAILED;
         goto out;
     }
-    if (!upd_state_trial(&in, want))
+    if (!upd_state_put("trial", in.newv, 0, upd_flavour_name(want->flavour)))
     {
         tool_error("%s could not be written", (LONG)"state");
         rc = UPD_RC_FAILED;
@@ -1582,6 +1702,15 @@ static LONG upd_check(BOOL install)
                                     "run Install-AmiNetXDuo");
     }
 
+    /* Installed before 1.0.0-rc5, or by hand: nothing to update from. */
+    rc = upd_receipt_load();
+    if (rc >= 0)
+    {
+        if (base != NULL)
+            CloseLibrary(base);
+        return rc;
+    }
+
     want.flavour = (unsigned char)flavour;
     want.channel = (unsigned char)(upd_set.channel >= 0
                        ? upd_set.channel
@@ -1653,6 +1782,16 @@ static LONG upd_check(BOOL install)
 
     case UPD_V_AVAILABLE:
         upd_ver_format(&m.version, upd_ver_text);
+        /* The version a rollback took back out, or one the user skipped. */
+        upd_state_load();
+        if ((upd_phase_is("rolledback") &&
+             tool_stricmp(upd_state_value("version"), upd_ver_text) == 0) ||
+            tool_stricmp(upd_state_value("skip"), upd_ver_text) == 0)
+        {
+            say("update=skipped version=", upd_ver_text, NULL);
+            rc = RETURN_OK;
+            break;
+        }
         say("update=available version=", upd_ver_text, NULL);
         rc = UPD_RC_AVAILABLE;
         if (!install && upd_run_args.answer != ANSWER_NONE)
@@ -1700,8 +1839,527 @@ done:
     return rc;
 }
 
+/* ------------------------------------------------------- BOOT, CONFIRM --- */
+
+#define UPD_BOOTS_MAX       2               /* unconfirmed boots of a trial  */
+#define UPD_CONFIRM_WAIT    30              /* seconds for an address        */
+#define UPD_RECORD          "S:AmiNetXDuo-Files"
+#define UPD_RECORD_MAX      (256UL * 1024UL)
+
+static ULONG upd_atoul(const char *s)
+{
+    ULONG v = 0;
+
+    while (*s >= '0' && *s <= '9' && v < 100000UL)
+        v = v * 10 + (ULONG)(*s++ - '0');
+    return v;
+}
+
+/* A journal or trial file read and parsed; text NULL when it is not there. */
+typedef struct UpdJFile
+{
+    UBYTE      *text;
+    ULONG       len;
+    UpdJEntry  *e;
+    UpdJournal  j;
+    BOOL        ok;
+    BOOL        unread;     /* there, and not read: never "not there" */
+} UpdJFile;
+
+/* BOOT's, the commit's and the rollback's, one at a time: static, as the
+   startup line may run on the Shell's stack. */
+static UpdJFile upd_jf;
+
+static VOID upd_jfree(UpdJFile *f)
+{
+    if (f->e != NULL)
+        FreeVec(f->e);
+    if (f->text != NULL)
+        FreeVec(f->text);
+    f->e = NULL;
+    f->text = NULL;
+}
+
+/* upd_journal_path read; ok when it parses.  A last line cut short is cut
+   off the file first, so that what is appended starts a line of its own. */
+static VOID upd_jload(UpdJFile *f)
+{
+    ULONG keep;
+
+    memset(f, 0, sizeof(*f));
+    f->text = upd_slurp(upd_journal_path, 64UL * 1024UL, &f->len);
+    if (f->text == NULL)
+    {
+        f->unread = upd_exists(upd_journal_path) ||
+                    IoErr() != ERROR_OBJECT_NOT_FOUND;
+        return;
+    }
+    f->e = (UpdJEntry *)AllocVec(UPD_FILES_MAX * sizeof(UpdJEntry), MEMF_ANY | MEMF_CLEAR);
+    if (f->e == NULL ||
+        !upd_journal_parse((const char *)f->text, f->len, &f->j, f->e, UPD_FILES_MAX))
+        return;
+    keep = upd_journal_trim((const char *)f->text, f->len);
+    if (keep != f->len)
+    {
+        BPTR fh = Open((CONST_STRPTR)upd_journal_path, MODE_OLDFILE);
+
+        if (fh == (BPTR)0)
+            return;
+        if (SetFileSize(fh, (LONG)keep, OFFSET_BEGINNING) != (LONG)keep)
+        {
+            Close(fh);
+            return;
+        }
+        Close(fh);
+    }
+    f->ok = TRUE;
+}
+
+static VOID upd_say_version(const char *what, const UpdVer *v)
+{
+    upd_ver_format(v, upd_ver_text);
+    say(what, upd_ver_text, NULL);
+}
+
+/* The prior-old drawer, made when it is not there. */
+static VOID upd_prior_dir(char *out)
+{
+    BPTR l;
+
+    upd_in_dir(out, "prior-old");
+    if (!upd_exists(out) && (l = CreateDir((CONST_STRPTR)out)) != (BPTR)0)
+        UnLock(l);
+}
+
+/*
+ * S:AmiNetXDuo-Files with this update's block: Uninstall-AmiNetXDuo deletes
+ * the other build's copies the commit kept (<path>.old, <path>.otherbuild)
+ * where they still carry the mark; a prior .old put back is not ours and is
+ * not named.  The trust store is the one receipt file the installer's
+ * record leaves to Installed/Remove, which deletes it only while it holds
+ * the bytes of its copy in Installed: that copy becomes the store as it is
+ * now, and the block deletes the store where it still holds those bytes.  Written as
+ * .tmp and renamed; a .tmp a cut left is the record.
+ */
+/* The trust store's path as the receipt names it, into `out`, and its hash
+   there into `hex`; FALSE when the receipt lists none. */
+static BOOL upd_store_path(char *out, char *hex)
+{
+    UBYTE *t;
+    ULONG  len, a, b;
+    BOOL   found = FALSE;
+
+    upd_in_dir(upd_line, "receipt");
+    t = upd_slurp(upd_line, UPD_RCPT_FILE_MAX, &len);
+    if (t == NULL)
+        return FALSE;
+    for (a = 0; a < len && !found; a = b + 1)
+    {
+        for (b = a; b < len && t[b] != '\n'; b++)
+            ;
+        if (b - a > 65 + 12 &&
+            tool_stricmp_n((const char *)t + b - 12, "certificates", 12) == 0 &&
+            (t[b - 13] == '/' || t[b - 13] == ':') && b - a - 65 < UPD_PATH)
+        {
+            out[0] = '\0';
+            sbn(out, UPD_PATH, (const char *)t + a + 65, b - a - 65);
+            CopyMem(t + a, hex, 64);
+            hex[64] = '\0';
+            found = TRUE;
+        }
+    }
+    FreeVec(t);
+    return found;
+}
+
+static __attribute__((noinline)) VOID upd_record(const UpdJFile *f)
+{
+    /* Static: CONFIRM may run on the Shell's stack. */
+    static char             want[65], have[65], date[11];
+    static UBYTE            sha[32];
+    static UpdScan          scan;
+    static struct DateStamp ds;
+    ULONG  len = 0, cap, n, i;
+    UBYTE *old;
+    char  *sec, *out;
+
+    if (!upd_exists(UPD_RECORD) && upd_exists(UPD_RECORD ".tmp"))
+        (VOID)Rename((CONST_STRPTR)UPD_RECORD ".tmp", (CONST_STRPTR)UPD_RECORD);
+    old = upd_slurp(UPD_RECORD, UPD_RECORD_MAX, &len);
+    if (old == NULL)
+        return;
+
+    for (i = 0, cap = 200; i < f->j.nfiles; i++)
+        if (f->e[i].why == UPD_WHY_OTHERBUILD)
+            cap += 3 * UPD_PATH + 120;
+    cap += 4 * UPD_PATH + 120;          /* the trust store's lines         */
+    sec = (char *)AllocVec(cap, MEMF_ANY);
+    out = (char *)AllocVec(len + cap, MEMF_ANY);
+    if (sec != NULL && out != NULL)
+    {
+        /* InstallSameFile, beside the Update drawer in Installed. */
+        upd_p2[0] = '\0';
+        sb(upd_p2, UPD_PATH, upd_udir);
+        for (i = strlen(upd_p2); i > 0 && upd_p2[i - 1] != '/' && upd_p2[i - 1] != ':'; i--)
+            ;
+        upd_p2[i] = '\0';
+        sb(upd_p2, UPD_PATH, "InstallSameFile");
+
+        DateStamp(&ds);
+        upd_date((unsigned long)ds.ds_Days, date);
+        upd_ver_format(&f->j.version, upd_ver_text);
+        sec[0] = '\0';
+        sb(sec, cap, UPD_REC_BEGIN "\n; ");
+        sb(sec, cap, upd_ver_text);
+        sb(sec, cap, ", installed by UpdateAmiNetXDuo on ");
+        sb(sec, cap, date);
+        sb(sec, cap, "\n");
+        if (upd_store_path(upd_p1, want))
+        {
+            /* <Installed>/Devs/Internet/certificates, as it is now -- only
+               while it is the receipt's: a store the user edited stays
+               one Uninstall keeps. */
+            static char snap[UPD_PATH];
+
+            snap[0] = '\0';
+            sbn(snap, UPD_PATH, upd_p2, strlen(upd_p2) - 15);
+            sb(snap, UPD_PATH, "Devs/Internet/certificates");
+            if (upd_exists(snap) && upd_hash_file(upd_p1, sha, &scan) &&
+                (upd_hex32(sha, have), memcmp(have, want, 64) == 0))
+            {
+                upd_line[0] = '\0';
+                sb(upd_line, sizeof(upd_line), snap);
+                sb(upd_line, sizeof(upd_line), ".tmp");
+                if (ao_copy(NULL, upd_p1, upd_line) && upd_remove(snap))
+                    (VOID)Rename((CONST_STRPTR)upd_line, (CONST_STRPTR)snap);
+            }
+            sb(sec, cap, "If EXISTS \"");
+            sb(sec, cap, upd_p1);
+            sb(sec, cap, "\"\n  \"");
+            sb(sec, cap, upd_p2);
+            sb(sec, cap, "\" \"");
+            sb(sec, cap, upd_p1);
+            sb(sec, cap, "\" \"");
+            sb(sec, cap, snap);
+            sb(sec, cap, "\" BYTES\n  If NOT WARN\n    Delete \"");
+            sb(sec, cap, upd_p1);
+            sb(sec, cap, "\" QUIET\n  EndIf\nEndIf\n");
+        }
+        for (i = 0; i < f->j.nfiles; i++)
+        {
+            if (f->e[i].why != UPD_WHY_OTHERBUILD)
+                continue;
+            upd_p1[0] = '\0';
+            sbn(upd_p1, UPD_PATH, f->e[i].path, f->e[i].len);
+            sb(upd_p1, UPD_PATH, f->e[i].other ? ".otherbuild" : ".old");
+            sb(sec, cap, "If EXISTS \"");
+            sb(sec, cap, upd_p1);
+            sb(sec, cap, "\"\n  \"");
+            sb(sec, cap, upd_p2);
+            sb(sec, cap, "\" \"");
+            sb(sec, cap, upd_p1);
+            sb(sec, cap, "\" AmiNetXDuo MARK\n  If NOT WARN\n    Delete \"");
+            sb(sec, cap, upd_p1);
+            sb(sec, cap, "\" QUIET\n  EndIf\nEndIf\n");
+        }
+        sb(sec, cap, UPD_REC_END "\n");
+        n = upd_record_merge((const char *)old, len, sec, strlen(sec), out, len + cap);
+        if (n != 0 && upd_write_file(UPD_RECORD ".tmp", out, n) &&
+            DeleteFile((CONST_STRPTR)UPD_RECORD))
+            (VOID)Rename((CONST_STRPTR)UPD_RECORD ".tmp", (CONST_STRPTR)UPD_RECORD);
+    }
+    if (out != NULL)
+        FreeVec(out);
+    if (sec != NULL)
+        FreeVec(sec);
+    FreeVec(old);
+}
+
+/* The trial committed: the .old rules, receipt-next as the receipt, the
+   record, phase=confirmed.  Each step repeatable: BOOT runs it again after a
+   cut, from phase=commit. */
+static LONG upd_commit_run(VOID)
+{
+    UpdJFile    *fp = &upd_jf;
+    unsigned int failed, i;
+    LONG         rc = RETURN_OK;
+
+    upd_in_dir(upd_journal_path, "trial");
+    upd_jload(fp);
+    if (fp->unread || (fp->text != NULL && !fp->ok))
+    {
+        upd_jfree(fp);
+        return refuse("pending", "the trial file cannot be read");
+    }
+    if (fp->ok)
+    {
+        upd_prior_dir(upd_p1);
+        upd_cut_phase = 3;
+        if (upd_commit(fp->e, fp->j.nfiles, upd_p1, &upd_amiga_ops, &failed) != 1)
+        {
+            tool_error("the commit stopped at %s: the next boot finishes it",
+                       (LONG)(failed < fp->j.nfiles ? fp->e[failed].path : ""));
+            upd_jfree(fp);
+            return RETURN_WARN;
+        }
+        for (i = 0; i < fp->j.nfiles; i++)
+            if (upd_commit_stays(&fp->e[i]))
+            {
+                upd_line[0] = '\0';
+                sb(upd_line, sizeof(upd_line), "file=keep otherbuild ");
+                sbn(upd_line, sizeof(upd_line), fp->e[i].path, fp->e[i].len);
+                sb(upd_line, sizeof(upd_line), ".old prior=prior-old/");
+                sbu(upd_line, sizeof(upd_line), i + 1);
+                say(upd_line, NULL, NULL);
+            }
+    }
+
+    upd_in_dir(upd_p1, "receipt-next");
+    upd_in_dir(upd_p2, "receipt");
+    if (upd_exists(upd_p1) &&
+        (!upd_remove(upd_p2) || !Rename((CONST_STRPTR)upd_p1, (CONST_STRPTR)upd_p2)))
+    {
+        tool_error("%s could not be renamed", (LONG)upd_p1);
+        rc = RETURN_WARN;
+    }
+    if (fp->ok)
+        upd_record(fp);
+
+    tool_copy_string(upd_ver_text, sizeof(upd_ver_text), upd_state_value("version"));
+    if (rc == RETURN_OK &&
+        !upd_state_put("confirmed", upd_ver_text,
+                       upd_atoul(upd_state_value("boots")), NULL))
+        rc = RETURN_WARN;
+    if (rc == RETURN_OK)
+    {
+        upd_in_dir(upd_p1, "trial");
+        (VOID)upd_remove(upd_p1);
+        upd_in_dir(upd_p1, "prior-old");
+        (VOID)DeleteFile((CONST_STRPTR)upd_p1);    /* only when empty */
+        say("confirm=confirmed version=", upd_ver_text, NULL);
+    }
+    upd_jfree(fp);
+    return rc;
+}
+
+/* The trial rolled back: every .old live again, every prior .old back,
+   receipt-next dropped (the receipt is the one before), phase=rolledback;
+   CHECK skips that version from then on. */
+static LONG upd_rollback_run(VOID)
+{
+    UpdJFile    *fp = &upd_jf;
+    unsigned int failed;
+
+    upd_in_dir(upd_journal_path, "trial");
+    upd_jload(fp);
+    if (fp->unread || (fp->text != NULL && !fp->ok))
+    {
+        upd_jfree(fp);
+        return refuse("pending", "the trial file cannot be read");
+    }
+    if (fp->ok)
+    {
+        upd_prior_dir(upd_p1);
+        upd_cut_phase = 2;
+        if (upd_rollback(fp->e, fp->j.nfiles, upd_p1, &upd_amiga_ops, &failed) != 1)
+        {
+            tool_error("the rollback stopped at %s: the next boot finishes it",
+                       (LONG)(failed < fp->j.nfiles ? fp->e[failed].path : ""));
+            upd_jfree(fp);
+            return RETURN_WARN;
+        }
+    }
+    upd_jfree(fp);
+
+    upd_in_dir(upd_p1, "receipt-next");
+    (VOID)upd_remove(upd_p1);
+    tool_copy_string(upd_ver_text, sizeof(upd_ver_text), upd_state_value("version"));
+    if (!upd_state_put("rolledback", upd_ver_text,
+                       upd_atoul(upd_state_value("boots")), NULL))
+        return RETURN_WARN;
+    upd_in_dir(upd_p1, "trial");
+    (VOID)upd_remove(upd_p1);
+    upd_in_dir(upd_p1, "prior-old");
+    (VOID)DeleteFile((CONST_STRPTR)upd_p1);
+    say("boot=rolledback version=", upd_ver_text, NULL);
+    return RETURN_OK;
+}
+
+/*
+ * BOOT, before anything opens bsdsocket.library: a journal with "ready"
+ * finished (the swap that a cut stopped), one without it undone with the
+ * rest of a stopped PREPARE, then the trial's boots counted.
+ */
+static LONG upd_boot(VOID)
+{
+    UpdJFile    *fp = &upd_jf;
+    unsigned int failed;
+    ULONG        boots;
+
+    if (!upd_find_udir())
+        return RETURN_OK;
+    upd_stop_read();
+
+    upd_in_dir(upd_journal_path, "journal");
+    upd_jload(fp);
+    if (fp->unread)
+    {
+        /* Not read is not absent: nothing is undone or counted on it. */
+        upd_jfree(fp);
+        return refuse("pending", "the journal cannot be read");
+    }
+    if (fp->ok && fp->j.ready)
+    {
+        upd_prior_dir(upd_p1);
+        upd_cut_phase = 1;
+        if (upd_forward(fp->e, fp->j.nfiles, upd_p1, &upd_amiga_ops, &failed) != 1)
+        {
+            tool_error("the swap could not be finished at %s",
+                       (LONG)(failed < fp->j.nfiles ? fp->e[failed].path : ""));
+            upd_jfree(fp);
+            return RETURN_WARN;
+        }
+        upd_ver_format(&fp->j.version, upd_ver_text);
+        if (upd_state_put("trial", upd_ver_text, 0, upd_flavour_name(fp->j.flavour)))
+            upd_in_dir(upd_p2, "trial");
+        else
+            upd_p2[0] = '\0';
+        if (upd_p2[0] == '\0' || !upd_remove(upd_p2) ||
+            !Rename((CONST_STRPTR)upd_journal_path, (CONST_STRPTR)upd_p2))
+        {
+            tool_error("%s could not be renamed", (LONG)upd_journal_path);
+            upd_jfree(fp);
+            return RETURN_WARN;
+        }
+        upd_say_version("boot=forward version=", &fp->j.version);
+    }
+    upd_jfree(fp);
+
+    upd_state_load();
+    if (upd_phase_is("trial"))
+    {
+        tool_copy_string(upd_ver_text, sizeof(upd_ver_text), upd_state_value("version"));
+        boots = upd_atoul(upd_state_value("boots")) + 1;
+        if (boots > UPD_BOOTS_MAX)
+        {
+            if (!upd_state_put("rollback", upd_ver_text, boots, NULL))
+                return RETURN_WARN;
+            return upd_rollback_run();
+        }
+        if (!upd_state_put("trial", upd_ver_text, boots, NULL))
+            return RETURN_WARN;
+        upd_line[0] = '\0';
+        sb(upd_line, sizeof(upd_line), "boot=trial boots=");
+        sbu(upd_line, sizeof(upd_line), boots);
+        sb(upd_line, sizeof(upd_line), " version=");
+        sb(upd_line, sizeof(upd_line), upd_ver_text);
+        say(upd_line, NULL, NULL);
+        return RETURN_OK;
+    }
+    if (upd_phase_is("rollback"))
+        return upd_rollback_run();
+    if (upd_phase_is("commit"))
+        return upd_commit_run();
+
+    if (upd_clean_stale() >= 0)
+        return RETURN_WARN;
+    if (upd_removed)
+        say("boot=undone", NULL, NULL);
+    return RETURN_OK;
+}
+
+/*
+ * One of our interfaces has an IPv4 address that is not loopback: SIOCGIFCONF
+ * on the stack that is running.  Nothing is opened that is not open already:
+ * a stack that did not start is not started here.
+ */
+#define UPD_SIOCGIFCONF     0xC0086924UL    /* _IOWR('i', 36, struct ifconf) */
+#define UPD_IFREQ           32UL
+
+static BOOL upd_online(VOID)
+{
+    static UBYTE    ifbuf[UPD_IFREQ * 8];
+    struct { LONG len; APTR buf; } ifc;
+    struct Library *lib;
+    BOOL            up = FALSE;
+    LONG            s, i;
+
+    Forbid();
+    lib = (struct Library *)FindName(&SysBase->LibList,
+                                     (CONST_STRPTR)"bsdsocket.library");
+    Permit();
+    if (lib == NULL)
+        return FALSE;
+    lib = OpenLibrary((CONST_STRPTR)"bsdsocket.library", 4UL);
+    if (lib == NULL)
+        return FALSE;
+    if (tool_stack_is_ours(lib) &&
+        (s = tool_sock_socket(lib, 2 /* AF_INET */, 2 /* SOCK_DGRAM */, 0)) >= 0)
+    {
+        ifc.len = (LONG)sizeof(ifbuf);
+        ifc.buf = ifbuf;
+        if (tool_sock_ioctl(lib, s, UPD_SIOCGIFCONF, &ifc) == 0)
+            for (i = 0; i + (LONG)UPD_IFREQ <= ifc.len; i += (LONG)UPD_IFREQ)
+            {
+                const UBYTE *a = ifbuf + i + 20;    /* sin_addr            */
+
+                if ((a[0] | a[1] | a[2] | a[3]) != 0 && a[0] != 127)
+                    up = TRUE;
+            }
+        (VOID)tool_sock_close(lib, s);
+    }
+    CloseLibrary(lib);
+    return up;
+}
+
+/* CONFIRM, after S:Network-Startup: a trial whose network came up is
+   committed; one whose did not stays on trial, and BOOT counts it. */
+static LONG upd_confirm(VOID)
+{
+    ULONG t;
+
+    if (!upd_find_udir())
+        return RETURN_OK;
+    upd_state_load();
+    if (upd_phase_is("commit"))
+        return upd_commit_run();
+    if (!upd_phase_is("trial"))
+        return RETURN_OK;
+
+    for (t = 0; !upd_online(); t++)
+    {
+        if (t >= UPD_CONFIRM_WAIT || tool_delay_ticks(50))
+        {
+            say("confirm=timeout version=", upd_state_value("version"), NULL);
+            return RETURN_OK;
+        }
+    }
+    tool_copy_string(upd_ver_text, sizeof(upd_ver_text), upd_state_value("version"));
+    if (!upd_state_put("commit", upd_ver_text, upd_atoul(upd_state_value("boots")), NULL))
+        return RETURN_WARN;
+    return upd_commit_run();
+}
+
+/* BOOT and CONFIRM: no requester, and at most a warning for the startup. */
+static LONG upd_startup_word(VOID)
+{
+    struct Process *me = (struct Process *)FindTask(NULL);
+    APTR            saved = me->pr_WindowPtr;
+    LONG            rc;
+
+    me->pr_WindowPtr = (APTR)-1L;
+    rc = upd_run_args.word[0] == 'B' ? upd_boot() : upd_confirm();
+    me->pr_WindowPtr = saved;
+    return rc > RETURN_WARN ? RETURN_WARN : rc;
+}
+
 static LONG upd_main(VOID)
 {
+    /* The swap finished or undone whatever stack is to run: BOOT runs
+       before any opens. */
+    if (upd_run_args.word[0] == 'B')
+        return upd_startup_word();
+
     /* Another stack is active: nothing at all, not even the check. */
     if (tool_stack_foreign_loaded())
     {
@@ -1709,35 +2367,28 @@ static LONG upd_main(VOID)
         return RETURN_OK;
     }
 
-    if (upd_run_args.word[0] != 'C' && upd_run_args.word[0] != 'I')
-        return refuse("not_implemented", "BOOT and CONFIRM are not "
-                                         "implemented yet");
+    if (upd_run_args.word[0] == 'C' && upd_run_args.word[1] == 'O')
+        return upd_startup_word();
 
     /* Fail safe: a build that holds no key accepts nothing. */
     if (upd_key_count == 0)
         return refuse("unknown_key", "this build holds no release key");
 
-    if (upd_run_args.word[0] == 'I')
     {
         struct Process *me = (struct Process *)FindTask(NULL);
         APTR            saved = me->pr_WindowPtr;
-        LONG            rc;
+        LONG            rc = -1;
 
         /* No "volume is write protected" or "insert volume" requester:
-           every refusal is a line. */
+           every refusal is a line.  CHECK looks for the receipt as well,
+           through an AmiNetXDuo: that the system layout may not have. */
         me->pr_WindowPtr = (APTR)-1L;
-        rc = upd_install_begin();
+        if (upd_run_args.word[0] == 'I')
+            rc = upd_install_begin();
         if (rc < 0)
-            rc = upd_check(TRUE);
+            rc = upd_check(upd_run_args.word[0] == 'I');
         upd_install_end();
         me->pr_WindowPtr = saved;
-        return rc;
-    }
-
-    {
-        LONG rc = upd_check(FALSE);
-
-        upd_install_end();
         return rc;
     }
 }
@@ -1803,9 +2454,10 @@ int main(int argc, char **argv)
     if (rda == NULL)
     {
         tool_fault(IoErr());
-        tool_usage("CHECK [QUIET] [ANSWER=INSTALL|LATER|SKIP] | INSTALL [RESTART]",
+        tool_usage("CHECK [QUIET] [ANSWER=INSTALL|LATER|SKIP] | INSTALL [RESTART]"
+                   " | BOOT | CONFIRM",
                    "Check the mirror for a newer AmiNetXDuo, or install it.  "
-                   "BOOT and CONFIRM are the steps after it.");
+                   "BOOT and CONFIRM are S:User-Startup's steps after it.");
         return RETURN_ERROR;
     }
 

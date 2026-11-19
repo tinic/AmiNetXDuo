@@ -594,6 +594,9 @@ int upd_journal_parse(const char *text, unsigned long len, UpdJournal *j,
                 e[j->nfiles].why   = why;
                 e[j->nfiles].aside = 0;
                 e[j->nfiles].done  = 0;
+                e[j->nfiles].back  = 0;
+                e[j->nfiles].other = 0;
+                e[j->nfiles].kept  = 0;
                 j->nfiles++;
             }
             else if (n == 5 && ui_prefix(l, n, "ready") == 5)
@@ -615,6 +618,18 @@ int upd_journal_parse(const char *text, unsigned long len, UpdJournal *j,
         {
             e[k].done = 1;
         }
+        else if ((k = ui_word_n(l, n, "back", j->nfiles)) >= 0)
+        {
+            e[k].back = 1;
+        }
+        else if ((k = ui_word_n(l, n, "other", j->nfiles)) >= 0)
+        {
+            e[k].other = 1;
+        }
+        else if ((k = ui_word_n(l, n, "kept", j->nfiles)) >= 0)
+        {
+            e[k].kept = 1;
+        }
         else
         {
             return 0;
@@ -632,8 +647,12 @@ typedef struct UiNames
     char old[UPD_APATH_MAX + 4];
     char prior[UPD_APATH_MAX + 8];
     char tmp[UPD_APATH_MAX + 12];
+    char otmp[UPD_APATH_MAX + 4];       /* <path>.tmp                      */
+    char other[UPD_APATH_MAX + 11];     /* <path>.otherbuild               */
     char line[16];
 } UiNames;
+
+static UiNames ui_nm;
 
 static int ui_names(UiNames *nm, const UpdJEntry *e, unsigned int i,
                     const char *prior)
@@ -661,6 +680,14 @@ static int ui_names(UiNames *nm, const UpdJEntry *e, unsigned int i,
     if (!ui_cat(nm->tmp, sizeof(nm->tmp), &at, nm->prior, ui_len(nm->prior)) ||
         !ui_cat(nm->tmp, sizeof(nm->tmp), &at, ".tmp", 4))
         return 0;
+    at = 0;
+    if (!ui_cat(nm->otmp, sizeof(nm->otmp), &at, e->path, e->len) ||
+        !ui_cat(nm->otmp, sizeof(nm->otmp), &at, ".tmp", 4))
+        return 0;
+    at = 0;
+    if (!ui_cat(nm->other, sizeof(nm->other), &at, e->path, e->len) ||
+        !ui_cat(nm->other, sizeof(nm->other), &at, ".otherbuild", 11))
+        return 0;
     return 1;
 }
 
@@ -678,10 +705,11 @@ static int ui_jline(const UpdFsOps *ops, UiNames *nm, const char *word,
     return ops->journal(ops->ctx, nm->line);
 }
 
+#define nm ui_nm
+
 int upd_forward(UpdJEntry *e, unsigned int n, const char *prior,
                 const UpdFsOps *ops, unsigned int *failed)
 {
-    static UiNames nm;
     unsigned int   i;
 
     for (i = 0; i < n; i++)
@@ -759,6 +787,217 @@ int upd_forward(UpdJEntry *e, unsigned int n, const char *prior,
 unsigned int upd_forward_steps(unsigned int n, unsigned int olds)
 {
     return 3 * n + olds;
+}
+
+/*
+ * <prior>/<n> back to <path>.old, which is gone or a whole copy of it: a
+ * copy is renamed to .old only once whole, and the prior one deleted only
+ * after that, so from any cut the prior one is still there or .old is it.
+ */
+static int ui_put_back(const UpdFsOps *ops)
+{
+    if (!ops->remove(ops->ctx, nm.old))
+        return 0;
+    if (!ops->rename(ops->ctx, nm.prior, nm.old))
+    {
+        if (!ops->remove(ops->ctx, nm.otmp) ||
+            !ops->copy(ops->ctx, nm.prior, nm.otmp) ||
+            !ops->rename(ops->ctx, nm.otmp, nm.old) ||
+            !ops->remove(ops->ctx, nm.prior))
+            return 0;
+    }
+    return ops->cut(ops->ctx);
+}
+
+int upd_rollback(UpdJEntry *e, unsigned int n, const char *prior,
+                 const UpdFsOps *ops, unsigned int *failed)
+{
+    unsigned int i;
+
+    for (i = 0; i < n; i++)
+    {
+        if (failed != 0)
+            *failed = i;
+        if (!ui_names(&nm, &e[i], i, prior))
+            return 0;
+        if (!e[i].back)
+        {
+            /* Before "back", a .old is the version this update replaced:
+               the rename that makes it live is the last thing undone. */
+            if (ops->exists(ops->ctx, nm.old))
+            {
+                if (!ops->remove(ops->ctx, nm.live) || !ops->cut(ops->ctx))
+                    return 0;
+                if (!ops->rename(ops->ctx, nm.old, nm.live) || !ops->cut(ops->ctx))
+                    return 0;
+            }
+            else if (!ops->exists(ops->ctx, nm.live))
+            {
+                return -1;
+            }
+            if (!ui_jline(ops, &nm, "back", i))
+                return 0;
+            e[i].back = 1;
+            if (!ops->cut(ops->ctx))
+                return 0;
+        }
+        if (e[i].aside && ops->exists(ops->ctx, nm.prior) && !ui_put_back(ops))
+            return 0;
+    }
+    if (failed != 0)
+        *failed = n;
+    return 1;
+}
+
+int upd_commit(UpdJEntry *e, unsigned int n, const char *prior,
+               const UpdFsOps *ops, unsigned int *failed)
+{
+    unsigned int i;
+
+    for (i = 0; i < n; i++)
+    {
+        if (failed != 0)
+            *failed = i;
+        if (e[i].kept)
+            continue;
+        if (!ui_names(&nm, &e[i], i, prior))
+            return 0;
+
+        if (e[i].why == UPD_WHY_OTHERBUILD)
+        {
+            /* The other build's file is kept; with a prior .old, under a
+               name of its own, or nowhere new at all. */
+            if (e[i].aside && !e[i].other)
+            {
+                int stays = 0;
+
+                if (ops->exists(ops->ctx, nm.old))
+                {
+                    if (ops->exists(ops->ctx, nm.other) ||
+                        !ops->rename(ops->ctx, nm.old, nm.other))
+                        stays = 1;
+                    else if (!ops->cut(ops->ctx))
+                        return 0;
+                }
+                if (!stays)
+                {
+                    if (!ui_jline(ops, &nm, "other", i))
+                        return 0;
+                    e[i].other = 1;
+                    if (!ops->cut(ops->ctx))
+                        return 0;
+                }
+            }
+            if (e[i].other && ops->exists(ops->ctx, nm.prior) && !ui_put_back(ops))
+                return 0;
+        }
+        else if (e[i].aside)
+        {
+            /* Ours: the version replaced goes, the prior .old comes back.
+               Once that is gone from <prior>, .old is the prior one. */
+            if (ops->exists(ops->ctx, nm.prior) && !ui_put_back(ops))
+                return 0;
+        }
+        else if (!ops->remove(ops->ctx, nm.old) || !ops->cut(ops->ctx))
+        {
+            return 0;
+        }
+
+        if (!ui_jline(ops, &nm, "kept", i))
+            return 0;
+        e[i].kept = 1;
+        if (!ops->cut(ops->ctx))
+            return 0;
+    }
+    if (failed != 0)
+        *failed = n;
+    return 1;
+}
+
+int upd_commit_stays(const UpdJEntry *e)
+{
+    return e->why == UPD_WHY_OTHERBUILD && e->aside && !e->other;
+}
+
+#undef nm
+
+unsigned long upd_journal_trim(const char *text, unsigned long len)
+{
+    while (len > 0 && text[len - 1] != '\n')
+        len--;
+    return len;
+}
+
+/* The offset after the line that holds `at`, or `len`. */
+static unsigned long ui_eol(const char *t, unsigned long len, unsigned long at)
+{
+    while (at < len && t[at] != '\n')
+        at++;
+    return at < len ? at + 1 : len;
+}
+
+unsigned long upd_record_merge(const char *old, unsigned long oldlen,
+                               const char *section, unsigned long seclen,
+                               char *out, unsigned long outlen)
+{
+    unsigned long i, b = oldlen, e = oldlen, ins = 0, at = 0;
+
+    /* Our block, from its BEGIN line to after its END line. */
+    for (i = 0; i < oldlen; i = ui_eol(old, oldlen, i))
+    {
+        if (b == oldlen && ui_prefix(old + i, oldlen - i, UPD_REC_BEGIN) != 0)
+            b = i;
+        else if (b != oldlen && ui_prefix(old + i, oldlen - i, UPD_REC_END) != 0)
+        {
+            e = ui_eol(old, oldlen, i);
+            break;
+        }
+    }
+    if (b != oldlen)
+        ins = b;
+    else
+        for (i = 0; i < oldlen; i = ui_eol(old, oldlen, i))
+            if (ui_prefix(old + i, oldlen - i, "FailAt") != 0)
+            {
+                ins = ui_eol(old, oldlen, i);
+                break;
+            }
+    if (!ui_cat(out, outlen, &at, old, ins) ||
+        !ui_cat(out, outlen, &at, section, seclen))
+        return 0;
+    if (b != oldlen)
+    {
+        if (!ui_cat(out, outlen, &at, old + e, oldlen - e))
+            return 0;
+    }
+    else if (!ui_cat(out, outlen, &at, old + ins, oldlen - ins))
+    {
+        return 0;
+    }
+    return at;
+}
+
+int upd_state_get(const char *text, unsigned long len, const char *key,
+                  char *out, unsigned long outlen)
+{
+    unsigned long i, k = ui_len(key), n;
+
+    for (i = 0; i < len; i = ui_eol(text, len, i))
+    {
+        if (ui_prefix(text + i, len - i, key) != k || i + k >= len ||
+            text[i + k] != '=')
+            continue;
+        i += k + 1;
+        for (n = 0; i + n < len && text[i + n] != '\n' && text[i + n] != '\r'; n++)
+            ;
+        if (n + 1 > outlen)
+            return 0;
+        for (k = 0; k < n; k++)
+            out[k] = text[i + k];
+        out[n] = '\0';
+        return 1;
+    }
+    return 0;
 }
 
 /* ---------------------------------------------------------------- state --- */

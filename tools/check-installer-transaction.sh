@@ -21,6 +21,16 @@
 #
 # This proves the ORDER, on every commit, without an emulator.
 #
+# UpdateAmiNetXDuo (#497) swaps the same files at run time, in C, and is held
+# to the same order: every .new written and checked before the journal says
+# "ready", and per file an existing .old moved aside, the live file to .old,
+# the .new to the live name, then "done".  Its rollback puts the .old back
+# before it says "back", and only then the prior .old.  The steps are in
+# src/tools/updinstall.c (upd_forward, upd_rollback) and the stages in
+# src/tools/updateaminetxduo.c (upd_install); test_updinstall cuts each of
+# them after every operation, and this checks the order is still the one it
+# tests.
+#
 # A dynamic round was tried first and thrown away: it planted a library, took
 # the new one out of the archive so the copy could not succeed, and checked
 # the planted one survived.  It PASSED against the old order too -- the
@@ -40,7 +50,7 @@ SCRIPT="$ROOT/install/Install-AmiNetXDuo"
 
 [ -f "$SCRIPT" ] || { echo "installer_txn=skipped reason=no_script"; exit 2; }
 
-python3 - "$SCRIPT" <<'PY'
+python3 - "$SCRIPT" "$ROOT/src/tools/updinstall.c" "$ROOT/src/tools/updateaminetxduo.c" <<'PY'
 import re, sys
 
 path = sys.argv[1]
@@ -124,6 +134,56 @@ for name in ("anxnet.device", "anxgenet.device", "anxzz9000.device", "anxwifipi.
     if not setline or not call:
         print("  !! %s: not installed through P_install_device" % name)
         bad = 1
+
+# The updater's own order, by the lines of the functions that run it.
+def body(text, name):
+    """The lines of C function `name`, from its definition to its closing
+    brace in column 0."""
+    src = text.split('\n')
+    start = next((i for i, l in enumerate(src)
+                  if re.match(r'^[A-Za-z].*\b%s\(' % re.escape(name), l)
+                  and not l.rstrip().endswith(';')), None)
+    if start is None:
+        return []
+    end = next((i for i in range(start + 1, len(src)) if src[i] == '}'), len(src))
+    return src[start:end]
+
+def order(fn, src, steps):
+    got = []
+    for label, rx in steps:
+        hit = next((i for i, l in enumerate(src) if re.search(rx, l)), -1)
+        got.append((label, hit))
+    print("updater_txn fn=%-12s %s" % (fn, " ".join(
+        "%s=%s" % (l, h + 1 if h >= 0 else "-") for l, h in got)))
+    hs = [h for _, h in got]
+    if min(hs) < 0 or hs != sorted(hs):
+        print("  !! %s: out of order or missing" % fn)
+        return 1
+    return 0
+
+ui = open(sys.argv[2], errors='ignore').read()
+ua = open(sys.argv[3], errors='ignore').read()
+bad |= order("upd_forward", body(ui, "upd_forward"), [
+    ("aside",    r'ui_jline\(ops, &nm, "aside"'),
+    ("prior",    r'rename\(ops->ctx, nm\.old, nm\.prior\)'),
+    ("live_old", r'rename\(ops->ctx, nm\.live, nm\.old\)'),
+    ("activate", r'rename\(ops->ctx, nm\.fresh, nm\.live\)'),
+    ("done",     r'ui_jline\(ops, &nm, "done"'),
+])
+bad |= order("upd_rollback", body(ui, "upd_rollback"), [
+    ("remove",   r'remove\(ops->ctx, nm\.live\)'),
+    ("old_live", r'rename\(ops->ctx, nm\.old, nm\.live\)'),
+    ("back",     r'ui_jline\(ops, &nm, "back"'),
+    ("prior",    r'ui_put_back\('),
+])
+bad |= order("upd_install", body(ua, "upd_install"), [
+    ("download", r'upd_download\(&in\)'),
+    ("journal",  r'upd_journal_write\(&in'),
+    ("extract",  r'upd_extract\(&in\)'),
+    ("ready",    r'ao_journal\(NULL, "ready"\)'),
+    ("swap",     r'upd_forward\(in\.je'),
+    ("trial",    r'upd_state_put\("trial"'),
+])
 print("installer_txn=%s" % ("FAIL" if bad else "PASS"))
 sys.exit(1 if bad else 0)
 PY
