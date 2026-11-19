@@ -182,7 +182,7 @@ bad |= order("upd_install", body(ua, "upd_install"), [
     ("extract",  r'upd_extract\(&in\)'),
     ("ready",    r'ao_journal\(NULL, "ready"\)'),
     ("swap",     r'upd_forward\(in\.je'),
-    ("trial",    r'upd_state_put\("trial"'),
+    ("trial",    r'upd_state_trial\(\)'),
 ])
 print("installer_txn=%s" % ("FAIL" if bad else "PASS"))
 sys.exit(1 if bad else 0)

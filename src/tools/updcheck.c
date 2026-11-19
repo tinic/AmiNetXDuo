@@ -327,3 +327,12 @@ unsigned long upd_stack_size(const char *word)
         return 16UL * 1024UL;
     return 64UL * 1024UL;
 }
+
+long upd_fetch_result(long status, int whole)
+{
+    if (status > 0 && status != 200)
+        return status;
+    if (status == 200 && whole)
+        return 0;
+    return -1;
+}

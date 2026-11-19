@@ -48,8 +48,9 @@
  * the same bytes as its SOURCE -- the file this installation placed --
  * gets a "<sha256> <name>" line, once per name, after the lines FIRST
  * holds already; written to FIRST.tmp and renamed over FIRST.  RETURN_OK
- * with the receipt written, RETURN_ERROR otherwise, and then FIRST is as it
- * was.  The Installer deletes FIRST first and calls once per drawer, which
+ * with the receipt written, or with nothing to add and FIRST as it was;
+ * RETURN_ERROR otherwise, and then FIRST is as it was.  A FIRST that
+ * cannot be opened for any reason but not being there is an error.  The Installer deletes FIRST first and calls once per drawer, which
  * keeps each command line short.
  *
  * SPDX-License-Identifier: MIT
@@ -73,6 +74,7 @@
 #include "aminetxduo/config.h"
 #include "devicehome.h"
 #include "c68k_sha256.h"
+#include "updinstall.h"
 
 const char *const tool_name = "InstallSameFile";
 
@@ -541,6 +543,14 @@ static LONG write_receipt(const char *file, STRPTR *second)
         return RETURN_ERROR;
     rc_len = 0;
     fh = Open((CONST_STRPTR)file, MODE_OLDFILE);
+    /* Only a FIRST that is not there starts empty: any other failure to
+       open it would drop the drawers already in it. */
+    if (fh == 0 &&
+        upd_rcpt_write_plan(0, IoErr() == ERROR_OBJECT_NOT_FOUND, 0) == UPD_RW_ERROR)
+    {
+        FreeVec(rc_text);
+        return RETURN_ERROR;
+    }
     if (fh != 0)
     {
         rc_len = Read(fh, rc_text, RECEIPT_MAX);
@@ -558,8 +568,12 @@ static LONG write_receipt(const char *file, STRPTR *second)
             break;
     strcpy(tmp, file);
     strcat(tmp, ".tmp");
-    if (second[n] == NULL && rc_len > 0 &&
-        (fh = Open((CONST_STRPTR)tmp, MODE_NEWFILE)) != 0)
+    /* A drawer with none of this flavour's files (C/fat on a full
+       install) adds nothing: done, and FIRST as it was. */
+    if (second[n] == NULL && upd_rcpt_write_plan(1, 0, (ULONG)rc_len) == UPD_RW_NONE)
+        rc = RETURN_OK;
+    else if (second[n] == NULL &&
+             (fh = Open((CONST_STRPTR)tmp, MODE_NEWFILE)) != 0)
     {
         LONG wrote = Write(fh, rc_text, rc_len);
 

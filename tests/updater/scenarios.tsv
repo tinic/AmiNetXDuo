@@ -33,8 +33,11 @@
 #
 #   Every run writes its key=value lines to stdout (not with QUIET) and
 #   appends them to <DOCDIR>/Installed/Update/log.  The keys:
-#     update=current|available|installed|off|notdue|later|skipped|foreign_stack
-#            version=<v>          (installed adds replaced= kept= skipped= missing=)
+#     update=current|available|installed|unchanged|off|notdue|later|skipped|foreign_stack
+#            version=<v>          (installed adds replaced= kept= skipped= missing=;
+#                                  unchanged, rc 0: INSTALL found no file to
+#                                  replace, adds kept= skipped= missing=, and
+#                                  writes no trial and needs no restart)
 #     refused=signature|unknown_key|manifest|container_hash|member_hash|clock|
 #             network|space|protected|writeprotected|no_receipt|pending|busy
 #             [<amiga path>]   (pending: a swap is half done, BOOT ends it;

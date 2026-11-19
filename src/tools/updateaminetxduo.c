@@ -156,7 +156,19 @@ typedef struct UpdBuf
     ULONG  len;
     ULONG  size;
     ULONG  cap;
+    BOOL   opened;              /* a final 2xx: the body is the answer    */
 } UpdBuf;
+
+/* Only a final 2xx opens the sink; an error status's body still reaches
+   ub_write(), and is neither kept nor counted (upd_dl_chunk). */
+static BOOL ub_open(APTR ctx)
+{
+    UpdBuf *b = (UpdBuf *)ctx;
+
+    b->opened = TRUE;
+    b->len = 0;
+    return TRUE;
+}
 
 static BOOL ub_write(APTR ctx, const UBYTE *d, LONG n)
 {
@@ -165,9 +177,14 @@ static BOOL ub_write(APTR ctx, const UBYTE *d, LONG n)
     if (n <= 0)
         return TRUE;
 
-    if (b->len + (ULONG)n > b->cap)
+    switch (upd_dl_chunk(b->opened, b->len, (ULONG)n, b->cap))
     {
+    case UPD_DL_OK:
+        break;
+    case UPD_DL_LONG:
         tool_error("the answer is larger than %lu bytes", b->cap);
+        return FALSE;
+    default:
         return FALSE;
     }
 
@@ -216,6 +233,7 @@ static FetchCore upd_fc;
 static LONG upd_fetch(const char *url, UpdBuf *b)
 {
     FetchUrlResult why = fetch_url_parse(url, &upd_fc.url);
+    int            whole;
 
     if (why != FETCH_URL_OK)
     {
@@ -228,20 +246,17 @@ static LONG upd_fetch(const char *url, UpdBuf *b)
     upd_fc.headers    = FALSE;
     upd_fc.quiet      = TRUE;
     upd_fc.noverify   = FALSE;
-    upd_fc.sink.open  = NULL;
+    upd_fc.sink.open  = ub_open;
     upd_fc.sink.write = ub_write;
     upd_fc.sink.ctx   = b;
     b->len = 0;
+    b->opened = FALSE;
 
-    if (fetch_core_run(&upd_fc) != RETURN_OK)
-        return -1;
-    if (upd_fc.status != 200)
-    {
+    /* The status first, as the container's (upd_fetch_result). */
+    whole = fetch_core_run(&upd_fc) == RETURN_OK;
+    if (upd_fc.status != 0 && upd_fc.status != 200)
         tool_error("%s: HTTP %ld", (LONG)url, upd_fc.status);
-        return upd_fc.status > 0 ? upd_fc.status : -1;
-    }
-
-    return 0;
+    return upd_fetch_result(upd_fc.status, whole);
 }
 
 /* ------------------------------------------------------- what is here --- */
@@ -593,17 +608,13 @@ static BOOL upd_absent(const char *path)
         UnLock(l);
         return FALSE;
     }
-    return IoErr() == ERROR_OBJECT_NOT_FOUND;
+    return upd_ioerr_absent(IoErr()) ? TRUE : FALSE;
 }
 
+/* There, or it cannot be said that it is not: fails closed. */
 static BOOL upd_exists(const char *path)
 {
-    BPTR l = Lock((CONST_STRPTR)path, SHARED_LOCK);
-
-    if (l == (BPTR)0)
-        return FALSE;
-    UnLock(l);
-    return TRUE;
+    return !upd_absent(path);
 }
 
 /* "<what> <path>" said, with a refusal's return code. */
@@ -696,11 +707,13 @@ static LONG upd_clean_stale(VOID)
     ULONG                 len, i;
     BPTR                  dir;
 
+    /* Absent only for ERROR_OBJECT_NOT_FOUND, as the journal below. */
     upd_in_dir(upd_p1, UPD_N_STATE);
     t = upd_slurp(upd_p1, UPD_STATE_MAX, &len);
+    i = t == NULL && upd_absent(upd_p1);
     upd_in_dir(upd_p1, UPD_N_TRIAL);
-    i = (ULONG)upd_trial_active(upd_exists(upd_p1), (const char *)t,
-                                t != NULL ? len : 0);
+    i = (ULONG)upd_trial_refuse(upd_absent(upd_p1), (const char *)t,
+                                t != NULL ? len : 0, (int)i);
     if (t != NULL)
         FreeVec(t);
     if (i)
@@ -998,7 +1011,7 @@ static LONG upd_vol_of(BPTR lock, const char *name)
         return -1;
     upd_vols[i].node  = upd_info.id_VolumeNode;
     upd_vols[i].state = upd_info.id_DiskState;
-    upd_vols[i].free  = (ULONG)(upd_info.id_NumBlocks - upd_info.id_NumBlocksUsed);
+    upd_vols[i].free  = upd_free_blocks(upd_info.id_NumBlocks, upd_info.id_NumBlocksUsed);
     upd_vols[i].bpb   = (ULONG)upd_info.id_BytesPerBlock;
     upd_vols[i].need  = UPD_VOL_MARGIN;
     tool_copy_string(upd_vols[i].name, sizeof(upd_vols[i].name), name);
@@ -1029,11 +1042,28 @@ static BOOL upd_hash_file(const char *path, UBYTE *sha, UpdScan *scan)
 }
 
 /* Protection bits that stop a write or a delete, on what `path` names. */
+/* 1 a drawer, 0 a file, -1 not there or not to be examined. */
+static LONG upd_kind(const char *path)
+{
+    BPTR                  l = Lock((CONST_STRPTR)path, SHARED_LOCK);
+    struct FileInfoBlock *fib = (struct FileInfoBlock *)AllocDosObject(DOS_FIB, NULL);
+    LONG                  k = -1;
+
+    if (fib != NULL && l != (BPTR)0 && Examine(l, fib))
+        k = fib->fib_DirEntryType > 0 ? 1 : 0;
+    if (l != (BPTR)0)
+        UnLock(l);
+    if (fib != NULL)
+        FreeDosObject(DOS_FIB, fib);
+    return k;
+}
+
+/* Not there: FALSE.  Any other failure to look: protected. */
 static BOOL upd_protected(const char *path, ULONG *size)
 {
-    struct FileInfoBlock *fib = (struct FileInfoBlock *)AllocDosObject(DOS_FIB, NULL);
     BPTR                  l = Lock((CONST_STRPTR)path, SHARED_LOCK);
-    BOOL                  p = FALSE;
+    BOOL                  p = l != (BPTR)0 || !upd_ioerr_absent(IoErr());
+    struct FileInfoBlock *fib = (struct FileInfoBlock *)AllocDosObject(DOS_FIB, NULL);
 
     if (fib != NULL && l != (BPTR)0 && Examine(l, fib))
     {
@@ -1052,7 +1082,19 @@ static BOOL upd_protected(const char *path, ULONG *size)
 
 static char upd_journal_path[UPD_PATH];
 
-static int ao_exists(void *c, const char *p) { (VOID)c; return upd_exists(p); }
+/* Tri-state for the swap: a lock error is neither there nor not. */
+static int ao_exists(void *c, const char *p)
+{
+    BPTR l = Lock((CONST_STRPTR)p, SHARED_LOCK);
+
+    (VOID)c;
+    if (l != (BPTR)0)
+    {
+        UnLock(l);
+        return 1;
+    }
+    return upd_ioerr_absent(IoErr()) ? 0 : -1;
+}
 static int ao_rename(void *c, const char *a, const char *b)
 {
     (VOID)c;
@@ -1441,6 +1483,22 @@ static BOOL upd_journal_write(UpdInst *in, const UpdWant *want)
     return ok;
 }
 
+/* phase=trial with the rest of the state kept: state.tmp, then renamed. */
+/* The state with phase=trial, merged before PREPARE (upd_state_next). */
+static char  upd_state_out[UPD_STATE_MAX];
+static ULONG upd_state_len;
+
+/* state.tmp, then renamed: the old state goes only once it is written. */
+static BOOL upd_state_trial(VOID)
+{
+    upd_in_dir(upd_p1, UPD_N_STATE_TMP);
+    if (upd_state_len == 0 || !upd_write_file(upd_p1, upd_state_out, upd_state_len))
+        return FALSE;
+    upd_in_dir(upd_p2, UPD_N_STATE);
+    (VOID)upd_remove(upd_p2);
+    return Rename((CONST_STRPTR)upd_p1, (CONST_STRPTR)upd_p2);
+}
+
 static LONG upd_install(const char *mirror, const UpdWant *want,
                         UpdManifest *m, UpdFile *files)
 {
@@ -1462,7 +1520,7 @@ static LONG upd_install(const char *mirror, const UpdWant *want,
     upd_in_dir(upd_journal_path, UPD_N_JOURNAL);
 
     in.pick = (UpdPick *)AllocVec(m->nfiles * sizeof(UpdPick) + 1, MEMF_ANY | MEMF_CLEAR);
-    in.pool = (char *)AllocVec(m->nfiles * UPD_PATH, MEMF_ANY);
+    in.pool = (char *)AllocVec(m->nfiles * UPD_PATH + 1, MEMF_ANY);
     if (in.pick == NULL || in.pool == NULL)
     {
         tool_fault(ERROR_NO_FREE_STORE);
@@ -1504,6 +1562,13 @@ static LONG upd_install(const char *mirror, const UpdWant *want,
         sel.fresh   = files[i].sha256;
         sel.update  = &m->version;
         l = Lock((CONST_STRPTR)upd_p1, SHARED_LOCK);
+        /* Missing is ERROR_OBJECT_NOT_FOUND alone: a file in use, or one
+           on a volume that will not answer, is not deleted. */
+        if (l == (BPTR)0 && !upd_ioerr_absent(IoErr()))
+        {
+            rc = refuse_at("protected", upd_p1, "it cannot be read");
+            goto out;
+        }
         if (l != (BPTR)0)
         {
             if (upd_hash_file(upd_p1, disk, &scan))
@@ -1558,6 +1623,24 @@ static LONG upd_install(const char *mirror, const UpdWant *want,
             sb(upd_line, sizeof(upd_line), upd_p1);
             say(upd_line, NULL, NULL);
         }
+    }
+
+    /* Nothing to replace: no container, no journal, no trial, no
+       restart, and the receipt as it is. */
+    if (in.nrep == 0)
+    {
+        upd_line[0] = '\0';
+        sb(upd_line, sizeof(upd_line), "update=unchanged version=");
+        sb(upd_line, sizeof(upd_line), in.newv);
+        sb(upd_line, sizeof(upd_line), " kept=");
+        sbu(upd_line, sizeof(upd_line), in.kept);
+        sb(upd_line, sizeof(upd_line), " skipped=");
+        sbu(upd_line, sizeof(upd_line), in.skipped);
+        sb(upd_line, sizeof(upd_line), " missing=");
+        sbu(upd_line, sizeof(upd_line), in.missing);
+        say(upd_line, NULL, NULL);
+        rc = RETURN_OK;
+        goto out;
     }
 
     /* ---- refused as a whole, before anything is staged ---- */
@@ -1646,17 +1729,75 @@ static LONG upd_install(const char *mirror, const UpdWant *want,
             p->has_old = 1;
             in.nold++;
             if (p->vol != upd_vol)
-                upd_vols[upd_vol].need += upd_blocks(p->old_size, upd_vols[upd_vol].bpb);
+                upd_vols[upd_vol].need = upd_sat_add(upd_vols[upd_vol].need,
+                                                     upd_blocks(p->old_size, upd_vols[upd_vol].bpb));
         }
-        upd_vols[p->vol].need += upd_blocks(files[i].size, upd_vols[p->vol].bpb);
+        upd_vols[p->vol].need = upd_sat_add(upd_vols[p->vol].need,
+                                            upd_blocks(files[i].size, upd_vols[p->vol].bpb));
     }
-    upd_vols[upd_vol].need += upd_blocks(m->container_size, upd_vols[upd_vol].bpb);
+    upd_vols[upd_vol].need = upd_sat_add(upd_vols[upd_vol].need,
+                                         upd_blocks(m->container_size, upd_vols[upd_vol].bpb));
     for (i = 0; i < upd_nvols; i++)
         if (upd_vols[i].need > upd_vols[i].free)
         {
             rc = refuse_at("space", upd_vols[i].name, "free space on that volume");
             goto out;
         }
+
+    /* The state SWAP writes, merged now: one that cannot be read, or
+       that would not fit, is refused rather than its keys dropped. */
+    {
+        UBYTE *old;
+        ULONG  oldlen;
+
+        upd_in_dir(upd_p2, UPD_N_STATE);
+        old = upd_slurp(upd_p2, UPD_STATE_MAX, &oldlen);
+        upd_state_len = upd_state_next(old != NULL ? (const char *)old : NULL,
+                                       oldlen, old == NULL && upd_absent(upd_p2),
+                                       in.newv, upd_flavour_name(want->flavour),
+                                       upd_state_out, sizeof(upd_state_out));
+        if (old != NULL)
+            FreeVec(old);
+        if (upd_state_len == 0)
+        {
+            rc = refuse_at("protected", upd_p2, "it cannot be read, or is too "
+                                                "long to keep");
+            goto out;
+        }
+    }
+
+    /* prior-old, a drawer, before the first .new: each .old goes there. */
+    if (in.nold != 0)
+    {
+        upd_in_dir(upd_p1, UPD_N_PRIOR);
+        if (upd_absent(upd_p1))
+        {
+            l = CreateDir((CONST_STRPTR)upd_p1);
+            if (l == (BPTR)0)
+            {
+                rc = refuse_at("protected", upd_p1, "it cannot be made");
+                goto out;
+            }
+            UnLock(l);
+        }
+        else if (upd_kind(upd_p1) != 1)
+        {
+            rc = refuse_at("protected", upd_p1, "it is not a drawer");
+            goto out;
+        }
+        for (i = 0; i < m->nfiles; i++)
+            if (in.pick[i].act == UPD_ACT_REPLACE && in.pick[i].has_old)
+            {
+                upd_in_dir(upd_p1, UPD_N_PRIOR "/");
+                sbu(upd_p1, UPD_PATH, (ULONG)in.pick[i].jn + 1);
+                sb(upd_p1, UPD_PATH, ".tmp");
+                if (upd_protected(upd_p1, NULL))
+                {
+                    rc = refuse_at("protected", upd_p1, NULL);
+                    goto out;
+                }
+            }
+    }
 
 #ifdef UPD_TEST_KEY
     upd_line[0] = '\0';
@@ -1709,12 +1850,6 @@ static LONG upd_install(const char *mirror, const UpdWant *want,
 
     /* ---- SWAP ---- */
     upd_in_dir(upd_p1, UPD_N_PRIOR);
-    if (in.nold != 0 && !upd_exists(upd_p1))
-    {
-        l = CreateDir((CONST_STRPTR)upd_p1);
-        if (l != (BPTR)0)
-            UnLock(l);
-    }
     if (upd_forward(in.je, in.nrep, upd_p1, &upd_amiga_ops, &failed) != 1)
     {
         tool_error("the swap stopped at %s: restart, and the next boot "
@@ -1722,7 +1857,7 @@ static LONG upd_install(const char *mirror, const UpdWant *want,
         rc = UPD_RC_FAILED;
         goto out;
     }
-    if (!upd_state_put("trial", in.newv, 0, upd_flavour_name(want->flavour)))
+    if (!upd_state_trial())
     {
         tool_error("%s could not be written", (LONG)"state");
         rc = UPD_RC_FAILED;
@@ -2222,13 +2357,22 @@ static LONG upd_commit_run(VOID)
             }
     }
 
-    upd_in_dir(upd_p1, "receipt-next");
-    upd_in_dir(upd_p2, "receipt");
-    if (upd_exists(upd_p1) &&
-        (!upd_remove(upd_p2) || !Rename((CONST_STRPTR)upd_p1, (CONST_STRPTR)upd_p2)))
+    /* The receipt goes only for a receipt-next that is surely there: a
+       look that cannot be answered leaves both, for the next boot. */
+    upd_in_dir(upd_p1, UPD_N_RECEIPT_NEXT);
+    upd_in_dir(upd_p2, UPD_N_RECEIPT);
+    switch (ao_exists(NULL, upd_p1))
     {
+    case 0:
+        break;
+    case 1:
+        if (upd_remove(upd_p2) && Rename((CONST_STRPTR)upd_p1, (CONST_STRPTR)upd_p2))
+            break;
+        /* fall through */
+    default:
         tool_error("%s could not be renamed", (LONG)upd_p1);
         rc = RETURN_WARN;
+        break;
     }
     if (fp->ok)
         upd_record(fp);
