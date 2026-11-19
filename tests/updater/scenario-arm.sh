@@ -303,17 +303,28 @@ Lab done
 EOF
     # $1 is the command name; waits while it runs, at most 240 s.  Skip to
     # an end label, never Quit: Quit in an Executed script ends the boot's
-    # own script as well.
+    # own script as well.  Status COMMAND= matches the name as it was
+    # typed, and the startup line runs "<C>UpdateAmiNetXDuo CHECK QUIET"
+    # (C: or AmiNetXDuo:C/), so all three spellings are looked for.
     cat > "$HD/scn/waitgone" <<'EOF'
 .key name/a
 FailAt 9999
 Set scng 0
 Lab top
 Status >NIL: COMMAND=<name>
+If NOT WARN
+  Skip wait
+EndIf
+Status >NIL: COMMAND=C:<name>
+If NOT WARN
+  Skip wait
+EndIf
+Status >NIL: COMMAND=AmiNetXDuo:C/<name>
 If WARN
   Echo >>DH0:scn/gone.txt "<name>=gone waited=$scng"
   Skip done
 EndIf
+Lab wait
 Wait 1
 Set scng `Eval $scng + 1`
 Echo >DH0:scn/hb "$scng"
