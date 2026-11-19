@@ -15,10 +15,16 @@
  * boots counted, and on the third boot without CONFIRM the update rolled
  * back.  CONFIRM, after S:Network-Startup: once an interface has an
  * address, the trial committed (the .old files, the receipt, the record
- * Uninstall-AmiNetXDuo runs).  The SKIP answer is refused as not
- * implemented until its part of #497 lands.
+ * Uninstall-AmiNetXDuo runs).
  *
- *   rc 0   update=current, update=off, update=foreign_stack,
+ * CHECK QUIET is the startup line, run in the background: nothing with
+ * AUTO=OFF, at most one check a day (the state's last_check= and later=),
+ * and an update offered with the Install / Skip this version / Later
+ * requester once the Workbench screen is open.  Install installs it and
+ * asks to restart; Later asks again the next day; Skip passes that version
+ * by (skip=).  ANSWER= answers the requester without drawing it.
+ *
+ *   rc 0   update=current, update=off, update=notdue, update=foreign_stack,
  *          update=installed, update=skipped; BOOT and CONFIRM always, but
  *          for a journal they cannot read (5): a startup line never stops
  *          the startup
@@ -38,6 +44,9 @@
 #include <exec/tasks.h>
 #include <dos/dos.h>
 #include <dos/dosextens.h>
+#include <intuition/intuition.h>
+#include <intuition/screens.h>
+#include <proto/intuition.h>
 
 #include "aminetxduo/version.h"
 
@@ -350,9 +359,13 @@ static UpdBuf      upd_manifest_buf, upd_sig_buf;
 static char        upd_url_buf[UPD_MIRROR_MAX + 96];
 static char        upd_ver_text[UPD_VER_MAX];
 
+/* The last refusal, for the requester that says an install failed. */
+static char upd_refused[48];
+
 static LONG refuse(const char *why, const char *hint)
 {
     say("refused=", why, NULL);
+    tool_copy_string(upd_refused, sizeof(upd_refused), why);
     if (hint != NULL)
         tool_hint("%s", (LONG)hint);
     return UPD_RC_REFUSED;
@@ -922,15 +935,34 @@ static BOOL upd_phase_open(VOID)
            upd_phase_is("rollback");
 }
 
+/* `n` bytes of `out` as the state: state.tmp, then renamed over state. */
+static BOOL upd_state_write(const char *out, ULONG n)
+{
+    BOOL ok;
+
+    upd_in_dir(upd_p1, "state.tmp");
+    upd_in_dir(upd_p2, "state");
+    ok = upd_write_file(upd_p1, out, n);
+    if (ok)
+        (VOID)upd_remove(upd_p2);
+    ok = ok && Rename((CONST_STRPTR)upd_p1, (CONST_STRPTR)upd_p2);
+    if (ok)
+    {
+        CopyMem((APTR)out, upd_st, n);
+        upd_st_len = n;
+        upd_st[n] = '\0';
+    }
+    return ok;
+}
+
 /* phase, version and boots set, flavour (NULL: the state's own) and every
-   other line kept: state.tmp, then renamed over state. */
+   other line kept. */
 static BOOL upd_state_put(const char *phase, const char *version, ULONG boots,
                           const char *flavour)
 {
     static char out[UPD_STATE_MAX];
     static char fl[16];
     ULONG       n;
-    BOOL        ok;
 
     /* A state that cannot be read is not written over: its keys (skip=,
        last_check=) would go. */
@@ -943,21 +975,7 @@ static BOOL upd_state_put(const char *phase, const char *version, ULONG boots,
     }
     n = upd_state_merge(upd_st, upd_st_len, phase, version, boots, flavour,
                         out, sizeof(out));
-    if (n == 0)
-        return FALSE;
-    upd_in_dir(upd_p1, "state.tmp");
-    upd_in_dir(upd_p2, "state");
-    ok = upd_write_file(upd_p1, out, n);
-    if (ok)
-        (VOID)upd_remove(upd_p2);
-    ok = ok && Rename((CONST_STRPTR)upd_p1, (CONST_STRPTR)upd_p2);
-    if (ok)
-    {
-        CopyMem(out, upd_st, n);
-        upd_st_len = n;
-        upd_st[n] = '\0';
-    }
-    return ok;
+    return n != 0 && upd_state_write(out, n);
 }
 
 /*
@@ -2009,6 +2027,223 @@ out:
     return rc;
 }
 
+/* ----------------------------------------------------------- the answer --- */
+
+struct IntuitionBase *IntuitionBase;
+
+static char upd_today[11];          /* the clock's date, after upd_clock() */
+
+static LONG upd_answer(const char *s);
+
+/*
+ * The state's last_check= set to today, and `line2` (later=, skip=) when
+ * not NULL, every other line kept; under the drawer's lock, taken here when
+ * this run does not hold it.  Nothing, and no line, when that cannot be: a
+ * date not written is one more check, never a refusal.
+ */
+static VOID upd_state_note(const char *line2)
+{
+    static char line1[24];
+    char       *tmp = (char *)upd_chunk;    /* free between the fetches  */
+    char       *out = (char *)upd_chunk + UPD_STATE_MAX;
+    BOOL        took = FALSE;
+    ULONG       n;
+
+    if (upd_today[0] == '\0' || !upd_find_udir())
+        return;
+    if (upd_lock_fh == (BPTR)0)
+    {
+        upd_in_dir(upd_p1, UPD_N_LOCK);
+        upd_lock_fh = Open((CONST_STRPTR)upd_p1, MODE_NEWFILE);
+        if (upd_lock_fh == (BPTR)0)
+            return;
+        took = TRUE;
+    }
+    if (upd_state_load())
+    {
+        line1[0] = '\0';
+        sb(line1, sizeof(line1), "last_check=");
+        sb(line1, sizeof(line1), upd_today);
+        n = line2 != NULL
+            ? upd_prefs_set2(upd_st, upd_st_len, line1, line2, tmp, out,
+                             UPD_STATE_MAX)
+            : upd_prefs_set(upd_st, upd_st_len, line1, out, UPD_STATE_MAX);
+        if (n != 0)
+            (VOID)upd_state_write(out, n);
+    }
+    if (took)
+        upd_lock_drop();
+}
+
+/*
+ * A requester on the Workbench screen, `a` and `b` for its two %s: 1 for
+ * the first button, 2 the second, 0 the last, -1 none drawn.  The startup
+ * check runs before LoadWB, so the screen is waited for, up to
+ * UPD_SCREEN_WAIT seconds; without it nothing is drawn.
+ */
+#define UPD_SCREEN_WAIT     600UL
+
+static LONG upd_ask(const char *text, const char *buttons, const char *a,
+                    const char *b)
+{
+    struct EasyStruct es;
+    struct Screen    *s;
+    LONG              args[2];
+    ULONG             t;
+
+    if (IntuitionBase == NULL)
+        IntuitionBase = (struct IntuitionBase *)
+            OpenLibrary((CONST_STRPTR)"intuition.library", 37UL);
+    if (IntuitionBase == NULL)
+        return -1;
+    for (t = 0; (s = LockPubScreen((CONST_STRPTR)"Workbench")) == NULL; t++)
+        if (t >= UPD_SCREEN_WAIT || tool_delay_ticks(50))
+            return -1;
+    UnlockPubScreen(NULL, s);
+
+    es.es_StructSize   = sizeof(es);
+    es.es_Flags        = 0;
+    es.es_Title        = (UBYTE *)"AmiNetXDuo";
+    es.es_TextFormat   = (UBYTE *)text;
+    es.es_GadgetFormat = (UBYTE *)buttons;
+    args[0] = (LONG)a;
+    args[1] = (LONG)b;
+    return EasyRequestArgs(NULL, &es, NULL, (APTR)args);
+}
+
+#ifdef UPD_TEST_KEY
+/* ENV:AmiNetXDuo/UpdateAnswer, "INSTALL|LATER|SKIP [RESTART]": the answers
+   a QUIET run's requesters get, none of them drawn.  FALSE without one. */
+static BOOL upd_hook_answer(LONG *answer, BOOL *restart)
+{
+    static const char *const where[] = {
+        "ENV:AmiNetXDuo/UpdateAnswer", "ENVARC:AmiNetXDuo/UpdateAnswer"
+    };
+    char   w[2][12];
+    ULONG  len, i, k, n;
+    UBYTE *t = NULL;
+
+    for (i = 0; i < 2 && t == NULL; i++)
+        t = upd_slurp(where[i], 64, &len);
+    if (t == NULL)
+        return FALSE;
+    for (i = 0, n = 0; n < 2; n++)
+    {
+        while (i < len && t[i] <= ' ')
+            i++;
+        for (k = 0; i < len && t[i] > ' ' && k + 1 < sizeof(w[n]); i++)
+            w[n][k++] = (char)t[i];
+        w[n][k] = '\0';
+    }
+    FreeVec(t);
+    *answer = upd_answer(w[0]);
+    if (*answer < 0)
+        *answer = ANSWER_NONE;
+    *restart = tool_stricmp(w[1], "RESTART") == 0;
+    return TRUE;
+}
+#endif
+
+/*
+ * update=available, not INSTALL: the offer.  ANSWER= answers it; a QUIET
+ * run asks with the requester (the test hook's answers in a test build).
+ * Later: rc 5, and later= today; Skip: rc 0, and skip= the version; no
+ * answer (no screen): rc 5, asked again at the next startup.  Install from
+ * the requester asks to restart once it is installed, or says why not.
+ */
+static LONG upd_offer(const char *mirror, const UpdWant *want,
+                      UpdManifest *m, UpdFile *files)
+{
+    LONG answer = upd_run_args.answer, rc;
+    BOOL ask = upd_run_args.quiet && answer == ANSWER_NONE;
+    BOOL drawn = ask, restart = FALSE, saved;
+    char inst[UPD_VER_MAX];
+
+    if (ask)
+    {
+#ifdef UPD_TEST_KEY
+        drawn = !upd_hook_answer(&answer, &restart);
+#endif
+        if (drawn)
+        {
+            upd_ver_format(&want->installed, inst);
+            /* 0 is also what a requester that could not open returns:
+               the last button is Later, never the lasting Skip. */
+            switch (upd_ask("AmiNetXDuo %s is available (installed %s).",
+                            "Install|Skip this version|Later", upd_ver_text,
+                            inst))
+            {
+            case 1:  answer = ANSWER_INSTALL; break;
+            case 2:  answer = ANSWER_SKIP;    break;
+            case 0:  answer = ANSWER_LATER;   break;
+            default: break;             /* none drawn: asked next startup */
+            }
+        }
+    }
+    if (answer == ANSWER_NONE)
+        return UPD_RC_AVAILABLE;
+    say("requester=offer", NULL, NULL);
+
+    if (answer == ANSWER_LATER)
+    {
+        say("update=later version=", upd_ver_text, NULL);
+        upd_line[0] = '\0';
+        sb(upd_line, sizeof(upd_line), "later=");
+        sb(upd_line, sizeof(upd_line), upd_today);
+        upd_state_note(upd_line);
+        return UPD_RC_AVAILABLE;
+    }
+    if (answer == ANSWER_SKIP)
+    {
+        say("update=skipped version=", upd_ver_text, NULL);
+        upd_line[0] = '\0';
+        sb(upd_line, sizeof(upd_line), "skip=");
+        sb(upd_line, sizeof(upd_line), upd_ver_text);
+        upd_state_note(upd_line);
+        return RETURN_OK;
+    }
+
+    upd_state_note(NULL);
+    rc = upd_install_begin();
+    if (rc < 0)
+    {
+        /* From the requester the restart is asked after, not printed. */
+        saved = upd_run_args.restart;
+        upd_run_args.restart = upd_run_args.restart || ask;
+        rc = upd_install(mirror, want, m, files);
+        upd_run_args.restart = saved;
+    }
+    if (!ask)
+        return rc;
+
+    if (rc == RETURN_OK && upd_reboot)
+    {
+        if (drawn)
+            restart = upd_ask("AmiNetXDuo %s is installed.\n"
+                              "Restart the Amiga now to use it?",
+                              "Restart now|Later", upd_ver_text, NULL) == 1;
+        say("requester=restart", NULL, NULL);
+        if (!restart)
+        {
+            upd_reboot = FALSE;
+            say("restart=needed", NULL, NULL);
+        }
+    }
+    else if (rc != RETURN_OK)
+    {
+        say("requester=refused", NULL, NULL);
+        if (drawn && rc == UPD_RC_REFUSED)
+            (VOID)upd_ask("AmiNetXDuo %s was not installed (%s).\n"
+                          "Nothing was changed.",
+                          "OK", upd_ver_text, upd_refused);
+        else if (drawn)
+            (VOID)upd_ask("The update to AmiNetXDuo %s stopped.\n"
+                          "Restart the Amiga: the next start finishes it.",
+                          "OK", upd_ver_text, NULL);
+    }
+    return rc;
+}
+
 static LONG upd_check(BOOL install)
 {
     struct Library *base = NULL;
@@ -2021,7 +2256,9 @@ static LONG upd_check(BOOL install)
     const char     *mirror;
 
     upd_read_settings(&upd_set);
-    if (upd_run_args.quiet && !upd_set.auto_check)
+    /* AUTO=OFF and the daily check are the startup line's (CHECK QUIET);
+       an INSTALL, QUIET or not, is asked for and runs. */
+    if (upd_run_args.quiet && !install && !upd_set.auto_check)
     {
         say("update=off", NULL, NULL);
         return RETURN_OK;
@@ -2071,6 +2308,25 @@ static LONG upd_check(BOOL install)
             CloseLibrary(base);
         return refuse("clock", "the clock is not set: run sntp, or set it "
                                "with Date");
+    }
+
+    /* The day, from a clock that is set: the startup check's at most once. */
+    {
+        struct DateStamp ds;
+
+        DateStamp(&ds);
+        upd_date((unsigned long)ds.ds_Days, upd_today);
+    }
+    if (upd_run_args.quiet && !install)
+    {
+        (VOID)upd_state_load_as(FALSE);
+        if (!upd_due(upd_st, upd_st_len, upd_today))
+        {
+            if (base != NULL)
+                CloseLibrary(base);
+            say("update=notdue", NULL, NULL);
+            return RETURN_OK;
+        }
     }
 
     mirror = upd_set.mirror[0] != '\0' ? upd_set.mirror : UPD_DEFAULT_MIRROR;
@@ -2125,6 +2381,8 @@ static LONG upd_check(BOOL install)
     case UPD_V_CURRENT:
         upd_ver_format(&want.installed, upd_ver_text);
         say("update=current version=", upd_ver_text, NULL);
+        if (upd_run_args.quiet && !install)
+            upd_state_note(NULL);
         rc = RETURN_OK;
         break;
 
@@ -2138,6 +2396,8 @@ static LONG upd_check(BOOL install)
         {
         case UPD_SKIP_SKIPPED:
             say("update=skipped version=", upd_ver_text, NULL);
+            if (upd_run_args.quiet && !install)
+                upd_state_note(NULL);
             rc = RETURN_OK;
             goto done;
         case UPD_SKIP_OVERRIDDEN:
@@ -2147,24 +2407,8 @@ static LONG upd_check(BOOL install)
             break;
         }
         say("update=available version=", upd_ver_text, NULL);
-        rc = UPD_RC_AVAILABLE;
-        if (!install && upd_run_args.answer != ANSWER_NONE)
-        {
-            say("requester=offer", NULL, NULL);
-            if (upd_run_args.answer == ANSWER_LATER)
-                say("update=later version=", upd_ver_text, NULL);
-            else if (upd_run_args.answer == ANSWER_INSTALL)
-            {
-                rc = upd_install_begin();
-                if (rc < 0)
-                    rc = upd_install(mirror, &want, &m, files);
-            }
-            else
-                rc = refuse("not_implemented", "ANSWER=SKIP is not "
-                                               "implemented yet");
-        }
-        else if (install)
-            rc = upd_install(mirror, &want, &m, files);
+        rc = install ? upd_install(mirror, &want, &m, files)
+                     : upd_offer(mirror, &want, &m, files);
         break;
 
     case UPD_V_UNKNOWN_KEY:
@@ -2963,6 +3207,8 @@ int main(int argc, char **argv)
            in fetch, so try rather than refuse. */
         upd_result = upd_main();
     }
+    if (IntuitionBase != NULL)
+        CloseLibrary((struct Library *)IntuitionBase);
 
     upd_log_write(upd_run_args.word);
 

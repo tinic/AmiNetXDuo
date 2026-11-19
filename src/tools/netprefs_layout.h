@@ -45,6 +45,10 @@ enum
     NP_L_ARPREQUESTS,
     NP_L_WRITEREQUESTS,
     NP_L_NOTE,                      /* "0 = automatic", drawn with Text() */
+    NP_L_UPD_AUTO,
+    NP_L_UPD_CHANNEL,
+    NP_L_UPD_USE,
+    NP_L_UPD_CHECK,
 #ifdef AMINETXDUO_PTP
     NP_L_PTP,
     NP_L_DESTINATION,
@@ -61,6 +65,7 @@ enum
     NP_PAGE_IPV6,
     NP_PAGE_DEVICE,
     NP_PAGE_TUNING,
+    NP_PAGE_UPDATES,                /* ENV(ARC):AmiNetXDuo/Update, no interface */
     NP_PAGE_COMMON
 };
 
@@ -89,6 +94,7 @@ extern const char *const np_ipv4_labels[];
 extern const char *const np_ipv6_labels[];
 extern const char *const np_live_labels[];
 extern const char *const np_action_labels[];
+extern const char *const np_channel_labels[];
 
 typedef int (*NpMeasure)(void *ctx, const char *text, int len);
 

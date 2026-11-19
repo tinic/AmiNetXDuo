@@ -197,8 +197,13 @@ BUDGETS=(
     # 30,052 -> 38,624 (a 4 KB chunk buffer, the swap paths).  -> 64,140
     # with BOOT and CONFIRM (and the review fixes of #505-#507, #509): the rollback and the commit (updinstall.c),
     # the state, the trial file, the network check and the Uninstall
-    # record's block.
-    "default:src/tools/UpdateAmiNetXDuo:65536"
+    # record's block.  These sizes are a build that holds a key (the
+    # test-key build); the default arm holds none yet, and LTO drops what
+    # only a verified manifest reaches: 56,736 there on 2026-11-19.
+    # -> 66,252 with a key (57,644 without) with the startup requester
+    # (Install / Later / Skip, Restart now / Later), the daily check and
+    # the state's last_check= later= skip= (+2,116; #497 PR 7).
+    "default:src/tools/UpdateAmiNetXDuo:67584"
     # 225,876 -> 226,216 on 2026-09-17: the write queue behind the SANA-II
     # ring and its launcher (a round trip in flight for every card: A1200
     # sends 180 -> 275 Mbit/s on the LAN, 12 -> 198 over 26 ms), the 1 MB
@@ -334,6 +339,7 @@ BUDGETS=(
     "fat:src/tlslib/tls.library:244000"
     # UpdateAmiNetXDuo in C/fat: 38,288 with CHECK and one key, 2026-11-18;
     # 63,900 with INSTALL the same day; 78,664 with BOOT and CONFIRM.
+    # 69,168 without a key with the startup requester (#497 PR 7).
     "fat:src/tools/UpdateAmiNetXDuo:79872"
 )
 

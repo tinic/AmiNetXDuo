@@ -21,6 +21,7 @@
  */
 
 #include "updinstall.h"
+#include "updprefs.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -1079,6 +1080,50 @@ static void test_skip_verdict(void)
     CHECK(upd_skip_verdict("", 0, "1.0.1", 1) == UPD_SKIP_NONE);
 }
 
+/* #497 PR 7: the startup check at most once a day; Later asks again the
+   next day; the dates and the skip written into the state, the trial's
+   lines kept (upd_state_note's merge). */
+static void test_due(void)
+{
+    static const char st[] = "phase=trial\nversion=1.0.1\nboots=1\n"
+                             "flavour=full\nlast_check=2026-11-18\n";
+    static const char lt[] = "phase=confirmed\r\nLater=2026-11-19\r\n";
+    char          tmp[256], out[256];
+    unsigned long n;
+
+    CHECK(upd_due(st, sizeof(st) - 1, "2026-11-18") == 0);
+    CHECK(upd_due(st, sizeof(st) - 1, "2026-11-19") == 1);
+    CHECK(upd_due(st, sizeof(st) - 1, "2026-11-17") == 1);   /* clock back */
+    CHECK(upd_due(st, sizeof(st) - 1, "") == 1);             /* no clock   */
+    CHECK(upd_due(lt, sizeof(lt) - 1, "2026-11-19") == 0);
+    CHECK(upd_due(lt, sizeof(lt) - 1, "2026-11-20") == 1);
+    CHECK(upd_due("", 0, "2026-11-19") == 1);
+    CHECK(upd_due("last_check=\n", 12, "2026-11-19") == 1);
+    CHECK(upd_due("last_checkx=2026-11-19\n", 23, "2026-11-19") == 1);
+
+    /* Later: last_check and later replaced, the trial's lines as they were. */
+    n = upd_prefs_set2(st, sizeof(st) - 1, "last_check=2026-11-19",
+                       "later=2026-11-19", tmp, out, sizeof(out));
+    out[n] = '\0';
+    CHECK(n > 0 && strcmp(out, "phase=trial\nversion=1.0.1\nboots=1\n"
+                               "flavour=full\nlast_check=2026-11-19\n"
+                               "later=2026-11-19\n") == 0);
+    CHECK(upd_due(out, n, "2026-11-19") == 0 && upd_due(out, n, "2026-11-20") == 1);
+    /* Skip: remembered for that version, any day. */
+    n = upd_prefs_set2(out, n, "last_check=2026-11-20", "skip=1.0.2", tmp,
+                       out + 128, 128);
+    CHECK(n > 0 && upd_skip_verdict(out + 128, n, "1.0.2", 0) == UPD_SKIP_SKIPPED &&
+          upd_skip_verdict(out + 128, n, "1.0.3", 0) == UPD_SKIP_NONE &&
+          upd_due(out + 128, n, "2026-11-21") == 1);
+    /* A state with no lines yet. */
+    n = upd_prefs_set("", 0, "last_check=2026-11-19", out, sizeof(out));
+    out[n] = '\0';
+    CHECK(strcmp(out, "last_check=2026-11-19\n") == 0);
+    /* Too long for the state buffer: nothing written. */
+    CHECK(upd_prefs_set2(st, sizeof(st) - 1, "last_check=2026-11-19",
+                         "later=2026-11-19", tmp, out, 40) == 0);
+}
+
 static void test_state_get(void)
 {
     static const char st[] = "phase=trial\r\nVersion=1.0.0-rc5.1\nboots=2\nskip=";
@@ -1644,6 +1689,7 @@ int main(int argc, char **argv)
         test_state_get();
         test_pair_plan();
         test_skip_verdict();
+        test_due();
         test_record();
         test_trial_cut("U:Installed/Update/prior-old", 1);
         test_trial_cut("B:Installed/Update/prior-old", 1);

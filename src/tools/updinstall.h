@@ -503,6 +503,15 @@ enum { UPD_SKIP_NONE = 0, UPD_SKIP_SKIPPED, UPD_SKIP_OVERRIDDEN };
 int upd_skip_verdict(const char *state, unsigned long len, const char *version,
                      int explicit_install);
 
+/*
+ * The startup check (CHECK QUIET) runs at most once a day: 1 when it is
+ * due, 0 when the state's last_check= or later= is `today` ("YYYY-MM-DD",
+ * the clock's date).  An empty `today` (the clock is not set) is due, and
+ * the caller writes no date from it.  Only equality counts, so a clock set
+ * wrong once into the future does not stop the checks until that day.
+ */
+int upd_due(const char *state, unsigned long len, const char *today);
+
 /* Lower-case hex of 32 bytes into `out`, 65 bytes with the NUL. */
 void upd_hex32(const unsigned char *b, char *out);
 

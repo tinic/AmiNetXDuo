@@ -2,10 +2,12 @@
  * updprefs: one key=value line of ENVARC:AmiNetXDuo/Update set, every other
  * line kept -- what Install-AmiNetXDuo writes through `InstallSameFile
  * <file> KEY=VALUE SETKEY`, so that a reinstall sets AUTO= and keeps a
- * CHANNEL= or MIRROR= the user wrote.  The file's syntax is updcheck.h's
- * (keys without case, LF or CR LF lines).
+ * CHANNEL= or MIRROR= the user wrote.  NetPrefs' Updates page saves AUTO=
+ * and CHANNEL= the same way, and UpdateAmiNetXDuo its state's dates.  The
+ * file's syntax is updcheck.h's (keys without case, LF or CR LF lines).
  *
- * Header only, as InstallSameFile links nothing of the updater; compiled
+ * Header only, as InstallSameFile and NetPrefs link nothing of the
+ * updater; compiled
  * natively by src/tools/test/test_updcheck.c.
  *
  * SPDX-License-Identifier: MIT
@@ -99,6 +101,110 @@ static unsigned long upd_prefs_set(const char *old, unsigned long oldlen,
         out[at++] = '\n';
     }
     return at;
+}
+
+/*
+ * Two lines set in one pass, as NetPrefs' Save writes AUTO= and CHANNEL=,
+ * and the updater the state's last_check= with later= or skip=: `tmp` and
+ * `out` hold `cap` bytes each.  The length, or 0 as upd_prefs_set().
+ */
+static inline unsigned long upd_prefs_set2(const char *old, unsigned long oldlen,
+                                           const char *line1, const char *line2,
+                                           char *tmp, char *out,
+                                           unsigned long cap)
+{
+    unsigned long n = upd_prefs_set(old, oldlen, line1, tmp, cap);
+
+    return n == 0 ? 0 : upd_prefs_set(tmp, n, line2, out, cap);
+}
+
+/* `n` bytes at `a` are `word`, without case. */
+static inline int upd_prefs_same(const char *a, unsigned long n,
+                                 const char *word)
+{
+    unsigned long i;
+
+    for (i = 0; i < n; i++)
+        if (word[i] == '\0' ||
+            upd_prefs_fold((unsigned char)a[i]) != upd_prefs_fold((unsigned char)word[i]))
+            return 0;
+    return word[n] == '\0';
+}
+
+/*
+ * The setting `key` reads as, the way UpdateAmiNetXDuo reads it
+ * (upd_settings_parse(), updcheck.c): of the lines that set it, the LAST
+ * whose value, its spaces and a CR dropped, is one of `words` (without
+ * case; NULL ends the list) wins, and a line with any other value is
+ * passed by.  The index of that word, or `def` when no line sets one.
+ */
+static inline int upd_prefs_word(const char *text, unsigned long len,
+                                 const char *key, const char *const *words,
+                                 int def)
+{
+    unsigned long klen = 0, i = 0, n, b, e;
+    int           w, got = def;
+
+    while (key[klen] != '\0')
+        klen++;
+    while (i < len)
+    {
+        const char *l = text + i;
+
+        for (n = 0; i + n < len && l[n] != '\n'; n++)
+            ;
+        if (upd_prefs_is_key(l, n, key, klen))
+        {
+            for (b = 0; l[b] != '='; b++)
+                ;
+            b++;
+            e = n;
+            while (b < e && (l[b] == ' ' || l[b] == '\t'))
+                b++;
+            while (e > b && (l[e - 1] == ' ' || l[e - 1] == '\t' ||
+                             l[e - 1] == '\r'))
+                e--;
+            for (w = 0; words[w] != 0; w++)
+                if (upd_prefs_same(l + b, e - b, words[w]))
+                    got = w;
+        }
+        i += n + 1;
+    }
+    return got;
+}
+
+/*
+ * The value of the first "<key>=" token of UpdateAmiNetXDuo's key=value
+ * output (`key` with its '='), a token being one that starts a line or
+ * follows a space: "version=" in "update=available version=1.0.1".  Up to
+ * the next space or the line's end, into `out` (`outlen` bytes, NUL
+ * ended, cut to fit).  1, or 0 when there is none.
+ */
+static inline int upd_output_value(const char *text, unsigned long len,
+                                   const char *key, char *out,
+                                   unsigned long outlen)
+{
+    unsigned long klen = 0, i, k;
+
+    while (key[klen] != '\0')
+        klen++;
+    if (outlen == 0)
+        return 0;
+    for (i = 0; i + klen <= len; i++)
+    {
+        if (i > 0 && text[i - 1] != ' ' && text[i - 1] != '\n')
+            continue;
+        for (k = 0; k < klen && text[i + k] == key[k]; k++)
+            ;
+        if (k < klen)
+            continue;
+        i += klen;
+        for (k = 0; i + k < len && text[i + k] > ' ' && k + 1 < outlen; k++)
+            out[k] = text[i + k];
+        out[k] = '\0';
+        return 1;
+    }
+    return 0;
 }
 
 #endif /* AMINETXDUO_UPDPREFS_H */

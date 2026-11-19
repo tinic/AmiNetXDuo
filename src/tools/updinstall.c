@@ -1330,3 +1330,18 @@ int upd_skip_verdict(const char *state, unsigned long len, const char *version,
         return UPD_SKIP_NONE;
     return explicit_install ? UPD_SKIP_OVERRIDDEN : UPD_SKIP_SKIPPED;
 }
+
+int upd_due(const char *state, unsigned long len, const char *today)
+{
+    static const char *const keys[] = { "last_check", "later" };
+    char          v[16];
+    unsigned long n = ui_len(today), k;
+
+    if (n == 0)
+        return 1;
+    for (k = 0; k < 2; k++)
+        if (upd_state_get(state, len, keys[k], v, sizeof(v)) &&
+            ui_same(v, ui_len(v), today, n))
+            return 0;
+    return 1;
+}
