@@ -41,6 +41,7 @@ Untrusted — anything reachable from the network:
 | mDNS queries and responses — unauthenticated multicast from any host on the segment | `src/netstack/netstack_mdns.c` |
 | TLS records and X.509 certificate chains | NX Secure, in `tls.library` |
 | SSH protocol | Dropbear's `dbclient`, `clients/dropbear/` |
+| The update manifest and its containers, from the mirror over plain HTTP | `src/tools/updsig.c` checks the Ed25519 signature first; only then `src/tools/updmanifest.c` parses it and `src/tools/updinstall.c` checks each file's SHA-256 |
 | HTTP requests, chunked bodies and WebDAV XML, from any client that reaches the port, **with no authentication anywhere in the server** | `src/tools/httpd.c` |
 
 Trusted, and listed because that trust is not obvious:
@@ -50,6 +51,37 @@ Trusted, and listed because that trust is not obvious:
 | `DEVS:NetInterfaces/`, `DEVS:Internet/`, `ENV:` | whoever writes those configures the machine, and is assumed to be its owner |
 | The SANA-II driver | third-party code that the stack hands buffers and callbacks to, and it can write wherever it likes. This is not theoretical. `x-surf-100.device` 1.16 stops calling the buffer-management callbacks it was given. It walks `ios2_Data` as an AmiTCP mbuf chain whenever it finds an `AMITCP` public port, which copied received frame bytes to an address read out of a structure that is not an mbuf. `src/netstack/netstack_rexx.c` removes that port across `OpenDevice()`. A driver is inside the boundary whether or not it deserves to be |
 | BPF filter programs | `bpf_*` compiles and runs filters from a local process. The VM bounds-checks, but the interface is local, not remote |
+
+## Signed updates
+
+`C:UpdateAmiNetXDuo` installs only what the release key signed. The mirror,
+`http://aminetxduo.tinic.info/`, and the network path to it are untrusted:
+plain HTTP is used on purpose, because the minimal and micro stacks have no
+TLS. A manifest whose signature does not check, or a file whose SHA-256 does
+not match the signed manifest, changes nothing on the machine.
+
+- The public keys are in `src/tools/updkeys.c`; a manifest carries up to three
+  `key=<id> sig=<hex>` lines and one valid known key is enough.
+- The private key is the secret `AMINETXDUO_UPDATE_SIGNING_KEY` of the GitHub
+  environment `release`, which only `v*` tags can use and which needs the
+  maintainer's approval twice per release: to sign and to publish. Signing runs
+  on a GitHub-hosted runner, so the key never reaches the self-hosted one.
+- A test-key build (`AMINETXDUO_UPDATE_TEST_KEY=ON`) knows only the test key;
+  `tools/check-release-candidate.sh` refuses a candidate built that way, or
+  built without a release key.
+- Publishing refuses a version older than the one the channel holds, and a
+  machine refuses to install an older version than it runs.
+
+**Rotating the key.** Add the new public key to `updkeys.c` beside the old
+one and release. Then sign with both keys until that release is old enough
+that machines still on the version before it no longer matter, and only then
+remove the old key from `updkeys.c` and the secret.
+
+**If the key leaks.** Replace the secret at once and stop publishing. Machines
+trust the leaked key until they run a release without it, and such a release
+must be signed by a key they already trust. So a leaked key without a second
+trusted key means asking users to run the Installer by hand from a release
+downloaded from GitHub or Aminet; say so in an advisory.
 
 ## What is tested
 
