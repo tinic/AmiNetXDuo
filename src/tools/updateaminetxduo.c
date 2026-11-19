@@ -90,9 +90,6 @@ enum { ANSWER_NONE = 0, ANSWER_INSTALL, ANSWER_LATER, ANSWER_SKIP };
 #define UPD_DEFAULT_MIRROR  "http://aminetxduo.tinic.info/"
 #define UPD_NTP_SERVER      "pool.ntp.org"
 #define UPD_TIMEOUT         60UL            /* seconds, per fetch          */
-#define UPD_MANIFEST_MAX    (64UL * 1024UL)
-#define UPD_SIG_MAX         1024UL
-#define UPD_FILES_MAX       160
 #define UPD_SETTINGS_MAX    1024
 #define UPD_PATH            300
 

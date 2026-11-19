@@ -28,6 +28,10 @@ COUNT = re.compile(r'upd_key_count\s*=\s*([0-9]+)\s*;')
 
 def tables(path):
     text = open(path, encoding="ascii").read()
+    # A commented-out key is no key: /* ... */ and // comments go first.
+    # updkeys.c has no string holding "/*" or "//".
+    text = re.sub(r'/\*.*?\*/', ' ', text, flags=re.S)
+    text = re.sub(r'//[^\n]*', ' ', text)
     m = re.search(r'#ifdef\s+UPD_TEST_KEY(.*?)#else(.*?)#endif', text, re.S)
     if not m:
         raise ValueError("no #ifdef UPD_TEST_KEY / #else / #endif")

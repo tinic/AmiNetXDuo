@@ -1504,6 +1504,31 @@ if(NOT CMAKE_CROSSCOMPILING)
             "${CMAKE_CURRENT_SOURCE_DIR}/test/updverify-testkey.manifest.sig")
     set_tests_properties(updverify_refuses_test_key PROPERTIES
         PASS_REGULAR_EXPRESSION "^update_verify=FAIL step=signature ")
+    # One byte over what CHECK takes (updcheck.h): refused before the
+    # signature, as the tool refuses it at the download.
+    string(REPEAT "x" 1025 _upd_long_sig)
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/updverify-long.sig" "${_upd_long_sig}")
+    string(REPEAT "x" 65537 _upd_long_manifest)
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/updverify-long.manifest" "${_upd_long_manifest}")
+    add_test(NAME updverify_refuses_long_sig
+        COMMAND updverify
+            "${CMAKE_CURRENT_SOURCE_DIR}/test/updverify-testkey.manifest"
+            "${CMAKE_CURRENT_BINARY_DIR}/updverify-long.sig")
+    set_tests_properties(updverify_refuses_long_sig PROPERTIES
+        PASS_REGULAR_EXPRESSION "^update_verify=FAIL step=size sig_over=1024")
+    add_test(NAME updverify_refuses_long_manifest
+        COMMAND updverify
+            "${CMAKE_CURRENT_BINARY_DIR}/updverify-long.manifest"
+            "${CMAKE_CURRENT_SOURCE_DIR}/test/updverify-testkey.manifest.sig")
+    set_tests_properties(updverify_refuses_long_manifest PROPERTIES
+        PASS_REGULAR_EXPRESSION "^update_verify=FAIL step=size manifest_over=65536")
+    # The order tools/update-certificates-prev.sh refuses a downgrade by.
+    add_test(NAME updverify_cmp_newer COMMAND updverify cmp 1.0.0-rc10 1.0.0-rc9)
+    set_tests_properties(updverify_cmp_newer PROPERTIES
+        PASS_REGULAR_EXPRESSION "^cmp=newer")
+    add_test(NAME updverify_cmp_older COMMAND updverify cmp 1.0.0-rc5 1.0.0)
+    set_tests_properties(updverify_cmp_older PROPERTIES
+        PASS_REGULAR_EXPRESSION "^cmp=older")
     add_test(NAME toolsock_connect_budget COMMAND test_toolbudget)
     add_test(NAME netprefs_preserves_text COMMAND test_netprefs_text)
     add_test(NAME devicehome_rewrites_only_ours COMMAND test_devicehome)

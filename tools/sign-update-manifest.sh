@@ -38,11 +38,11 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 die()  { printf 'update_sign=FAIL %s\n' "$*"; exit 2; }
 fail() { printf 'update_sign=FAIL %s\n' "$*"; exit 1; }
 
-keyid="" prev="" outdir=""
+keyid="" prev="" prev_set=0 outdir=""
 while getopts 'k:p:o:' opt; do
     case "$opt" in
         k) keyid="$OPTARG" ;;
-        p) prev="$OPTARG" ;;
+        p) prev="$OPTARG" prev_set=1 ;;
         o) outdir="$OPTARG" ;;
         *) die "usage=bad_option" ;;
     esac
@@ -56,8 +56,9 @@ src="$1"
 [ -n "${AMINETXDUO_UPDATE_SIGNING_KEY:-}" ] || die "missing=AMINETXDUO_UPDATE_SIGNING_KEY"
 command -v openssl >/dev/null 2>&1 || die "missing=openssl"
 command -v python3 >/dev/null 2>&1 || die "missing=python3"
-if [ -n "$prev" ]; then
-    [[ "$prev" =~ ^[0-9a-f]{64}$ ]] || die "certificates_prev=$prev"
+# -p "" (an empty step output) is an error, never "keep the line".
+if [ "$prev_set" = 1 ]; then
+    [[ "$prev" =~ ^[0-9a-f]{64}$ ]] || die "certificates_prev=${prev:-empty}"
 fi
 
 want_pk=$(python3 -I "$ROOT/tools/updkeys.py" list "$ROOT/src/tools/updkeys.c" |
@@ -86,7 +87,7 @@ rm -rf "$outdir"
 mkdir -p "$outdir"
 umask 022
 manifest="$outdir/update.manifest"
-if [ -n "$prev" ]; then
+if [ "$prev_set" = 1 ]; then
     [ "$(grep -c '^certificates\.prev=' "$src/update.manifest" || true)" = 1 ] ||
         fail "step=certificates_prev lines_not_one"
     sed "s/^certificates\.prev=.*/certificates.prev=$prev/" \

@@ -18,6 +18,14 @@
 
 #define UPD_MIRROR_MAX      200     /* MIRROR=, with the NUL               */
 
+/* What CHECK reads at most: the fetched manifest and signature file in
+   bytes (an answer of exactly this size is taken), and the installed
+   flavour's file lines.  Shared with src/tools/updverify.c, the host check
+   release.yml runs, so that it never passes what the tool refuses. */
+#define UPD_MANIFEST_MAX    (64UL * 1024UL)
+#define UPD_SIG_MAX         1024UL
+#define UPD_FILES_MAX       160
+
 /*
  * ENVARC:AmiNetXDuo/Update (ENV: at boot), key=value, one per line:
  *

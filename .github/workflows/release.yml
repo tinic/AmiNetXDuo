@@ -151,7 +151,10 @@ jobs:
                     -c "$channel" -v "$(tools/version.sh --product)" \
                     -b "$RUNNER_TEMP/updverify")
           echo "$out"
-          echo "certificates_prev=$(printf '%s\n' "$out" | sed -n 's/^certificates_prev=\([0-9a-f]\{64\}\) .*/\1/p')" >> "$GITHUB_OUTPUT"
+          prev=$(printf '%s\n' "$out" | sed -n 's/^certificates_prev=\([0-9a-f]\{64\}\) .*/\1/p')
+          [[ "$prev" =~ ^[0-9a-f]{64}$ ]] || {
+            echo "::error::no certificates.prev (64 hex digits) from the mirror"; exit 1; }
+          echo "certificates_prev=$prev" >> "$GITHUB_OUTPUT"
           echo "channel=$channel" >> "$GITHUB_OUTPUT"
         env:
           AMINETXDUO_UPDATE_MIRROR: http://aminetxduo.tinic.info/
@@ -188,6 +191,9 @@ jobs:
           PREV: ${{ needs.prev.outputs.certificates_prev }}
           CHANNEL: ${{ needs.prev.outputs.channel }}
         run: |
+          # An empty or short prev is an error, never "keep the CI line".
+          [[ "$PREV" =~ ^[0-9a-f]{64}$ ]] || {
+            echo "::error::certificates.prev from the prev job is not 64 hex digits"; exit 1; }
           [ "$(sed -n 's/^channel=//p' build/candidate/update/update.manifest)" = "$CHANNEL" ] || {
             echo "::error::the manifest's channel is not $CHANNEL"; exit 1; }
           tools/sign-update-manifest.sh -k rel-2026 -p "$PREV" \

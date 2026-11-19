@@ -19,6 +19,9 @@
 #                                   file= line of class certificates)
 #   published is this version       its own certificates.prev: a re-run of
 #                                   the same release publishes the same line
+#   published is a NEWER version    refused: this release would downgrade
+#                                   the channel (order: updver.c, through
+#                                   updverify cmp, the tool's own order)
 #   nothing published (HTTP 404)    the first release on the channel: the
 #                                   pin third_party/cacert/certificates.sha256
 #                                   at the previous v* tag, which is what
@@ -69,14 +72,23 @@ case "$code" in
         v=$("$ROOT/tools/verify-update-manifest.sh" -n -c "$channel" ${build:+-b "$build"} "$work") ||
             fail "published=$mirror$channel/ $v"
         pv=$(sed -n 's/^version=//p' "$work/update.manifest")
-        if [ "$pv" = "$version" ]; then
-            prev=$(sed -n 's/^certificates\.prev=//p' "$work/update.manifest")
-            src="published_same:$pv"
-        else
-            prev=$(awk '$1 ~ /^file=/ && $2 == "certificates" { print $4; exit }' \
-                       "$work/update.manifest")
-            src="published:$pv"
-        fi
+        uv=$("$ROOT/tools/verify-update-manifest.sh" -P ${build:+-b "$build"}) ||
+            die "updverify $uv"
+        order=$("$uv" cmp "$version" "$pv") || fail "version=$version published=$pv $order"
+        case "$order" in
+            cmp=same)
+                prev=$(sed -n 's/^certificates\.prev=//p' "$work/update.manifest")
+                src="published_same:$pv"
+                ;;
+            cmp=newer)
+                prev=$(awk '$1 ~ /^file=/ && $2 == "certificates" { print $4; exit }' \
+                           "$work/update.manifest")
+                src="published:$pv"
+                ;;
+            *)
+                fail "downgrade version=$version published=$pv"
+                ;;
+        esac
         ;;
     404)
         tag=$(git -C "$ROOT" describe --tags --abbrev=0 --match 'v*' HEAD^ 2>/dev/null) ||
