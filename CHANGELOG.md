@@ -7,6 +7,10 @@ are history.
 
 ## Unreleased
 
+- The update check tells the mirror the installed version and the kind of
+  stack, so the mirror can count which versions are in use. fetch sends
+  its version instead of 1.0.
+
 ## 1.0.0-rc7
 
 - NetPrefs Check now shows the update it found instead of saying that

@@ -1253,8 +1253,10 @@
 
   Once a day, after the network is up, UpdateAmiNetXDuo asks
   aminetxduo.tinic.info whether a newer version exists. It does this in
-  the background; the boot does not wait for it. When there is one, it
-  waits for the Workbench screen and shows:
+  the background; the boot does not wait for it. The request tells the
+  server the installed version and the kind of stack (Full, Minimal,
+  Micro or fat), and nothing else about the Amiga. When there is a
+  newer version, it waits for the Workbench screen and shows:
 
       AmiNetXDuo <new> is available (installed <old>).
       Install | Skip this version | Later

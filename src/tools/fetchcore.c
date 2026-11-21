@@ -449,7 +449,10 @@ LONG fetch_core_run(FetchCore *fc)
             ok = ok && str_append(fetch_request, sizeof(fetch_request), &used,
                                   authority);
             ok = ok && str_append(fetch_request, sizeof(fetch_request), &used,
-                                  "\r\nUser-Agent: AmiNetXDuo-fetch/1.0 (m68k)"
+                                  "\r\nUser-Agent: ");
+            ok = ok && str_append(fetch_request, sizeof(fetch_request), &used,
+                                  fc->agent != NULL ? fc->agent : FETCH_AGENT);
+            ok = ok && str_append(fetch_request, sizeof(fetch_request), &used,
                                   "\r\nConnection: close\r\n\r\n");
             if (!ok)
             {
