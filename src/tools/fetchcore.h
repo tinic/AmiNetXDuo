@@ -38,6 +38,7 @@ typedef struct FetchCore
     BOOL        headers;    /* the header block goes to the sink too     */
     BOOL        quiet;      /* no TLS summary, no redirect lines         */
     BOOL        noverify;
+    const char *agent;      /* User-Agent value, NULL: FETCH_AGENT       */
     FetchSink   sink;
 
     /* Set by every return after bsdsocket.library opened. */
@@ -51,6 +52,10 @@ typedef struct FetchCore
  * otherwise the return code for the failure, already reported.  Not
  * reentrant: the buffers are static, 4 KB of chunk and FETCH_HEAD_MAX of head.
  */
+/* fetch's own User-Agent.  The version tells a server's log which release
+   sent a request. */
+#define FETCH_AGENT "AmiNetXDuo-fetch/" AMINETXDUO_VERSION " (m68k)"
+
 LONG fetch_core_run(FetchCore *fc);
 
 #endif /* AMINETXDUO_FETCHCORE_H */

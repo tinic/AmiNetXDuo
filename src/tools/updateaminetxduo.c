@@ -236,6 +236,10 @@ static VOID ub_free(UpdBuf *b)
 
 static FetchCore upd_fc;
 
+/* "AmiNetXDuo-update/1.0.0-rc8 (m68k; full)": from it the mirror's log counts
+   the installed versions and flavours.  Nothing else about the Amiga. */
+static char upd_agent[64];
+
 /* 0 got it whole with a 200; the HTTP status otherwise; -1 no answer. */
 static LONG upd_fetch(const char *url, UpdBuf *b)
 {
@@ -2294,6 +2298,12 @@ static LONG upd_check(BOOL install)
     }
 
     want.flavour = (unsigned char)flavour;
+    upd_agent[0] = '\0';
+    sb(upd_agent, sizeof(upd_agent),
+       "AmiNetXDuo-update/" AMINETXDUO_VERSION " (m68k; ");
+    sb(upd_agent, sizeof(upd_agent), upd_flavour_name(want.flavour));
+    sb(upd_agent, sizeof(upd_agent), ")");
+    upd_fc.agent = upd_agent;
     want.channel = (unsigned char)(upd_set.channel >= 0
                        ? upd_set.channel
                        : (want.installed.pre[0] != '\0' ? UPD_CHANNEL_PRERELEASE
