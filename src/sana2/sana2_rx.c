@@ -2220,8 +2220,7 @@ BOOL ami_sana2_rx_should_block(const AmiSana2Reader *rd, UWORD taken)
 /*
  * The reader's reply port, in rd->port_mem (see sana2_internal.h), with a
  * signal of the reader's own.  noinline, both: they run once a reader, and
- * inlined they would count against its loop's instruction ceiling
- * (tools/check-hotpath-budget.sh).
+ * inlined they would only make the reader's loop bigger.
  */
 static BOOL __attribute__((noinline)) ami_sana2_rx_port_open(AmiSana2Reader *rd)
 {
@@ -2354,9 +2353,8 @@ static BOOL ami_sana2_rx_in_flight_batch(const AmiSana2Rx *rx, UWORD i)
  * have one out -- and every posted slot that is not travelling in one of
  * them.
  */
-/* noinline: teardown runs once, and inlined into the reader's loop it is
-   counted against the loop's instruction ceiling
-   (tools/check-hotpath-budget.sh, _ami_sana2_rx_thread). */
+/* noinline: teardown runs once, and inlined into the reader's loop it
+   would only make the loop bigger. */
 AMI_SANA2_BATCH_LINKAGE VOID __attribute__((noinline))
 ami_sana2_rx_abort_outstanding(AmiSana2Reader *rd)
 {
