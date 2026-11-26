@@ -80,9 +80,17 @@ endif()
 # algorithm, which moves a block only when the code cannot grow.  "stc"
 # (software trace cache) lays out the likely path in a straight line, so the
 # taken branches are the rare ones.  The commit that added it gives the size.
+#
+# The flag is GCC's.  The host build also takes CMAKE_C_FLAGS_RELEASE, and
+# clang refuses the option ("unknown argument"), so add it only where the
+# compiler accepts it.
+include(CheckCCompilerFlag)
 set(AMINETXDUO_OPT_FLAG "-${AMINETXDUO_OPT}")
 if(AMINETXDUO_OPT STREQUAL "Os")
-    list(APPEND AMINETXDUO_OPT_FLAG -freorder-blocks-algorithm=stc)
+    check_c_compiler_flag(-freorder-blocks-algorithm=stc AMINETXDUO_HAVE_REORDER_STC)
+    if(AMINETXDUO_HAVE_REORDER_STC)
+        list(APPEND AMINETXDUO_OPT_FLAG -freorder-blocks-algorithm=stc)
+    endif()
 endif()
 list(JOIN AMINETXDUO_OPT_FLAG " " AMINETXDUO_OPT_FLAGS_STRING)
 set(CMAKE_C_FLAGS_RELEASE "${AMINETXDUO_OPT_FLAGS_STRING} -DNDEBUG"
