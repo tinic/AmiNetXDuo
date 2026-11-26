@@ -61,7 +61,7 @@ set(TOOLS_WARNINGS -Wall -Wextra)
 # the fat flavour's commands are -O2 like its libraries.  It governs a
 # command's OWN objects; the static libraries a command links take the same
 # variable through CMAKE_C_FLAGS_RELEASE.
-set(TOOLS_OPTIMISE $<$<CONFIG:Release>:${AMINETXDUO_OPT_FLAG}>)
+set(TOOLS_OPTIMISE "$<$<CONFIG:Release>:${AMINETXDUO_OPT_FLAG}>")
 
 # THE COMMANDS NO LONGER LINK THE TOOLCHAIN crt0 AT ALL: they are linked
 # -nostartfiles against src/tools/tool_startup.S, which is 180 bytes and says
@@ -278,7 +278,7 @@ if(CMAKE_CROSSCOMPILING)
     target_include_directories(tool_statusreport PRIVATE
         "${CMAKE_SOURCE_DIR}/third_party/shelltools/src")
     set(_sr_cxx_options ${AMIGA_ARCH_FLAGS} -fomit-frame-pointer
-        -fno-strict-aliasing -Os -std=c++23 -fno-exceptions -fno-rtti
+        -fno-strict-aliasing -Os -freorder-blocks-algorithm=stc -std=c++23 -fno-exceptions -fno-rtti
         -fno-threadsafe-statics)
     if(AMINETXDUO_REGPARM GREATER 0)
         list(APPEND _sr_cxx_options "-mregparm=${AMINETXDUO_REGPARM}")

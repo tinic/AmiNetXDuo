@@ -75,8 +75,17 @@ set_property(CACHE AMINETXDUO_OPT PROPERTY STRINGS Os O2)
 if(NOT AMINETXDUO_OPT MATCHES "^(Os|O2)$")
     message(FATAL_ERROR "AMINETXDUO_OPT=${AMINETXDUO_OPT} is not Os or O2.")
 endif()
+# AMINETXDUO_OPT_FLAG is a list: the -O level and, at -Os, the block
+# reordering that GCC uses at -O2.  At -Os GCC selects the "simple"
+# algorithm, which moves a block only when the code cannot grow.  "stc"
+# (software trace cache) lays out the likely path in a straight line, so the
+# taken branches are the rare ones.  The commit that added it gives the size.
 set(AMINETXDUO_OPT_FLAG "-${AMINETXDUO_OPT}")
-set(CMAKE_C_FLAGS_RELEASE "${AMINETXDUO_OPT_FLAG} -DNDEBUG"
+if(AMINETXDUO_OPT STREQUAL "Os")
+    list(APPEND AMINETXDUO_OPT_FLAG -freorder-blocks-algorithm=stc)
+endif()
+list(JOIN AMINETXDUO_OPT_FLAG " " AMINETXDUO_OPT_FLAGS_STRING)
+set(CMAKE_C_FLAGS_RELEASE "${AMINETXDUO_OPT_FLAGS_STRING} -DNDEBUG"
     CACHE STRING "C flags for Release builds" FORCE)
 
 # -flto, for the cross build only.  Measured against the same sources and
@@ -1986,7 +1995,7 @@ message(STATUS "  version ....... ${AMINETXDUO_VERSION_COMPOUND}")
 message(STATUS "  built on ...... NetX Duo ${AMINETXDUO_NETXDUO_VERSION}, ThreadX ${AMINETXDUO_THREADX_VERSION}")
 string(REPLACE ";" " " _amiga_arch_shown "${AMIGA_ARCH_FLAGS}")
 message(STATUS "  CPU ........... ${AMINETXDUO_CPU} (${_amiga_arch_shown})")
-message(STATUS "  optimisation .. ${AMINETXDUO_OPT_FLAG}")
+message(STATUS "  optimisation .. ${AMINETXDUO_OPT_FLAGS_STRING}")
 message(STATUS "  IPv6 .......... ${AMINETXDUO_IPV6}")
 message(STATUS "  TLS ........... ${AMINETXDUO_TLS}")
 message(STATUS "  BPF ........... ${AMINETXDUO_BPF}")

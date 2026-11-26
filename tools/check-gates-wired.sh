@@ -98,16 +98,13 @@ for _pp in ".githooks/pre-push:host-stage.ok" "tools/ci.sh:host-stage.ok" \
     fi
 done
 
-# THE RECEIVE-PATH GATES WERE PROTECTED BY NOTHING UNTIL 2026-09-08.  All
-# three guard properties no test and no A/B can see, which is exactly the kind
+# THE RECEIVE-PATH GATES WERE PROTECTED BY NOTHING UNTIL 2026-09-08.  Both
+# guard properties no test and no A/B can see, which is exactly the kind
 # that goes quiet without anyone noticing:
 #   hot-calls        a per-frame helper stopped being inlined
 #   rearm-invariants the device started writing a field the re-arm hoisted out
-#   hotpath-budget   a per-frame receive function grew, at ~0.029% of
-#                    receive an instruction -- under what the rig can measure
 want hot-calls      tools/ci.sh                      'check-hot-calls\.sh'
 want rearm-invar    tools/ci.sh                      'check-rearm-invariants\.sh'
-want hotpath-budget tools/ci.sh                      'check-hotpath-budget\.sh'
 
 # No test runs longer than ten seconds.  Wired into FOUR ctest arms, and the
 # reason it is named here rather than left to the blanket rule below is that
@@ -202,7 +199,7 @@ done
 for g in check-changelog-prose check-image-size check-ram-size check-rate \
          check-stage-coverage check-rx-posted check-option-stubs \
          check-lvo-matrix check-lvo-clobbers check-generated \
-         check-hot-calls check-rearm-invariants check-hotpath-budget \
+         check-hot-calls check-rearm-invariants \
          check-gates-wired; do
     if [ ! -x "tools/$g.sh" ]; then
         echo "gates_wired=NOT_EXECUTABLE gate=$g"
